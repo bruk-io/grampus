@@ -13,10 +13,10 @@ one unit between them — at the path `port/manifest.tsv`'s `target crate` and `
 columns name.
 
 The exception is the template-heavy and header-only files, which are type-and-trait design rather
-than file-units and are hand-designed once, before fan-out, by plan step 20. The set is the
-in-scope rows whose `template-heavy` column is `yes`, taken from `port/manifest.tsv`; it is not
-listed in this document, because a list here would drift from the column that is its source of
-truth.
+than file-units and are hand-designed once, before fan-out, by plan step 20, cut as
+`34-foundation-spike`. The set is the in-scope rows whose `template-heavy` column is `yes`, taken
+from `port/manifest.tsv`; it is not listed in this document, because a list here would drift from
+the column that is its source of truth.
 
 A porter reads the manifest row for a unit before starting it: the paths, the target crate, the
 equality tier, the tolerance and comparison function, the proof path, and whether a fuzz target is
@@ -29,7 +29,8 @@ live; this document states the process around them, not the rules themselves.
 **Phase A** drafts every in-scope unit and **is not required to compile**. A draft is written at
 its final path, `crates/<crate>/src/<module>.rs`, and **no `mod` declaration names it**. That is
 what keeps `main` building: `cargo build` never reads it, so CI stays green with hundreds of
-non-compiling drafts in the tree, and `cargo fmt --check` never sees one either.
+non-compiling drafts in the tree, and `cargo fmt --check` never sees one, because no `mod` line
+reaches it.
 
 **Phase B** makes the drafts compile, bottom-up by the crate-level level the cut defines, with
 compiler errors as the work queue. Phase B's work on a module is to make it compile, add its `mod`
@@ -38,16 +39,15 @@ its differential fuzz target where its row says `required`. `just port-status` c
 trailer-carrying file that no `mod` line reaches as a module gated out of the build, which is the
 burn-down that has to reach zero.
 
-A draft is not exempt from the marker checks, and does not need to be: `just port-status
---per-commit` is text-based and reads a file that need not be valid Rust, and its constant rule
-fires only on a constant the draft actually writes. Transcribe a numeric constant and it carries a
+A draft is not exempt from the marker checks, and does not need to be: `just port-status --per-commit` is
+text-based and reads a file that need not be valid Rust, and its constant rule fires only on a
+constant the draft actually writes. Transcribe a numeric constant and it carries a
 `// PORT SRC: <vendored path>:<line>` marker whose line really holds that literal; do not
 transcribe it yet and leave `// TODO(port):` in its place instead. Neither choice fails the check.
 A draft that invents a constant with no marker does — that is the case the check exists for. The
-same holds for `// SAFETY:`, which applies to the `unsafe` blocks a draft writes: write the
-comment on the block that exists, do not add an `unsafe` block with none.
+same holds for `// SAFETY:`, which applies to the `unsafe` blocks a draft writes.
 
-A module may carry exactly six markers, and the list is closed:
+Every marker a module carries is one of these six, and the list is closed:
 
 - `// TODO(port):`
 - `// PERF(port):`
@@ -106,8 +106,9 @@ produced by the repository instead, and writing it by hand is what the rule forb
 A task's branch changes nothing under `intent/`, and therefore passes `just guard` as it stands.
 
 The `mod` line in `lib.rs` is the one shared file a port task does write. It is a one-line append
-that git merges, and it goes in the crate's documented alphabetical position, so two branches
-appending to the same `lib.rs` conflict textually rather than reordering silently.
+that git merges: the crate's `mod` lines are kept in one block, sorted by module name, and a new
+`mod <module>;` line is inserted at its sorted position in that block, so two branches appending
+to the same `lib.rs` conflict textually rather than reordering silently.
 
 A task passes `just port-check`, which includes `just port-status --per-commit` and its
 per-marker assertion: every `// PERF(port):` and `// FIDELITY(port):` marker the branch adds is
@@ -123,11 +124,12 @@ where the oracle is not. Each such site carries the marker that puts it in
 
 ## Trial-run record
 
-Before any fan-out pull request is opened, `35-trial-run` runs a three-unit trial and records it
-here: one unit of each equality tier — one fixed-point unit held to exact integer-coordinate
-equality, one float unit held to its row's declared tolerance and comparison function, and one unit
-with a non-const reference out-parameter and a `throw`. The record takes the same form a unit's
-pull request uses: both review verdicts, each citing `source:line` against `module:line`, plus the
-module's manifest row. The trial's output corrects `docs/PORTING.md` before fan-out.
+Before any fan-out pull request is opened, plan step 21, cut as `35-trial-run`, runs a three-unit
+trial and records it here: one unit of each equality tier — one fixed-point unit held to exact
+integer-coordinate equality, one float unit held to its row's declared tolerance and comparison
+function, and one unit with a non-const reference out-parameter and a `throw`. The record takes
+the same form a unit's pull request uses: both review verdicts, each citing `source:line` against
+`module:line`, plus the module's manifest row. The trial's output corrects `docs/PORTING.md`
+before fan-out.
 
 This section is filled by `35-trial-run`.
