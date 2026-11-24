@@ -41,7 +41,9 @@ assert-placement fixture run_dir:
 
 # regenerate every resolved-configuration golden under port/goldens/configs/ (R11): one per row
 # of docs/ORACLE.md's configuration table, each sliced through oracle-slice and carrying its
-# provenance header via port/merge-provenance; a row added there must be added here too
+# provenance header via port/merge-provenance; a row added there must be added here too.
+# oracle/.cache/config-goldens/ accumulates one scratch directory per invocation (git-ignored,
+# left behind for inspection) and nothing prunes it; safe to delete by hand.
 config-goldens:
     ./port/merge-provenance frog_legs.stl base-fff port/goldens/configs/base-fff.json
     ./port/merge-provenance frog_legs.stl tree-support port/goldens/configs/tree-support.json

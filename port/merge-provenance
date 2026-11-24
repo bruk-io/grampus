@@ -68,6 +68,13 @@ def fresh_scratch_dir() -> Path:
 
 def run_slice(fixture: str, configuration: str, out_dir: Path) -> Path:
     """Run oracle/slice --export-settings into `out_dir`; return the written settings.json."""
+    # `out_dir` may be a reused directory (the caller's own `--out`). Remove any stale
+    # settings.json from a previous run before invoking oracle/slice, mirroring oracle/slice's
+    # own precaution against a reused --out hiding a failing run (oracle/slice:305-307), so a
+    # failing run here can never be mistaken for this run's export by the check below.
+    stale_settings = out_dir / "settings.json"
+    if stale_settings.is_file():
+        stale_settings.unlink()
     cmd = [str(ORACLE_SLICE), fixture, configuration, "--export-settings", "--out", str(out_dir)]
     result = subprocess.run(cmd)
     if result.returncode != 0:

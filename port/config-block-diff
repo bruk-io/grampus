@@ -12,16 +12,16 @@
 set (a golden under ``port/goldens/configs/``, minus the ``provenance`` key this task's own
 ``port/merge-provenance`` adds -- that key is this task's bookkeeping, not part of libslic3r's
 resolved configuration, and was never a candidate for either set) against the key set of
-``<gcode>``'s ``; CONFIG_BLOCK_START`` / ``; CONFIG_BLOCK_END`` section (``GCode.cpp:4318-4330``,
+``<gcode>``'s ``; CONFIG_BLOCK_START`` / ``; CONFIG_BLOCK_END`` section (``GCode.cpp:4326-4335``,
 one ``; key = value`` line per key; ``wipe_tower_x``/``wipe_tower_y`` each get two such lines --
-``GCode.cpp:8397-8403``'s un-skipped fallthrough -- which does not change either key's
+``GCode.cpp:8394-8400``'s un-skipped fallthrough -- which does not change either key's
 membership in the set). It prints two lists, in this order:
 
 1. Keys the JSON carries that the config block does not -- the golden's own resolved config
-   holds keys ``append_full_config``'s own ban list (``GCode.cpp:8328-8385``) excludes from
+   holds keys ``append_full_config``'s own ban list (``GCode.cpp:8328-8387``) excludes from
    every G-code it writes, among them the five string-valued ``printhost_*`` credential fields.
 2. Keys the config block carries that the JSON does not -- written by
-   ``GCode.cpp:4330-4332`` straight after ``append_full_config`` returns, not through
+   ``GCode.cpp:4333-4334`` straight after ``append_full_config`` returns, not through
    ``cfg.keys()`` and so never part of ``--export-settings``'s own dump: exactly
    ``first_layer_bed_temperature`` and ``first_layer_temperature``, derived by the oracle (and,
    in scope for the port, by the port itself) at G-code emission time.
