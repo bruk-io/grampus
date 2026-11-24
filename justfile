@@ -59,3 +59,9 @@ config-goldens:
 # CONFIG_BLOCK does not, and the keys the config block carries that the JSON does not (R11)
 config-block-diff golden gcode:
     ./port/config-block-diff {{golden}} {{gcode}}
+
+# batch port/manifest.tsv and port/cut.tsv's rows into one of the four plan-step cut files
+# (R8, R9; task 15-task-cuts): ownership, foundation, phase-a or phase-b. Variadic so a caller
+# can also pass `--out <dir>` to redirect the write away from the committed port/ tree.
+task-cuts phase *ARGS:
+    ./port/cut-tasks {{phase}} {{ARGS}}
