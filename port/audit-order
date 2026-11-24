@@ -40,8 +40,9 @@ single-field compare, a nested lexicographic if-chain, or a nested ternary chain
 **Every one of those four questions is answered conservatively.** Where the script cannot decide
 whether a container is only looked up, it reports the row as iterated. Where it cannot decide
 whether a comparator is a total order, it reports the row as not one. In both cases the reason
-cell says the classification is undecided. The port's-choice mapping (``port_choice``) and the
-diverges rule (``diverges``) are likewise written as explicit, named branches below, not as
+cell says the classification is undecided. The port's-choice mapping (``container_port_choice``
+and ``comparator_port_choice``) and the diverges rule (``diverges``) are likewise written as
+explicit, named branches below, not as
 literals folded into a row dict, because the point of writing them in code is that a reviewer can
 point at the branch that produced a given cell.
 
@@ -85,7 +86,7 @@ def in_scope_paths(manifest_path: Path) -> list[str]:
     A row is in scope when its "in scope or out with a reason" column is exactly "in" or starts
     with "in:" (an in-scope row with a note); every other value starts with "out:".
     """
-    with manifest_path.open(newline="") as fh:
+    with manifest_path.open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh, delimiter="\t"))
     scope_col = "in scope or out with a reason"
     paths = [r["path"] for r in rows if r[scope_col] == "in" or r[scope_col].startswith("in:")]
@@ -261,6 +262,54 @@ _CLASS_HEADER_RE = re.compile(r"\b(?:class|struct)\s+(\w+)(?:\s+final)?\s*(?::[^
 # plain name, likewise optionally qualified.
 _OPERATOR_TAIL_RE = re.compile(r"(?:([A-Za-z_]\w*)\s*::\s*)?operator\s*(<=|>=|<|>|\(\)|\[\])\s*$")
 _PLAIN_NAME_TAIL_RE = re.compile(r"(?:([A-Za-z_]\w*)\s*::\s*)?([A-Za-z_~]\w*)\s*$")
+# A control-flow header's condition can itself end in a call (`if (!x.empty())`, `for (auto&
+# v : foo())`), and picking the LAST top-level `(...)` (below) would then read the call's own
+# name as a function name. Reject any header whose own leading keyword (after an optional
+# leading `else`) is a control-flow keyword, before ever looking at its parens.
+_CONTROL_HEAD_RE = re.compile(r"^(?:else\s+)?(if|for|while|switch|catch)\b")
+
+
+_OPERATOR_SYMBOL_RE = re.compile(r"operator\s*(<<|>>|<=|>=|<|>)")
+
+
+def _mask_operator_symbols(text: str) -> str:
+    """Blank the `<`/`>` characters of an `operator<`/`<=`/`>`/`>=`/`<<`/`>>` token's own
+    symbol, keeping length and every other character's position, so a bracket-depth scan over
+    the header (see `_top_level_open_positions`) never mistakes the operator's own symbol for
+    template/bracket punctuation -- an unmatched `<` from `operator<` would otherwise corrupt
+    the depth count for the rest of the header and hide the real parameter list entirely."""
+    out = list(text)
+    for m in _OPERATOR_SYMBOL_RE.finditer(text):
+        for i in range(m.start(1), m.end(1)):
+            out[i] = " "
+    return "".join(out)
+
+
+def _top_level_open_positions(text: str, target_open: str) -> list[int]:
+    """Return every position of `target_open` that sits at depth 0 across *all* bracket kinds
+    (`()`, `[]`, `{}` and `<>` together), not just its own kind.
+
+    A plain same-kind depth count (as `find_matching` uses, correctly, once given the right
+    starting position) is not enough to *find* a header's own parameter-list paren: a return
+    type or parameter type can itself carry a template argument list containing its own parens
+    (`std::function<bool(int, int)>`), and those are nested *inside* a `<...>` the naive count
+    never sees, so a same-kind-only scan reads the template's inner `(` as another top-level
+    paren and, being later in the text, is picked over the real one. Treating `<`/`>` as
+    brackets too (alongside `()[]{}` ) correctly nests that inner `(` one level deeper.
+    """
+    stack: list[str] = []
+    positions: list[int] = []
+    for i, c in enumerate(text):
+        if c in _OPEN:
+            if not stack and c == target_open:
+                positions.append(i)
+            stack.append(c)
+        elif c in _CLOSE:
+            if stack and stack[-1] == _CLOSE[c]:
+                stack.pop()
+            # A mismatched closer (e.g. a `>` that was really "greater than", not a template
+            # close) is ignored rather than corrupting the rest of the scan.
+    return positions
 
 
 def classify_header(header: str) -> tuple[str, str | None, str | None]:
@@ -276,11 +325,13 @@ def classify_header(header: str) -> tuple[str, str | None, str | None]:
     m = _CLASS_HEADER_RE.search(h)
     if m:
         return "class", m.group(1), None
+    if _CONTROL_HEAD_RE.match(h):
+        return "other", None, None
     # Function: the header must end with `)` possibly followed by const/noexcept/override/final
     # and/or an initializer list `: a(...), b(...)`. Strip a trailing initializer list first (it
     # can itself contain parens, so strip from the first top-level `:` after the parameter list).
     stripped = h
-    paren_positions = [i for i, c in enumerate(stripped) if c == "("]
+    paren_positions = _top_level_open_positions(_mask_operator_symbols(stripped), "(")
     last_open = None
     for i in paren_positions:
         end = find_matching(stripped, i)
@@ -388,8 +439,22 @@ CONTAINER_TYPE_RE = re.compile(
     r"|tbb::concurrent_unordered_(?:map|set))\b"
 )
 
-MAP_KINDS = {"std::unordered_map", "std::unordered_multimap", "ankerl::unordered_dense::map", "tbb::concurrent_unordered_map"}
-SET_KINDS = {"std::unordered_set", "std::unordered_multiset", "ankerl::unordered_dense::set", "tbb::concurrent_unordered_set"}
+MAP_KINDS = {
+    "std::unordered_map",
+    "std::unordered_multimap",
+    "ankerl::unordered_dense::map",
+    "tbb::concurrent_unordered_map",
+    "boost::unordered_map",
+    "boost::unordered_multimap",
+}
+SET_KINDS = {
+    "std::unordered_set",
+    "std::unordered_multiset",
+    "ankerl::unordered_dense::set",
+    "tbb::concurrent_unordered_set",
+    "boost::unordered_set",
+    "boost::unordered_multiset",
+}
 
 _DECLARATOR_NAME_RE = re.compile(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*$")
 
@@ -412,9 +477,19 @@ class ContainerDecl:
     var_name: str | None  # None when the declarator could not be parsed (reported undecided)
 
 
-def find_container_decls(path: str, masked: str, offsets: list[int]) -> list[ContainerDecl]:
-    """Find every unordered-container variable declaration in `masked`."""
+def find_container_decls(
+    path: str, masked: str, offsets: list[int], funcs: list[FunctionScope], classes: list[ClassScope]
+) -> list[ContainerDecl]:
+    """Find every unordered-container variable declaration in `masked`.
+
+    A container type's own match can sit in a variable declaration (`Type v;`, `Type v{...};`,
+    `Type v = {...};`, `Type v(args);`, a reference parameter `Type& p` with or without a
+    `= {}` default), in a function's return type or a parameter type (whether the function goes
+    on to a body or is a bare prototype), or inside a `using`/`typedef` alias (skipped above).
+    Only the first case names a container instance to audit; the rest produce no row.
+    """
     decls: list[ContainerDecl] = []
+    n = len(masked)
     for m in CONTAINER_TYPE_RE.finditer(masked):
         type_name = m.group(1)
         # Skip a type alias (`using X = std::unordered_map<...>;` / `typedef ... X;`): it names
@@ -426,48 +501,115 @@ def find_container_decls(path: str, masked: str, offsets: list[int]) -> list[Con
         after_type = m.end()
         # Only a declaration if the type name is directly followed by a template arg list.
         j = after_type
-        while j < len(masked) and masked[j] in " \t":
+        while j < n and masked[j] in " \t":
             j += 1
-        if j >= len(masked) or masked[j] != "<":
+        if j >= n or masked[j] != "<":
             continue
         close = find_matching(masked, j)
         if close is None:
             continue
-        # Declarator: from just after `>` to the next top-level `;`, `,`, `(` or `{`.
+
+        def undecided() -> None:
+            decls.append(
+                ContainerDecl(file=path, line=line_of(offsets, m.start()), pos=m.start(), type_name=type_name, var_name=None)
+            )
+
+        # Scan forward from just after the type's own closing `>` to the first top-level `(`,
+        # `=`, `{`, `;` or `,`, or an unmatched closing bracket (`)`/`]`/`}`) that exits a
+        # structure this scan never opened -- a parameter declared last in an enclosing
+        # parameter list ends exactly this way, at the function's own closing `)`, with no `;`
+        # or `,` of its own. That one boundary tells a bare declaration (`;`/`,`/a closing
+        # bracket) or a brace-/equals-initialised variable (`{`/`=`) apart from a parenthesised
+        # form (`(`, ambiguous between a direct-init variable `Type v(args);` and a function
+        # signature) -- without a parameter list's or a constructor call's own parens ever being
+        # mistaken for the declarator boundary (the previous version bumped a depth counter at
+        # every one of those and never actually stopped there, which is how a `{` deep inside a
+        # parameter's default argument reached the old blanket "`{` in declarator" check and
+        # dropped every genuine brace-init variable along with it).
         k = close + 1
         depth = 0
-        decl_end = None
-        while k < len(masked):
+        stop_char: str | None = None
+        stop_pos = k
+        while k < n:
             c = masked[k]
+            if depth == 0 and c in "(={;,":
+                stop_char, stop_pos = c, k
+                break
             if c in "([{":
                 depth += 1
             elif c in ")]}":
                 if depth == 0:
+                    stop_char, stop_pos = c, k
                     break
                 depth -= 1
-            elif c in ";," and depth == 0:
-                decl_end = k
-                break
             k += 1
-        if decl_end is None:
-            decl_end = k
-        declarator = masked[close + 1 : decl_end]
-        # A function *definition* whose return type or parameter is this container type has a
-        # `{` body in `declarator` (its own brace-balance already consumed by the depth counter
-        # above); that is not a variable declaration, so skip it entirely -- there is nothing to
-        # audit at a site that is not a declaration.
-        if "{" in declarator:
+        if stop_char is None:
+            # Ran off the end of the file: an unusual declarator form. Conservatively undecided.
+            undecided()
             continue
-        # The declarator may be a bare name (`Type v;`) or a direct-init constructor call
-        # (`Type v(first, last);`); either way the variable name is the identifier right before
-        # the first `(`, if any, else the trailing identifier of the whole declarator.
-        name_source = declarator.split("(", 1)[0]
+
+        if stop_char != "(":
+            # A bare, brace- or equals-initialised variable declaration (`;`/`,`/`{`/`=`). Cut
+            # the declarator here, before any initialiser expression, so the trailing-identifier
+            # match below reads the declared name and never a name inside the initialiser.
+            name_source = masked[close + 1 : stop_pos]
+        else:
+            # `(`: a parameter list or a direct-init call -- ambiguous with a function's own
+            # signature on the page alone. Resolve it from where this declaration sits.
+            rparen = find_matching(masked, stop_pos)
+            if rparen is None:
+                undecided()
+                continue
+            # What follows the parameter list: specifiers and/or an initialiser list, then the
+            # first top-level `{` (a body) or `;` (a prototype, or a direct-init statement).
+            q = rparen + 1
+            depth2 = 0
+            after_stop: str | None = None
+            while q < n:
+                c = masked[q]
+                if depth2 == 0 and c in "{;":
+                    after_stop = c
+                    break
+                if c in "([{":
+                    depth2 += 1
+                elif c in ")]}":
+                    if depth2 == 0:
+                        break
+                    depth2 -= 1
+                q += 1
+            in_function_body = any(f.start <= m.start() < f.end for f in funcs)
+            in_class_only = (not in_function_body) and any(cl.start <= m.start() < cl.end for cl in classes)
+            if in_function_body:
+                # Nested named functions don't exist in C++: inside a function body this is a
+                # local variable, direct-initialised with constructor arguments.
+                name_source = masked[close + 1 : stop_pos]
+            elif in_class_only:
+                # In a class body, and not inside any method body, `Type member(args);` is
+                # always a member function declaration -- a class has no syntax for
+                # direct-initialising a data member with parens (the same "most vexing parse"
+                # rule the language itself resolves this with). Whether it is a bare prototype
+                # or defined inline, there is no container instance here to audit.
+                continue
+            elif after_stop == "{":
+                # File/namespace scope, unambiguous: a body follows, so this is a function
+                # definition's return type or parameter type, not a variable.
+                continue
+            elif after_stop == ";":
+                # File/namespace scope, genuinely ambiguous between a forward-declared function
+                # returning this container type and a direct-init variable definition.
+                # Conservative: treat it as a variable rather than risk dropping a real
+                # container, the same direction as every other undecided branch.
+                name_source = masked[close + 1 : stop_pos]
+            else:
+                undecided()
+                continue
+
         nm = _DECLARATOR_NAME_RE.search(name_source)
         if not nm or nm.group(1) in {"typedef", "using", "static", "const", "constexpr"}:
             # The declarator parse failed to find a plausible variable name (an unusual
             # declarator form this heuristic doesn't cover). Conservatively undecided rather
             # than silently dropped: `var_name=None` skips straight to that verdict below.
-            decls.append(ContainerDecl(file=path, line=line_of(offsets, m.start()), pos=m.start(), type_name=type_name, var_name=None))
+            undecided()
             continue
         var_name = nm.group(1)
         decls.append(ContainerDecl(file=path, line=line_of(offsets, m.start()), pos=m.start(), type_name=type_name, var_name=var_name))
@@ -491,9 +633,16 @@ def classify_container_usage(var_name: str, search_text: str) -> tuple[str, str,
     )
     algo_re = re.compile(r"(?:" + ALGORITHM_NAMES + r")\s*\([^;]*\b" + name_re + r"\b")
     lookup_re = re.compile(name_re + r"\s*(?:\.\s*(?:" + LOOKUP_METHODS + r")\s*\(|\[)")
+    # A `.end()`/`.cend()` immediately on one side of `==`/`!=` is the `find(k) != m.end()`
+    # lookup idiom (the task's own rule lists `find` as lookup evidence), not an iteration --
+    # even though the same call is also named as begin()/end() iteration evidence. Recognise
+    # that idiom so the reason and evidence cells never claim an iteration at a lookup line.
+    eq_before_re = re.compile(r"(==|!=)\s*$")
 
     saw_any = False
     saw_unknown = False
+    saw_idiom_only = False
+    idiom_pos: int | None = None
     first_iter_pos: int | None = None
     first_iter_reason: str | None = None
     for occ in occ_re.finditer(search_text):
@@ -514,20 +663,34 @@ def classify_container_usage(var_name: str, search_text: str) -> tuple[str, str,
             continue
         m = begin_end_re.search(window)
         if m:
+            abs_pos = window_start + m.start()
+            if eq_before_re.search(search_text[max(0, abs_pos - 4) : abs_pos]):
+                saw_idiom_only = True
+                if idiom_pos is None:
+                    idiom_pos = abs_pos
+                continue
             if first_iter_pos is None:
-                first_iter_pos, first_iter_reason = window_start + m.start(), "begin()/end() (or cbegin()/cend()) called on the container"
+                first_iter_pos, first_iter_reason = abs_pos, "begin()/end() (or cbegin()/cend()) called on the container"
             continue
         m = algo_re.search(window)
         if m:
             if first_iter_pos is None:
                 first_iter_pos, first_iter_reason = window_start + m.start(), "handed to an algorithm or a reduction"
             continue
-        if lookup_re.match(search_text, pos) or lookup_re.search(search_text[max(0, pos - 2) : pos + 40]):
+        if lookup_re.match(search_text, pos):
             continue
         saw_unknown = True
 
     if first_iter_pos is not None:
         return "iterated", first_iter_reason or "iterated", first_iter_pos
+    if saw_idiom_only and not saw_unknown:
+        return (
+            "undecided",
+            "classification undecided: the only begin()/end() use found is a find()/end() "
+            "lookup comparison (== or != against end()/cend()), which the begin()/end() "
+            "iteration rule does not clearly cover",
+            idiom_pos,
+        )
     if saw_any and not saw_unknown:
         return "looked_up", "every use is find/count/contains/at/insert/emplace/erase/size/empty/clear", None
     return "undecided", "classification undecided: no recognised iterating or lookup-only use found", None
@@ -562,14 +725,15 @@ _BARE_GT_RE = re.compile(r"(?<!-)>(?!=)")
 def is_single_gt_compare(expr: str) -> bool:
     """True when `expr` (a `return` statement's expression, `;` already stripped) is a single,
     unparenthesized `A > B` and nothing else -- no `&&`/`||` (which would mean more than one
-    comparison is involved) and exactly one bare `>` in the whole expression."""
-    if "&&" in expr or "||" in expr:
+    comparison is involved), no negation (`!(*this > val)` is a `<=` wearing a `>` costume, not
+    a clean `>` compare), and exactly one bare `>` in the whole expression."""
+    if "&&" in expr or "||" in expr or "!" in expr:
         return False
     return len(_BARE_GT_RE.findall(expr)) == 1
 
 _FIELD_EXPR = r"[\w.\->()\[\]]+"
 _SINGLE_LT_RE = re.compile(r"^" + _FIELD_EXPR + r"\s*<\s*" + _FIELD_EXPR + r"$")
-_GUARD_HEAD_RE = re.compile(r"^" + _FIELD_EXPR + r"\s*<\s*" + _FIELD_EXPR + r"\s*\|\|\s*\(")
+_GUARD_HEAD_RE = re.compile(r"^(" + _FIELD_EXPR + r")\s*<\s*(" + _FIELD_EXPR + r")\s*\|\|\s*\(")
 _GUARD_INNER_RE = re.compile(r"^(" + _FIELD_EXPR + r")\s*==\s*(" + _FIELD_EXPR + r")\s*&&\s*(.*)$", re.DOTALL)
 
 
@@ -582,8 +746,11 @@ def is_lexicographic_or_chain(expr: str) -> bool:
     the first pair compares equal, so it is a proper nested lexicographic chain over the fields
     in order, not two independently-orderable fields. ``classify_comparator_shape`` checks this
     *before* ``DISJUNCTION_RE`` so this idiom is recognised as a clean total order instead of a
-    false-positive "disjunction". Recursion (via `find_matching`, so a mismatched guard can never
-    recurse past the string it was given) accepts a chain of any depth.
+    false-positive "disjunction". The guard's `==` must compare the *same* two fields the head's
+    `<` compared (in either order) -- otherwise this is a real disjunction wearing an unrelated
+    guard, and must fall through to ``DISJUNCTION_RE`` instead of being waved through as clean.
+    Recursion (via `find_matching`, so a mismatched guard can never recurse past the string it
+    was given) accepts a chain of any depth.
     """
     expr = expr.strip()
     if _SINGLE_LT_RE.match(expr):
@@ -591,6 +758,7 @@ def is_lexicographic_or_chain(expr: str) -> bool:
     head = _GUARD_HEAD_RE.match(expr)
     if not head:
         return False
+    head_a, head_b = head.group(1).strip(), head.group(2).strip()
     open_paren = head.end() - 1  # the "(" the pattern itself ends on, not any "(" in a.getX()
     close_paren = find_matching(expr, open_paren)
     if close_paren is None or close_paren != len(expr) - 1:
@@ -598,6 +766,9 @@ def is_lexicographic_or_chain(expr: str) -> bool:
     inner = expr[open_paren + 1 : close_paren].strip()
     m = _GUARD_INNER_RE.match(inner)
     if not m:
+        return False
+    guard_a, guard_b = m.group(1).strip(), m.group(2).strip()
+    if {guard_a, guard_b} != {head_a, head_b}:
         return False
     return is_lexicographic_or_chain(m.group(3))
 
@@ -626,14 +797,33 @@ COMPARE_ARG_INDEX = {
 DEFAULT_COMPARE_RE = re.compile(r"^\s*std::(?:less|greater)\b")
 
 
-def classify_comparator_shape(body: str) -> tuple[str | None, str]:
+def classify_comparator_shape(body: str, operator_name: str | None = None) -> tuple[str | None, str]:
     """Classify a comparator body.
 
     Returns (shape, reason). shape is one of "disjunction", "non_strict", "tolerance" (a
     not-a-total-order shape, in that priority order), None (recognised as a clean total order,
     so not reported), or "undecided" (reported, conservatively, as not a total order).
+
+    `operator_name`, when this body is an `operator<=`/`operator>=` *definition*, settles the
+    shape immediately: the operator's own name already establishes a non-strict relation (e.g.
+    ``operator<=`` returning ``!(*this > val)`` is a `<=` by definition, however its body reads),
+    so no clean-shape recogniser below is ever allowed to wave it through as a strict total
+    order. TOLERANCE_RE and NON_STRICT_RE also run before the clean-shape recognisers, because
+    neither can ever match a genuinely clean shape (those only ever use a bare `<`/`>`, never
+    `<=`/`>=`/`EPSILON`/`fabs`/`abs`) -- so checking them first only catches bodies a clean
+    recogniser would otherwise have swallowed by accident (e.g. ``fabs(a - b) < EPSILON``, whose
+    single `<` also matches the single-field clean shape). DISJUNCTION_RE, by contrast, can and
+    does match a genuine short-circuited lexicographic OR chain (`A < B || (A == B && C < D)`)
+    as plain text, so it must stay *after* `is_lexicographic_or_chain`, which is the only check
+    that tells the two apart.
     """
     normalized = re.sub(r"\s+", " ", body).strip()
+    if operator_name in ("operator<=", "operator>="):
+        return "non_strict", f"the comparator is {operator_name}: equal elements compare true by definition"
+    if NON_STRICT_RE.search(normalized):
+        return "non_strict", "the top-level return uses <= or >=: equal elements compare true"
+    if TOLERANCE_RE.search(normalized):
+        return "tolerance", "the comparison goes through a tolerance or EPSILON: the relation is non-transitive"
     ret_m = re.match(r"^return\s+(.*)$", normalized)
     if ret_m:
         expr = ret_m.group(1).rstrip()
@@ -645,10 +835,6 @@ def classify_comparator_shape(body: str) -> tuple[str | None, str]:
             return None, "recognised total-order shape (single > comparison)"
     if DISJUNCTION_RE.search(normalized):
         return "disjunction", "a disjunction of < over different fields: two distinct elements can each compare less than the other"
-    if NON_STRICT_RE.search(normalized):
-        return "non_strict", "the top-level return uses <= or >=: equal elements compare true"
-    if TOLERANCE_RE.search(normalized):
-        return "tolerance", "the comparison goes through a tolerance or EPSILON: the relation is non-transitive"
     if (
         TIE_SHAPE_RE.search(normalized)
         or SINGLE_FIELD_RE.match(normalized)
@@ -723,7 +909,7 @@ def write_table(path: Path, header: list[str], rows: list[list[str]]) -> None:
     for row in rows:
         lines.append("| " + " | ".join(row) + " |")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def escape_cell(text: str) -> str:
@@ -739,7 +925,6 @@ def escape_cell(text: str) -> str:
 def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
     paths = in_scope_paths(manifest_path)
 
-    file_text: dict[str, str] = {}
     file_masked: dict[str, str] = {}
     file_offsets: dict[str, list[int]] = {}
     all_functions: list[FunctionScope] = []
@@ -751,7 +936,6 @@ def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
         abspath = LIBSLIC3R_ROOT / rel
         text = abspath.read_text(encoding="utf-8", errors="replace")
         masked = mask_source(text)
-        file_text[rel] = text
         file_masked[rel] = masked
         file_offsets[rel] = line_index(masked)
         funcs, classes = scan_file(rel, masked)
@@ -780,7 +964,7 @@ def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
         offsets = file_offsets[rel]
         funcs = functions_by_file.get(rel, [])
         classes = classes_by_file.get(rel, [])
-        for decl in find_container_decls(rel, masked, offsets):
+        for decl in find_container_decls(rel, masked, offsets, funcs, classes):
             pos = decl.pos
             key = (rel, decl.line, decl.var_name)
             if key in seen_container_keys:
@@ -839,6 +1023,32 @@ def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
             search_text = "\n".join(combined_parts)
 
             verdict, reason, evidence_pos = classify_container_usage(decl.var_name, search_text)
+            if verdict == "looked_up" and scope_kind == "function":
+                # The task's rule also counts a container iterated "in a function it is passed
+                # to by reference" -- a local that looks only-looked-up in its own declaring
+                # function can still be handed by reference to another call this script does
+                # not resolve a call graph to check. Named branch, kept explicit for the same
+                # reason `diverges` below documents its own never-taken branch: by construction
+                # this one is not reachable either. `lookup_re` only ever matches the variable
+                # immediately followed by `.<method>(` or `[`, so the one textual shape that
+                # would mean "passed as a bare argument" -- the name directly preceded by `(` or
+                # `,` and followed by `,` or `)` -- can never also satisfy `lookup_re`; any such
+                # occurrence already fails every recognised pattern and is already caught as an
+                # "unknown" occurrence by `classify_container_usage` itself, which already
+                # returns "undecided" rather than "looked_up" for it. Kept as its own branch
+                # anyway (rather than relying on that as an implicit side effect) so a reviewer
+                # can point at the rule by name; if `lookup_re` ever grows a method whose own
+                # call syntax also matches this shape, this branch is what keeps the row
+                # conservative instead of silently reintroducing exactly the gap it closes.
+                bare_arg_re = re.compile(r"[(,]\s*&?\s*" + re.escape(decl.var_name) + r"\s*[,)]")
+                if bare_arg_re.search(search_text):
+                    verdict = "undecided"
+                    reason = (
+                        "classification undecided: the container is passed as an argument to a "
+                        "call in its declaring scope; this script does not resolve the callee "
+                        "to check whether it is iterated there"
+                    )
+                    evidence_pos = None
             if verdict == "looked_up":
                 continue  # only iterated (incl. undecided) containers are rows in this report.
             seen_container_keys.add(key)
@@ -915,7 +1125,7 @@ def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
         if f.name not in COMPARATOR_OPERATORS:
             continue
         body = file_masked[f.file][f.start : f.end]
-        shape, reason = classify_comparator_shape(body)
+        shape, reason = classify_comparator_shape(body, operator_name=f.name)
         if shape is None:
             continue
         emit_comparator(f.file, f.start_line, "definition", f.file, f.start_line, shape, reason)
@@ -958,7 +1168,7 @@ def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
                 continue
             for f in op_funcs:
                 body = file_masked[f.file][f.start : f.end]
-                shape, reason = classify_comparator_shape(body)
+                shape, reason = classify_comparator_shape(body, operator_name=f.name)
                 if shape is None:
                     continue
                 emit_comparator(f.file, f.start_line, "container Compare argument", rel, line, shape, reason)
@@ -1027,7 +1237,7 @@ def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
                 continue
             for f in named:
                 body = file_masked[f.file][f.start : f.end]
-                shape, reason = classify_comparator_shape(body)
+                shape, reason = classify_comparator_shape(body, operator_name=f.name)
                 if shape is None:
                     continue
                 emit_comparator(f.file, f.start_line, "call-site comparator", rel, line, shape, reason)
