@@ -1584,10 +1584,18 @@ _SNAKE_CASE_BOUNDARY_RE = re.compile(r"([a-z0-9])([A-Z])")
 
 
 def to_snake_case(name: str) -> str:
-    """Return name (a file stem or directory name, with no extension) in snake_case."""
+    """Return name (a file stem or directory name, with no extension) in snake_case.
+
+    Prefixed with "_" when the result would otherwise start with a digit (no in-scope stem
+    does this at the pin — Format/3mf.cpp, Format/3mf.hpp and Format/bbs_3mf.cpp are all out of
+    scope — but a bare digit-led result such as "3mf" is not a valid Rust module path, and a
+    later scope change must not be able to commit one silently)."""
     step1 = _SNAKE_CASE_WORD_RE.sub(r"\1_\2", name)
     step2 = _SNAKE_CASE_BOUNDARY_RE.sub(r"\1_\2", step1)
-    return re.sub(r"[^A-Za-z0-9]+", "_", step2).lower().strip("_")
+    result = re.sub(r"[^A-Za-z0-9]+", "_", step2).lower().strip("_")
+    if result[:1].isdigit():
+        result = "_" + result
+    return result
 
 
 _CRATE_NAME_COLLAPSE_RE = re.compile(r"[^A-Za-z0-9]+")
@@ -1668,13 +1676,22 @@ def build_module_reference_edges(
     file_set: list[str],
     graph: dict[str, set[str]],
     module_of_file: dict[str, str],
-    canonicalize: bool,
+    *,
+    canonicalize: bool = False,
 ) -> dict[tuple[str, str], list[tuple[str, str]]]:
     """Roll the file-level include graph up to module level, restricted to `file_set` (both
     endpoints of an edge must be in it), weighting each module edge with the include
     references (file, header) pairs it carries. Self-edges — a file including another file of
-    its own module, or, when `canonicalize` is set, two merged modules including each other —
-    are dropped, per this task's own rule."""
+    its own module — are dropped, per this task's own rule.
+
+    `canonicalize` applies `canonical_module` to each endpoint before the self-edge check, so a
+    merged group's internal includes drop out here too; every call site below passes the
+    default `False` and folds the two merge groups itself afterward instead (the inline fold in
+    `compute_crate_cut`), so this parameter is currently unexercised. It stays because its
+    behaviour is simple, correct and already proven by `canonical_module`'s own use elsewhere,
+    and because collapsing both folding paths into one is a larger change than this task's
+    review should carry; a later caller that wants module edges pre-folded can pass it directly
+    rather than re-deriving the inline fold."""
     allowed = set(file_set)
     edges: dict[tuple[str, str], list[tuple[str, str]]] = {}
     for file in file_set:
@@ -1851,13 +1868,17 @@ def compute_crate_cut(
         "dependency graph after the cut (the module graph is acyclic at crate granularity)"
     )
 
-    # Each merge group lies wholly inside one crate: the merged-away directory name ("GCode/",
-    # "Format/") must never itself survive as a vertex of the cut or retained graph — every
-    # edge that once touched it was re-keyed onto its group's canonical name
-    # (build_module_reference_edges's `canonicalize=True`-equivalent folding, done inline
-    # above) before ordering or cutting ever ran, so no edge — cut or retained — can have an
-    # endpoint naming "GCode/" or "Format/", and therefore none can run inside either group.
-    merged_away = {"GCode/", "Format/"}
+    # Each merge group lies wholly inside one crate: a merged-away directory name ("GCode/",
+    # "Format/", or whatever MERGE_INTO names) must never itself survive as a vertex of the cut
+    # or retained graph — every edge that once touched it was re-keyed onto its group's
+    # canonical name (the inline fold above, keyed by `canonical_module`) before ordering or
+    # cutting ever ran, so no edge — cut or retained — can have an endpoint naming a MERGE_INTO
+    # key, and therefore none can run inside either group. This is structural (true by
+    # construction, not an independent check): `stray` below is always empty, and the print is
+    # there so a reader sees the property stated rather than silently assumed. Derived from
+    # `MERGE_INTO` itself, not hardcoded, so a third merge group this task's own prose offers as
+    # the coarsening mechanism stays covered.
+    merged_away = set(MERGE_INTO)
     stray = merged_away & (vertices | {s for e in (retained, cut) for pair in e for s in pair})
     if stray:
         raise SystemExit(
@@ -1915,7 +1936,14 @@ def compute_crate_cut(
         if len(identities) == 1:
             target_module_of_identity[next(iter(identities))] = path_key
             continue
-        ordered = sorted(identities, key=lambda i: ("/" not in i, i))
+        # A root same-stem unit (no "/" in its identity) sorts first and keeps the plain path,
+        # matching the convention `assign_crate_names` already applies for crate-name collisions
+        # ("a root same-stem unit keeps the plain name"); every directory-qualified identity
+        # takes a parent-directory prefix. (Unexercised at the pin: this branch only runs when a
+        # root unit and a directory-qualified unit share both a crate — via MERGE_INTO — and a
+        # stem, which no current merge group plus file set produces; see the "no target module
+        # path needed disambiguation" print.)
+        ordered = sorted(identities, key=lambda i: ("/" in i, i))
         for i, identity in enumerate(ordered):
             parent = posixpath.dirname(identity)
             stem = posixpath.basename(identity)
@@ -1987,6 +2015,18 @@ def compute_crate_cut(
     return crate_level_cells, target_crate_cells, target_module_cells, cut_rows
 
 
+# port/cut.tsv's schema: one sparse, 11-column table shared by three row `kind`s, documented
+# here because later steps (15-task-cuts, 19-porting-contract, 34-foundation-spike) read this
+# file and nowhere else states its shape.
+#   - `crate` rows use: crate, level, modules (its constituent modules, `, `-joined; more than
+#     one only for the two merged crates), in_scope_files, in_scope_lines. source/target/
+#     references/path/header are empty.
+#   - `dep` rows (one per retained crate-to-crate edge) use: source (the depending crate),
+#     target (the crate it depends on), references (the include references the edge carries).
+#     Every other column is empty.
+#   - `edge` rows (one per cut module edge) use: source (the cutting module), target (the
+#     module it used to include), references, path (a representative cutting file), header (the
+#     header it includes). Every other column is empty.
 CUT_HEADER = [
     "kind",
     "crate",
