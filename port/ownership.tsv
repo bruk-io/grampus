@@ -26,14 +26,14 @@ EdgeGrid.hpp	99	Contour	m_end	const Slic3r::Point *
 Extruder.hpp	99	Extruder	m_config	GCodeConfig *			
 ExtrusionEntityCollection.hpp	39	ExtrusionEntityCollection	entities	ExtrusionEntitiesPtr			
 Fill/AdaptiveInfillField.hpp	31	Slice	expolygons	const ExPolygons *	borrowed	PrintObject.cpp:1290, PrintObject.cpp:1310	&'a ExPolygons
-Fill/AdaptiveInfillField.hpp	116	AdaptiveTpms	equation	float (*)(float x, float y, float z)	borrowed	Fill/AdaptiveInfillField.cpp:673, Fill/AdaptiveInfillField.hpp:116	fn(f32, f32, f32) -> f32
-Fill/Fill.hpp	35	Filler	fill	Fill *	owned	Fill/Fill.hpp:32, Fill/FillBase.cpp:65	Box<Fill>
+Fill/AdaptiveInfillField.hpp	116	AdaptiveTpms	equation	float (*)(float x, float y, float z)	borrowed	Fill/FillGyroid.cpp:348, Fill/FillGyroid.cpp:25, Fill/AdaptiveInfillField.cpp:673, Fill/AdaptiveInfillField.cpp:692	fn(f32, f32, f32) -> f32
+Fill/Fill.hpp	35	Filler	fill	Fill *	owned	Fill/Fill.hpp:32, Fill/FillBase.cpp:65	Box<dyn Fill>
 Fill/FillBase.hpp	120	FillParams	config	const           PrintRegionConfig *	borrowed	Fill/Fill.cpp:1448, Print.hpp:154	&'a PrintRegionConfig
-Fill/FillBase.hpp	165	Fill	adapt_fill_octree	FillAdaptive::Octree *	borrowed	PrintObject.cpp:1255, Fill/FillAdaptive.hpp:39, Fill/Fill.cpp:1485	&'a mut Octree
+Fill/FillBase.hpp	165	Fill	adapt_fill_octree	FillAdaptive::Octree *	borrowed	PrintObject.cpp:1255, Fill/FillAdaptive.hpp:39, Fill/Fill.cpp:1485	&'a Octree
 Fill/FillBase.hpp	168	Fill	adaptive_infill_field	const AdaptiveInfillField *	borrowed	PrintObject.cpp:1299, Print.hpp:410, Fill/Fill.cpp:1387	&'a AdaptiveInfillField
 Fill/FillBase.hpp	172	Fill	print_config	const PrintConfig *	borrowed	Fill/Fill.cpp:1388, Print.hpp:1131	&'a PrintConfig
 Fill/FillBase.hpp	173	Fill	print_object_config	const PrintObjectConfig *	borrowed	Fill/Fill.cpp:1389, Print.hpp:372	&'a PrintObjectConfig
-Fill/FillLightning.hpp	32	Filler	generator	Generator *	borrowed	Print.hpp:709, Fill/Fill.cpp:1401, Fill/FillLightning.hpp:22	&'a mut Generator
+Fill/FillLightning.hpp	32	Filler	generator	Generator *	borrowed	Fill/FillLightning.cpp:56, Fill/FillLightning.cpp:51, PrintObject.cpp:1271, Fill/Fill.cpp:1401	&'a Generator
 FlushVolPredictor.hpp	48	GenericFlushPredictor	predictor	FlushVolPredictor *			
 GCode.hpp	198	WipeTowerIntegration	m_print_config	const PrintConfig *			
 GCode.hpp	366	LayerToPrint	object_layer	const Layer *			
