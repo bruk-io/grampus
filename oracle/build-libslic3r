@@ -341,10 +341,11 @@ def stage_report_failure(
     sys.exit(rc or 1)
 
 
-def run_stage_one(env: dict[str, str]) -> tuple[float, float, float]:
+def run_stage_one(env: dict[str, str]) -> tuple[float, float, float, float]:
     """Configure and build the dependency superbuild. Exits non-zero on failure.
 
-    Returns (total_elapsed, configure_elapsed, build_elapsed). On a checkout
+    Returns (total_elapsed, configure_elapsed, build_elapsed, openssl_elapsed), the
+    last being the OpenSSL-first phase inside build_elapsed. On a checkout
     whose install prefix already holds stage one's output, both commands are
     cheap no-ops that Ninja resolves without rebuilding anything.
     """
@@ -370,6 +371,27 @@ def run_stage_one(env: dict[str, str]) -> tuple[float, float, float]:
         f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
         f"-DCMAKE_POLICY_VERSION_MINIMUM={CMAKE_POLICY_VERSION_MINIMUM}",
     ]
+    # Built, and installed into the prefix, before the rest of the list is configured.
+    # dep_Boost calls find_package(OpenSSL) but Boost.cmake:61 declares only
+    # `DEP_Boost_DEPENDS ZLIB`, so nothing orders Boost after OpenSSL and ninja is free
+    # to configure Boost first. Measured both ways on two cold runs of this script: when
+    # the prefix already held OpenSSL, dep_Boost logged
+    # `Found OpenSSL: .../OrcaSlicer_dep/usr/local`; when it did not, FindOpenSSL's
+    # pkg-config hint resolved `/opt/homebrew/Cellar/openssl@4/4.1.0` instead and
+    # dep_Boost's cache recorded five Homebrew paths, including the
+    # `pkgcfg_lib__OPENSSL_*` entries that name the route. pkg-config does not read
+    # CMAKE_IGNORE_PREFIX_PATH, so no ignore list can close that path; giving OpenSSL to
+    # the prefix first does, because CMAKE_PREFIX_PATH is searched ahead of a find
+    # module's hints. Nothing under vendor/OrcaSlicer/ changes; this only fixes the
+    # order in which this script asks for the targets.
+    openssl_first_cmd = [
+        "cmake",
+        "--build",
+        str(DEPS_BUILD),
+        "--target",
+        "dep_OpenSSL",
+        "--verbose",
+    ]
     build_cmd = [
         "cmake",
         "--build",
@@ -392,7 +414,13 @@ def run_stage_one(env: dict[str, str]) -> tuple[float, float, float]:
             sys.exit(rc)
 
         build_start = time.monotonic()
-        rc = run_logged(build_cmd, env, log)
+        rc = run_logged(openssl_first_cmd, env, log)
+        # Reported separately in the summary, because this phase is the whole cost of
+        # the ordering fix above: it is the one part of stage one that cannot overlap
+        # with anything else.
+        openssl_elapsed = time.monotonic() - build_start
+        if rc == 0:
+            rc = run_logged(build_cmd, env, log)
         build_elapsed = time.monotonic() - build_start
     elapsed = time.monotonic() - start
 
@@ -400,7 +428,7 @@ def run_stage_one(env: dict[str, str]) -> tuple[float, float, float]:
         stage_report_failure(
             rc,
             log_path=STAGE1_LOG_PATH,
-            commands=[configure_cmd, build_cmd],
+            commands=[configure_cmd, openssl_first_cmd, build_cmd],
             label="stage one",
         )
 
@@ -408,12 +436,12 @@ def run_stage_one(env: dict[str, str]) -> tuple[float, float, float]:
         stage_report_failure(
             1,
             log_path=STAGE1_LOG_PATH,
-            commands=[configure_cmd, build_cmd],
+            commands=[configure_cmd, openssl_first_cmd, build_cmd],
             label="stage one",
             patch_missing=True,
         )
 
-    return elapsed, configure_elapsed, build_elapsed
+    return elapsed, configure_elapsed, build_elapsed, openssl_elapsed
 
 
 def host_resolved_cache_entries() -> tuple[list[str], list[str]]:
@@ -652,7 +680,7 @@ def main() -> None:
     env = os.environ.copy()
     env["CMAKE_POLICY_VERSION_MINIMUM"] = CMAKE_POLICY_VERSION_MINIMUM
 
-    elapsed, configure_elapsed, build_elapsed = run_stage_one(env)
+    elapsed, configure_elapsed, build_elapsed, openssl_elapsed = run_stage_one(env)
 
     minutes, seconds = divmod(int(elapsed), 60)
     hours, minutes = divmod(minutes, 60)
@@ -661,7 +689,8 @@ def main() -> None:
         "",
         "--- stage one: dependency superbuild ---",
         f"Wall-clock: {hours:d}:{minutes:02d}:{seconds:02d} ({elapsed:.1f}s)"
-        f"  [configure {configure_elapsed:.1f}s + build {build_elapsed:.1f}s]",
+        f"  [configure {configure_elapsed:.1f}s + build {build_elapsed:.1f}s,"
+        f" of which dep_OpenSSL alone {openssl_elapsed:.1f}s]",
         f"Build directory ({DEPS_BUILD}): {du_sh(DEPS_BUILD)}",
         f"Install prefix ({INSTALL_PREFIX}): {du_sh(INSTALL_PREFIX)}",
         "Host prefixes ignored in every dependency's own configure: "

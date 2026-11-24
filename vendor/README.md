@@ -208,26 +208,65 @@ dependency still receives `/opt/local` alone. The other candidates recorded then
 pointing `LIBLZMA_INCLUDE_DIR` at Homebrew by hand — are all unnecessary now, and the first and
 third are the kind of workaround C7's decision declines.
 
+#### The second thing needed: OpenSSL has to reach the prefix before Boost configures
+
+An ignore list cannot close every route to the host, because `pkg-config` does not read one. Found
+by the diagnostic above, on the second of two cold runs of the fixed script: dep_Boost had resolved
+**Homebrew's** OpenSSL —
+`OPENSSL_INCLUDE_DIR:PATH=/opt/homebrew/Cellar/openssl@4/4.1.0/include` and four more entries,
+including the `pkgcfg_lib__OPENSSL_*` pair that names the route — while on the first cold run it had
+resolved the superbuild's own (`Found OpenSSL: .../OrcaSlicer_dep/usr/local`).
+
+It is a race, not a host difference. dep_Boost calls `find_package(OpenSSL)`, but
+`deps/Boost/Boost.cmake:61` declares only `DEP_Boost_DEPENDS ZLIB`, so nothing orders Boost after
+OpenSSL and ninja is free to configure Boost first. When the prefix does not hold OpenSSL yet,
+`FindOpenSSL`'s pkg-config hint finds Homebrew's, and `CMAKE_IGNORE_PREFIX_PATH` has no say in it.
+
+`oracle/build-libslic3r` therefore builds `dep_OpenSSL` on its own before asking for the rest of
+the list, which is deterministic in the right direction: `CMAKE_PREFIX_PATH` is searched ahead of a
+find module's hints, so once the prefix holds OpenSSL, that is what every dependency resolves.
+Nothing under `vendor/OrcaSlicer/` changes — only the order in which the script asks for targets.
+It is the one part of stage one that cannot overlap with anything else, so stage one's summary
+reports its wall-clock separately: **11.2s** of a 234.1s cold stage one, and nothing on a repeat
+run. With it in place, dep_Boost resolved the prefix's OpenSSL on every subsequent run and the
+host-resolved list stayed at the two dep_OpenCV entries below.
+
+Worth knowing what this did and did not affect: on the run where Boost compiled against Homebrew's
+OpenSSL headers, stage two still configured, built and passed both suites in full, and neither
+built test executable linked anything under `/opt/homebrew` — libslic3r links none of the Boost
+libraries that use OpenSSL. So the symptom was a silent host dependency in stage one's own output,
+not a broken oracle.
+
 #### What of the host the build still touches
 
-Full hermeticity in CMake's own resolution, not in every dependency. `oracle/build-libslic3r`
-prints both of these with stage one's summary, so the list is measured each run rather than
-asserted here:
+**Full hermeticity was not reached, and this is the exact extent of what is left.** Two residuals
+survive, neither of which the ignore list can reach and neither of which gets into the oracle;
+`oracle/build-libslic3r` measures and prints both with stage one's summary every run, rather than
+leaving them asserted here:
+
+- **dep_OpenCV resolves Homebrew's Python framework at configure time** —
+  `PYTHON3_INCLUDE_DIR` and `PYTHON3_LIBRARY` under
+  `/opt/homebrew/Frameworks/Python.framework/Versions/3.15`. dep_OpenCV *is* a CMake dependency and
+  it does receive the full ignore list; OpenCV's own Python detection simply does not route through
+  it. **Nothing in the install prefix links `libpython`** (checked with `otool -L` over every
+  `.dylib` and `.so` in it), which is what makes this harmless rather than merely untidy: it
+  affects what OpenCV's configure decided about optional Python bindings, not what libslic3r links.
+- **The bundled CPython's `_lzma` module links `/opt/homebrew/opt/xz/lib/liblzma.5.dylib`** — the
+  one host library anything in the install prefix links, by the same `otool -L` sweep.
+  `deps/python3/python3.cmake` builds CPython with `./configure`, which never reads CMake's ignore
+  list, so neither the old flag nor the toolchain file reaches it. Already found and reported by
+  `02-deps-superbuild` (PR #7).
+
+So: **one host library is linked anywhere in the build, and it is not linked into the oracle.**
+Two further notes on what that leaves:
 
 - **Build tools** — `ninja`, `pkg-config`, `git`, `cmake` itself — are still Homebrew's (26 cache
   entries). Ignoring a prefix does not displace a tool, and should not: `find_program` still
   resolves them under `/opt/homebrew` while `find_path(lzma.h)` no longer resolves the header
   there. A tool's path is not linked into anything.
-- **dep_OpenCV still resolves Homebrew's Python framework** at configure time
-  (`PYTHON3_INCLUDE_DIR` and `PYTHON3_LIBRARY` under
-  `/opt/homebrew/Frameworks/Python.framework/Versions/3.15`). OpenCV's own Python detection does
-  not go through the ignored prefixes. It is the only header/library entry left of the five that
-  were there before (dep_Boost's lzma and zstd, dep_OpenVDB's lzma, these two).
-- **The bundled CPython's `_lzma` module links `/opt/homebrew/opt/xz/lib/liblzma.5.dylib`** —
-  the one host library anything in the install prefix links, found by `otool -L` over every
-  `.dylib` and `.so` in it. `deps/python3/python3.cmake` builds CPython with `./configure`, which
-  never reads CMake's ignore list, so neither the old flag nor the toolchain file reaches it. This
-  was already found and reported by `02-deps-superbuild` (PR #7).
+- **The dep_OpenCV entries are what is left of five.** Before the toolchain file, stage one also
+  recorded dep_Boost's Homebrew `lzma` and `zstd` and dep_OpenVDB's Homebrew `lzma`; those three
+  are gone, and the two OpenCV Python entries remain.
 - **Nothing host-resolved reaches the oracle itself.** `otool -L` on both built test executables
   lists only `/usr/lib` dylibs and `/System/Library` frameworks — `libiconv`, `libc++`, `libz`,
   `libobjc`, `libSystem`, and the AppKit/Foundation/IOKit/CoreFoundation/ModelIO frameworks. No
@@ -244,9 +283,15 @@ also measured together in this worktree on the final hermetic script, from an em
 | | Wall-clock | Build directory | Install prefix |
 |---|---|---|---|
 | Stage one, recorded figure (PR #7, pre-hermetic flags) | 3m47s (227.3s), configure 0.9s + build 226.4s | 3.3G | 625M |
-| Stage one, measured here (hermetic flags, warm `DL_CACHE`) | 3m54s (234.1s), configure 1.0s + build 233.1s | 3.3G | 625M |
-| Stage two, measured here (hermetic flags, empty build tree) | 1m49s (109.1s), configure 5.9s + 0.8s + build 102.4s | 1.1G | — |
-| **Both stages, measured here** | **5m43s (343.2s)** | **4.4G** | 625M |
+| Stage one, measured here (hermetic flags, warm `DL_CACHE`) | 3m54s (234.1s), configure 1.1s + build 233.0s, of which `dep_OpenSSL` alone 11.2s | 3.3G | 625M |
+| Stage two, measured here (hermetic flags, empty build tree) | 1m53s (113.2s), configure 6.3s + 0.8s + build 106.0s | 1.1G | — |
+| **Both stages, measured here** | **5m47s (347.3s)** | **4.4G** | 625M |
+
+**These are figures from an unloaded machine, and they move a lot with what else is running.**
+Two further cold runs of the same script measured stage one at 337.2s and 339.7s and stage two at
+204.8s and 203.3s while 28 cores carried 40 artificial spin loops — 1.4x to 1.8x the table's
+figures, on identical input. Read them as what this recipe costs when it has the machine, not as a
+precision measurement.
 
 The two stage-one figures agree to within 3%, so making stage one hermetic did not measurably
 change its cost, its build tree or its prefix. 625M is also what PR #7 measured, which settles a
@@ -284,40 +329,53 @@ every run of the final script:
 
 | Suite | `ctest` outcome | Time |
 |---|---|---|
-| `tests/fff_print` | 100% tests passed, 0 tests failed out of 657 | 120.0s |
-| `tests/libslic3r` | 100% tests passed, 0 tests failed out of 1718 | 64.0s |
+| `tests/fff_print` | 100% tests passed, 0 tests failed out of 657 | 121.5s |
+| `tests/libslic3r` | 100% tests passed, 0 tests failed out of 1718 | 63.8s |
 
 No test was skipped, excluded or deselected; both runs are
 `ctest --test-dir <dir> -C Release --output-on-failure --timeout 600` over the whole suite.
 
-**One upstream test can deadlock instead of failing, and that is why `--timeout` is there.**
-Observed once, on the second of four full runs of the final script: `131 - Belt brim on an object
-layer precedes its perimeters, once` sat at 0% CPU for 22 minutes. `sample` on the stuck process
-put every thread in `name_tbb_thread_pool_threads_set_locale`
-(`src/libslic3r/Thread.cpp`), whose `parallel_for` over
-`tbb::this_task_arena::max_concurrency()` single-element chunks has each chunk block on a
-condition variable until *all* of them have been entered — so it hangs whenever TBB does not
-schedule that many chunks concurrently. That is upstream code called by `Print::process`, with no
-relation to this configuration's flags, and the machine was running other work at the time. It did
-**not** reproduce in 30 targeted re-runs of that test (15 idle, 15 with 40 spinning processes on 28
-cores), so it is rare rather than load-triggered in any way this measured. The run it happened on
-was unblocked by killing the test, which `ctest` recorded as `(Subprocess killed)` and the script
-reported as `fff_print suite FAILED (exit 8)` — and `just oracle-build` still exited 0, which is
-the "evidence, not a gate" behaviour working as specified. The per-test timeout now turns such a
-hang into a reported failure instead of a recipe that never returns (and, in CI, a job that burns
-its whole timeout).
+**`tests/fff_print` has an intermittent deadlock, and that is why `--timeout 600` is there.** Any
+test in it can hang instead of failing. Measured over **seven** full runs of this suite here, five
+were clean and two were not:
+
+| Run | Machine | Outcome |
+|---|---|---|
+| 5 clean runs | unloaded, and one with 40 spin loops on 28 cores | 657 of 657 passed |
+| one run | unloaded | `131 - Belt brim on an object layer precedes its perimeters, once` hung at 0% CPU for 22 minutes |
+| one run | 40 spin loops on 28 cores | tests `506` and `528` hung; both ended by `--timeout 600` |
+
+**The mechanism.** `sample` on the first stuck process put every thread in
+`name_tbb_thread_pool_threads_set_locale` (`src/libslic3r/Thread.cpp`), whose `parallel_for` over
+`tbb::this_task_arena::max_concurrency()` single-element chunks has each chunk block on a condition
+variable until *all* of them have been entered — so it hangs whenever TBB does not schedule that
+many chunks concurrently. `Print::process` calls it, so every test that slices can hit it. Upstream
+code; nothing to do with this configuration's flags. Load makes it likelier but is neither
+necessary (the unloaded occurrence) nor sufficient (one loaded run passed in full), and a targeted
+probe of test 131 alone did not reproduce it in 30 attempts (15 idle, 15 under that load).
+
+**The timeout is measured to work**, which matters because the suites are evidence and not a gate:
+a hang has to be *reported*, not left to stall the recipe or, in CI, burn the job's whole timeout.
+`catch_discover_tests` (`tests/CMakeLists.txt:88`) sets no per-test `TIMEOUT` property — zero
+occurrences in the generated `*_tests-*.cmake`, `*_include.cmake` and `CTestTestfile.cmake` — so
+ctest's `--timeout` is what governs. On the run above it fired exactly as intended:
+`***Timeout 600.03 sec`, the remaining 151 tests still ran, the script reported
+`fff_print suite FAILED (exit 8)`, and `just oracle-build` still exited 0. 600s is ~16x the slowest
+test measured here (37.1s, with exactly one test of 657 over 10s), so it cannot fire on a healthy
+test even on a much slower runner.
 
 #### Idempotence, and the one thing a repeat run still does
 
 A third and any later run of `just oracle-build` is a genuine no-op in both stages — stage one
-`ninja: no work to do.` in 0.6s, stage two 1.9s for its two configures — and exits 0.
+`ninja: no work to do.` in 0.7s, stage two 1.8s for its two configures — and exits 0, with both
+suites passing in full each time.
 
 The **second** run is not quite free, and this is upstream's own doing rather than this script's:
 `deps/python3/python3.cmake` adds a `relink_ssl_extensions` step only when a glob of already-built
 `_ssl*.so`/`_hashlib*.so` matches, which cannot be true during a cold configure and is true
-afterwards. So the first repeat run spends about 11 seconds re-linking and re-installing the
-bundled CPython, which is also where the install prefix grows from 625M to **637M**. It exits 0,
-stage two is still a no-op (2.3s), and from the third run on nothing happens in either stage.
+afterwards. So the first repeat run spends 11.8s re-linking and re-installing the bundled CPython,
+which is also where the install prefix grows from 625M to **637M**. It exits 0, stage two is still
+a no-op (2.7s), and from the third run on nothing happens in either stage.
 
 #### `OCCT_LIBS` and the second configure
 
