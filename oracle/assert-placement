@@ -57,7 +57,7 @@ HEADER_SIZE = 80
 
 # How far an observed toolpath bounding box may lie outside OR inside the committed mesh's own
 # bounding box before this script calls it a disagreement. Measured across the three committed
-# fixtures' own base-fff runs (per edge, min_x/max_x/min_y/max_y, positive = observed outside the
+# fixtures' own base-fff runs (per edge, min_x/min_y/max_x/max_y, positive = observed outside the
 # mesh's box): 20mm_cube [-0.210, 1.790, -0.210, -2.210]; frog_legs [-0.234, 1.747, -0.312,
 # -2.272]; 3DBenchy [-0.210, 1.789, -0.211, -2.210].
 #
