@@ -37,6 +37,18 @@ For a comparator, does its body match one of the three non-total-order shapes (a
 compare), or one of the recognised total-order shapes (``std::tie(...) < std::tie(...)``, a
 single-field compare, a nested lexicographic if-chain, or a nested ternary chain)?
 
+This script also regenerates ``port/reports/divergences.md`` (task 18-divergences-regeneration,
+part 2 of this step), from exactly four sources and no other: the rows of the two reports above
+whose own ``diverges`` cell is ``yes``, read from this run's own in-memory tables rather than
+from the files just written; every ``// FIDELITY(port):`` marker under ``crates/``; every row of
+``port/reports/oracle-parity.tsv`` whose two oracles do not reach L1; and every row of
+``port/reports/determinism.tsv`` whose gate is ``none``. The last two files are written by later
+tasks and are absent today -- an absent source contributes zero rows and is not an error, but a
+source that is present with an unreadable header (a renamed column) is. ``--out DIR`` redirects
+all three reports to ``DIR`` instead of the committed ``port/reports/`` tree (what ``just
+audit-check`` uses to regenerate into a scratch directory and diff); ``--self-test`` runs the
+fixtures under ``port/tests/audit-order/`` and asserts their expected result.
+
 **Every one of those four questions is answered conservatively.** Where the script cannot decide
 whether a container is only looked up, it reports the row as iterated. Where it cannot decide
 whether a comparator is a total order, it reports the row as not one. In both cases the reason
@@ -59,7 +71,9 @@ this static script has no way to detect and therefore never emits.
 from __future__ import annotations
 
 import bisect
+import contextlib
 import csv
+import difflib
 import re
 import sys
 from dataclasses import dataclass
@@ -73,6 +87,14 @@ LIBSLIC3R_PREFIX = "vendor/OrcaSlicer/src/libslic3r/"
 MANIFEST_PATH = REPO_ROOT / "port" / "manifest.tsv"
 CONTAINERS_REPORT = REPO_ROOT / "port" / "reports" / "order-containers.md"
 COMPARATORS_REPORT = REPO_ROOT / "port" / "reports" / "order-comparators.md"
+DIVERGENCES_REPORT = REPO_ROOT / "port" / "reports" / "divergences.md"
+CRATES_ROOT = REPO_ROOT / "crates"
+ORACLE_PARITY_TSV = REPO_ROOT / "port" / "reports" / "oracle-parity.tsv"
+DETERMINISM_TSV = REPO_ROOT / "port" / "reports" / "determinism.tsv"
+# just audit-check's own scratch directory (git-ignored; task 18-divergences-regeneration),
+# the same convention port/.cache/inventory-check uses (task 14-manifest-columns).
+SCRATCH_ROOT = REPO_ROOT / "port" / ".cache" / "audit-check"
+SELFTEST_ROOT = REPO_ROOT / "port" / "tests" / "audit-order"
 
 
 # --------------------------------------------------------------------------------------------
@@ -946,6 +968,245 @@ def diverges(port_choice: str) -> tuple[str, str]:
 
 
 # --------------------------------------------------------------------------------------------
+# divergences.md (task 18-divergences-regeneration, part 2 of step 13; R18).
+#
+# Exactly four sources, named here and nowhere else:
+#   1. order-audit       -- the rows of the two reports above whose own `diverges` cell is
+#                            `yes`, read from this run's in-memory tables (never the files just
+#                            written, so one run cannot mix two generations).
+#   2. fidelity-marker    -- every `// FIDELITY(port):` marker under crates/.
+#   3. oracle-parity      -- every row of port/reports/oracle-parity.tsv whose two oracles do
+#                            not reach L1.
+#   4. determinism        -- every row of port/reports/determinism.tsv whose gate is `none`.
+#
+# Sources 3 and 4 are written by later, independent tasks and are absent today: an absent
+# source contributes zero rows and is not an error. A *present* source whose header is missing
+# one of the three literal columns this task fixes (`level reached`, `normative oracle`,
+# `gate`) is a failure, naming the column, so a silent rename can never be read as zero rows.
+# --------------------------------------------------------------------------------------------
+
+DIVERGENCES_HEADER = ["source", "place", "level", "configuration", "fixture", "artifact"]
+# Fixed row order (1-4 above), used for the deterministic sort key, not for anything semantic.
+SOURCE_ORDER = ["order-audit", "fidelity-marker", "oracle-parity", "determinism"]
+NA = "n/a"
+
+# Source 1's "level it is checked at instead": spec.md:696 says these sites are "checked at a
+# looser level (R18, R27, and the gate table from R3)" -- there is no per-site empirical level
+# for a static audit to report (unlike sources 3 and 4, which each read one off their own TSV
+# row), so every order-audit and fidelity-marker row names that gate table by a fixed literal
+# rather than inventing one. This is a judgement call the task leaves open; see the pull
+# request body.
+STATIC_SITE_LEVEL = "the gate table in docs/ORACLE.md (R3)"
+
+FIDELITY_MARKER_RE = re.compile(r"//\s*FIDELITY\(port\):")
+
+
+def fidelity_marker_rows(crates_root: Path) -> list[list[str]]:
+    """Every `// FIDELITY(port):` marker anywhere under `crates_root` (source 2).
+
+    `crates_root` not existing contributes zero rows, not an error -- true today (no module has
+    landed; `crates/` is created by 08-comparator-workspace, which this task does not depend
+    on) and true of a fixture tree that simply has no `crates/` of its own. Paths are reported
+    relative to `crates_root`'s parent, so pointing this at the real repository root
+    (`crates_root = REPO_ROOT / "crates"`) reports `crates/...` paths exactly as committed,
+    and pointing it at a self-contained fixture directory reports paths relative to that
+    fixture, the same convention `port/port-status --tree` uses.
+
+    This is deliberately `rglob("*.rs")`, not the narrower `*/src/**/*.rs` shape
+    `port/port-status` uses to define a *ported module* -- that definition is port-status's own
+    and states its exclusion out loud (a marker's declaration here is "anywhere under `crates/`",
+    per this task's Done-when line, with no exclusion: a marker in `tests/`, `build.rs`, a
+    nested-workspace member's `src/`, or `crates/slic3r-ffi/fuzz/fuzz_targets/` (the planned
+    fuzz-target location, R19/plan.md) must still produce a row). A `target/` path component is
+    skipped regardless, since a local build can drop generated `.rs` under a crate's own
+    `target/` and this report must stay byte-identical on a fresh clone that never built anything.
+    A file that cannot be read is a failure, not a silent skip, for the same reason a present but
+    unreadable `.tsv` source is: the row would otherwise vanish with nothing failing.
+    """
+    rows: list[list[str]] = []
+    if not crates_root.is_dir():
+        return rows
+    tree_root = crates_root.parent
+    for rs_path in sorted(crates_root.rglob("*.rs")):
+        if "target" in rs_path.relative_to(crates_root).parts:
+            continue
+        try:
+            text = rs_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise SystemExit(f"audit-order: {rs_path} could not be read: {exc}") from exc
+        relpath = rs_path.relative_to(tree_root).as_posix()
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if FIDELITY_MARKER_RE.search(line):
+                place = f"{relpath}:{lineno}"
+                rows.append(["fidelity-marker", place, STATIC_SITE_LEVEL, NA, NA, NA])
+    return rows
+
+
+def order_audit_rows(container_table: list[list[str]], comparator_table: list[list[str]]) -> list[list[str]]:
+    """Source 1: every row of the two just-generated tables whose last cell (`diverges`) is
+    `yes`, read from the tables `run()` returns -- never from the committed `.md` files, so a
+    stale committed report can never be read back into its own regeneration.
+
+    A single container declaration iterated at two different sites (two rows in
+    `order-containers.md` that share a declaration line but differ in `iteration`) projects to
+    the same `place` here, since this source's `place` is the declaration site, not the
+    iteration site. Rather than carry a second cell into `place` and change what it means, the
+    resulting byte-identical duplicate rows are collapsed to one: `divergences.md` names every
+    *place*, once, and the per-site detail stays in `order-containers.md` where it is already
+    recorded.
+    """
+    rows: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for table in (container_table, comparator_table):
+        for row in table:
+            if row[-1] == "yes":
+                out = ["order-audit", row[0], STATIC_SITE_LEVEL, NA, NA, NA]
+                key = tuple(out)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(out)
+    return rows
+
+
+def read_tsv_source(
+    path: Path, required_columns: list[str], predicate, row_builder
+) -> tuple[list[list[str]], bool]:
+    """Read one of sources 3/4's `.tsv` files by column name.
+
+    Returns (rows, present). `path` not existing is `([], False)`, not an error (the rule an
+    absent source is never a failure). `path` existing with a header missing any of
+    `required_columns` exits non-zero naming the column(s) -- the other rule, that a present
+    but unreadable source is a failure rather than silently zero rows. A data row shorter than
+    the header (`csv.DictReader` fills a missing trailing cell with `None`) is the same failure,
+    named by its 1-based data-row number rather than coerced to an empty string: coercing would
+    make a missing `gate` or `level reached` cell read as `""`, fail the `== "none"` /
+    `not in {...}` test, and vanish as if the row simply did not diverge -- the row-loss
+    direction this task exists to prevent. Row order follows the file; the caller sorts the
+    combined table.
+    """
+    if not path.is_file():
+        return [], False
+    with path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        fieldnames = list(reader.fieldnames or [])
+        missing = [c for c in required_columns if c not in fieldnames]
+        if missing:
+            raise SystemExit(
+                f"audit-order: {path} is missing column(s) {missing!r}; its header is "
+                f"{fieldnames!r} but {required_columns!r} are required"
+            )
+        rows: list[list[str]] = []
+        for lineno, raw_row in enumerate(reader, start=1):
+            short = [c for c in required_columns if raw_row.get(c) is None]
+            if short:
+                raise SystemExit(
+                    f"audit-order: {path} data row {lineno} is missing value(s) for "
+                    f"column(s) {short!r} (fewer fields than the header)"
+                )
+            if predicate(raw_row):
+                rows.append(row_builder(raw_row))
+    return rows, True
+
+
+ORACLE_PARITY_REQUIRED = ["configuration", "fixture", "artifact", "level reached", "normative oracle"]
+# Levels that count as "reaching L1": L0 (strictly more bytes-identical) and L1 itself.
+ORACLE_PARITY_REACHES_L1 = {"L0", "L1"}
+
+
+def _oracle_parity_predicate(row: dict[str, str]) -> bool:
+    return row["level reached"].strip() not in ORACLE_PARITY_REACHES_L1
+
+
+def _oracle_parity_row(row: dict[str, str]) -> list[str]:
+    place = f"configuration: {row['configuration'].strip()}, fixture: {row['fixture'].strip()}, artifact: {row['artifact'].strip()}"
+    return ["oracle-parity", place, row["level reached"].strip(), NA, NA, NA]
+
+
+DETERMINISM_REQUIRED = ["configuration", "fixture", "artifact", "gate"]
+
+
+def _determinism_predicate(row: dict[str, str]) -> bool:
+    return row["gate"].strip() == "none"
+
+
+def _determinism_row(row: dict[str, str]) -> list[str]:
+    configuration, fixture, artifact = row["configuration"].strip(), row["fixture"].strip(), row["artifact"].strip()
+    place = f"configuration: {configuration}, fixture: {fixture}, artifact: {artifact}"
+    return ["determinism", place, "none", configuration, fixture, artifact]
+
+
+@dataclass
+class DivergencesResult:
+    rows: list[list[str]]
+    # (source name, present, row count), in SOURCE_ORDER.
+    summary: list[tuple[str, bool, int]]
+
+
+def build_divergences(
+    container_table: list[list[str]],
+    comparator_table: list[list[str]],
+    crates_root: Path,
+    oracle_parity_path: Path,
+    determinism_path: Path,
+) -> DivergencesResult:
+    order_rows = order_audit_rows(container_table, comparator_table)
+    fidelity_rows = fidelity_marker_rows(crates_root)
+    oracle_rows, oracle_present = read_tsv_source(
+        oracle_parity_path, ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row
+    )
+    determinism_rows, determinism_present = read_tsv_source(
+        determinism_path, DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row
+    )
+
+    by_source = {
+        "order-audit": order_rows,
+        "fidelity-marker": fidelity_rows,
+        "oracle-parity": oracle_rows,
+        "determinism": determinism_rows,
+    }
+    presence = {
+        "order-audit": True,  # this run's own in-memory tables: always present.
+        "fidelity-marker": crates_root.is_dir(),
+        "oracle-parity": oracle_present,
+        "determinism": determinism_present,
+    }
+
+    all_rows = [row for name in SOURCE_ORDER for row in by_source[name]]
+    all_rows.sort(key=lambda r: (SOURCE_ORDER.index(r[0]), r[1], r[2], r[3], r[4], r[5]))
+    summary = [(name, presence[name], len(by_source[name])) for name in SOURCE_ORDER]
+    return DivergencesResult(rows=all_rows, summary=summary)
+
+
+def write_divergences(path: Path, result: DivergencesResult) -> None:
+    lines = [
+        "| " + " | ".join(DIVERGENCES_HEADER) + " |",
+        "| " + " | ".join(["---"] * len(DIVERGENCES_HEADER)) + " |",
+    ]
+    for row in result.rows:
+        lines.append("| " + " | ".join(escape_cell(c) for c in row) + " |")
+    lines.append("")
+    lines.append("## Sources")
+    lines.append("")
+    lines.append(
+        "Every row above comes from exactly one of these four sources; a source that was "
+        "absent when this file was regenerated contributed zero rows, not a failure."
+    )
+    lines.append("")
+    # The first cell is prefixed `source: ` (unlike a data row's bare source name) so
+    # `grep '^| <source> '` against a data row never also matches this summary row -- a data
+    # row's second cell is a place, this row's is `yes`/`no`, and a consumer that greps by
+    # first cell alone (e.g. 23-perf-backlog, matching `fidelity-marker` rows against markers
+    # still in the tree) must not have to special-case this table to avoid it.
+    lines.append("| source | present | rows contributed |")
+    lines.append("| --- | --- | --- |")
+    for name, present, count in result.summary:
+        lines.append(f"| source: {name} | {'yes' if present else 'no'} | {count} |")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# --------------------------------------------------------------------------------------------
 # Markdown table writer.
 # --------------------------------------------------------------------------------------------
 
@@ -1310,23 +1571,276 @@ def funcs_start_end(funcs: list[FunctionScope], pos: int) -> slice:
     return slice(best.sig_start, best.end)
 
 
-@click.command()
-def main() -> None:
-    """Regenerate port/reports/order-containers.md and port/reports/order-comparators.md."""
+def regenerate_all(out_dir: Path | None) -> tuple[Path, Path, Path, DivergencesResult]:
+    """Run the full pass (parts 1 and 2) and write all three reports under `out_dir`, or the
+    committed `port/reports/` tree when `out_dir` is None. Returns the three report paths and
+    the divergences result, so a caller (`main`, `run_check`) can print or diff without
+    re-running the pass."""
     container_table, comparator_table = run(MANIFEST_PATH)
 
+    if out_dir is None:
+        containers_path, comparators_path, divergences_path = CONTAINERS_REPORT, COMPARATORS_REPORT, DIVERGENCES_REPORT
+    else:
+        containers_path = out_dir / "order-containers.md"
+        comparators_path = out_dir / "order-comparators.md"
+        divergences_path = out_dir / "divergences.md"
+
+    # build_divergences runs -- and can raise (a present-but-unreadable source 2/3/4) -- before
+    # either part-1 report is written, so a failure here leaves all three reports untouched
+    # rather than two freshly regenerated and one stale.
+    result = build_divergences(container_table, comparator_table, CRATES_ROOT, ORACLE_PARITY_TSV, DETERMINISM_TSV)
     write_table(
-        CONTAINERS_REPORT,
+        containers_path,
         ["declaration", "container type", "declaring scope", "iteration", "reason", "port's choice", "diverges"],
         container_table,
     )
     write_table(
-        COMPARATORS_REPORT,
+        comparators_path,
         ["comparator", "reach", "use", "shape", "reason", "port's choice", "diverges"],
         comparator_table,
     )
-    click.echo(f"{CONTAINERS_REPORT.relative_to(REPO_ROOT)}: {len(container_table)} rows")
-    click.echo(f"{COMPARATORS_REPORT.relative_to(REPO_ROOT)}: {len(comparator_table)} rows")
+    write_divergences(divergences_path, result)
+    click.echo(f"{containers_path if out_dir else containers_path.relative_to(REPO_ROOT)}: {len(container_table)} rows")
+    click.echo(f"{comparators_path if out_dir else comparators_path.relative_to(REPO_ROOT)}: {len(comparator_table)} rows")
+    counts = ", ".join(f"{name}={count}" for name, _present, count in result.summary)
+    click.echo(
+        f"{divergences_path if out_dir else divergences_path.relative_to(REPO_ROOT)}: "
+        f"{len(result.rows)} rows ({counts})"
+    )
+    return containers_path, comparators_path, divergences_path, result
+
+
+DIFF_LINE_LIMIT = 40
+
+
+def run_check() -> None:
+    """`just audit-check`: regenerate all three reports into a scratch directory (git-ignored)
+    and fail, with a diff, when a committed one differs byte for byte. The regeneration's own
+    chatter is captured to a log file rather than printed, so a clean tree's check prints
+    nothing at all (part 1's two reports and divergences.md are already byte-stable by
+    construction: no timestamp, no machine-specific path, deterministic sort)."""
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    log_path = SCRATCH_ROOT / "audit-check.log"
+    with log_path.open("w", encoding="utf-8") as log_file, contextlib.redirect_stdout(log_file):
+        fresh_containers, fresh_comparators, fresh_divergences, _result = regenerate_all(SCRATCH_ROOT)
+
+    drifted: list[tuple[Path, Path, str, str]] = []
+    for committed, fresh in (
+        (CONTAINERS_REPORT, fresh_containers),
+        (COMPARATORS_REPORT, fresh_comparators),
+        (DIVERGENCES_REPORT, fresh_divergences),
+    ):
+        committed_text = committed.read_text(encoding="utf-8") if committed.is_file() else ""
+        fresh_text = fresh.read_text(encoding="utf-8")
+        if committed_text != fresh_text:
+            drifted.append((committed, fresh, committed_text, fresh_text))
+
+    if drifted:
+        print(f"audit-check: drift found (the regeneration's own output is at {log_path}):")
+        for committed, fresh, committed_text, fresh_text in drifted:
+            relpath = committed.relative_to(REPO_ROOT)
+            print(f"  {relpath} has drifted from its regeneration (fresh copy at {fresh}):")
+            diff_lines = list(
+                difflib.unified_diff(
+                    committed_text.splitlines(keepends=True),
+                    fresh_text.splitlines(keepends=True),
+                    fromfile=f"{relpath} (committed)",
+                    tofile=f"{relpath} (regenerated)",
+                )
+            )
+            for line in diff_lines[:DIFF_LINE_LIMIT]:
+                print("    " + line.rstrip("\n"))
+            if len(diff_lines) > DIFF_LINE_LIMIT:
+                print(f"    ... ({len(diff_lines) - DIFF_LINE_LIMIT} more diff lines omitted)")
+        raise SystemExit(1)
+
+
+# --------------------------------------------------------------------------------------------
+# --self-test
+# --------------------------------------------------------------------------------------------
+
+
+def _selftest_source2() -> list[str]:
+    """Source 2's two rules: an absent `crates/` contributes zero rows (not an error), and a
+    marker under a present tree produces exactly one row per marker."""
+    failures = []
+    absent_dir = SELFTEST_ROOT / "sources-absent" / "crates"
+    rows = fidelity_marker_rows(absent_dir)
+    if rows:
+        failures.append(f"fidelity-marker: expected 0 rows for an absent {absent_dir}, got {rows!r}")
+
+    present_dir = SELFTEST_ROOT / "sources-present" / "crates"
+    rows = fidelity_marker_rows(present_dir)
+    if len(rows) != 1:
+        failures.append(f"fidelity-marker: expected 1 row for {present_dir}, got {rows!r}")
+    elif rows[0][0] != "fidelity-marker":
+        failures.append(f"fidelity-marker: expected source cell 'fidelity-marker', got {rows[0]!r}")
+
+    # The Done-when line is "anywhere under crates/", not just `<crate>/src/**/*.rs` -- a
+    # marker in `<crate>/tests/` must still produce a row (the narrower glob
+    # `port/port-status` uses for a *ported module* would silently miss it).
+    outside_src_dir = SELFTEST_ROOT / "sources-present-outside-src" / "crates"
+    rows = fidelity_marker_rows(outside_src_dir)
+    if len(rows) != 1:
+        failures.append(f"fidelity-marker: expected 1 row for a marker outside <crate>/src/ under {outside_src_dir}, got {rows!r}")
+    elif "tests/t.rs" not in rows[0][1]:
+        failures.append(f"fidelity-marker: expected the row's place to name tests/t.rs, got {rows[0]!r}")
+    return failures
+
+
+def _selftest_tsv_sources() -> list[str]:
+    """Sources 3 and 4's two rules: an absent file contributes zero rows (not an error), a
+    present file with every required column contributes its matching rows, and a present file
+    missing a required column raises (the "present but unreadable is a failure" rule)."""
+    failures = []
+
+    absent_dir = SELFTEST_ROOT / "sources-absent"
+    rows, present = read_tsv_source(
+        absent_dir / "oracle-parity.tsv", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row
+    )
+    if present or rows:
+        failures.append(f"oracle-parity: expected absent/0 rows for a missing file, got present={present} rows={rows!r}")
+    rows, present = read_tsv_source(
+        absent_dir / "determinism.tsv", DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row
+    )
+    if present or rows:
+        failures.append(f"determinism: expected absent/0 rows for a missing file, got present={present} rows={rows!r}")
+
+    present_dir = SELFTEST_ROOT / "sources-present"
+    rows, present = read_tsv_source(
+        present_dir / "oracle-parity.tsv", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row
+    )
+    if not present or len(rows) != 1:
+        failures.append(f"oracle-parity: expected present/1 row for {present_dir}, got present={present} rows={rows!r}")
+    rows, present = read_tsv_source(
+        present_dir / "determinism.tsv", DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row
+    )
+    if not present or len(rows) != 1:
+        failures.append(f"determinism: expected present/1 row for {present_dir}, got present={present} rows={rows!r}")
+
+    for fixture, required, predicate, builder, bad_column in (
+        ("renamed-level-reached", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row, "level reached"),
+        ("renamed-normative-oracle", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row, "normative oracle"),
+    ):
+        path = SELFTEST_ROOT / fixture / "oracle-parity.tsv"
+        try:
+            read_tsv_source(path, required, predicate, builder)
+            failures.append(f"{fixture}: expected SystemExit naming {bad_column!r}, got no error")
+        except SystemExit as exc:
+            if bad_column not in str(exc):
+                failures.append(f"{fixture}: expected the error to name {bad_column!r}, got {exc}")
+
+    path = SELFTEST_ROOT / "renamed-gate" / "determinism.tsv"
+    try:
+        read_tsv_source(path, DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row)
+        failures.append("renamed-gate: expected SystemExit naming 'gate', got no error")
+    except SystemExit as exc:
+        if "gate" not in str(exc):
+            failures.append(f"renamed-gate: expected the error to name 'gate', got {exc}")
+
+    return failures
+
+
+def _selftest_build_divergences() -> list[str]:
+    """End-to-end: build_divergences itself, not just the per-source readers, against the
+    `sources-present` fixture -- catches a regression where a reader returns rows that the
+    combining/sorting step then drops or miscounts, which the per-source tests above cannot."""
+    failures = []
+    fixture = SELFTEST_ROOT / "sources-present"
+    # Two synthetic order-audit rows (one container, one comparator), both diverging, plus one
+    # looked-up (non-diverging) container row that must NOT appear in the output.
+    container_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "n/a", "r", "c", "yes"],
+    ]
+    comparator_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "definition", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "s", "r", "c", "yes"],
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "definition", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "s", "r", "c", "no"],
+    ]
+    result = build_divergences(
+        container_table, comparator_table, fixture / "crates", fixture / "oracle-parity.tsv", fixture / "determinism.tsv"
+    )
+    counts = {name: count for name, _present, count in result.summary}
+    presence = {name: present for name, present, _count in result.summary}
+    expected_counts = {"order-audit": 2, "fidelity-marker": 1, "oracle-parity": 1, "determinism": 1}
+    if counts != expected_counts:
+        failures.append(f"build_divergences: expected counts {expected_counts!r}, got {counts!r}")
+    if not all(presence.values()):
+        failures.append(f"build_divergences: expected every source present for this fixture, got {presence!r}")
+    if len(result.rows) != sum(expected_counts.values()):
+        failures.append(f"build_divergences: expected {sum(expected_counts.values())} total rows, got {len(result.rows)}")
+    return failures
+
+
+def _selftest_order_audit_dedup() -> list[str]:
+    """One container declaration iterated at two sites yields two rows in
+    `order-containers.md` that share a declaration (`place`) but differ in `iteration` --
+    `order_audit_rows` must collapse those to a single `divergences.md` row, not emit the same
+    place twice."""
+    failures = []
+    container_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "r", "c", "yes"],
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "r", "c", "yes"],
+    ]
+    rows = order_audit_rows(container_table, [])
+    if len(rows) != 1:
+        failures.append(f"order_audit_rows: expected 1 deduplicated row for two iteration sites of one declaration, got {rows!r}")
+    return failures
+
+
+def run_selftest() -> int:
+    failures = (
+        _selftest_source2()
+        + _selftest_tsv_sources()
+        + _selftest_build_divergences()
+        + _selftest_order_audit_dedup()
+    )
+    if failures:
+        for failure in failures:
+            click.echo(f"self-test: FAILED: {failure}")
+        return 1
+    click.echo("self-test: OK (source 2's absent/present rule, sources 3-4's absent/present/unreadable rules)")
+    return 0
+
+
+# --------------------------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------------------------
+
+
+@click.command()
+@click.option(
+    "--out",
+    "out_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write order-containers.md, order-comparators.md and divergences.md under DIR instead "
+    "of the committed port/reports/ tree. Lets a run be proved deterministic, and is what "
+    "just audit-check uses to regenerate into a scratch directory, without committing anything.",
+)
+@click.option(
+    "--check",
+    "check",
+    is_flag=True,
+    help="just audit-check: regenerate all three reports into a scratch directory and fail, "
+    "with a diff, when a committed one differs byte for byte. Never writes port/reports/.",
+)
+@click.option(
+    "--self-test",
+    "self_test",
+    is_flag=True,
+    help="Run every fixture under port/tests/audit-order/ and assert its expected result.",
+)
+def main(out_dir: Path | None, check: bool, self_test: bool) -> None:
+    """Regenerate port/reports/order-containers.md, port/reports/order-comparators.md and
+    port/reports/divergences.md."""
+    if self_test:
+        sys.exit(run_selftest())
+    if check:
+        if out_dir is not None:
+            raise SystemExit("audit-order: --out and --check are mutually exclusive")
+        run_check()
+        return
+    regenerate_all(out_dir)
 
 
 if __name__ == "__main__":
