@@ -6,6 +6,7 @@
 //! stopping at the first pass.
 
 pub mod gcode;
+pub mod json;
 pub mod levels;
 pub mod tolerance;
 
