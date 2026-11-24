@@ -603,8 +603,19 @@ def collect_fields(
                 continue
             if try_parse_alias(stmt_text) is not None:
                 continue
+            # pos is the statement's boundary (right after the previous ';'/'}'), which can sit
+            # several lines above the declaration's own first character once leading
+            # whitespace/blank lines/stripped comments are skipped (a trailing inline method
+            # body's own closing '}' on one line, the real field only starting two lines later).
+            # Skipping stmt_text's own leading whitespace before looking up the line is what
+            # makes the reported line the declaration's own, matching R30's worked examples
+            # (ExtrusionEntityCollection.hpp:39, Model.hpp:189) exactly rather than off by
+            # whatever the previous statement happened to leave behind.
+            leading_ws = len(stmt_text) - len(stmt_text.lstrip())
             for name, cpp_type in parse_fields(stmt_text, declaring_type, pointer_aliases):
-                rows.append([relpath, str(line_of(text, pos)), declaring_type, name, cpp_type])
+                rows.append(
+                    [relpath, str(line_of(text, pos + leading_ws)), declaring_type, name, cpp_type]
+                )
     return rows
 
 
