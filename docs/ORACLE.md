@@ -31,7 +31,9 @@ under `oracle/.cache/`, never an app already installed on the machine running th
 `just oracle-build` (`oracle/build-libslic3r`) builds `src/libslic3r` itself from the vendored
 submodule, as a second, from-source oracle alongside the release-binary one above. Stage two,
 the main project, is configured with generator `-G "Ninja Multi-Config"` (twice — see
-`vendor/README.md`), built with `--config Release`, and tested with `ctest -C Release`, using:
+`vendor/README.md`), built with `--config Release`, and tested with
+`ctest -C Release --output-on-failure --timeout 600` (the per-test bound exists because one
+upstream test can deadlock rather than fail; `vendor/README.md` has the measurement), using:
 
 ```
 -DCMAKE_PREFIX_PATH="<stage one's install prefix>"
@@ -58,16 +60,27 @@ task.md names only the C++ spelling, but the orientation/incircle predicates it 
 (Shewchuk's routines in `deps_src/mcut/source/shewchuk.c`, linked into both `libslic3r` and
 `libslic3r_cgal`) are C, not C++, so the faithful reading passes it to both languages.
 
-**This configuration does not currently build.** Stage two's first configure fails — see
-`vendor/README.md`'s "Building libslic3r locally" section for the exact error, the evidence for the
-root cause, and what was tried. In short: stage one forwards `CMAKE_IGNORE_PREFIX_PATH` to each
-dependency sub-build unquoted, so only `/opt/local` survives there and Boost.Iostreams resolves
-`lzma.h` under `/opt/homebrew`, which makes its exported CMake config declare
-`find_dependency(LibLZMA)`; stage two's top-level configure honours the full ignore list, that
-header is excluded, and only the Xcode SDK's headerless `liblzma.tbd` remains — hence
-`missing: LIBLZMA_INCLUDE_DIR`. Both hosts tried (this dev machine and a GitHub-hosted `macos-15`
-runner) carry Homebrew's `xz`, so a host without it is untested. No upstream
-workflow runs `SLIC3R_GUI=OFF`/`SLIC3R_CAD=ON` on macOS at all; the one upstream script that runs
-it at all (`scripts/CAD/run-kernel-tests.sh:145-158`) does so only on Linux. The flags above are
-what this oracle is specified to use once this is resolved, not evidence that it currently
-produces a working binary.
+Stage one (the dependency superbuild) is configured with generator `-G Ninja` and:
+
+```
+-DCMAKE_BUILD_TYPE=Release
+-DCMAKE_OSX_ARCHITECTURES=arm64
+-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+-DCMAKE_TOOLCHAIN_FILE=<generated: sets CMAKE_IGNORE_PREFIX_PATH to the same three prefixes>
+-DCMAKE_POLICY_VERSION_MINIMUM=3.10
+```
+
+Stage one reaches the same three ignored prefixes through a toolchain file rather than
+`-DCMAKE_IGNORE_PREFIX_PATH` because the superbuild forwards that cache entry to each dependency's
+own CMake invocation unquoted, which truncates the list to its first element; a toolchain file has
+no list separator to split on, so it survives. `oracle/build-libslic3r` generates the file and
+carries the measurements; `vendor/README.md`'s "Building libslic3r locally" section has the full
+account. Without it, Boost.Iostreams resolved `lzma.h` under `/opt/homebrew`, exported
+`find_dependency(LibLZMA)` in its CMake config, and stage two — which does honour the whole ignore
+list — could not satisfy it (`Could NOT find LibLZMA (missing: LIBLZMA_INCLUDE_DIR)`).
+
+**No upstream workflow builds this configuration on macOS.** `SLIC3R_GUI=OFF` with
+`SLIC3R_CAD=ON` is exercised by exactly one upstream script
+(`scripts/CAD/run-kernel-tests.sh:145-158`), on Linux only, for one target. The flags above are
+measured: both stages complete, the three named targets build, and both upstream Catch2 suites
+pass in full. `vendor/README.md` records the wall-clock, the disk cost and the suite outcomes.
