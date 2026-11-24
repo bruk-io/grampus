@@ -332,20 +332,24 @@ was added before the build step — the same category of addition as the existin
 `setup-uv`/`setup-just` steps, needed for this task's one step to run at all.
 
 With that gap closed, the job **completed stage one in full**, for real, from an empty prefix on a
-from-scratch `macos-15` runner, on two separate runs: 21 dependencies, no further missing tools.
-The two runs' own stage-one summaries, both printed by `oracle/build-libslic3r` from an equally
-cold start, differ by a factor of 1.7:
+from-scratch `macos-15` runner, on three separate runs: 21 dependencies, no further missing tools.
+All three stage-one summaries, each printed by `oracle/build-libslic3r` from an equally cold start
+(no superbuild cache exists — that is `24-port-check-ci`'s half), are listed because they span
+almost a factor of two:
 
 | Run | Stage one wall-clock | Build directory | Install prefix |
 |---|---|---|---|
 | [45382513074](https://github.com/bruk-io/grampus/actions/runs/45382513074) | 26m11s (1571.1s), configure 2.3s + build 1568.9s | 3.3G | 622M |
 | [45387169000](https://github.com/bruk-io/grampus/actions/runs/45387169000) | 43m35s (2615.2s), configure 3.4s + build 2611.8s | 3.3G | 622M |
+| [45398085129](https://github.com/bruk-io/grampus/actions/runs/45398085129) | 48m53s (2934.0s), configure 2.8s + build 2931.2s | 3.3G | 622M |
 
-Neither is the recorded figure — PR #7's 227.3s on this dev machine is, per task.md — and the
-spread is hosted-runner variance, not a difference in what was built. Both are listed because a
-reader sizing a CI timeout from one number would be misled by either alone. Note also that the
-install prefix measures **622M** on both CI runs, against 625M in PR #7 and 637M in this
-worktree: three real measurements of the same prefix path, same spread as noted above the table.
+None of them is the recorded figure — PR #7's 227.3s on this dev machine is, per task.md — and the
+spread is hosted-runner variance, not a difference in what was built: same 21 dependencies, same
+3.3G build tree, same 622M prefix every time. All three are listed because a reader sizing a CI
+timeout from one of them would be misled by any single one (the job's current 90-minute timeout is
+set against the slowest, not the fastest). Note also that the install prefix measures **622M** on
+every CI run, against 625M in PR #7 and 637M in this worktree: three real measurements of the same
+prefix path, same kind of spread as noted above the table.
 
 Stage two then hit the *identical* `Could NOT find LibLZMA (missing: LIBLZMA_INCLUDE_DIR)` error,
 at the identical call stack, as this dev host. That second host is what the root-cause section
