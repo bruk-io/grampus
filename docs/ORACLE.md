@@ -257,8 +257,11 @@ holds two different values and which the block writes, nine collapse to the firs
 (`filament_max_volumetric_speed` `["21", "29"]` → `21`, `outer_wall_speed` `["200", "350"]` → `200`,
 `inner_wall_speed`, `top_surface_speed`, `sparse_infill_speed`, `internal_solid_infill_speed` and
 the three `*_extruder_variant` keys, whose block value is the golden's first variant
-`"Direct Drive Standard"`), and the remaining two (`start_end_points`, `filament_dev_ams_drying_ams_limitations`)
-keep both slots because they are not per-variant vectors at all. The first slot of
+`"Direct Drive Standard"`), and the remaining two keep both slots in one line
+(`start_end_points` → `30x-3,54x245`, a `coPoints` option at `PrintConfig.cpp:5853`;
+`filament_dev_ams_drying_ams_limitations` → `1;0`, a `coStrings` option at `:8758`), so those two
+are not collapsing per-variant vectors — which is measured here, not a claim about why their widths
+differ. The first slot of
 `filament_retraction_length` and `filament_z_hop` is `nil`, which is why `is_nil()` skips them there
 and not here. A port that decides the `CONFIG_BLOCK` skip by applying `Config.hpp:1085` to a
 golden's own wider vectors would keep these two keys where the oracle drops them; the rule has to be
