@@ -42,9 +42,16 @@ This script writes no provenance header of its own and does not call oracle/prov
 path separator and no extension is resolved against `fixtures/` by appending `.stl` -- so
 `3DBenchy` means `fixtures/3DBenchy.stl` -- and exits non-zero naming the argument when that
 resolves to no committed file. An argument with a separator (e.g. `fixtures/3DBenchy.stl`, or any
-other path) is a path and is not resolved; neither is a bare name that already carries an
-extension (e.g. a bare `3DBenchy.stl` typed on the command line falls through to the existing
-cwd-relative path handling below, not to this rule).
+other path) is a path and is not resolved.
+
+A bare name that already carries `.stl` (e.g. `3DBenchy.stl`, with no separator) is resolved
+against `fixtures/` too, **if** a file of that exact name exists there -- this is the literal form
+`oracle/assert-placement --list` and `docs/ORACLE.md`'s Fixtures column both print, so the
+enumeration this task defines is directly usable as this script's `<fixture>` argument without a
+caller having to strip the extension or add a `fixtures/` prefix first. If no such file exists in
+`fixtures/`, the argument falls through unchanged to the existing cwd-relative path handling below
+(so a real file named e.g. `my-model.stl` in the invocation's own cwd, which happens to share no
+basename with a committed fixture, still resolves exactly as before this rule existed).
 """
 
 from __future__ import annotations
@@ -179,9 +186,18 @@ def resolve_fixture_arg(fixture: str, invocation_cwd: Path) -> Path:
     """Resolve the <fixture> argument to a file path.
 
     No path separator and no extension: a bare fixture stem, resolved against fixtures/ by
-    appending .stl (e.g. "3DBenchy" -> fixtures/3DBenchy.stl). Anything else -- a path with a
-    separator, or a bare name that already has an extension -- is treated as a path and resolved
-    against the invocation's own cwd, unchanged from before this rule existed.
+    appending .stl (e.g. "3DBenchy" -> fixtures/3DBenchy.stl); exits non-zero naming the argument
+    if that resolves to no committed file.
+
+    No path separator, but the name already ends in .stl (e.g. "3DBenchy.stl", the exact form
+    `oracle/assert-placement --list` prints): resolved against fixtures/ unchanged, but only if a
+    file of that name is actually committed there. If not, this falls through to cwd-relative path
+    handling below, same as any other bare name with an extension -- so a real file in the
+    invocation's own cwd is still reachable by its bare name, as before this rule existed.
+
+    Anything else -- a path with a separator, or a bare name with some other extension -- is
+    treated as a path and resolved against the invocation's own cwd, unchanged from before this
+    rule existed.
     """
     has_separator = os.sep in fixture or (os.altsep is not None and os.altsep in fixture)
     has_extension = Path(fixture).suffix != ""
@@ -194,6 +210,10 @@ def resolve_fixture_arg(fixture: str, invocation_cwd: Path) -> Path:
             )
             sys.exit(1)
         return resolved
+    if not has_separator and fixture.endswith(".stl"):
+        resolved = FIXTURES_DIR / fixture
+        if resolved.is_file():
+            return resolved
     return (invocation_cwd / fixture).resolve()
 
 

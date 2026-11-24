@@ -71,6 +71,7 @@ does on its own.
 from __future__ import annotations
 
 import json
+import re
 import struct
 import subprocess
 import sys
@@ -82,6 +83,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BINARY = REPO_ROOT / "oracle" / ".cache" / "app" / "OrcaSlicer.app" / "Contents" / "MacOS" / "OrcaSlicer"
 FIXTURES_DIR = REPO_ROOT / "fixtures"
 SCRATCH_ROOT = REPO_ROOT / "oracle" / ".cache" / "fixture-export"
+README_PATH = REPO_ROOT / "vendor" / "README.md"
 
 PRINTABLE_AREA_FILE = (
     REPO_ROOT / "vendor" / "OrcaSlicer" / "resources" / "profiles" / "BBL" / "machine"
@@ -95,6 +97,8 @@ EXCLUSION_AREA_FILE = (
 # Frozen basename -> vendored source path, relative to the repo root. This is the only place the
 # mapping is hardcoded; vendor/README.md's committed row is what makes a fixture official for
 # every other reader (oracle/assert-placement --list, 42-compare-fixtures).
+# check_fixture_defs_match_readme(), run at the top of main(), keeps this dict and that table from
+# silently drifting apart.
 FIXTURE_DEFS: dict[str, str] = {
     "3DBenchy.stl": "vendor/OrcaSlicer/resources/handy_models/3DBenchy.drc",
     "20mm_cube.stl": "vendor/OrcaSlicer/tests/data/20mm_cube.obj",
@@ -107,6 +111,96 @@ HEADER_SIZE = 80
 
 class PlacementError(Exception):
     """Raised when a translated fixture fails the printable-area / exclusion-area assertion."""
+
+
+SEPARATOR_RE = re.compile(r"^:?-+:?$")
+
+
+def split_row(line: str) -> list[str]:
+    """Split one markdown table line into its trimmed cells."""
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def strip_cell(cell: str) -> str:
+    """Drop a cell's surrounding backticks and whitespace."""
+    cell = cell.strip()
+    if cell.startswith("`") and cell.endswith("`") and len(cell) >= 2:
+        cell = cell[1:-1].strip()
+    return cell
+
+
+def read_readme_fixture_defs() -> dict[str, str]:
+    """Read {frozen basename: vendored path} from vendor/README.md's Fixtures table.
+
+    Mirrors oracle/assert-placement's own header-matched parser (not a general Markdown parser,
+    the house pattern) rather than importing that script, since the two are independent
+    executables with their own PEP 723 dependencies.
+    """
+    if not README_PATH.is_file():
+        return {}
+    lines = README_PATH.read_text().splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.startswith("|") and i + 1 < len(lines):
+            header = split_row(line)
+            sep_cells = split_row(lines[i + 1].strip()) if lines[i + 1].strip().startswith("|") else []
+            if header and header[0] == "Frozen basename" and sep_cells and all(
+                SEPARATOR_RE.match(c) for c in sep_cells
+            ):
+                defs = {}
+                j = i + 2
+                while j < len(lines) and lines[j].strip().startswith("|"):
+                    cells = dict(zip(header, split_row(lines[j])))
+                    basename = strip_cell(cells.get("Frozen basename", ""))
+                    vendored = strip_cell(cells.get("Vendored path", ""))
+                    if basename:
+                        defs[basename] = vendored
+                    j += 1
+                return defs
+            i += 1
+        else:
+            i += 1
+    return {}
+
+
+def check_fixture_defs_match_readme() -> None:
+    """Exit non-zero, naming the diverging fixture, if FIXTURE_DEFS and vendor/README.md's
+    Fixtures table disagree on the committed set or any vendored path.
+
+    FIXTURE_DEFS is the only place this mapping is hardcoded (see its own comment); this check
+    is what keeps that hardcoding from silently drifting from the table that R25 makes the
+    authority on what a fixture is.
+    """
+    readme_defs = read_readme_fixture_defs()
+    if not readme_defs:
+        # No row yet (e.g. a fresh checkout before any fixture is committed) -- nothing to
+        # cross-check against yet.
+        return
+    only_in_code = sorted(set(FIXTURE_DEFS) - set(readme_defs))
+    only_in_readme = sorted(set(readme_defs) - set(FIXTURE_DEFS))
+    mismatched = sorted(
+        name
+        for name in set(FIXTURE_DEFS) & set(readme_defs)
+        if FIXTURE_DEFS[name] != readme_defs[name]
+    )
+    if only_in_code or only_in_readme or mismatched:
+        click.echo(
+            "error: FIXTURE_DEFS (oracle/export-fixture) and vendor/README.md's Fixtures table "
+            "disagree:",
+            err=True,
+        )
+        for name in only_in_code:
+            click.echo(f"  {name}: in FIXTURE_DEFS, no vendor/README.md row", err=True)
+        for name in only_in_readme:
+            click.echo(f"  {name}: a vendor/README.md row, not in FIXTURE_DEFS", err=True)
+        for name in mismatched:
+            click.echo(
+                f"  {name}: vendored path differs "
+                f"(FIXTURE_DEFS {FIXTURE_DEFS[name]!r} vs vendor/README.md {readme_defs[name]!r})",
+                err=True,
+            )
+        sys.exit(1)
 
 
 def normalize_name(name: str) -> str:
@@ -251,7 +345,9 @@ def assert_placed(
             f"is not inside printable_area ({p_minx:.3f}, {p_miny:.3f})-({p_maxx:.3f}, {p_maxy:.3f})"
         )
     e_minx, e_miny, e_maxx, e_maxy = exclusion
-    # Standard AABB overlap test, inverted; <=/>= so a touching edge counts as "meeting" it.
+    # Standard AABB overlap test, inverted; the strict </> comparisons mean a box that only
+    # touches the exclusion area's edge (e.g. minx == e_maxx exactly) does NOT count as meeting
+    # it -- a shared edge with no interior overlap is clear.
     meets_exclusion = not (maxx <= e_minx or minx >= e_maxx or maxy <= e_miny or miny >= e_maxy)
     if meets_exclusion:
         raise PlacementError(
@@ -313,6 +409,23 @@ def export_one(basename: str, vendored_rel: str) -> None:
         write_binary_stl(target, translated, count)
         click.echo(f"{basename}: wrote {target} ({count} facets)")
 
+    # The in-memory comparison above (t_min_z/t_max_z against min_z/max_z) only proves
+    # translate_facets() didn't touch the z bytes it was handed -- true by construction, since it
+    # never arithmetic on z, so it can't actually fail. Re-read the Z extent back out of the file
+    # this script just wrote (or confirmed unchanged) on disk, through the same binary-STL parser
+    # oracle/assert-placement and a human re-running `just fixture-export` would use, so a bug in
+    # the header size, the facet layout or write_binary_stl's own byte order would be caught here
+    # too, not just a bug in translate_facets.
+    disk_facets, disk_count = read_facets(target)
+    _, _, disk_min_z, _, _, disk_max_z = mesh_bbox(disk_facets, disk_count)
+    if (disk_min_z, disk_max_z) != (min_z, max_z):
+        click.echo(
+            f"error: {basename}: committed file's Z extent ({disk_min_z}..{disk_max_z}) does not "
+            f"match move one's export ({min_z}..{max_z})",
+            err=True,
+        )
+        sys.exit(1)
+
     click.echo(
         f"{basename}: translated by dx={dx:.6f} dy={dy:.6f}; "
         f"xy bbox ({t_min_x:.3f}, {t_min_y:.3f})-({t_max_x:.3f}, {t_max_y:.3f}); "
@@ -329,6 +442,8 @@ def main(names: tuple[str, ...]) -> None:
     With no NAMES, exports all three. Each NAME is a frozen basename ("3DBenchy.stl") or bare
     stem ("3DBenchy").
     """
+    check_fixture_defs_match_readme()
+
     if names:
         requested = [normalize_name(n) for n in names]
         unknown = [n for n in requested if n not in FIXTURE_DEFS]

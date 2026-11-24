@@ -37,9 +37,12 @@ equals form, which every option type (including a `coBool` one) accepts as a val
 space-separated form's risk of being parsed as a stray positional file argument instead. A row
 naming no filament is rejected by `oracle/slice` itself, before the binary runs.
 
-`Fixtures` names a frozen basename under `fixtures/` (R25), exactly as `ls fixtures/` prints it;
-`oracle/slice` also accepts the bare stem with no path separator and no extension, resolved
-against that directory by appending `.stl` (added in `11-fixture-set`).
+`Fixtures` names a frozen basename under `fixtures/` (R25), exactly as `ls fixtures/` prints it,
+and that exact string is directly usable as `oracle/slice`'s `<fixture>` argument (e.g.
+`just oracle-slice frog_legs.stl base-fff`): a separator-free argument ending in `.stl` resolves
+against `fixtures/` when a file of that name is committed there. `oracle/slice` also accepts the
+bare stem with no path separator and no extension, resolved against that directory by appending
+`.stl` (added in `11-fixture-set`).
 
 | Configuration | Machine | Process | Filament(s) | Overrides | Fixtures |
 |---|---|---|---|---|---|
@@ -57,8 +60,14 @@ flags (every key named above is CLI-exposed — not `nocli` — in
 exported from each run confirms the override landed in the resolved config. All of it was measured
 before `11-fixture-set` fixed `frog_legs`'s placement, against the vendored
 `tests/data/frog_legs.obj` at its own, untranslated coordinates; the byte counts, filament lengths
-and marker counts below are that measurement's record and are unaffected by the model's position
-on the bed, but are not asserted to reproduce to the byte against the now-translated
+and marker counts below are that measurement's record. The filament lengths and marker counts are
+unaffected by the model's position on the bed (re-measured against the translated
+`fixtures/frog_legs.stl`: identical `; filament used [mm]`, identical `; FEATURE: Prime tower` and
+toolchange counts for `wipe-tower-multi-filament`). The byte counts are **not** position-independent
+— translating the model changes how many digits each X/Y token takes, so `plate_1.gcode`'s size
+shifts with it (`wipe-tower-multi-filament`: 632859 bytes against the untranslated
+`tests/data/frog_legs.obj`, 661311 bytes against the translated, committed `fixtures/frog_legs.stl`)
+— and none of the byte counts below are asserted to reproduce to the byte against the now-translated
 `fixtures/frog_legs.stl`.
 
 **`wipe-tower-multi-filament`'s third element, measured.** task.md names three things for this row:

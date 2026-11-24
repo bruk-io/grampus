@@ -21,13 +21,15 @@ is plate_1.gcode's own toolpath: each layer brackets the fixture's extrusion mov
 "; printing object <basename> id:<n> copy <c>" and "; stop printing object <basename> id:<n>
 copy <c>" comments (the same basename R25 requires with no absolute path in it). This script
 collects every G0/G1/G2/G3 move's X/Y inside those brackets, across every layer, and takes their
-bounding box as "the bounding box the oracle reports for the run". That is necessarily a little
-larger than the committed STL's own bounding box -- perimeters trace the surface at a half
-line-width offset, arcs can bulge slightly past their endpoints, and a model with brim enabled
-would ring it further out -- so the comparison allows PLACEMENT_TOLERANCE_MM of slack on every
-side rather than demanding exact equality; a genuine misplacement (the wrong fixture, a skipped
-translation, a transform that is not the identity R25 records) is tens of millimetres off, far
-outside that tolerance.
+bounding box as "the bounding box the oracle reports for the run". That box differs from the
+committed STL's own bounding box on both sides, not just outward: perimeters trace the surface at
+a half line-width offset (can go either way depending on the edge), and the X1C machine preset's
+own `extruder_offset` shifts every toolpath coordinate a constant amount in Y relative to the mesh
+(see PLACEMENT_TOLERANCE_MM's comment below). So the comparison allows PLACEMENT_TOLERANCE_MM of
+slack on every side, outward or inward, rather than demanding exact equality; a genuine
+misplacement (the wrong fixture, a skipped translation, a transform that is not the identity R25
+records, a part printed at the wrong scale) is tens of millimetres off on at least one edge, far
+outside that tolerance either way.
 
 Every fixture holds exactly one object, so every record names exactly one transform (a
 multi-filament configuration assigns more than one filament to that single object rather than
@@ -53,12 +55,35 @@ FIXTURES_DIR = REPO_ROOT / "fixtures"
 FACET_SIZE = 50
 HEADER_SIZE = 80
 
-# How far an observed toolpath bounding box may lie outside the committed mesh's own bounding
-# box before this script calls it a disagreement. Measured across the three committed fixtures
-# (perimeter offset and arc bulge, no brim on any of the three -- no "; FEATURE: Skirt" line
-# appears in any of their base-fff runs), the largest deviation on any edge was 2.272 mm
-# (frog_legs's Y max). This is a bit over double that, to leave margin without coming close to
-# accepting a real misplacement, which is off by tens of millimetres.
+# How far an observed toolpath bounding box may lie outside OR inside the committed mesh's own
+# bounding box before this script calls it a disagreement. Measured across the three committed
+# fixtures' own base-fff runs (per edge, min_x/max_x/min_y/max_y, positive = observed outside the
+# mesh's box): 20mm_cube [-0.210, 1.790, -0.210, -2.210]; frog_legs [-0.234, 1.747, -0.312,
+# -2.272]; 3DBenchy [-0.210, 1.789, -0.211, -2.210].
+#
+# The X deviation (~0.21-0.31 mm) is perimeter offset: the toolpath traces the surface at a half
+# line-width inset, slightly more on frog_legs because its mesh is concave there. The dominant
+# term, though, is the ~-2 mm constant shift in Y on every fixture: the X1C machine preset's
+# `extruder_offset` is `["0x2"]`, and `GCode::point_to_gcode` (GCode.cpp:11662-11666) returns
+# `unscale(point) + m_origin - extruder_offset`, so every toolpath coordinate this run emits is 2
+# mm lower in Y than the mesh that produced it, by construction, on every run of this machine
+# preset, not a fault of the slice. (The 3DBenchy run does print a brim -- "; FEATURE: Brim" does
+# appear in its plate_1.gcode -- but at a line before the fixture's own "; printing object"
+# marker, so it falls outside toolpath_bbox_xy's bracket and does not affect this measurement; an
+# earlier version of this comment grepped only for "; FEATURE: Skirt" and concluded wrongly that
+# none of the three prints a brim.)
+#
+# This script does not know which machine preset produced <run-dir> (it takes only <fixture> and
+# <run-dir>, and the three real runs above were not sliced with --export-settings, so there is no
+# settings.json here to read extruder_offset back out of) and so does not subtract it before
+# comparing; it compares the raw toolpath box against the raw mesh box, both ways, within this one
+# tolerance. A later task that wants finer sensitivity has to subtract the known, constant
+# extruder_offset first -- the residual after that would be well under 1 mm -- but cannot simply
+# shrink this constant: the real deviation is asymmetric (rows disagree by about 2 mm in one Y
+# direction and about 7 mm or more in the other, folding in the offset), and the largest observed
+# edge above, with no offset subtracted, is 2.272 mm. This is a bit over double that, to leave
+# margin on both sides without coming close to accepting a real misplacement, which is off by tens
+# of millimetres on at least one edge.
 PLACEMENT_TOLERANCE_MM = 5.0
 
 SEPARATOR_RE = re.compile(r"^:?-+:?$")
@@ -233,9 +258,13 @@ def check_placement(fixture: str, run_dir: Path) -> None:
     e_minx, e_miny, e_maxx, e_maxy = expected
     o_minx, o_miny, o_maxx, o_maxy = observed
     tol = PLACEMENT_TOLERANCE_MM
-    disagrees = (
-        o_minx < e_minx - tol or o_maxx > e_maxx + tol
-        or o_miny < e_miny - tol or o_maxy > e_maxy + tol
+    # Symmetric per edge: a box more than tol outside OR more than tol inside the record is a
+    # disagreement. Outward-only would accept a toolpath bounding box of (almost) any smaller
+    # size at the same centre -- a non-identity scale, a truncated run, a stale run directory
+    # checked against a regenerated, larger fixture -- as long as it never crossed the outer edge.
+    disagrees = any(
+        abs(o - e) > tol
+        for o, e in zip((o_minx, o_miny, o_maxx, o_maxy), (e_minx, e_miny, e_maxx, e_maxy))
     )
     if disagrees:
         raise RecordError(
