@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.13"
+# requires-python = ">=3.14"
 # dependencies = [
 #   "click>=8.1.0",
 # ]
@@ -29,9 +29,12 @@ CLI's read_cli() accepts for every option type, including the coBool ones a spac
 would silently misparse as a stray positional file argument.
 
 A row naming no filament is rejected here, before the binary runs, because omitting
---load-filaments still exits 0 and slices with a different filament. A row naming no machine or
-process omits --load-settings entirely and lets the binary fail on its own terms. A filament path
-that is named but absent from disk is likewise left to the binary's own CLI_CONFIG_FILE_ERROR.
+--load-filaments still exits 0 and slices with a different filament. A row naming neither machine
+nor process omits --load-settings entirely and lets the binary fail on its own terms (this is the
+deliberate no-settings negative case). A row naming exactly one of the two is rejected here, before
+the binary runs, because silently dropping the other half of --load-settings corrupts the
+comparison rather than failing. A filament path that is named but absent from disk is likewise left
+to the binary's own CLI_CONFIG_FILE_ERROR.
 
 This script writes no provenance header of its own and does not call oracle/provenance.
 """
@@ -226,11 +229,31 @@ def main(
     machine_cell = strip_cell(row.get("Machine", ""))
     process_cell = strip_cell(row.get("Process", ""))
 
+    # A row naming exactly one of machine/process would silently drop the other half of
+    # --load-settings (the `if machine_cell and process_cell:` below only builds the flag when
+    # both are present). That is the same silent-corruption shape the no-filament check above
+    # guards against, so it is rejected here rather than let through. Naming neither is the
+    # deliberate no-settings negative case and is left to the binary's own CLI_VALIDATE_ERROR.
+    if bool(machine_cell) != bool(process_cell):
+        click.echo(
+            f"error: configuration {configuration!r} names only one of Machine/Process "
+            f"(machine={machine_cell!r}, process={process_cell!r}); --load-settings needs both "
+            "or neither",
+            err=True,
+        )
+        sys.exit(1)
+
     scratch = fresh_scratch_dir()
     datadir = scratch / "datadir"
     datadir.mkdir()
     out_dir = (invocation_cwd / out_dir_arg).resolve() if out_dir_arg else scratch / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
+    # --out may be a reused directory. Remove any stale plate_1.gcode from a previous run before
+    # invoking the binary, so a failing run here can never be mistaken for this run's success by
+    # the gcode_size check below.
+    stale_gcode = out_dir / "plate_1.gcode"
+    if stale_gcode.is_file():
+        stale_gcode.unlink()
 
     cmd = [str(BINARY), "--datadir", str(datadir)]
     if machine_cell and process_cell:

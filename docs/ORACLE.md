@@ -44,7 +44,7 @@ Until `11-fixture-set` lands, `Fixtures` names a path under `vendor/OrcaSlicer/`
 |---|---|---|---|---|---|
 | `base-fff` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | (none) | `vendor/OrcaSlicer/tests/data/frog_legs.obj` |
 | `tree-support` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | `enable_support=1`; `support_type=tree(auto)` | `vendor/OrcaSlicer/tests/data/frog_legs.obj` |
-| `wipe-tower-multi-filament` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json`; `filament/Bambu PLA Basic @BBL X1C.json` | `enable_prime_tower=1` | `vendor/OrcaSlicer/tests/data/frog_legs.obj` |
+| `wipe-tower-multi-filament` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json`; `filament/Bambu PLA Basic @BBL X1C.json` | `enable_prime_tower=1`; `outer_wall_filament_id=2` | `vendor/OrcaSlicer/tests/data/frog_legs.obj` |
 | `fuzzy-skin` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | `fuzzy_skin=external` | `vendor/OrcaSlicer/tests/data/frog_legs.obj` |
 
 All four rows were attempted directly on the pinned 2.5.2 binary (C12) and all four slice through
@@ -55,13 +55,31 @@ flags (every key named above is CLI-exposed — not `nocli` — in
 `vendor/OrcaSlicer/src/libslic3r/PrintConfig.cpp`), not a doctored preset file, and `settings.json`
 exported from each run confirms the override landed in the resolved config.
 
-**`wipe-tower-multi-filament` caveat, measured, not a `docs/ORACLE.md`-level failure.** `frog_legs.obj`
-is a single untextured mesh (no `o`/`g` groups), and the pinned CLI exposes no flag to split one
-input mesh's filament assignment by region or by height range from the command line (only
-`--load-assemble-list`'s project-file format can, which this task does not build). So although the
-row slices at exit 0 with `enable_prime_tower` on and two filaments loaded, the G-code's own
-`; filament used [mm]` line shows the second filament at `0.00` — the single object never actually
-switches. The row is left as is (it is the override set the task fixes, "nothing else"); whichever
-of `25-stage-dumper`, `27-oracle-determinism` or `12-config-goldens` first needs an input that
-truly exercises per-region or per-height filament switching has to supply one, through the built
-driver or a richer fixture.
+**`wipe-tower-multi-filament`'s third element, measured.** task.md names three things for this row:
+`enable_prime_tower=1`, two `--load-filaments` entries so the print has two filaments, and "the
+single object's filament assignment switching between them". `enable_prime_tower=1` alone does not
+reach the third element — the row's own `settings.json` shows the key is already `1` in the
+inherited process preset, so the override is a no-op by itself, and without a per-region or
+per-height assignment the single mesh never draws from the second filament (confirmed: with only
+`enable_prime_tower=1`, `; filament used [mm]` reads `589.35, 0.00` and no `; FEATURE: Prime tower`
+line appears). `outer_wall_filament_id` (`coInt`, CLI-exposed, not `nocli`,
+`vendor/OrcaSlicer/src/libslic3r/PrintConfig.cpp:5927`) assigns the single object's outer walls to
+the second filament by region, which is what the row's override cell now adds. Measured on the
+pinned 2.5.2 binary through `just oracle-slice`: exit 0, `plate_1.gcode` 632859 bytes,
+`; filament used [mm] = 786.64, 555.17`, 20 `; FEATURE: Prime tower` markers, 14 toolchanges — the
+single object's filament assignment does switch between the two loaded filaments. `--load-custom-gcodes`'s
+JSON `ToolChange` items are a second, separately-measured mechanism for a per-height switch on this
+same mesh (print_z below `frog_legs.obj`'s 2 mm height), but this task builds neither
+`--load-custom-gcodes` nor `--load-assemble-list` support into `oracle/slice` — the row's override
+cell is enough on its own, so no second mechanism is added here.
+
+**`fuzzy-skin`'s G-code is not byte-reproducible run to run.** Three consecutive
+`just oracle-slice vendor/OrcaSlicer/tests/data/frog_legs.obj fuzzy-skin` runs measured
+`plate_1.gcode` at 535737, 534845 and 532275 bytes; `base-fff` and `tree-support` reproduce
+byte-exactly across repeated runs, so the variance is specific to this row, not the harness. The
+cause is in the pin: `vendor/OrcaSlicer/src/libslic3r/Feature/FuzzySkin/FuzzySkin.cpp:38-42`
+seeds each run's `random_value()` from `std::random_device`/a thread id, with no fixed seed, and
+that value is consumed by the perimeter generator at `FuzzySkin.cpp:320,337,375,393`. Every run
+still exits 0 with a non-empty `plate_1.gcode`, which is all this row's Done-when line requires;
+`27-oracle-determinism` is where a normalisation or tolerance for this row's byte comparison has
+to be decided.
