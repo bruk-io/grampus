@@ -64,6 +64,16 @@ jobs:
 
       - uses: extractions/setup-just@v3
 
+      # dep_MPFR (vendor/OrcaSlicer/deps/MPFR/MPFR.cmake, pulled in transitively by dep_OCCT)
+      # runs `autoreconf -f -i` as its configure step; macos-15's hosted image carries
+      # Homebrew itself but not these formulae (confirmed empirically: the first run of this
+      # job on this label failed stage one with `/bin/sh: autoreconf: command not found`,
+      # exit 127, even though stage one builds without this step on a Homebrew-equipped dev
+      # machine that already has them). Nothing under vendor/OrcaSlicer/ changes; this only
+      # makes the tool its own vendored configure step calls for available on the runner.
+      - name: Install autotools (dep_MPFR's configure step needs autoreconf)
+        run: brew install autoconf automake libtool
+
       # Reads the gitlink entry directly, so it works before the submodule step above and
       # changes whenever vendor/README.md's "Changing the pin" procedure moves the pin.
       - name: Resolve the submodule pin for the cache key
