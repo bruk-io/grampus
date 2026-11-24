@@ -2086,7 +2086,6 @@ JUDGEMENT_INDEXES = tuple(HEADER.index(name) for name in JUDGEMENT_COLUMNS)
 
 # The derived columns `just inventory-check` diffs: every column but the six judgement columns
 # and `status`. Index 0 (`path`) is the join key, not diffed on its own account.
-DERIVED_COLUMNS = HEADER[1:9]
 DERIVED_INDEXES = tuple(range(1, 9))
 
 TEMPLATE_HEAVY_THRESHOLD = 0.25
@@ -2281,7 +2280,9 @@ def seed_judgement_cells(
 
     fuzz_target = (
         "required"
-        if own_header_text is not None and header_takes_surface_types(own_header_text)
+        if equality_tier == "exact"
+        and own_header_text is not None
+        and header_takes_surface_types(own_header_text)
         else "n/a"
     )
 
@@ -2470,11 +2471,9 @@ def generate_in_memory() -> tuple[list[list[str]], list[list[str]]]:
     proof_path_counts = {"1": 0, "2": 0, "3": 0}
 
     rows = []
-    total_lines = 0
     for relpath in relpaths:
         subsystem = subsystem_of(relpath)
         lines = lines_by_path[relpath]
-        total_lines += lines
         level = levels[relpath]
         row = [relpath, subsystem, str(lines), str(level)]
         row.append(crate_level_cells.get(relpath, ""))
