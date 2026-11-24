@@ -438,6 +438,18 @@ type map, idiom map, don't-translate list, banned-substitution list, and the six
 rejection rule, the conflict discipline, and the trial-run record. The check reads headings, not
 prose quality.
 
+### R30: A committed ownership manifest classifies every raw pointer before fan-out
+
+`port/ownership.tsv` has one row per raw-pointer field, and per field that is a container of raw
+pointers, declared in a header the manifest (R8) marks in scope, with columns: header path, line,
+declaring type, field, C++ type, class (`owned`, `shared`, `borrowed`, `back-reference`, `ffi` or
+`unknown`), the `path:line` of the evidence for that class, and the Rust type porters use. A
+committed script lists the fields from the vendored headers and fails if a field has no row, a row
+names a field that does not exist at the pin, or a row other than `unknown` has no evidence. The
+file is committed before the first fan-out port unit's pull request is opened, and
+`docs/PORTING.md` tells porters to take the Rust type from it verbatim. `just port-status` prints
+the count of `unknown` rows.
+
 ## Design
 
 ### Repository layout
@@ -462,6 +474,7 @@ oracle/stage-dump/               (new)  the pipeline-hook dumper, C++ plus its C
 port/inventory                   (new)  regenerates port/manifest.tsv and the cut (R8)
 port/manifest.tsv                (new)  the scope and progress authority (R8, R9)
 port/cut.tsv                     (new)  the committed feedback-arc cut that defines crate levels (R8)
+port/ownership.tsv               (new)  the ownership class and Rust type of every raw-pointer field (R30)
 port/port-status                 (new)  trailers, markers, burn-down, substitutes, documents (R14-R17, R26, R29)
 port/goldens/                    (new)  statistics JSON, resolved configs, normalised hashes
 port/reports/                    (new)  determinism, oracle-parity, divergences, audits, backlog
@@ -685,6 +698,8 @@ The proposal to the owner is to accept that, with the alternative being an expli
 determinism overlay on the oracle for those subsystems, recorded in `vendor/README.md` and
 treated like a pin move. R3 tells us how much is actually at stake before anyone decides.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. Accepted as proposed: the pin holds, the oracle is not patched, the port is deterministic, and each divergence is named in `port/reports/divergences.md` and checked at the gate R3 measures. No determinism overlay is built in this intent.
+
 ### C2: The two oracles may disagree, and then one of them is not "the old library"
 - owner: Bruk Habtu
 
@@ -695,6 +710,8 @@ but that is an argument and it is unmeasured for this library. R6 measures it. I
 materially, the owner decides which is normative — the binary a user would actually run, or the
 build the port can match — and whether goldens are then per-oracle. The same choice fixes the
 platform: these goldens are valid for one operating system and architecture only.
+
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. The locally built library with `-ffp-contract=off` is the normative oracle for every per-unit and per-stage proof, and macOS arm64 is the one platform goldens are valid for. For the end-to-end gates (R21, R22, R27) the pinned release binary is normative where R6 shows the two agree at L1. Where R6 shows they disagree, the built oracle is normative for that fixture and configuration, the disagreement is a named row in `port/reports/divergences.md`, and goldens are kept per oracle.
 
 ### C3: "A benchy as a first output" and a bottom-up port pull against each other
 - owner: Bruk Habtu
@@ -712,6 +729,8 @@ C++, which would make a mixed end-to-end slice possible much earlier; its cost i
 the boundary marshals a shared mutable object graph rather than values. The owner decides whether
 the per-stage reading is the one they meant, knowing it is not an early end-to-end signal.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. The per-stage reading is accepted: the first comparison is per stage on the benchy (R20) and the end-to-end comparison is the acceptance gate (R21). No throwaway bridge to the vendored C++ is built.
+
 ### C4: At the end of this intent the port still links C and C++
 - owner: Bruk Habtu
 
@@ -725,6 +744,8 @@ and that two of the six are pinned by a recipe rather than by the submodule. The
 accept it for this intent and let a later intent replace each one, validated against the FFI
 build.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. Accepted for this intent. Replacing the linked C and C++ libraries is left to a later intent.
+
 ### C5: Equality of G-code is necessary and not sufficient
 - owner: Bruk Habtu
 
@@ -737,6 +758,8 @@ regressions it later acknowledges come from). This spec requires a `// SAFETY:` 
 `unsafe` block (R14) and nothing more; sanitizers, Miri and fuzzing beyond R19's differential
 targets are not requirements here. The owner decides whether that belongs in this intent or the
 next.
+
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. This intent requires the `// SAFETY:` comment (R14) and R19's differential fuzz targets and nothing more. Sanitizers and Miri are left to the following intent, which is the one that changes the code's shape.
 
 ### C6: 3MF project files and presets are out of scope, that is how Bambu users work, and the print is the owner's call
 - owner: Bruk Habtu
@@ -753,6 +776,8 @@ where R22 holds the port's G-code is identical to the oracle's and the print say
 both. The owner decides whether R22 plus their own print is enough without the project-format and
 preset layers, or whether either belongs in this intent.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. R22 is accepted as the measure of "usable to slice files for 3D printing" for this intent: the port slices a mesh plus a resolved configuration. The project-format and preset layers stay out, and the print on an X1 Carbon stays the owner's own act and is not a requirement.
+
 ### C7: The fine oracle depends on a build nobody has exercised on this platform
 - owner: Bruk Habtu
 
@@ -768,6 +793,8 @@ and R19's first and third proof paths both go through it, so no single ported un
 until it works. The proposal is to attempt it early, as its own piece of work, and to report back
 rather than work around it.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. Accepted as proposed: the build is attempted first, as its own piece of work, and no port unit is started before it works. If it cannot be made to work, that is reported and the work that depends on it stops; it is not worked around.
+
 ### C8: The size of this intent is not a schedule, and nothing here makes it smaller
 - owner: Bruk Habtu
 
@@ -782,6 +809,8 @@ one, and no third-party replication of them was found. This spec is written so t
 proceed and be checked piece by piece, and so that no single piece has to be finished for the rest
 to be verifiable; it does not shorten the work. The owner should know that before the plan is cut.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. Noted. The work proceeds piece by piece as this spec describes, and the size is not reduced.
+
 ### C9: SLA is excluded, but the slicing pipeline calls part of it
 - owner: Bruk Habtu
 
@@ -795,6 +824,8 @@ R9 is the proposed resolution: `SLA/IndexedMesh` in scope because the FFF pipeli
 SLA fields on the model type ported as data only so the type's layout and serialisation match,
 and the hollowing, pad and concave-hull implementations out. The owner decides whether that
 reading of "SLA is not ported" is the one they meant.
+
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. R9's reading is accepted: `SLA/IndexedMesh` is in scope because the FFF pipeline calls it, the SLA fields on the model type are ported as data only, and the SLA implementations are out.
 
 ### C10: The crate-level cut is a design choice nobody has made yet
 - owner: Bruk Habtu
@@ -812,6 +843,8 @@ level from the cut graph, so the order of work is reproducible rather than asser
 two mutual pairs are single crates. The owner decides whether a 62-edge cut chosen by a greedy
 algorithm is acceptable as the crate map, or whether the crate boundaries should be designed by
 hand first.
+
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. The computed cut is accepted as the crate map, committed as `port/cut.tsv`, with `GCode.cpp` and `GCode/*` as one crate and `Model` and `Format` as one crate. The cut is reviewed like any other change in the pull request that commits it, and is changed afterwards only by a pull request that regenerates the manifest.
 
 ### C11: The per-stage oracle cannot see inside G-code export
 - owner: Bruk Habtu
@@ -831,6 +864,8 @@ or the `GCodeProcessorResult` at `psSkirtBrim` and compare that as a pseudo-stag
 split the gap in two without touching the vendored tree; its cost is unmeasured. The owner decides
 whether the fallback is enough.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. The fallback is accepted for this intent. A pseudo-stage dump at `psSkirtBrim` is not required.
+
 ### C12: The non-base configurations may not be constructible through the pinned CLI
 - owner: Bruk Habtu
 
@@ -848,6 +883,8 @@ instead, where the config is set in code as `tests/fff_print/test_helpers.hpp` d
 cover the swap of oracle for those rows. If neither works, the non-base configurations have no
 oracle at all and R3, R27 and part of C1 have to be re-scoped. The owner decides whether to accept
 that fallback now or to wait for the attempt.
+
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. The fallback is accepted now: the non-base configurations are attempted on the pinned 2.5.2 binary first, and a configuration that cannot be constructed there is constructed through the locally built library, with R6 covering the swap. A configuration neither can construct is recorded in `docs/ORACLE.md` with a gate of `none` and reported, and R3 and R27 hold for the configurations that remain.
 
 ### C13: An ownership manifest may belong in this intent
 - owner: Bruk Habtu
@@ -868,6 +905,8 @@ mid-port: either add it as a requirement in this intent, so the manifest is comm
 on porters before Phase A, or leave R12's don't-translate list and R14's `// SAFETY:` rule to
 carry the risk and let the following intent build it. The owner decides.
 
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. The ownership manifest is brought into this intent, as R30, because the requester asked for the approach the Bun port took and this pass is one that port did before any unit was ported.
+
 ### C14: Arrange and orient are deducted from scope although the application calls them
 - owner: Bruk Habtu
 
@@ -886,3 +925,5 @@ following intent port arrange against a GUI-side oracle. The alternative is to b
 scope now and prove it against the test harness's `arrange_objects(model, InfiniteBed{}, ...)`
 call rather than against the CLI, which is a narrower oracle than everything else here uses. The
 owner decides.
+
+**Decision (2026-11-24).** Decided by Claude (Fable), acting for Bruk Habtu, who handed over this intent's decisions and merges before stepping away. The deduction is accepted. Arrange and orient are left to the following intent.
