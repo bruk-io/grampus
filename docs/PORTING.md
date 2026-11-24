@@ -305,8 +305,8 @@ Each entry names what is banned and the check that catches it, where one exists.
 | Banned | Check |
 |---|---|
 | Rounding a scaling conversion (`scaled<coord_t>()`, the Eigen `scaled()` overload, or any truncating entry point) | None automated yet; `### Scaling conversions` below is the rule a reviewer holds a unit to. |
-| A hash-ordered map or set where iteration order reaches output, in place of the one insertion-ordered spelling this document fixes | `just ownership-check`/`just inventory-check` do not check this directly; `port/reports/order-containers.md`'s regeneration is where a reintroduced hash-ordered container at an audited site would be caught. |
-| A parallel reduction where the original's order is load-bearing | `port/reports/order-containers.md` and `port/reports/order-comparators.md`'s regeneration (R18). |
+| A hash-ordered map or set where iteration order reaches output, in place of the one insertion-ordered spelling this document fixes | `just audit-check` (`port/audit-order --check`), the regeneration pass's drift check on `port/reports/order-containers.md` — not a check a port task itself passes; see `docs/WORKFLOW.md`'s conflict discipline. |
+| A parallel reduction where the original's order is load-bearing | `just audit-check` over `port/reports/order-comparators.md` and `port/reports/divergences.md` (R18), the same regeneration-pass check. |
 | Replacing one of R17's six libraries (Clipper2, admesh, libnest2d, qhull, Boost.Polygon's Voronoi builder, NLopt) with a Rust crate | `just port-check`'s substitute check fails a crate manifest that depends on a named substitute. |
 | Widening a `float` field to `f64`, or narrowing an `f64` field to `float`/`f32` | None automated yet; `### Float widths` below. |
 | Any fused multiply-add, including `f64::mul_add` | None automated yet; the normative oracle is built with `-ffp-contract=off` and never fuses, so a port that fuses diverges from it. |
