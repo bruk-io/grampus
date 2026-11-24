@@ -114,10 +114,10 @@ GCode/WipeTower.hpp	415	WipeTower	m_multi_nozzle_group_result	const MultiNozzleU
 GCode/WipeTower.hpp	444	WipeTower	m_cur_block	WipeTowerBlock *			
 GCodeWriter.hpp	262	GCodeWriter	m_curr_filament_extruder	std::vector<Extruder*>			
 GCodeWriter.hpp	402	GCodeFormatter	buf_end	char *			
-Geometry/VoronoiUtils.hpp	20	SegmentCellRange	edge_begin	const VoronoiDiagram::edge_type *	ffi	Arachne/SkeletalTrapezoidation.cpp:387, Geometry/Voronoi.hpp:34, Geometry/VoronoiUtils.cpp:218	*const VoronoiEdge
-Geometry/VoronoiUtils.hpp	21	SegmentCellRange	edge_end	const VoronoiDiagram::edge_type *	ffi	Arachne/SkeletalTrapezoidation.cpp:387, Geometry/Voronoi.hpp:34, Geometry/VoronoiUtils.cpp:218	*const VoronoiEdge
-Geometry/VoronoiUtils.hpp	35	PointCellRange	edge_begin	const VoronoiDiagram::edge_type *	ffi	Arachne/SkeletalTrapezoidation.cpp:387, Geometry/Voronoi.hpp:34, Geometry/VoronoiUtils.cpp:218	*const VoronoiEdge
-Geometry/VoronoiUtils.hpp	36	PointCellRange	edge_end	const VoronoiDiagram::edge_type *	ffi	Arachne/SkeletalTrapezoidation.cpp:387, Geometry/Voronoi.hpp:34, Geometry/VoronoiUtils.cpp:218	*const VoronoiEdge
+Geometry/VoronoiUtils.hpp	20	SegmentCellRange	edge_begin	const VoronoiDiagram::edge_type *	ffi	Geometry/Voronoi.hpp:180, Geometry/VoronoiUtils.cpp:218, Geometry/Voronoi.hpp:41, Geometry/Voronoi.cpp:326, Arachne/SkeletalTrapezoidation.cpp:387	*const VoronoiEdge
+Geometry/VoronoiUtils.hpp	21	SegmentCellRange	edge_end	const VoronoiDiagram::edge_type *	ffi	Geometry/Voronoi.hpp:180, Geometry/VoronoiUtils.cpp:218, Geometry/Voronoi.hpp:41, Geometry/Voronoi.cpp:326, Arachne/SkeletalTrapezoidation.cpp:387	*const VoronoiEdge
+Geometry/VoronoiUtils.hpp	35	PointCellRange	edge_begin	const VoronoiDiagram::edge_type *	ffi	Geometry/Voronoi.hpp:180, Geometry/VoronoiUtils.cpp:305, Geometry/Voronoi.hpp:41, Geometry/Voronoi.cpp:326, Arachne/SkeletalTrapezoidation.cpp:387	*const VoronoiEdge
+Geometry/VoronoiUtils.hpp	36	PointCellRange	edge_end	const VoronoiDiagram::edge_type *	ffi	Geometry/Voronoi.hpp:180, Geometry/VoronoiUtils.cpp:306, Geometry/Voronoi.hpp:41, Geometry/Voronoi.cpp:326, Arachne/SkeletalTrapezoidation.cpp:387	*const VoronoiEdge
 InstanceLock.hpp	55	InstanceLock	m_slot	Slot *			
 Layer.hpp	133	LayerRegion	m_layer	Layer *			
 Layer.hpp	134	LayerRegion	m_region	const PrintRegion *			
