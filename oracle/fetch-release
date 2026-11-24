@@ -1,0 +1,203 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Fetch, verify and stage the pinned OrcaSlicer release binary used as the test oracle.
+
+Downloads the OrcaSlicer v2.5.2 release asset, verifies its sha256 against the value
+recorded in vendor/README.md, mounts the disk image read-only, copies the app bundle
+into oracle/.cache/app/, detaches the image, and verifies the bundle reports version
+2.5.2. A populated cache is re-verified and reused rather than re-fetched; the cache
+is rebuilt from the download onward when either check disagrees.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import plistlib
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+
+ASSET_NAME = "OrcaSlicer_Mac_universal_V2.5.2.dmg"
+RELEASE_TAG = "v2.5.2"
+SOURCE_REPO = "OrcaSlicer/OrcaSlicer"
+EXPECTED_VERSION = "2.5.2"
+
+
+def repo_root() -> Path:
+    """Resolve the repository root from this script's own location, not the cwd."""
+    return Path(__file__).resolve().parent.parent
+
+
+def sha256_of(path: Path) -> str:
+    """Compute the sha256 digest of a file's contents."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_recorded_sha256(readme_path: Path) -> str:
+    """Read the oracle asset's recorded sha256 out of vendor/README.md by its label."""
+    text = readme_path.read_text()
+    match = re.search(r"Recorded sha256 \| `([^`]+)`", text)
+    if match is None:
+        print(f"error: no recorded sha256 found in {readme_path}", file=sys.stderr)
+        sys.exit(1)
+    return match.group(1)
+
+
+def read_bundle_version(app_bundle: Path) -> str:
+    """Read CFBundleShortVersionString from an app bundle's Info.plist, or '' if unreadable."""
+    plist_path = app_bundle / "Contents" / "Info.plist"
+    if not plist_path.is_file():
+        return ""
+    result = subprocess.run(
+        ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleShortVersionString", str(plist_path)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def fetch_asset(download_dir: Path, download_path: Path) -> None:
+    """Download the pinned release asset into download_dir, overwriting any stale copy."""
+    download_dir.mkdir(parents=True, exist_ok=True)
+    print(f"action: download {ASSET_NAME} from {SOURCE_REPO}@{RELEASE_TAG}")
+    try:
+        subprocess.run(
+            [
+                "gh",
+                "release",
+                "download",
+                RELEASE_TAG,
+                "-R",
+                SOURCE_REPO,
+                "-p",
+                ASSET_NAME,
+                "-D",
+                str(download_dir),
+                "--clobber",
+            ],
+            check=True,
+        )
+    except FileNotFoundError:
+        print("error: gh is not installed or not on PATH", file=sys.stderr)
+        sys.exit(1)
+    except subprocess.CalledProcessError as exc:
+        print(f"error: gh release download failed (exit {exc.returncode})", file=sys.stderr)
+        sys.exit(1)
+    if not download_path.is_file():
+        print(
+            f"error: gh release download reported success but {download_path} is missing",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def attach_dmg(dmg_path: Path) -> tuple[str, Path]:
+    """Mount a disk image read-only and return its device entry and mount point."""
+    print(f"action: attach {dmg_path.name}")
+    try:
+        result = subprocess.run(
+            ["hdiutil", "attach", "-readonly", "-nobrowse", "-plist", str(dmg_path)],
+            capture_output=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode(errors="replace").strip() if exc.stderr else ""
+        print(f"error: hdiutil attach failed: {stderr}", file=sys.stderr)
+        sys.exit(1)
+    plist = plistlib.loads(result.stdout)
+    for entity in plist.get("system-entities", []):
+        mount_point = entity.get("mount-point")
+        dev_entry = entity.get("dev-entry")
+        if mount_point and dev_entry:
+            return dev_entry, Path(mount_point)
+    print("error: hdiutil attach produced no mount point", file=sys.stderr)
+    sys.exit(1)
+
+
+def detach_dmg(dev_entry: str) -> None:
+    """Detach a mounted disk image, retrying with -force if it is reported busy."""
+    print(f"action: detach {dev_entry}")
+    result = subprocess.run(["hdiutil", "detach", dev_entry], capture_output=True)
+    if result.returncode != 0:
+        subprocess.run(["hdiutil", "detach", "-force", dev_entry], capture_output=True)
+
+
+def copy_bundle(mount_point: Path, app_dir: Path, app_bundle: Path) -> None:
+    """Copy the .app bundle out of a mounted volume into app_dir."""
+    candidates = sorted(mount_point.glob("*.app"))
+    if not candidates:
+        print(f"error: no .app bundle found on {mount_point}", file=sys.stderr)
+        sys.exit(1)
+    source = candidates[0]
+    print(f"action: copy {source.name}")
+    if app_dir.exists():
+        shutil.rmtree(app_dir)
+    app_dir.mkdir(parents=True)
+    shutil.copytree(source, app_bundle, symlinks=True)
+
+
+@click.command()
+def main() -> None:
+    """Fetch and verify the pinned OrcaSlicer release binary, reusing a valid cache."""
+    root = repo_root()
+    readme_path = root / "vendor" / "README.md"
+    cache_dir = root / "oracle" / ".cache"
+    download_dir = cache_dir / "download"
+    download_path = download_dir / ASSET_NAME
+    app_dir = cache_dir / "app"
+    app_bundle = app_dir / "OrcaSlicer.app"
+    binary = app_bundle / "Contents" / "MacOS" / "OrcaSlicer"
+
+    expected_sha = read_recorded_sha256(readme_path)
+
+    cached_download_valid = download_path.is_file() and sha256_of(download_path) == expected_sha
+    cached_bundle_valid = binary.is_file() and read_bundle_version(app_bundle) == EXPECTED_VERSION
+
+    if cached_download_valid and cached_bundle_valid:
+        print("action: reuse-cached-download")
+        print("action: reuse-cached-bundle")
+    else:
+        fetch_asset(download_dir, download_path)
+        measured_sha = sha256_of(download_path)
+        if measured_sha != expected_sha:
+            print(f"error: sha256 mismatch for {ASSET_NAME}", file=sys.stderr)
+            print(f"  expected: {expected_sha}", file=sys.stderr)
+            print(f"  measured: {measured_sha}", file=sys.stderr)
+            sys.exit(1)
+
+        dev_entry, mount_point = attach_dmg(download_path)
+        try:
+            copy_bundle(mount_point, app_dir, app_bundle)
+        finally:
+            detach_dmg(dev_entry)
+
+        measured_version = read_bundle_version(app_bundle)
+        if measured_version != EXPECTED_VERSION:
+            print("error: OrcaSlicer.app bundle version mismatch", file=sys.stderr)
+            print(f"  expected: {EXPECTED_VERSION}", file=sys.stderr)
+            print(f"  measured: {measured_version or '(unreadable)'}", file=sys.stderr)
+            sys.exit(1)
+
+    print(f"sha256: {expected_sha}")
+    print(f"version: {EXPECTED_VERSION}")
+    print(f"binary: {binary}")
+
+
+if __name__ == "__main__":
+    main()

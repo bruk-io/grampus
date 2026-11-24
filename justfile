@@ -8,3 +8,7 @@ check:
 # the guard: this branch changes only what its documents on main allow
 guard *branch:
     {{asdlc}} branch check {{branch}}
+
+# fetch and verify the pinned oracle release binary (R1)
+oracle-fetch:
+    ./oracle/fetch-release
