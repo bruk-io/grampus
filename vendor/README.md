@@ -129,6 +129,25 @@ That sha256 was measured on a download of that asset during this intent's resear
 one value `oracle/fetch-release` reads; the script never rewrites it, and a mismatch fails the
 command instead. See `docs/ORACLE.md` for how the fetched binary is used.
 
+### Fixtures
+
+`fixtures/` holds three comparison models, each exported from this submodule by the pinned
+oracle and then translated in X/Y to the centre of the Bambu Lab X1 Carbon's printable area by
+`oracle/export-fixture` (`just fixture-export`), so both the port and the oracle slice the same
+committed file at the same, already-resolved placement (R24, R25). A fixture is added only by
+committing its row below, alongside its STL; `oracle/assert-placement --list` enumerates exactly
+these rows.
+
+| Frozen basename | Vendored path | Resolved instance transform | License |
+|---|---|---|---|
+| `3DBenchy.stl` | `vendor/OrcaSlicer/resources/handy_models/3DBenchy.drc` | identity | CC0 1.0, per 3DBenchy.com, the model's publisher. Upstream records no license of its own for `resources/handy_models/`: that directory has no license file. |
+| `20mm_cube.stl` | `vendor/OrcaSlicer/tests/data/20mm_cube.obj` | identity | No separate license is stated for this file; it ships as upstream OrcaSlicer test data and is covered by this submodule's own AGPL-3.0 (see "Licensing" below). |
+| `frog_legs.stl` | `vendor/OrcaSlicer/tests/data/frog_legs.obj` | identity | No separate license is stated for this file; it ships as upstream OrcaSlicer test data and is covered by this submodule's own AGPL-3.0 (see "Licensing" below). |
+
+"identity" means the committed STL already sits at its final plate position: the oracle's only
+remaining placement step, the Z-only `ModelObject::ensure_on_bed`, is a no-op on it, and no
+instance transform is applied on top (R24).
+
 ### Licensing
 
 OrcaSlicer is AGPL-3.0. Code in grampus written by reading or translating this source is a
