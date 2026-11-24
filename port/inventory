@@ -1818,10 +1818,21 @@ def compute_crate_cut(
     position = {v: i for i, v in enumerate(order)}
     retained = {k: w for k, w in weight.items() if position[k[0]] < position[k[1]]}
     cut = {k: v for k, v in merged_edges.items() if position[k[0]] > position[k[1]]}
+    # retained and cut partition merged_edges by position[src] < position[dst] vs >; since the
+    # order is a total order over distinct vertices, position[src] == position[dst] is
+    # impossible, so this sum is a cross-check that no module edge fell through both filters
+    # (or neither).
+    if len(retained) + len(cut) != len(merged_edges):
+        raise SystemExit(
+            f"inventory: {len(retained)} retained + {len(cut)} cut = "
+            f"{len(retained) + len(cut)}, not {len(merged_edges)} total in-scope module "
+            "edges; the order must have a duplicated or missing vertex"
+        )
     print(
-        f"inventory: in-scope crate cut: {len(vertices)} crates, {len(retained)} retained "
-        f"dependency edges, {len(cut)} cut edges carrying "
-        f"{sum(len(v) for v in cut.values())} of {sum(len(v) for v in merged_edges.values())} "
+        f"inventory: in-scope crate cut: {len(vertices)} crates, {len(merged_edges)} in-scope "
+        f"module edges, {len(retained)} retained dependency edges, {len(cut)} cut edges "
+        f"carrying {sum(len(v) for v in cut.values())} of "
+        f"{sum(len(v) for v in merged_edges.values())} "
         "in-scope include references"
     )
 
