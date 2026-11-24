@@ -1,0 +1,1197 @@
+kind	crate	level	modules	in_scope_files	in_scope_lines	source	target	references	path	header
+crate	slic3r-clonable-ptr	0	clonable_ptr	1	170					
+crate	slic3r-commondefs	0	CommonDefs	1	21					
+crate	slic3r-customgcode	0	CustomGCode	2	220					
+crate	slic3r-enum-bitmask	0	enum_bitmask	1	91					
+crate	slic3r-exception	0	Exception	1	55					
+crate	slic3r-filamentmixermodel	0	FilamentMixerModel	1	819					
+crate	slic3r-format	0	format	1	58					
+crate	slic3r-i18n	0	I18N	1	37					
+crate	slic3r-instancelock	0	InstanceLock	2	230					
+crate	slic3r-int128	0	Int128	1	301					
+crate	slic3r-lifecycleevents	0	LifecycleEvents	1	249					
+crate	slic3r-localesutils	0	LocalesUtils	2	201					
+crate	slic3r-macutils	0	MacUtils	1	10					
+crate	slic3r-materialtype	0	MaterialType	2	204					
+crate	slic3r-mutablepriorityqueue	0	MutablePriorityQueue	1	457					
+crate	slic3r-objectid	0	ObjectID	2	243					
+crate	slic3r-platform	0	Platform	2	223					
+crate	slic3r-pngreadwrite	0	PNGReadWrite	2	528					
+crate	slic3r-printconfigconstants	0	PrintConfigConstants	1	7					
+crate	slic3r-projecttask	0	ProjectTask	2	548					
+crate	slic3r-technologies	0	Technologies	1	54					
+crate	slic3r-thread	0	Thread	2	367					
+crate	slic3r-time	0	Time	2	393					
+crate	slic3r-timer	0	Timer	2	117					
+crate	slic3r-semver	1	Semver	2	230					
+crate	slic3r-libslic3r	2	libslic3r	2	440					
+crate	slic3r-color	3	Color	2	624					
+crate	slic3r-execution	3	Execution/	3	297					
+crate	slic3r-mtutils	3	MTUtils	1	143					
+crate	slic3r-point	3	Point	2	1206					
+crate	slic3r-slicingadaptive	3	SlicingAdaptive	2	269					
+crate	slic3r-utils	3	utils	2	3264					
+crate	slic3r-arachne-beadingstrategy	4	Arachne/BeadingStrategy/	14	1035					
+crate	slic3r-boundingbox	4	BoundingBox	2	614					
+crate	slic3r-brimearspoint	4	BrimEarsPoint	1	70					
+crate	slic3r-config	4	Config	2	5358					
+crate	slic3r-flushvolpredictor	4	FlushVolPredictor	2	405					
+crate	slic3r-kdtreeindirect	4	KDTreeIndirect	1	409					
+crate	slic3r-marchingsquares	4	MarchingSquares	1	657					
+crate	slic3r-meshsplitimpl	4	MeshSplitImpl	1	290					
+crate	slic3r-minimumspanningtree	4	MinimumSpanningTree	2	225					
+crate	slic3r-trianglesetsampling	4	TriangleSetSampling	2	98					
+crate	slic3r-aabbtreeindirect	5	AABBTreeIndirect	1	997					
+crate	slic3r-filamentmixer	5	FilamentMixer	2	1095					
+crate	slic3r-line	5	Line	2	491					
+crate	slic3r-slicing	5	Slicing	2	1263					
+crate	slic3r-aabbtreelines	6	AABBTreeLines	1	379					
+crate	slic3r-circle	6	Circle	2	779					
+crate	slic3r-colordecomposerecipe	6	ColorDecomposeRecipe	2	596					
+crate	slic3r-multipoint	6	MultiPoint	2	862					
+crate	slic3r-arcfitter	7	ArcFitter	2	214					
+crate	slic3r-polygon	7	Polygon	2	1205					
+crate	slic3r-polyline	8	Polyline	2	1415					
+crate	slic3r-principalcomponents2d	8	PrincipalComponents2D	2	167					
+crate	slic3r-printconfig	8	PrintConfig	2	17247					
+crate	slic3r-expolygon	9	ExPolygon	2	1182					
+crate	slic3r-extruder	9	Extruder	2	394					
+crate	slic3r-extrusionentitycollection	9	ExtrusionEntityCollection	2	358					
+crate	slic3r-flow	9	Flow	2	431					
+crate	slic3r-gcodereader	9	GCodeReader	2	599					
+crate	slic3r-geometry	9	Geometry	2	1490					
+crate	slic3r-multinozzleutils	9	MultiNozzleUtils	2	1278					
+crate	slic3r-parameterutils	9	ParameterUtils	2	165					
+crate	slic3r-belttransform	10	BeltTransform	2	334					
+crate	slic3r-expolygoncollection	10	ExPolygonCollection	2	180					
+crate	slic3r-extrusionentity	10	ExtrusionEntity	2	1491					
+crate	slic3r-filamentgrouputils	10	FilamentGroupUtils	2	475					
+crate	slic3r-intersectionpoints	10	IntersectionPoints	2	78					
+crate	slic3r-mutablepolygon	10	MutablePolygon	2	770					
+crate	slic3r-placeholderparser	10	PlaceholderParser	2	2812					
+crate	slic3r-surface	10	Surface	2	419					
+crate	slic3r-tesselate	10	Tesselate	2	286					
+crate	slic3r-filamentgroup	11	FilamentGroup	2	1849					
+crate	slic3r-shortestpath	11	ShortestPath	2	2688					
+crate	slic3r-trianglemeshslicer	11	TriangleMeshSlicer	2	2840					
+crate	slic3r-triangulation	11	Triangulation	2	419					
+crate	slic3r-variablewidth	11	VariableWidth	2	263					
+crate	slic3r-clipperutils	12	ClipperUtils	2	2196					
+crate	slic3r-trianglemesh	12	TriangleMesh	2	2252					
+crate	slic3r-bridgedetector	13	BridgeDetector	2	623					
+crate	slic3r-buildvolume	13	BuildVolume	2	790					
+crate	slic3r-clipperzutils	13	ClipperZUtils	2	240					
+crate	slic3r-imexhelpers	13	IMEXHelpers	2	1323					
+crate	slic3r-meshrepair	13	MeshRepair	2	1243					
+crate	slic3r-sla	13	SLA/	6	918					
+crate	slic3r-svg	13	SVG	2	643					
+crate	slic3r-triangleselector	13	TriangleSelector	2	3220					
+crate	slic3r-aabbmesh	14	AABBMesh	2	476					
+crate	slic3r-algorithm	14	Algorithm/	4	1092					
+crate	slic3r-arachne-utils	14	Arachne/utils/	16	1931					
+crate	slic3r-edgegrid	14	EdgeGrid	2	2083					
+crate	slic3r-gcodewriter	14	GCodeWriter	2	2183					
+crate	slic3r-imexzones	14	IMEXZones	2	473					
+crate	slic3r-surfacecollection	14	SurfaceCollection	2	266					
+crate	slic3r-beltgcode	15	BeltGCode	2	75					
+crate	slic3r-calib	15	calib	2	1406					
+crate	slic3r-elephantfootcompensation	15	ElephantFootCompensation	2	671					
+crate	slic3r-multimaterialsegmentation	15	MultiMaterialSegmentation	2	2593					
+crate	slic3r-appconfig	16	AppConfig	2	2489					
+crate	slic3r-geometry-dir	16	Geometry/	19	5928					
+crate	slic3r-layer	16	Layer	2	886					
+crate	slic3r-arachne	17	Arachne/	8	4509					
+crate	slic3r-beltbrim	17	BeltBrim	2	780					
+crate	slic3r-connectedbodies	17	ConnectedBodies	2	358					
+crate	slic3r-exclusionvolumegeometry	17	ExclusionVolumeGeometry	2	249					
+crate	slic3r-feature-fuzzyskin	17	Feature/FuzzySkin/	2	895					
+crate	slic3r-model	17	Format/, Model	4	6509					
+crate	slic3r-beltslicestrategy	18	BeltSliceStrategy	2	116					
+crate	slic3r-normalutils	18	NormalUtils	2	217					
+crate	slic3r-perimetergenerator	18	PerimeterGenerator	2	3425					
+crate	slic3r-printbase	18	PrintBase	2	870					
+crate	slic3r-brim	19	Brim	2	1052					
+crate	slic3r-shortedgecollapse	19	ShortEdgeCollapse	2	208					
+crate	slic3r-print	20	Print	2	9007					
+crate	slic3r-contourz	21	ContourZ	1	252					
+crate	slic3r-fill-lightning	21	Fill/Lightning/	8	2189					
+crate	slic3r-layerregion	21	LayerRegion	1	1129					
+crate	slic3r-printapply	21	PrintApply	1	2320					
+crate	slic3r-printregion	21	PrintRegion	1	120					
+crate	slic3r-fill	22	Fill/	36	17009					
+crate	slic3r-support	22	Support/	17	19801					
+crate	slic3r-feature-interlocking	23	Feature/Interlocking/	4	990					
+crate	slic3r-gcode	23	GCode, GCode/	71	56298					
+crate	slic3r-printobject	23	PrintObject	1	5574					
+crate	slic3r-beltpurge	24	BeltPurge	1	433					
+crate	slic3r-printobjectslice	24	PrintObjectSlice	1	1816					
+dep						slic3r-aabbmesh	slic3r-aabbtreeindirect	1		
+dep						slic3r-aabbmesh	slic3r-execution	1		
+dep						slic3r-aabbmesh	slic3r-point	2		
+dep						slic3r-aabbmesh	slic3r-sla	2		
+dep						slic3r-aabbmesh	slic3r-trianglemesh	2		
+dep						slic3r-aabbtreeindirect	slic3r-boundingbox	1		
+dep						slic3r-aabbtreeindirect	slic3r-libslic3r	1		
+dep						slic3r-aabbtreeindirect	slic3r-utils	1		
+dep						slic3r-aabbtreelines	slic3r-aabbtreeindirect	1		
+dep						slic3r-aabbtreelines	slic3r-libslic3r	1		
+dep						slic3r-aabbtreelines	slic3r-line	1		
+dep						slic3r-aabbtreelines	slic3r-point	1		
+dep						slic3r-aabbtreelines	slic3r-utils	1		
+dep						slic3r-algorithm	slic3r-aabbtreeindirect	1		
+dep						slic3r-algorithm	slic3r-aabbtreelines	1		
+dep						slic3r-algorithm	slic3r-boundingbox	1		
+dep						slic3r-algorithm	slic3r-clipperutils	2		
+dep						slic3r-algorithm	slic3r-clipperzutils	3		
+dep						slic3r-algorithm	slic3r-expolygon	4		
+dep						slic3r-algorithm	slic3r-libslic3r	3		
+dep						slic3r-algorithm	slic3r-line	1		
+dep						slic3r-algorithm	slic3r-point	4		
+dep						slic3r-algorithm	slic3r-polygon	2		
+dep						slic3r-algorithm	slic3r-polyline	1		
+dep						slic3r-algorithm	slic3r-svg	1		
+dep						slic3r-algorithm	slic3r-utils	2		
+dep						slic3r-appconfig	slic3r-calib	2		
+dep						slic3r-appconfig	slic3r-config	2		
+dep						slic3r-appconfig	slic3r-exception	1		
+dep						slic3r-appconfig	slic3r-format	1		
+dep						slic3r-appconfig	slic3r-instancelock	1		
+dep						slic3r-appconfig	slic3r-libslic3r	1		
+dep						slic3r-appconfig	slic3r-localesutils	2		
+dep						slic3r-appconfig	slic3r-printconfig	1		
+dep						slic3r-appconfig	slic3r-semver	2		
+dep						slic3r-appconfig	slic3r-technologies	1		
+dep						slic3r-appconfig	slic3r-thread	1		
+dep						slic3r-appconfig	slic3r-utils	1		
+dep						slic3r-arachne	slic3r-arachne-beadingstrategy	4		
+dep						slic3r-arachne	slic3r-arachne-utils	21		
+dep						slic3r-arachne	slic3r-clipperutils	1		
+dep						slic3r-arachne	slic3r-edgegrid	2		
+dep						slic3r-arachne	slic3r-flow	1		
+dep						slic3r-arachne	slic3r-geometry	1		
+dep						slic3r-arachne	slic3r-geometry-dir	2		
+dep						slic3r-arachne	slic3r-libslic3r	8		
+dep						slic3r-arachne	slic3r-line	3		
+dep						slic3r-arachne	slic3r-point	5		
+dep						slic3r-arachne	slic3r-polygon	4		
+dep						slic3r-arachne	slic3r-printconfig	2		
+dep						slic3r-arachne	slic3r-svg	1		
+dep						slic3r-arachne	slic3r-utils	1		
+dep						slic3r-arachne-beadingstrategy	slic3r-libslic3r	14		
+dep						slic3r-arachne-beadingstrategy	slic3r-point	3		
+dep						slic3r-arachne-utils	slic3r-clipperzutils	2		
+dep						slic3r-arachne-utils	slic3r-extrusionentity	2		
+dep						slic3r-arachne-utils	slic3r-libslic3r	10		
+dep						slic3r-arachne-utils	slic3r-line	1		
+dep						slic3r-arachne-utils	slic3r-point	14		
+dep						slic3r-arachne-utils	slic3r-polygon	5		
+dep						slic3r-arachne-utils	slic3r-polyline	2		
+dep						slic3r-arachne-utils	slic3r-variablewidth	1		
+dep						slic3r-arcfitter	slic3r-circle	2		
+dep						slic3r-arcfitter	slic3r-libslic3r	1		
+dep						slic3r-arcfitter	slic3r-multipoint	1		
+dep						slic3r-arcfitter	slic3r-point	2		
+dep						slic3r-beltbrim	slic3r-boundingbox	1		
+dep						slic3r-beltbrim	slic3r-clipperutils	1		
+dep						slic3r-beltbrim	slic3r-expolygon	2		
+dep						slic3r-beltbrim	slic3r-extrusionentity	1		
+dep						slic3r-beltbrim	slic3r-extrusionentitycollection	2		
+dep						slic3r-beltbrim	slic3r-flow	1		
+dep						slic3r-beltbrim	slic3r-layer	1		
+dep						slic3r-beltbrim	slic3r-libslic3r	2		
+dep						slic3r-beltbrim	slic3r-point	2		
+dep						slic3r-beltbrim	slic3r-polygon	1		
+dep						slic3r-beltbrim	slic3r-polyline	2		
+dep						slic3r-beltbrim	slic3r-printconfig	1		
+dep						slic3r-beltbrim	slic3r-shortestpath	1		
+dep						slic3r-beltbrim	slic3r-surface	1		
+dep						slic3r-beltbrim	slic3r-surfacecollection	1		
+dep						slic3r-beltgcode	slic3r-belttransform	1		
+dep						slic3r-beltgcode	slic3r-gcodewriter	1		
+dep						slic3r-beltgcode	slic3r-libslic3r	1		
+dep						slic3r-beltgcode	slic3r-point	2		
+dep						slic3r-beltgcode	slic3r-printconfig	1		
+dep						slic3r-beltpurge	slic3r-beltbrim	1		
+dep						slic3r-beltpurge	slic3r-exception	1		
+dep						slic3r-beltpurge	slic3r-extrusionentity	1		
+dep						slic3r-beltpurge	slic3r-extrusionentitycollection	1		
+dep						slic3r-beltpurge	slic3r-format	1		
+dep						slic3r-beltpurge	slic3r-gcode	1		
+dep						slic3r-beltpurge	slic3r-i18n	1		
+dep						slic3r-beltpurge	slic3r-layer	1		
+dep						slic3r-beltpurge	slic3r-libslic3r	1		
+dep						slic3r-beltpurge	slic3r-localesutils	1		
+dep						slic3r-beltpurge	slic3r-print	1		
+dep						slic3r-beltpurge	slic3r-printbase	1		
+dep						slic3r-beltpurge	slic3r-printconfig	1		
+dep						slic3r-beltslicestrategy	slic3r-belttransform	2		
+dep						slic3r-beltslicestrategy	slic3r-libslic3r	1		
+dep						slic3r-beltslicestrategy	slic3r-model	2		
+dep						slic3r-beltslicestrategy	slic3r-point	2		
+dep						slic3r-beltslicestrategy	slic3r-printconfig	2		
+dep						slic3r-belttransform	slic3r-boundingbox	2		
+dep						slic3r-belttransform	slic3r-config	2		
+dep						slic3r-belttransform	slic3r-geometry	2		
+dep						slic3r-belttransform	slic3r-libslic3r	2		
+dep						slic3r-belttransform	slic3r-point	2		
+dep						slic3r-belttransform	slic3r-printconfig	2		
+dep						slic3r-boundingbox	slic3r-exception	1		
+dep						slic3r-boundingbox	slic3r-libslic3r	2		
+dep						slic3r-boundingbox	slic3r-point	2		
+dep						slic3r-bridgedetector	slic3r-boundingbox	1		
+dep						slic3r-bridgedetector	slic3r-clipperutils	2		
+dep						slic3r-bridgedetector	slic3r-expolygon	2		
+dep						slic3r-bridgedetector	slic3r-geometry	1		
+dep						slic3r-bridgedetector	slic3r-libslic3r	2		
+dep						slic3r-bridgedetector	slic3r-line	2		
+dep						slic3r-bridgedetector	slic3r-point	2		
+dep						slic3r-bridgedetector	slic3r-polygon	2		
+dep						slic3r-bridgedetector	slic3r-polyline	2		
+dep						slic3r-bridgedetector	slic3r-principalcomponents2d	1		
+dep						slic3r-brim	slic3r-boundingbox	1		
+dep						slic3r-brim	slic3r-brimearspoint	1		
+dep						slic3r-brim	slic3r-clipperutils	1		
+dep						slic3r-brim	slic3r-config	1		
+dep						slic3r-brim	slic3r-edgegrid	1		
+dep						slic3r-brim	slic3r-exclusionvolumegeometry	1		
+dep						slic3r-brim	slic3r-expolygon	2		
+dep						slic3r-brim	slic3r-extrusionentity	1		
+dep						slic3r-brim	slic3r-extrusionentitycollection	1		
+dep						slic3r-brim	slic3r-flow	1		
+dep						slic3r-brim	slic3r-geometry	1		
+dep						slic3r-brim	slic3r-layer	1		
+dep						slic3r-brim	slic3r-libslic3r	1		
+dep						slic3r-brim	slic3r-line	1		
+dep						slic3r-brim	slic3r-materialtype	1		
+dep						slic3r-brim	slic3r-model	1		
+dep						slic3r-brim	slic3r-multimaterialsegmentation	1		
+dep						slic3r-brim	slic3r-multipoint	1		
+dep						slic3r-brim	slic3r-objectid	2		
+dep						slic3r-brim	slic3r-point	2		
+dep						slic3r-brim	slic3r-polygon	2		
+dep						slic3r-brim	slic3r-polyline	1		
+dep						slic3r-brim	slic3r-printbase	1		
+dep						slic3r-brim	slic3r-printconfig	1		
+dep						slic3r-brim	slic3r-shortestpath	1		
+dep						slic3r-brim	slic3r-surfacecollection	1		
+dep						slic3r-brim	slic3r-svg	1		
+dep						slic3r-brim	slic3r-trianglemesh	1		
+dep						slic3r-brimearspoint	slic3r-libslic3r	1		
+dep						slic3r-brimearspoint	slic3r-point	1		
+dep						slic3r-buildvolume	slic3r-boundingbox	2		
+dep						slic3r-buildvolume	slic3r-clipperutils	1		
+dep						slic3r-buildvolume	slic3r-extrusionentity	1		
+dep						slic3r-buildvolume	slic3r-libslic3r	2		
+dep						slic3r-buildvolume	slic3r-point	2		
+dep						slic3r-buildvolume	slic3r-polygon	2		
+dep						slic3r-buildvolume	slic3r-trianglemesh	1		
+dep						slic3r-calib	slic3r-boundingbox	2		
+dep						slic3r-calib	slic3r-clonable-ptr	1		
+dep						slic3r-calib	slic3r-config	1		
+dep						slic3r-calib	slic3r-customgcode	2		
+dep						slic3r-calib	slic3r-extruder	1		
+dep						slic3r-calib	slic3r-flow	1		
+dep						slic3r-calib	slic3r-gcodewriter	2		
+dep						slic3r-calib	slic3r-libslic3r	1		
+dep						slic3r-calib	slic3r-point	2		
+dep						slic3r-calib	slic3r-printconfig	2		
+dep						slic3r-circle	slic3r-libslic3r	2		
+dep						slic3r-circle	slic3r-line	1		
+dep						slic3r-circle	slic3r-point	2		
+dep						slic3r-clipperutils	slic3r-aabbtreeindirect	1		
+dep						slic3r-clipperutils	slic3r-boundingbox	2		
+dep						slic3r-clipperutils	slic3r-expolygon	2		
+dep						slic3r-clipperutils	slic3r-extrusionentity	1		
+dep						slic3r-clipperutils	slic3r-libslic3r	2		
+dep						slic3r-clipperutils	slic3r-line	2		
+dep						slic3r-clipperutils	slic3r-point	2		
+dep						slic3r-clipperutils	slic3r-polygon	2		
+dep						slic3r-clipperutils	slic3r-polyline	2		
+dep						slic3r-clipperutils	slic3r-shortestpath	1		
+dep						slic3r-clipperutils	slic3r-surface	2		
+dep						slic3r-clipperzutils	slic3r-clipperutils	2		
+dep						slic3r-clipperzutils	slic3r-expolygon	1		
+dep						slic3r-clipperzutils	slic3r-libslic3r	1		
+dep						slic3r-clipperzutils	slic3r-point	2		
+dep						slic3r-clipperzutils	slic3r-polygon	1		
+dep						slic3r-color	slic3r-libslic3r	1		
+dep						slic3r-colordecomposerecipe	slic3r-filamentmixer	1		
+dep						slic3r-colordecomposerecipe	slic3r-utils	1		
+dep						slic3r-config	slic3r-clonable-ptr	1		
+dep						slic3r-config	slic3r-exception	2		
+dep						slic3r-config	slic3r-format	1		
+dep						slic3r-config	slic3r-i18n	1		
+dep						slic3r-config	slic3r-libslic3r	2		
+dep						slic3r-config	slic3r-localesutils	2		
+dep						slic3r-config	slic3r-point	2		
+dep						slic3r-config	slic3r-utils	1		
+dep						slic3r-connectedbodies	slic3r-aabbtreeindirect	1		
+dep						slic3r-connectedbodies	slic3r-boundingbox	2		
+dep						slic3r-connectedbodies	slic3r-clipperutils	1		
+dep						slic3r-connectedbodies	slic3r-expolygon	2		
+dep						slic3r-connectedbodies	slic3r-geometry-dir	1		
+dep						slic3r-connectedbodies	slic3r-libslic3r	2		
+dep						slic3r-connectedbodies	slic3r-point	2		
+dep						slic3r-connectedbodies	slic3r-polygon	2		
+dep						slic3r-connectedbodies	slic3r-trianglemesh	2		
+dep						slic3r-connectedbodies	slic3r-trianglemeshslicer	1		
+dep						slic3r-contourz	slic3r-config	1		
+dep						slic3r-contourz	slic3r-exception	1		
+dep						slic3r-contourz	slic3r-extrusionentity	1		
+dep						slic3r-contourz	slic3r-extrusionentitycollection	1		
+dep						slic3r-contourz	slic3r-layer	1		
+dep						slic3r-contourz	slic3r-libslic3r	1		
+dep						slic3r-contourz	slic3r-line	1		
+dep						slic3r-contourz	slic3r-point	1		
+dep						slic3r-contourz	slic3r-polyline	1		
+dep						slic3r-contourz	slic3r-print	1		
+dep						slic3r-contourz	slic3r-printconfig	1		
+dep						slic3r-contourz	slic3r-sla	1		
+dep						slic3r-edgegrid	slic3r-boundingbox	1		
+dep						slic3r-edgegrid	slic3r-clipperutils	1		
+dep						slic3r-edgegrid	slic3r-expolygon	2		
+dep						slic3r-edgegrid	slic3r-geometry	1		
+dep						slic3r-edgegrid	slic3r-libslic3r	2		
+dep						slic3r-edgegrid	slic3r-line	2		
+dep						slic3r-edgegrid	slic3r-pngreadwrite	1		
+dep						slic3r-edgegrid	slic3r-point	2		
+dep						slic3r-edgegrid	slic3r-polygon	2		
+dep						slic3r-edgegrid	slic3r-polyline	2		
+dep						slic3r-edgegrid	slic3r-svg	1		
+dep						slic3r-elephantfootcompensation	slic3r-boundingbox	1		
+dep						slic3r-elephantfootcompensation	slic3r-clipperutils	1		
+dep						slic3r-elephantfootcompensation	slic3r-edgegrid	1		
+dep						slic3r-elephantfootcompensation	slic3r-expolygon	2		
+dep						slic3r-elephantfootcompensation	slic3r-extrusionentity	1		
+dep						slic3r-elephantfootcompensation	slic3r-flow	1		
+dep						slic3r-elephantfootcompensation	slic3r-geometry	1		
+dep						slic3r-elephantfootcompensation	slic3r-libslic3r	1		
+dep						slic3r-elephantfootcompensation	slic3r-point	1		
+dep						slic3r-elephantfootcompensation	slic3r-polygon	1		
+dep						slic3r-elephantfootcompensation	slic3r-utils	1		
+dep						slic3r-exclusionvolumegeometry	slic3r-boundingbox	1		
+dep						slic3r-exclusionvolumegeometry	slic3r-clipperutils	1		
+dep						slic3r-exclusionvolumegeometry	slic3r-expolygon	2		
+dep						slic3r-exclusionvolumegeometry	slic3r-filamentmixer	1		
+dep						slic3r-exclusionvolumegeometry	slic3r-geometry-dir	1		
+dep						slic3r-exclusionvolumegeometry	slic3r-libslic3r	2		
+dep						slic3r-exclusionvolumegeometry	slic3r-point	2		
+dep						slic3r-exclusionvolumegeometry	slic3r-polygon	2		
+dep						slic3r-exclusionvolumegeometry	slic3r-printconfig	2		
+dep						slic3r-execution	slic3r-libslic3r	3		
+dep						slic3r-expolygon	slic3r-boundingbox	1		
+dep						slic3r-expolygon	slic3r-libslic3r	2		
+dep						slic3r-expolygon	slic3r-line	2		
+dep						slic3r-expolygon	slic3r-multipoint	1		
+dep						slic3r-expolygon	slic3r-point	2		
+dep						slic3r-expolygon	slic3r-polygon	2		
+dep						slic3r-expolygon	slic3r-polyline	2		
+dep						slic3r-expolygoncollection	slic3r-boundingbox	1		
+dep						slic3r-expolygoncollection	slic3r-expolygon	1		
+dep						slic3r-expolygoncollection	slic3r-libslic3r	1		
+dep						slic3r-expolygoncollection	slic3r-line	1		
+dep						slic3r-expolygoncollection	slic3r-point	1		
+dep						slic3r-expolygoncollection	slic3r-polygon	1		
+dep						slic3r-expolygoncollection	slic3r-polyline	1		
+dep						slic3r-extruder	slic3r-config	1		
+dep						slic3r-extruder	slic3r-exception	1		
+dep						slic3r-extruder	slic3r-i18n	1		
+dep						slic3r-extruder	slic3r-libslic3r	2		
+dep						slic3r-extruder	slic3r-printconfig	1		
+dep						slic3r-extrusionentity	slic3r-arcfitter	1		
+dep						slic3r-extrusionentity	slic3r-extrusionentitycollection	1		
+dep						slic3r-extrusionentity	slic3r-flow	1		
+dep						slic3r-extrusionentity	slic3r-libslic3r	2		
+dep						slic3r-extrusionentity	slic3r-line	1		
+dep						slic3r-extrusionentity	slic3r-point	2		
+dep						slic3r-extrusionentity	slic3r-polygon	2		
+dep						slic3r-extrusionentity	slic3r-polyline	2		
+dep						slic3r-extrusionentity	slic3r-utils	1		
+dep						slic3r-extrusionentitycollection	slic3r-exception	1		
+dep						slic3r-extrusionentitycollection	slic3r-libslic3r	1		
+dep						slic3r-extrusionentitycollection	slic3r-point	2		
+dep						slic3r-extrusionentitycollection	slic3r-polygon	2		
+dep						slic3r-extrusionentitycollection	slic3r-polyline	1		
+dep						slic3r-feature-fuzzyskin	slic3r-algorithm	1		
+dep						slic3r-feature-fuzzyskin	slic3r-arachne-utils	3		
+dep						slic3r-feature-fuzzyskin	slic3r-clipperutils	1		
+dep						slic3r-feature-fuzzyskin	slic3r-layer	1		
+dep						slic3r-feature-fuzzyskin	slic3r-libslic3r	2		
+dep						slic3r-feature-fuzzyskin	slic3r-point	2		
+dep						slic3r-feature-fuzzyskin	slic3r-polygon	2		
+dep						slic3r-feature-fuzzyskin	slic3r-printconfig	1		
+dep						slic3r-feature-fuzzyskin	slic3r-surface	1		
+dep						slic3r-feature-interlocking	slic3r-boundingbox	1		
+dep						slic3r-feature-interlocking	slic3r-clipperutils	1		
+dep						slic3r-feature-interlocking	slic3r-config	1		
+dep						slic3r-feature-interlocking	slic3r-expolygon	3		
+dep						slic3r-feature-interlocking	slic3r-fill	1		
+dep						slic3r-feature-interlocking	slic3r-flow	1		
+dep						slic3r-feature-interlocking	slic3r-geometry	2		
+dep						slic3r-feature-interlocking	slic3r-layer	1		
+dep						slic3r-feature-interlocking	slic3r-libslic3r	4		
+dep						slic3r-feature-interlocking	slic3r-multimaterialsegmentation	1		
+dep						slic3r-feature-interlocking	slic3r-point	4		
+dep						slic3r-feature-interlocking	slic3r-polygon	3		
+dep						slic3r-feature-interlocking	slic3r-polyline	1		
+dep						slic3r-feature-interlocking	slic3r-print	1		
+dep						slic3r-feature-interlocking	slic3r-printconfig	2		
+dep						slic3r-feature-interlocking	slic3r-surface	2		
+dep						slic3r-feature-interlocking	slic3r-surfacecollection	1		
+dep						slic3r-filamentgroup	slic3r-filamentgrouputils	2		
+dep						slic3r-filamentgroup	slic3r-flushvolpredictor	1		
+dep						slic3r-filamentgroup	slic3r-libslic3r	1		
+dep						slic3r-filamentgroup	slic3r-multinozzleutils	2		
+dep						slic3r-filamentgroup	slic3r-printconfig	2		
+dep						slic3r-filamentgrouputils	slic3r-config	1		
+dep						slic3r-filamentgrouputils	slic3r-libslic3r	1		
+dep						slic3r-filamentgrouputils	slic3r-multinozzleutils	2		
+dep						slic3r-filamentgrouputils	slic3r-printconfig	2		
+dep						slic3r-filamentmixer	slic3r-config	1		
+dep						slic3r-filamentmixer	slic3r-filamentmixermodel	1		
+dep						slic3r-filamentmixer	slic3r-format	1		
+dep						slic3r-filamentmixer	slic3r-i18n	1		
+dep						slic3r-filamentmixer	slic3r-localesutils	1		
+dep						slic3r-fill	slic3r-aabbtreelines	3		
+dep						slic3r-fill	slic3r-arachne	3		
+dep						slic3r-fill	slic3r-arachne-utils	4		
+dep						slic3r-fill	slic3r-boundingbox	20		
+dep						slic3r-fill	slic3r-clipperutils	17		
+dep						slic3r-fill	slic3r-config	4		
+dep						slic3r-fill	slic3r-edgegrid	1		
+dep						slic3r-fill	slic3r-exception	2		
+dep						slic3r-fill	slic3r-execution	3		
+dep						slic3r-fill	slic3r-expolygon	32		
+dep						slic3r-fill	slic3r-extrusionentity	11		
+dep						slic3r-fill	slic3r-extrusionentitycollection	4		
+dep						slic3r-fill	slic3r-fill-lightning	2		
+dep						slic3r-fill	slic3r-flow	6		
+dep						slic3r-fill	slic3r-geometry	4		
+dep						slic3r-fill	slic3r-geometry-dir	1		
+dep						slic3r-fill	slic3r-layer	2		
+dep						slic3r-fill	slic3r-libslic3r	27		
+dep						slic3r-fill	slic3r-line	7		
+dep						slic3r-fill	slic3r-marchingsquares	3		
+dep						slic3r-fill	slic3r-multimaterialsegmentation	1		
+dep						slic3r-fill	slic3r-point	27		
+dep						slic3r-fill	slic3r-polygon	19		
+dep						slic3r-fill	slic3r-polyline	34		
+dep						slic3r-fill	slic3r-print	3		
+dep						slic3r-fill	slic3r-printconfig	15		
+dep						slic3r-fill	slic3r-shortestpath	9		
+dep						slic3r-fill	slic3r-slicing	1		
+dep						slic3r-fill	slic3r-surface	7		
+dep						slic3r-fill	slic3r-surfacecollection	2		
+dep						slic3r-fill	slic3r-svg	1		
+dep						slic3r-fill	slic3r-utils	3		
+dep						slic3r-fill	slic3r-variablewidth	3		
+dep						slic3r-fill-lightning	slic3r-boundingbox	7		
+dep						slic3r-fill-lightning	slic3r-clipperutils	3		
+dep						slic3r-fill-lightning	slic3r-config	1		
+dep						slic3r-fill-lightning	slic3r-edgegrid	5		
+dep						slic3r-fill-lightning	slic3r-expolygon	2		
+dep						slic3r-fill-lightning	slic3r-flow	1		
+dep						slic3r-fill-lightning	slic3r-geometry	2		
+dep						slic3r-fill-lightning	slic3r-layer	1		
+dep						slic3r-fill-lightning	slic3r-libslic3r	8		
+dep						slic3r-fill-lightning	slic3r-line	4		
+dep						slic3r-fill-lightning	slic3r-multimaterialsegmentation	1		
+dep						slic3r-fill-lightning	slic3r-point	7		
+dep						slic3r-fill-lightning	slic3r-polygon	8		
+dep						slic3r-fill-lightning	slic3r-polyline	4		
+dep						slic3r-fill-lightning	slic3r-print	1		
+dep						slic3r-fill-lightning	slic3r-printconfig	1		
+dep						slic3r-fill-lightning	slic3r-surface	1		
+dep						slic3r-fill-lightning	slic3r-surfacecollection	1		
+dep						slic3r-fill-lightning	slic3r-svg	3		
+dep						slic3r-flow	slic3r-config	2		
+dep						slic3r-flow	slic3r-exception	2		
+dep						slic3r-flow	slic3r-i18n	1		
+dep						slic3r-flow	slic3r-libslic3r	2		
+dep						slic3r-flow	slic3r-printconfig	1		
+dep						slic3r-flushvolpredictor	slic3r-utils	1		
+dep						slic3r-gcode	slic3r-aabbtreeindirect	5		
+dep						slic3r-gcode	slic3r-aabbtreelines	6		
+dep						slic3r-gcode	slic3r-arcfitter	5		
+dep						slic3r-gcode	slic3r-beltbrim	2		
+dep						slic3r-gcode	slic3r-belttransform	4		
+dep						slic3r-gcode	slic3r-boundingbox	22		
+dep						slic3r-gcode	slic3r-calib	1		
+dep						slic3r-gcode	slic3r-circle	4		
+dep						slic3r-gcode	slic3r-clipperutils	13		
+dep						slic3r-gcode	slic3r-clonable-ptr	1		
+dep						slic3r-gcode	slic3r-commondefs	2		
+dep						slic3r-gcode	slic3r-config	18		
+dep						slic3r-gcode	slic3r-connectedbodies	1		
+dep						slic3r-gcode	slic3r-customgcode	4		
+dep						slic3r-gcode	slic3r-edgegrid	3		
+dep						slic3r-gcode	slic3r-enum-bitmask	3		
+dep						slic3r-gcode	slic3r-exception	7		
+dep						slic3r-gcode	slic3r-exclusionvolumegeometry	1		
+dep						slic3r-gcode	slic3r-expolygon	14		
+dep						slic3r-gcode	slic3r-extruder	3		
+dep						slic3r-gcode	slic3r-extrusionentity	20		
+dep						slic3r-gcode	slic3r-extrusionentitycollection	5		
+dep						slic3r-gcode	slic3r-filamentgroup	1		
+dep						slic3r-gcode	slic3r-filamentgrouputils	1		
+dep						slic3r-gcode	slic3r-filamentmixer	4		
+dep						slic3r-gcode	slic3r-fill	1		
+dep						slic3r-gcode	slic3r-flow	4		
+dep						slic3r-gcode	slic3r-format	7		
+dep						slic3r-gcode	slic3r-gcodereader	8		
+dep						slic3r-gcode	slic3r-gcodewriter	12		
+dep						slic3r-gcode	slic3r-geometry	6		
+dep						slic3r-gcode	slic3r-geometry-dir	4		
+dep						slic3r-gcode	slic3r-i18n	8		
+dep						slic3r-gcode	slic3r-imexhelpers	1		
+dep						slic3r-gcode	slic3r-kdtreeindirect	2		
+dep						slic3r-gcode	slic3r-layer	12		
+dep						slic3r-gcode	slic3r-libslic3r	36		
+dep						slic3r-gcode	slic3r-lifecycleevents	1		
+dep						slic3r-gcode	slic3r-line	14		
+dep						slic3r-gcode	slic3r-localesutils	6		
+dep						slic3r-gcode	slic3r-model	6		
+dep						slic3r-gcode	slic3r-multimaterialsegmentation	2		
+dep						slic3r-gcode	slic3r-multinozzleutils	9		
+dep						slic3r-gcode	slic3r-objectid	4		
+dep						slic3r-gcode	slic3r-parameterutils	1		
+dep						slic3r-gcode	slic3r-placeholderparser	1		
+dep						slic3r-gcode	slic3r-point	46		
+dep						slic3r-gcode	slic3r-polygon	23		
+dep						slic3r-gcode	slic3r-polyline	17		
+dep						slic3r-gcode	slic3r-print	14		
+dep						slic3r-gcode	slic3r-printbase	3		
+dep						slic3r-gcode	slic3r-printconfig	35		
+dep						slic3r-gcode	slic3r-shortedgecollapse	1		
+dep						slic3r-gcode	slic3r-shortestpath	2		
+dep						slic3r-gcode	slic3r-slicing	2		
+dep						slic3r-gcode	slic3r-surface	3		
+dep						slic3r-gcode	slic3r-surfacecollection	3		
+dep						slic3r-gcode	slic3r-svg	3		
+dep						slic3r-gcode	slic3r-time	1		
+dep						slic3r-gcode	slic3r-trianglemesh	3		
+dep						slic3r-gcode	slic3r-triangleselector	2		
+dep						slic3r-gcode	slic3r-trianglesetsampling	1		
+dep						slic3r-gcode	slic3r-triangulation	1		
+dep						slic3r-gcode	slic3r-utils	6		
+dep						slic3r-gcodereader	slic3r-config	1		
+dep						slic3r-gcodereader	slic3r-libslic3r	2		
+dep						slic3r-gcodereader	slic3r-localesutils	1		
+dep						slic3r-gcodereader	slic3r-printconfig	2		
+dep						slic3r-gcodereader	slic3r-utils	1		
+dep						slic3r-gcodewriter	slic3r-clipperutils	1		
+dep						slic3r-gcodewriter	slic3r-config	2		
+dep						slic3r-gcodewriter	slic3r-extruder	2		
+dep						slic3r-gcodewriter	slic3r-geometry	1		
+dep						slic3r-gcodewriter	slic3r-i18n	1		
+dep						slic3r-gcodewriter	slic3r-imexhelpers	1		
+dep						slic3r-gcodewriter	slic3r-libslic3r	2		
+dep						slic3r-gcodewriter	slic3r-line	1		
+dep						slic3r-gcodewriter	slic3r-localesutils	1		
+dep						slic3r-gcodewriter	slic3r-point	2		
+dep						slic3r-gcodewriter	slic3r-polygon	2		
+dep						slic3r-gcodewriter	slic3r-printconfig	2		
+dep						slic3r-geometry	slic3r-boundingbox	2		
+dep						slic3r-geometry	slic3r-libslic3r	2		
+dep						slic3r-geometry	slic3r-multipoint	1		
+dep						slic3r-geometry	slic3r-point	2		
+dep						slic3r-geometry	slic3r-polygon	2		
+dep						slic3r-geometry	slic3r-polyline	1		
+dep						slic3r-geometry-dir	slic3r-arachne-utils	5		
+dep						slic3r-geometry-dir	slic3r-boundingbox	2		
+dep						slic3r-geometry-dir	slic3r-clipperutils	1		
+dep						slic3r-geometry-dir	slic3r-exception	1		
+dep						slic3r-geometry-dir	slic3r-expolygon	3		
+dep						slic3r-geometry-dir	slic3r-geometry	4		
+dep						slic3r-geometry-dir	slic3r-libslic3r	10		
+dep						slic3r-geometry-dir	slic3r-line	8		
+dep						slic3r-geometry-dir	slic3r-multimaterialsegmentation	3		
+dep						slic3r-geometry-dir	slic3r-point	14		
+dep						slic3r-geometry-dir	slic3r-polygon	5		
+dep						slic3r-geometry-dir	slic3r-polyline	4		
+dep						slic3r-geometry-dir	slic3r-svg	1		
+dep						slic3r-imexhelpers	slic3r-boundingbox	2		
+dep						slic3r-imexhelpers	slic3r-clipperutils	1		
+dep						slic3r-imexhelpers	slic3r-config	2		
+dep						slic3r-imexhelpers	slic3r-i18n	1		
+dep						slic3r-imexhelpers	slic3r-libslic3r	1		
+dep						slic3r-imexhelpers	slic3r-point	2		
+dep						slic3r-imexhelpers	slic3r-polygon	2		
+dep						slic3r-imexhelpers	slic3r-printconfig	2		
+dep						slic3r-imexzones	slic3r-boundingbox	2		
+dep						slic3r-imexzones	slic3r-config	1		
+dep						slic3r-imexzones	slic3r-imexhelpers	1		
+dep						slic3r-imexzones	slic3r-point	1		
+dep						slic3r-imexzones	slic3r-printconfig	2		
+dep						slic3r-intersectionpoints	slic3r-aabbtreeindirect	1		
+dep						slic3r-intersectionpoints	slic3r-aabbtreelines	1		
+dep						slic3r-intersectionpoints	slic3r-expolygon	2		
+dep						slic3r-intersectionpoints	slic3r-line	2		
+dep						slic3r-intersectionpoints	slic3r-point	2		
+dep						slic3r-intersectionpoints	slic3r-polygon	2		
+dep						slic3r-kdtreeindirect	slic3r-libslic3r	1		
+dep						slic3r-kdtreeindirect	slic3r-utils	1		
+dep						slic3r-layer	slic3r-boundingbox	2		
+dep						slic3r-layer	slic3r-clipperutils	1		
+dep						slic3r-layer	slic3r-config	1		
+dep						slic3r-layer	slic3r-exception	1		
+dep						slic3r-layer	slic3r-expolygon	2		
+dep						slic3r-layer	slic3r-extrusionentity	1		
+dep						slic3r-layer	slic3r-extrusionentitycollection	1		
+dep						slic3r-layer	slic3r-flow	2		
+dep						slic3r-layer	slic3r-libslic3r	2		
+dep						slic3r-layer	slic3r-line	1		
+dep						slic3r-layer	slic3r-multimaterialsegmentation	1		
+dep						slic3r-layer	slic3r-objectid	1		
+dep						slic3r-layer	slic3r-point	1		
+dep						slic3r-layer	slic3r-polygon	2		
+dep						slic3r-layer	slic3r-polyline	1		
+dep						slic3r-layer	slic3r-printconfig	1		
+dep						slic3r-layer	slic3r-shortestpath	1		
+dep						slic3r-layer	slic3r-surface	1		
+dep						slic3r-layer	slic3r-surfacecollection	1		
+dep						slic3r-layer	slic3r-svg	1		
+dep						slic3r-layer	slic3r-utils	1		
+dep						slic3r-layerregion	slic3r-algorithm	1		
+dep						slic3r-layerregion	slic3r-boundingbox	1		
+dep						slic3r-layerregion	slic3r-bridgedetector	1		
+dep						slic3r-layerregion	slic3r-clipperutils	1		
+dep						slic3r-layerregion	slic3r-config	1		
+dep						slic3r-layerregion	slic3r-exception	1		
+dep						slic3r-layerregion	slic3r-expolygon	1		
+dep						slic3r-layerregion	slic3r-extrusionentity	1		
+dep						slic3r-layerregion	slic3r-extrusionentitycollection	1		
+dep						slic3r-layerregion	slic3r-flow	1		
+dep						slic3r-layerregion	slic3r-geometry	1		
+dep						slic3r-layerregion	slic3r-layer	1		
+dep						slic3r-layerregion	slic3r-libslic3r	1		
+dep						slic3r-layerregion	slic3r-line	1		
+dep						slic3r-layerregion	slic3r-multimaterialsegmentation	1		
+dep						slic3r-layerregion	slic3r-perimetergenerator	1		
+dep						slic3r-layerregion	slic3r-point	1		
+dep						slic3r-layerregion	slic3r-polygon	1		
+dep						slic3r-layerregion	slic3r-polyline	1		
+dep						slic3r-layerregion	slic3r-print	1		
+dep						slic3r-layerregion	slic3r-printconfig	1		
+dep						slic3r-layerregion	slic3r-surface	1		
+dep						slic3r-layerregion	slic3r-surfacecollection	1		
+dep						slic3r-layerregion	slic3r-svg	1		
+dep						slic3r-layerregion	slic3r-utils	1		
+dep						slic3r-libslic3r	slic3r-semver	1		
+dep						slic3r-line	slic3r-boundingbox	1		
+dep						slic3r-line	slic3r-libslic3r	2		
+dep						slic3r-line	slic3r-point	2		
+dep						slic3r-marchingsquares	slic3r-execution	2		
+dep						slic3r-meshrepair	slic3r-i18n	1		
+dep						slic3r-meshrepair	slic3r-trianglemesh	1		
+dep						slic3r-meshsplitimpl	slic3r-execution	1		
+dep						slic3r-meshsplitimpl	slic3r-libslic3r	1		
+dep						slic3r-meshsplitimpl	slic3r-point	1		
+dep						slic3r-minimumspanningtree	slic3r-libslic3r	1		
+dep						slic3r-minimumspanningtree	slic3r-point	2		
+dep						slic3r-model	slic3r-aabbtreeindirect	1		
+dep						slic3r-model	slic3r-appconfig	1		
+dep						slic3r-model	slic3r-boundingbox	2		
+dep						slic3r-model	slic3r-brimearspoint	1		
+dep						slic3r-model	slic3r-buildvolume	1		
+dep						slic3r-model	slic3r-calib	2		
+dep						slic3r-model	slic3r-clipperutils	1		
+dep						slic3r-model	slic3r-config	1		
+dep						slic3r-model	slic3r-customgcode	2		
+dep						slic3r-model	slic3r-enum-bitmask	1		
+dep						slic3r-model	slic3r-exception	1		
+dep						slic3r-model	slic3r-expolygon	1		
+dep						slic3r-model	slic3r-gcodewriter	1		
+dep						slic3r-model	slic3r-geometry	2		
+dep						slic3r-model	slic3r-i18n	1		
+dep						slic3r-model	slic3r-libslic3r	2		
+dep						slic3r-model	slic3r-materialtype	1		
+dep						slic3r-model	slic3r-meshrepair	1		
+dep						slic3r-model	slic3r-mtutils	1		
+dep						slic3r-model	slic3r-objectid	2		
+dep						slic3r-model	slic3r-point	2		
+dep						slic3r-model	slic3r-polygon	2		
+dep						slic3r-model	slic3r-printconfig	2		
+dep						slic3r-model	slic3r-semver	2		
+dep						slic3r-model	slic3r-sla	3		
+dep						slic3r-model	slic3r-slicing	1		
+dep						slic3r-model	slic3r-svg	1		
+dep						slic3r-model	slic3r-tesselate	1		
+dep						slic3r-model	slic3r-trianglemesh	3		
+dep						slic3r-model	slic3r-trianglemeshslicer	1		
+dep						slic3r-model	slic3r-triangleselector	2		
+dep						slic3r-model	slic3r-utils	1		
+dep						slic3r-mtutils	slic3r-libslic3r	1		
+dep						slic3r-multimaterialsegmentation	slic3r-boundingbox	1		
+dep						slic3r-multimaterialsegmentation	slic3r-clipperutils	1		
+dep						slic3r-multimaterialsegmentation	slic3r-config	1		
+dep						slic3r-multimaterialsegmentation	slic3r-edgegrid	1		
+dep						slic3r-multimaterialsegmentation	slic3r-expolygon	1		
+dep						slic3r-multimaterialsegmentation	slic3r-flow	1		
+dep						slic3r-multimaterialsegmentation	slic3r-libslic3r	2		
+dep						slic3r-multimaterialsegmentation	slic3r-line	2		
+dep						slic3r-multimaterialsegmentation	slic3r-mutablepolygon	1		
+dep						slic3r-multimaterialsegmentation	slic3r-point	2		
+dep						slic3r-multimaterialsegmentation	slic3r-polygon	1		
+dep						slic3r-multimaterialsegmentation	slic3r-printconfig	1		
+dep						slic3r-multimaterialsegmentation	slic3r-surface	1		
+dep						slic3r-multimaterialsegmentation	slic3r-surfacecollection	1		
+dep						slic3r-multimaterialsegmentation	slic3r-trianglemeshslicer	1		
+dep						slic3r-multimaterialsegmentation	slic3r-utils	1		
+dep						slic3r-multinozzleutils	slic3r-config	1		
+dep						slic3r-multinozzleutils	slic3r-printconfig	2		
+dep						slic3r-multinozzleutils	slic3r-projecttask	1		
+dep						slic3r-multinozzleutils	slic3r-utils	1		
+dep						slic3r-multipoint	slic3r-boundingbox	1		
+dep						slic3r-multipoint	slic3r-libslic3r	2		
+dep						slic3r-multipoint	slic3r-line	2		
+dep						slic3r-multipoint	slic3r-point	2		
+dep						slic3r-mutablepolygon	slic3r-expolygon	1		
+dep						slic3r-mutablepolygon	slic3r-libslic3r	2		
+dep						slic3r-mutablepolygon	slic3r-point	2		
+dep						slic3r-mutablepolygon	slic3r-polygon	1		
+dep						slic3r-normalutils	slic3r-model	1		
+dep						slic3r-normalutils	slic3r-point	2		
+dep						slic3r-parameterutils	slic3r-config	1		
+dep						slic3r-parameterutils	slic3r-printconfig	2		
+dep						slic3r-perimetergenerator	slic3r-aabbtreelines	1		
+dep						slic3r-perimetergenerator	slic3r-arachne-utils	2		
+dep						slic3r-perimetergenerator	slic3r-boundingbox	1		
+dep						slic3r-perimetergenerator	slic3r-bridgedetector	1		
+dep						slic3r-perimetergenerator	slic3r-clipperutils	1		
+dep						slic3r-perimetergenerator	slic3r-clipperzutils	1		
+dep						slic3r-perimetergenerator	slic3r-config	1		
+dep						slic3r-perimetergenerator	slic3r-expolygon	2		
+dep						slic3r-perimetergenerator	slic3r-expolygoncollection	1		
+dep						slic3r-perimetergenerator	slic3r-extrusionentity	1		
+dep						slic3r-perimetergenerator	slic3r-extrusionentitycollection	1		
+dep						slic3r-perimetergenerator	slic3r-feature-fuzzyskin	1		
+dep						slic3r-perimetergenerator	slic3r-flow	2		
+dep						slic3r-perimetergenerator	slic3r-geometry	1		
+dep						slic3r-perimetergenerator	slic3r-layer	1		
+dep						slic3r-perimetergenerator	slic3r-libslic3r	2		
+dep						slic3r-perimetergenerator	slic3r-line	1		
+dep						slic3r-perimetergenerator	slic3r-multimaterialsegmentation	1		
+dep						slic3r-perimetergenerator	slic3r-point	2		
+dep						slic3r-perimetergenerator	slic3r-polygon	2		
+dep						slic3r-perimetergenerator	slic3r-polyline	1		
+dep						slic3r-perimetergenerator	slic3r-printconfig	2		
+dep						slic3r-perimetergenerator	slic3r-shortestpath	1		
+dep						slic3r-perimetergenerator	slic3r-surface	2		
+dep						slic3r-perimetergenerator	slic3r-surfacecollection	1		
+dep						slic3r-perimetergenerator	slic3r-variablewidth	1		
+dep						slic3r-placeholderparser	slic3r-config	2		
+dep						slic3r-placeholderparser	slic3r-exception	1		
+dep						slic3r-placeholderparser	slic3r-flow	1		
+dep						slic3r-placeholderparser	slic3r-format	1		
+dep						slic3r-placeholderparser	slic3r-i18n	1		
+dep						slic3r-placeholderparser	slic3r-libslic3r	1		
+dep						slic3r-placeholderparser	slic3r-point	1		
+dep						slic3r-placeholderparser	slic3r-printconfig	1		
+dep						slic3r-placeholderparser	slic3r-utils	1		
+dep						slic3r-point	slic3r-exception	1		
+dep						slic3r-point	slic3r-int128	1		
+dep						slic3r-point	slic3r-libslic3r	2		
+dep						slic3r-point	slic3r-localesutils	1		
+dep						slic3r-polygon	slic3r-boundingbox	1		
+dep						slic3r-polygon	slic3r-exception	1		
+dep						slic3r-polygon	slic3r-libslic3r	2		
+dep						slic3r-polygon	slic3r-line	2		
+dep						slic3r-polygon	slic3r-multipoint	2		
+dep						slic3r-polygon	slic3r-point	2		
+dep						slic3r-polyline	slic3r-arcfitter	2		
+dep						slic3r-polyline	slic3r-boundingbox	1		
+dep						slic3r-polyline	slic3r-circle	1		
+dep						slic3r-polyline	slic3r-exception	1		
+dep						slic3r-polyline	slic3r-libslic3r	2		
+dep						slic3r-polyline	slic3r-line	2		
+dep						slic3r-polyline	slic3r-multipoint	2		
+dep						slic3r-polyline	slic3r-point	2		
+dep						slic3r-principalcomponents2d	slic3r-libslic3r	1		
+dep						slic3r-principalcomponents2d	slic3r-point	2		
+dep						slic3r-principalcomponents2d	slic3r-polygon	2		
+dep						slic3r-print	slic3r-arcfitter	1		
+dep						slic3r-print	slic3r-beltbrim	2		
+dep						slic3r-print	slic3r-beltgcode	1		
+dep						slic3r-print	slic3r-belttransform	2		
+dep						slic3r-print	slic3r-boundingbox	2		
+dep						slic3r-print	slic3r-brim	1		
+dep						slic3r-print	slic3r-calib	2		
+dep						slic3r-print	slic3r-circle	1		
+dep						slic3r-print	slic3r-clipperutils	1		
+dep						slic3r-print	slic3r-commondefs	2		
+dep						slic3r-print	slic3r-config	2		
+dep						slic3r-print	slic3r-customgcode	1		
+dep						slic3r-print	slic3r-exception	1		
+dep						slic3r-print	slic3r-exclusionvolumegeometry	1		
+dep						slic3r-print	slic3r-expolygon	1		
+dep						slic3r-print	slic3r-extruder	1		
+dep						slic3r-print	slic3r-extrusionentity	2		
+dep						slic3r-print	slic3r-extrusionentitycollection	1		
+dep						slic3r-print	slic3r-filamentgroup	1		
+dep						slic3r-print	slic3r-filamentgrouputils	1		
+dep						slic3r-print	slic3r-filamentmixer	1		
+dep						slic3r-print	slic3r-flow	2		
+dep						slic3r-print	slic3r-format	1		
+dep						slic3r-print	slic3r-geometry	2		
+dep						slic3r-print	slic3r-geometry-dir	1		
+dep						slic3r-print	slic3r-i18n	1		
+dep						slic3r-print	slic3r-imexhelpers	1		
+dep						slic3r-print	slic3r-imexzones	1		
+dep						slic3r-print	slic3r-layer	1		
+dep						slic3r-print	slic3r-libslic3r	2		
+dep						slic3r-print	slic3r-lifecycleevents	1		
+dep						slic3r-print	slic3r-localesutils	1		
+dep						slic3r-print	slic3r-materialtype	1		
+dep						slic3r-print	slic3r-model	2		
+dep						slic3r-print	slic3r-multimaterialsegmentation	1		
+dep						slic3r-print	slic3r-multinozzleutils	1		
+dep						slic3r-print	slic3r-objectid	2		
+dep						slic3r-print	slic3r-placeholderparser	1		
+dep						slic3r-print	slic3r-point	2		
+dep						slic3r-print	slic3r-polygon	2		
+dep						slic3r-print	slic3r-polyline	2		
+dep						slic3r-print	slic3r-printbase	2		
+dep						slic3r-print	slic3r-printconfig	2		
+dep						slic3r-print	slic3r-shortestpath	1		
+dep						slic3r-print	slic3r-slicing	2		
+dep						slic3r-print	slic3r-surface	1		
+dep						slic3r-print	slic3r-surfacecollection	1		
+dep						slic3r-print	slic3r-thread	1		
+dep						slic3r-print	slic3r-time	1		
+dep						slic3r-print	slic3r-trianglemesh	2		
+dep						slic3r-print	slic3r-trianglemeshslicer	1		
+dep						slic3r-print	slic3r-triangleselector	2		
+dep						slic3r-print	slic3r-utils	1		
+dep						slic3r-printapply	slic3r-belttransform	1		
+dep						slic3r-printapply	slic3r-clipperutils	1		
+dep						slic3r-printapply	slic3r-config	1		
+dep						slic3r-printapply	slic3r-customgcode	1		
+dep						slic3r-printapply	slic3r-filamentmixer	1		
+dep						slic3r-printapply	slic3r-geometry	1		
+dep						slic3r-printapply	slic3r-imexhelpers	1		
+dep						slic3r-printapply	slic3r-libslic3r	1		
+dep						slic3r-printapply	slic3r-model	1		
+dep						slic3r-printapply	slic3r-multinozzleutils	1		
+dep						slic3r-printapply	slic3r-objectid	1		
+dep						slic3r-printapply	slic3r-placeholderparser	1		
+dep						slic3r-printapply	slic3r-point	1		
+dep						slic3r-printapply	slic3r-polygon	1		
+dep						slic3r-printapply	slic3r-print	1		
+dep						slic3r-printapply	slic3r-printbase	1		
+dep						slic3r-printapply	slic3r-printconfig	1		
+dep						slic3r-printapply	slic3r-slicing	1		
+dep						slic3r-printapply	slic3r-trianglemesh	1		
+dep						slic3r-printapply	slic3r-triangleselector	1		
+dep						slic3r-printbase	slic3r-config	2		
+dep						slic3r-printbase	slic3r-exception	1		
+dep						slic3r-printbase	slic3r-i18n	1		
+dep						slic3r-printbase	slic3r-libslic3r	2		
+dep						slic3r-printbase	slic3r-model	2		
+dep						slic3r-printbase	slic3r-objectid	1		
+dep						slic3r-printbase	slic3r-placeholderparser	2		
+dep						slic3r-printbase	slic3r-polygon	1		
+dep						slic3r-printbase	slic3r-printconfig	1		
+dep						slic3r-printconfig	slic3r-commondefs	2		
+dep						slic3r-printconfig	slic3r-config	2		
+dep						slic3r-printconfig	slic3r-enum-bitmask	1		
+dep						slic3r-printconfig	slic3r-filamentmixer	1		
+dep						slic3r-printconfig	slic3r-format	1		
+dep						slic3r-printconfig	slic3r-i18n	1		
+dep						slic3r-printconfig	slic3r-libslic3r	2		
+dep						slic3r-printconfig	slic3r-localesutils	1		
+dep						slic3r-printconfig	slic3r-materialtype	1		
+dep						slic3r-printconfig	slic3r-point	2		
+dep						slic3r-printconfig	slic3r-polygon	2		
+dep						slic3r-printconfig	slic3r-printconfigconstants	1		
+dep						slic3r-printobject	slic3r-aabbtreeindirect	1		
+dep						slic3r-printobject	slic3r-aabbtreelines	1		
+dep						slic3r-printobject	slic3r-beltbrim	1		
+dep						slic3r-printobject	slic3r-belttransform	1		
+dep						slic3r-printobject	slic3r-boundingbox	1		
+dep						slic3r-printobject	slic3r-clipperutils	1		
+dep						slic3r-printobject	slic3r-config	1		
+dep						slic3r-printobject	slic3r-connectedbodies	1		
+dep						slic3r-printobject	slic3r-exception	1		
+dep						slic3r-printobject	slic3r-expolygon	1		
+dep						slic3r-printobject	slic3r-extrusionentitycollection	1		
+dep						slic3r-printobject	slic3r-fill	5		
+dep						slic3r-printobject	slic3r-fill-lightning	1		
+dep						slic3r-printobject	slic3r-flow	1		
+dep						slic3r-printobject	slic3r-format	1		
+dep						slic3r-printobject	slic3r-geometry	1		
+dep						slic3r-printobject	slic3r-i18n	1		
+dep						slic3r-printobject	slic3r-layer	1		
+dep						slic3r-printobject	slic3r-libslic3r	1		
+dep						slic3r-printobject	slic3r-line	1		
+dep						slic3r-printobject	slic3r-model	1		
+dep						slic3r-printobject	slic3r-mutablepolygon	1		
+dep						slic3r-printobject	slic3r-perimetergenerator	1		
+dep						slic3r-printobject	slic3r-point	1		
+dep						slic3r-printobject	slic3r-polygon	1		
+dep						slic3r-printobject	slic3r-polyline	1		
+dep						slic3r-printobject	slic3r-print	1		
+dep						slic3r-printobject	slic3r-printbase	1		
+dep						slic3r-printobject	slic3r-printconfig	1		
+dep						slic3r-printobject	slic3r-sla	1		
+dep						slic3r-printobject	slic3r-slicing	1		
+dep						slic3r-printobject	slic3r-support	4		
+dep						slic3r-printobject	slic3r-surface	1		
+dep						slic3r-printobject	slic3r-surfacecollection	1		
+dep						slic3r-printobject	slic3r-svg	1		
+dep						slic3r-printobject	slic3r-tesselate	1		
+dep						slic3r-printobject	slic3r-timer	1		
+dep						slic3r-printobject	slic3r-trianglemesh	1		
+dep						slic3r-printobject	slic3r-trianglemeshslicer	1		
+dep						slic3r-printobject	slic3r-utils	1		
+dep						slic3r-printobjectslice	slic3r-beltslicestrategy	1		
+dep						slic3r-printobjectslice	slic3r-belttransform	1		
+dep						slic3r-printobjectslice	slic3r-boundingbox	1		
+dep						slic3r-printobjectslice	slic3r-clipperutils	1		
+dep						slic3r-printobjectslice	slic3r-config	1		
+dep						slic3r-printobjectslice	slic3r-elephantfootcompensation	1		
+dep						slic3r-printobjectslice	slic3r-exception	1		
+dep						slic3r-printobjectslice	slic3r-expolygon	1		
+dep						slic3r-printobjectslice	slic3r-feature-interlocking	1		
+dep						slic3r-printobjectslice	slic3r-flow	1		
+dep						slic3r-printobjectslice	slic3r-geometry	1		
+dep						slic3r-printobjectslice	slic3r-i18n	1		
+dep						slic3r-printobjectslice	slic3r-layer	1		
+dep						slic3r-printobjectslice	slic3r-libslic3r	1		
+dep						slic3r-printobjectslice	slic3r-model	1		
+dep						slic3r-printobjectslice	slic3r-multimaterialsegmentation	1		
+dep						slic3r-printobjectslice	slic3r-objectid	1		
+dep						slic3r-printobjectslice	slic3r-point	1		
+dep						slic3r-printobjectslice	slic3r-polygon	1		
+dep						slic3r-printobjectslice	slic3r-print	1		
+dep						slic3r-printobjectslice	slic3r-printbase	1		
+dep						slic3r-printobjectslice	slic3r-printconfig	1		
+dep						slic3r-printobjectslice	slic3r-shortestpath	1		
+dep						slic3r-printobjectslice	slic3r-slicing	1		
+dep						slic3r-printobjectslice	slic3r-surface	1		
+dep						slic3r-printobjectslice	slic3r-surfacecollection	1		
+dep						slic3r-printobjectslice	slic3r-trianglemesh	1		
+dep						slic3r-printobjectslice	slic3r-trianglemeshslicer	1		
+dep						slic3r-printobjectslice	slic3r-utils	1		
+dep						slic3r-printregion	slic3r-config	1		
+dep						slic3r-printregion	slic3r-exception	1		
+dep						slic3r-printregion	slic3r-flow	1		
+dep						slic3r-printregion	slic3r-libslic3r	1		
+dep						slic3r-printregion	slic3r-print	1		
+dep						slic3r-printregion	slic3r-printconfig	1		
+dep						slic3r-semver	slic3r-exception	1		
+dep						slic3r-shortedgecollapse	slic3r-normalutils	1		
+dep						slic3r-shortedgecollapse	slic3r-point	1		
+dep						slic3r-shortedgecollapse	slic3r-trianglemesh	2		
+dep						slic3r-shortestpath	slic3r-boundingbox	1		
+dep						slic3r-shortestpath	slic3r-expolygon	2		
+dep						slic3r-shortestpath	slic3r-extrusionentity	1		
+dep						slic3r-shortestpath	slic3r-extrusionentitycollection	1		
+dep						slic3r-shortestpath	slic3r-kdtreeindirect	1		
+dep						slic3r-shortestpath	slic3r-libslic3r	1		
+dep						slic3r-shortestpath	slic3r-line	1		
+dep						slic3r-shortestpath	slic3r-mutablepriorityqueue	1		
+dep						slic3r-shortestpath	slic3r-point	2		
+dep						slic3r-shortestpath	slic3r-polyline	2		
+dep						slic3r-sla	slic3r-aabbtreeindirect	1		
+dep						slic3r-sla	slic3r-boundingbox	1		
+dep						slic3r-sla	slic3r-execution	3		
+dep						slic3r-sla	slic3r-expolygon	1		
+dep						slic3r-sla	slic3r-libslic3r	3		
+dep						slic3r-sla	slic3r-point	4		
+dep						slic3r-sla	slic3r-trianglemesh	2		
+dep						slic3r-slicing	slic3r-config	1		
+dep						slic3r-slicing	slic3r-libslic3r	2		
+dep						slic3r-slicing	slic3r-point	2		
+dep						slic3r-slicing	slic3r-slicingadaptive	1		
+dep						slic3r-slicing	slic3r-utils	1		
+dep						slic3r-slicingadaptive	slic3r-libslic3r	1		
+dep						slic3r-support	slic3r-aabbtreeindirect	1		
+dep						slic3r-support	slic3r-aabbtreelines	2		
+dep						slic3r-support	slic3r-boundingbox	4		
+dep						slic3r-support	slic3r-buildvolume	2		
+dep						slic3r-support	slic3r-clipperutils	6		
+dep						slic3r-support	slic3r-clipperzutils	1		
+dep						slic3r-support	slic3r-color	1		
+dep						slic3r-support	slic3r-config	4		
+dep						slic3r-support	slic3r-edgegrid	2		
+dep						slic3r-support	slic3r-exception	1		
+dep						slic3r-support	slic3r-exclusionvolumegeometry	1		
+dep						slic3r-support	slic3r-expolygon	7		
+dep						slic3r-support	slic3r-extrusionentity	5		
+dep						slic3r-support	slic3r-extrusionentitycollection	4		
+dep						slic3r-support	slic3r-fill-lightning	2		
+dep						slic3r-support	slic3r-flow	8		
+dep						slic3r-support	slic3r-format	2		
+dep						slic3r-support	slic3r-geometry	4		
+dep						slic3r-support	slic3r-i18n	2		
+dep						slic3r-support	slic3r-layer	7		
+dep						slic3r-support	slic3r-libslic3r	15		
+dep						slic3r-support	slic3r-line	4		
+dep						slic3r-support	slic3r-materialtype	1		
+dep						slic3r-support	slic3r-minimumspanningtree	2		
+dep						slic3r-support	slic3r-model	1		
+dep						slic3r-support	slic3r-multimaterialsegmentation	3		
+dep						slic3r-support	slic3r-multipoint	1		
+dep						slic3r-support	slic3r-mutablepolygon	3		
+dep						slic3r-support	slic3r-pngreadwrite	1		
+dep						slic3r-support	slic3r-point	14		
+dep						slic3r-support	slic3r-polygon	14		
+dep						slic3r-support	slic3r-polyline	4		
+dep						slic3r-support	slic3r-print	8		
+dep						slic3r-support	slic3r-printconfig	13		
+dep						slic3r-support	slic3r-shortestpath	1		
+dep						slic3r-support	slic3r-slicing	9		
+dep						slic3r-support	slic3r-surface	4		
+dep						slic3r-support	slic3r-surfacecollection	2		
+dep						slic3r-support	slic3r-svg	2		
+dep						slic3r-support	slic3r-trianglemeshslicer	1		
+dep						slic3r-support	slic3r-triangleselector	2		
+dep						slic3r-support	slic3r-utils	5		
+dep						slic3r-surface	slic3r-boundingbox	2		
+dep						slic3r-surface	slic3r-expolygon	2		
+dep						slic3r-surface	slic3r-libslic3r	1		
+dep						slic3r-surface	slic3r-point	2		
+dep						slic3r-surface	slic3r-polygon	2		
+dep						slic3r-surfacecollection	slic3r-boundingbox	1		
+dep						slic3r-surfacecollection	slic3r-expolygon	2		
+dep						slic3r-surfacecollection	slic3r-point	1		
+dep						slic3r-surfacecollection	slic3r-polygon	2		
+dep						slic3r-surfacecollection	slic3r-surface	2		
+dep						slic3r-surfacecollection	slic3r-svg	1		
+dep						slic3r-svg	slic3r-boundingbox	1		
+dep						slic3r-svg	slic3r-expolygon	2		
+dep						slic3r-svg	slic3r-libslic3r	2		
+dep						slic3r-svg	slic3r-line	2		
+dep						slic3r-svg	slic3r-multipoint	2		
+dep						slic3r-svg	slic3r-point	2		
+dep						slic3r-svg	slic3r-polygon	2		
+dep						slic3r-svg	slic3r-polyline	2		
+dep						slic3r-svg	slic3r-surface	2		
+dep						slic3r-svg	slic3r-trianglemesh	1		
+dep						slic3r-tesselate	slic3r-expolygon	1		
+dep						slic3r-tesselate	slic3r-libslic3r	2		
+dep						slic3r-tesselate	slic3r-point	2		
+dep						slic3r-tesselate	slic3r-polygon	1		
+dep						slic3r-trianglemesh	slic3r-boundingbox	2		
+dep						slic3r-trianglemesh	slic3r-execution	2		
+dep						slic3r-trianglemesh	slic3r-expolygon	1		
+dep						slic3r-trianglemesh	slic3r-extrusionentity	1		
+dep						slic3r-trianglemesh	slic3r-geometry	1		
+dep						slic3r-trianglemesh	slic3r-libslic3r	2		
+dep						slic3r-trianglemesh	slic3r-line	1		
+dep						slic3r-trianglemesh	slic3r-meshsplitimpl	1		
+dep						slic3r-trianglemesh	slic3r-point	2		
+dep						slic3r-trianglemesh	slic3r-polygon	2		
+dep						slic3r-trianglemesh	slic3r-trianglemeshslicer	1		
+dep						slic3r-trianglemesh	slic3r-utils	1		
+dep						slic3r-trianglemeshslicer	slic3r-expolygon	2		
+dep						slic3r-trianglemeshslicer	slic3r-libslic3r	1		
+dep						slic3r-trianglemeshslicer	slic3r-line	1		
+dep						slic3r-trianglemeshslicer	slic3r-multipoint	1		
+dep						slic3r-trianglemeshslicer	slic3r-point	2		
+dep						slic3r-trianglemeshslicer	slic3r-polygon	2		
+dep						slic3r-trianglemeshslicer	slic3r-tesselate	1		
+dep						slic3r-trianglemeshslicer	slic3r-utils	1		
+dep						slic3r-triangleselector	slic3r-aabbtreeindirect	1		
+dep						slic3r-triangleselector	slic3r-geometry	1		
+dep						slic3r-triangleselector	slic3r-libslic3r	1		
+dep						slic3r-triangleselector	slic3r-point	2		
+dep						slic3r-triangleselector	slic3r-trianglemesh	2		
+dep						slic3r-triangleselector	slic3r-utils	1		
+dep						slic3r-trianglesetsampling	slic3r-point	2		
+dep						slic3r-triangulation	slic3r-expolygon	2		
+dep						slic3r-triangulation	slic3r-intersectionpoints	1		
+dep						slic3r-triangulation	slic3r-libslic3r	1		
+dep						slic3r-triangulation	slic3r-line	1		
+dep						slic3r-triangulation	slic3r-point	2		
+dep						slic3r-triangulation	slic3r-polygon	2		
+dep						slic3r-utils	slic3r-exception	1		
+dep						slic3r-utils	slic3r-format	1		
+dep						slic3r-utils	slic3r-i18n	1		
+dep						slic3r-utils	slic3r-libslic3r	2		
+dep						slic3r-utils	slic3r-macutils	1		
+dep						slic3r-utils	slic3r-platform	1		
+dep						slic3r-utils	slic3r-semver	2		
+dep						slic3r-variablewidth	slic3r-extrusionentity	2		
+dep						slic3r-variablewidth	slic3r-flow	1		
+dep						slic3r-variablewidth	slic3r-libslic3r	1		
+dep						slic3r-variablewidth	slic3r-line	1		
+dep						slic3r-variablewidth	slic3r-point	1		
+dep						slic3r-variablewidth	slic3r-polyline	2		
+edge						ArcFitter	Polyline	1	ArcFitter.cpp	Polyline.hpp
+edge						BeltBrim	Print	1	BeltBrim.cpp	Print.hpp
+edge						BeltBrim	Support/	1	BeltBrim.cpp	Support/BeltFloorContext.hpp
+edge						BeltGCode	GCode	2	BeltGCode.cpp	GCode/BeltKinematics.hpp
+edge						BeltGCode	Print	2	BeltGCode.cpp	Print.hpp
+edge						BeltTransform	GCode	1	BeltTransform.cpp	GCode/MachineFrameTransform.hpp
+edge						BeltTransform	Model	1	BeltTransform.cpp	Model.hpp
+edge						BoundingBox	Polygon	2	BoundingBox.cpp	Polygon.hpp
+edge						Brim	Print	1	Brim.cpp	Print.hpp
+edge						Brim	Support/	1	Brim.cpp	Support/SupportCommon.hpp
+edge						BuildVolume	GCode	1	BuildVolume.cpp	GCode/GCodeProcessor.hpp
+edge						BuildVolume	Geometry/	3	BuildVolume.cpp	Geometry/Circle.hpp
+edge						ClipperUtils	SVG	1	ClipperUtils.cpp	SVG.hpp
+edge						Config	PrintConfig	1	Config.cpp	PrintConfig.hpp
+edge						ExPolygon	ClipperUtils	1	ExPolygon.cpp	ClipperUtils.hpp
+edge						ExPolygon	Geometry/	1	ExPolygon.cpp	Geometry/MedialAxis.hpp
+edge						ExPolygonCollection	Geometry/	1	ExPolygonCollection.cpp	Geometry/ConvexHull.hpp
+edge						ExclusionVolumeGeometry	Print	1	ExclusionVolumeGeometry.cpp	Print.hpp
+edge						Extruder	GCodeWriter	1	Extruder.cpp	GCodeWriter.hpp
+edge						ExtrusionEntity	ClipperUtils	1	ExtrusionEntity.cpp	ClipperUtils.hpp
+edge						ExtrusionEntity	ExPolygon	1	ExtrusionEntity.cpp	ExPolygon.hpp
+edge						ExtrusionEntityCollection	ExtrusionEntity	2	ExtrusionEntityCollection.cpp	ExtrusionEntity.hpp
+edge						ExtrusionEntityCollection	ShortestPath	1	ExtrusionEntityCollection.cpp	ShortestPath.hpp
+edge						Feature/FuzzySkin/	PerimeterGenerator	1	Feature/FuzzySkin/FuzzySkin.cpp	PerimeterGenerator.hpp
+edge						Feature/FuzzySkin/	Print	1	Feature/FuzzySkin/FuzzySkin.cpp	Print.hpp
+edge						FilamentGroup	GCode	2	FilamentGroup.cpp	GCode/ToolOrderUtils.hpp
+edge						FilamentMixer	ColorDecomposeRecipe	1	FilamentMixer.cpp	ColorDecomposeRecipe.hpp
+edge						Fill/Lightning/	Fill/	1	Fill/Lightning/DistanceField.cpp	Fill/FillRectilinear.hpp
+edge						Flow	ExtrusionEntity	1	Flow.hpp	ExtrusionEntity.hpp
+edge						Flow	Print	1	Flow.cpp	Print.hpp
+edge						GCodeWriter	GCode	2	GCodeWriter.cpp	GCode/GCodeProcessor.hpp
+edge						GCodeWriter	Geometry/	1	GCodeWriter.cpp	Geometry/ArcWelder.hpp
+edge						Geometry	ClipperUtils	1	Geometry.cpp	ClipperUtils.hpp
+edge						Geometry	ExPolygon	1	Geometry.hpp	ExPolygon.hpp
+edge						Layer	Print	1	Layer.cpp	Print.hpp
+edge						Line	Geometry	1	Line.cpp	Geometry.hpp
+edge						MeshSplitImpl	TriangleMesh	1	MeshSplitImpl.hpp	TriangleMesh.hpp
+edge						Model	Geometry/	1	Model.cpp	Geometry/ConvexHull.hpp
+edge						MultiMaterialSegmentation	Geometry/	4	MultiMaterialSegmentation.cpp	Geometry/Voronoi.hpp
+edge						MultiMaterialSegmentation	Layer	1	MultiMaterialSegmentation.cpp	Layer.hpp
+edge						MultiMaterialSegmentation	Model	1	MultiMaterialSegmentation.cpp	Model.hpp
+edge						MultiMaterialSegmentation	Print	1	MultiMaterialSegmentation.cpp	Print.hpp
+edge						PerimeterGenerator	Arachne/	1	PerimeterGenerator.cpp	Arachne/WallToolPaths.hpp
+edge						PerimeterGenerator	Geometry/	1	PerimeterGenerator.cpp	Geometry/ConvexHull.hpp
+edge						Point	BoundingBox	1	Point.cpp	BoundingBox.hpp
+edge						Point	Line	1	Point.cpp	Line.hpp
+edge						Point	MultiPoint	1	Point.cpp	MultiPoint.hpp
+edge						Point	Polyline	1	Point.cpp	Polyline.hpp
+edge						Polygon	ClipperUtils	1	Polygon.cpp	ClipperUtils.hpp
+edge						Polygon	Polyline	2	Polygon.cpp	Polyline.hpp
+edge						Print	Fill/	4	Print.hpp	Fill/AdaptiveInfillField.hpp
+edge						Print	GCode	13	Print.cpp	GCode.hpp
+edge						PrintConfig	BeltTransform	1	PrintConfig.cpp	BeltTransform.hpp
+edge						PrintConfig	ClipperUtils	1	PrintConfig.cpp	ClipperUtils.hpp
+edge						PrintConfig	GCode	1	PrintConfig.cpp	GCode/Thumbnails.hpp
+edge						PrintConfig	Geometry	1	PrintConfig.cpp	Geometry.hpp
+edge						ShortestPath	GCode	1	ShortestPath.cpp	GCode/OrderingStrategies.hpp
+edge						ShortestPath	MultiMaterialSegmentation	1	ShortestPath.cpp	MultiMaterialSegmentation.hpp
+edge						ShortestPath	Print	1	ShortestPath.cpp	Print.hpp
+edge						Slicing	Model	1	Slicing.cpp	Model.hpp
+edge						Slicing	PrintConfig	1	Slicing.cpp	PrintConfig.hpp
+edge						Slicing	SVG	1	Slicing.cpp	SVG.hpp
+edge						SlicingAdaptive	Model	1	SlicingAdaptive.cpp	Model.hpp
+edge						SlicingAdaptive	Slicing	1	SlicingAdaptive.hpp	Slicing.hpp
+edge						SlicingAdaptive	TriangleMesh	1	SlicingAdaptive.cpp	TriangleMesh.hpp
+edge						Support/	Fill/	4	Support/SupportCommon.cpp	Fill/FillBase.hpp
+edge						Support/	GCode	1	Support/SupportSpotsGenerator.cpp	GCode/ExtrusionProcessor.hpp
+edge						Surface	SVG	1	Surface.cpp	SVG.hpp
+edge						TriangleMesh	ClipperUtils	1	TriangleMesh.cpp	ClipperUtils.hpp
+edge						TriangleMesh	Geometry/	1	TriangleMesh.cpp	Geometry/ConvexHull.hpp
+edge						TriangleMesh	Model	1	TriangleMesh.hpp	Format/STL.hpp
+edge						TriangleMeshSlicer	ClipperUtils	1	TriangleMeshSlicer.cpp	ClipperUtils.hpp
+edge						TriangleMeshSlicer	SVG	1	TriangleMeshSlicer.cpp	SVG.hpp
+edge						TriangleMeshSlicer	TriangleMesh	1	TriangleMeshSlicer.cpp	TriangleMesh.hpp
+edge						calib	GCode	3	calib.cpp	GCode.hpp
+edge						calib	Model	1	calib.cpp	Model.hpp
