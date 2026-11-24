@@ -1,0 +1,3 @@
+path	target crate	target module	equality tier
+Geometry/Circle.cpp	slic3r-circle	crates/slic3r-circle/src/circle.rs	exact
+Geometry/Circle.hpp	slic3r-circle	crates/slic3r-circle/src/circle.rs	exact

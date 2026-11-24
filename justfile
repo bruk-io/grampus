@@ -60,6 +60,11 @@ config-goldens:
 config-block-diff golden gcode:
     ./port/config-block-diff {{golden}} {{gcode}}
 
+# check every ported module's PORT STATUS trailer and port markers (R14, R15, R16 part);
+# variadic so `just port-status --per-commit` and the later `--pr-body <file>` (36-pr-body-check)
+# both reach it without this recipe being rewritten (task 21-port-status-markers)
+port-status *args:
+    ./port/port-status {{args}}
 # regenerate port/reports/order-containers.md and port/reports/order-comparators.md (R18, step
 # 13 part 1, task 17-order-audits): every unordered container that is iterated rather than only
 # looked up, and every comparator that is not a total order, over the manifest's in-scope rows,

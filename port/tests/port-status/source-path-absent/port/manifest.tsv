@@ -1,0 +1,2 @@
+path	target crate	target module	equality tier
+Geometry/NoSuchFile.cpp	slic3r-circle	crates/slic3r-circle/src/circle.rs	exact
