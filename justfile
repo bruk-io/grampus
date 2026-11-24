@@ -38,3 +38,19 @@ fixture-export *NAMES:
 # spelling for the same call
 assert-placement fixture run_dir:
     ./oracle/assert-placement {{fixture}} {{run_dir}}
+
+# regenerate every resolved-configuration golden under port/goldens/configs/ (R11): one per row
+# of docs/ORACLE.md's configuration table, each sliced through oracle-slice and carrying its
+# provenance header via port/merge-provenance; a row added there must be added here too.
+# oracle/.cache/config-goldens/ accumulates one scratch directory per invocation (git-ignored,
+# left behind for inspection) and nothing prunes it; safe to delete by hand.
+config-goldens:
+    ./port/merge-provenance frog_legs.stl base-fff port/goldens/configs/base-fff.json
+    ./port/merge-provenance frog_legs.stl tree-support port/goldens/configs/tree-support.json
+    ./port/merge-provenance frog_legs.stl wipe-tower-multi-filament port/goldens/configs/wipe-tower-multi-filament.json
+    ./port/merge-provenance frog_legs.stl fuzzy-skin port/goldens/configs/fuzzy-skin.json
+
+# print the keys a resolved-configuration golden's JSON carries that <gcode>'s G-code
+# CONFIG_BLOCK does not, and the keys the config block carries that the JSON does not (R11)
+config-block-diff golden gcode:
+    ./port/config-block-diff {{golden}} {{gcode}}
