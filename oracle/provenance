@@ -32,7 +32,7 @@ matching ``port/dumps/*/*.dump``; and the two reports an oracle run writes,
 ``just`` recipe and no CI step of its own; wiring ``--check`` into ``just port-check``
 belongs to a later task.
 
-This script never runs the oracle binary and never invokes ``oracle/run`` — it only reads
+This script never runs the oracle binary and never invokes ``oracle/slice`` — it only reads
 ``docs/ORACLE.md``, a README and the vendored tree's own files.
 """
 
@@ -90,7 +90,7 @@ class ProvenanceError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Small markdown-table helpers (deliberately duplicated from oracle/run's table reader
+# Small markdown-table helpers (deliberately duplicated from oracle/slice's table reader
 # rather than imported from it: these are standalone uv scripts, and this task touches no
 # other script's file).
 # ---------------------------------------------------------------------------
@@ -171,12 +171,28 @@ def commit_matches(measured: str) -> bool:
     return measured == PINNED_COMMIT
 
 
+def run_tool(cmd: list[str]) -> str:
+    """Run `cmd` and return its stdout, raising ProvenanceError rather than a traceback.
+
+    Printing mode is macOS-only by design (task.md requires ``sw_vers`` for item 3, and
+    R7/R23 pin macOS arm64) — this does not make the script more portable, only honest
+    about a missing tool (no ``clang`` on the PATH, say) the same way every other failure
+    here is honest: ``error: ...`` on stderr and a non-zero exit, never a Python
+    traceback. Checking mode calls none of this and is unaffected.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    except OSError as exc:
+        raise ProvenanceError(f"{cmd[0]}: {exc}") from exc
+    if result.returncode != 0:
+        raise ProvenanceError(f"{' '.join(cmd)} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
 def read_os() -> str:
     """Read the OS name and version from sw_vers."""
-    result = subprocess.run(["sw_vers"], capture_output=True, text=True, check=True)
-    fields = dict(
-        line.split(":", 1) for line in result.stdout.splitlines() if ":" in line
-    )
+    stdout = run_tool(["sw_vers"])
+    fields = dict(line.split(":", 1) for line in stdout.splitlines() if ":" in line)
     name = fields.get("ProductName", "").strip()
     version = fields.get("ProductVersion", "").strip()
     return f"{name} {version}".strip()
@@ -184,14 +200,12 @@ def read_os() -> str:
 
 def read_arch() -> str:
     """Read the machine architecture from uname -m."""
-    result = subprocess.run(["uname", "-m"], capture_output=True, text=True, check=True)
-    return result.stdout.strip()
+    return run_tool(["uname", "-m"]).strip()
 
 
 def read_compiler() -> str:
     """Read the compiler's own version line from clang --version."""
-    result = subprocess.run(["clang", "--version"], capture_output=True, text=True, check=True)
-    return result.stdout.splitlines()[0].strip()
+    return run_tool(["clang", "--version"]).splitlines()[0].strip()
 
 
 def read_scaling_factor() -> str:
@@ -225,7 +239,7 @@ def read_built_oracle_flags() -> str | None:
     if not ORACLE_DOC.is_file():
         raise ProvenanceError(f"{ORACLE_DOC} does not exist")
     lines = ORACLE_DOC.read_text().splitlines()
-    heading_re = re.compile(r"^#{1,6}\s*Built[- ]oracle flags\s*$", re.IGNORECASE)
+    heading_re = re.compile(r"^#{1,6}\s*Built[- ]oracle flags\b", re.IGNORECASE)
     for i, line in enumerate(lines):
         if heading_re.match(line.strip()):
             body = []
@@ -279,12 +293,43 @@ def read_fixture_record(fixture: str, readme_path: Path) -> dict[str, str]:
     raise ProvenanceError(f"no fixture record named {fixture!r} in {readme_path} (known: {known})")
 
 
+REQUIRED_PRESET_COLUMNS = ("Machine", "Process", "Filament(s)")
+
+
+def format_multi_cell(cell: str) -> str:
+    """Split a ``;``-separated cell into parts, stripping each one, then rejoin with "; ".
+
+    Mirrors ``oracle/slice``'s ``parse_overrides``/``parse_filaments``, which split a
+    multi-value cell *before* calling ``strip_cell`` on each part. ``strip_cell`` alone
+    only drops a single outer pair of backticks, so a cell holding more than one
+    backtick-quoted value (for example two filaments) would otherwise come out with the
+    delimiting backticks left in the middle.
+    """
+    parts = [strip_cell(part) for part in cell.split(";")]
+    parts = [part for part in parts if part]
+    return "; ".join(parts)
+
+
 def build_preset_set_item(row: dict[str, str]) -> str:
-    """Format item 7 (full preset set and overrides) from a configuration row."""
-    machine = strip_cell(row.get("Machine", "")) or "(none)"
-    process = strip_cell(row.get("Process", "")) or "(none)"
-    filaments = strip_cell(row.get("Filament(s)", "")) or "(none)"
-    overrides = strip_cell(row.get("Overrides", "")) or "(none)"
+    """Format item 7 (full preset set and overrides) from a configuration row.
+
+    Raises when ``Machine``, ``Process`` or ``Filament(s)`` is not a column of `row` at
+    all, rather than silently recording ``(none)`` for a renamed or dropped column: those
+    three are never legitimately absent (every configuration names a machine, a process
+    and at least one filament), unlike ``Overrides``, for which ``(none)`` is a real
+    value. Without this, a reworded `docs/ORACLE.md` table would make this item record a
+    false preset set with exit 0, baked into whatever golden or dump calls this script.
+    """
+    for name in REQUIRED_PRESET_COLUMNS:
+        if name not in row:
+            raise ProvenanceError(
+                f"configuration row has no {name!r} column "
+                f"(docs/ORACLE.md's configuration table may have been reworded)"
+            )
+    machine = format_multi_cell(row["Machine"]) or "(none)"
+    process = format_multi_cell(row["Process"]) or "(none)"
+    filaments = format_multi_cell(row["Filament(s)"]) or "(none)"
+    overrides = format_multi_cell(row.get("Overrides", "")) or "(none)"
     return f"machine={machine}; process={process}; filaments={filaments}; overrides={overrides}"
 
 
@@ -339,14 +384,29 @@ def expand_arg(arg: str, invocation_cwd: Path) -> tuple[list[str], list[Path]]:
     looking at the filesystem at all: being "pointed at" one of them is what task.md fails
     on, not finding a stale copy there, so a name that does not currently exist on disk is
     still named as a failure rather than silently passed. Once that check is past: a glob
-    (any of * ? [) is expanded with Path.glob relative to invocation_cwd, matching nothing
-    if nothing matches; a directory is walked recursively; a file is returned as itself; a
-    plain path that is none of those — most commonly port/goldens/ itself before
-    12-config-goldens exists — contributes no files, which is not a failure, only an empty
-    "covered, matched nothing" later.
+    (any of * ? [) is expanded relative to invocation_cwd, matching nothing if nothing
+    matches; a directory is walked recursively, skipping dotfiles (a `.gitkeep` or
+    `.DS_Store` left under `port/goldens/` is not a golden, and classifying it as a covered
+    file with "no provenance header found" would fail `just port-check` on every checkout
+    once such a path exists); a file is returned as itself; a plain path that is none of
+    those — most commonly port/goldens/ itself before 12-config-goldens exists —
+    contributes no files, which is not a failure, only an empty "covered, matched nothing"
+    later.
     """
     if any(ch in arg for ch in "*?["):
-        matches = sorted(invocation_cwd.glob(arg))
+        pattern_path = Path(arg)
+        if pattern_path.is_absolute():
+            # Path.glob itself only accepts a relative pattern and raises
+            # NotImplementedError on an absolute one — a raw Python traceback, which the
+            # ProvenanceError class above says this script never produces. Split the
+            # absolute pattern into its anchor and a relative tail so an absolute
+            # --check argument (a natural thing for a cwd-independent `just` recipe to
+            # write, e.g. {{justfile_directory()}}/port/dumps/*/*.dump) still expands.
+            anchor = pattern_path.anchor
+            tail = str(pattern_path.relative_to(anchor))
+            matches = sorted(Path(anchor).glob(tail))
+        else:
+            matches = sorted(invocation_cwd.glob(arg))
         return [], [m for m in matches if m.is_file()]
 
     literal_rel = repo_relative((invocation_cwd / arg).resolve())
@@ -355,7 +415,9 @@ def expand_arg(arg: str, invocation_cwd: Path) -> tuple[list[str], list[Path]]:
 
     path = (invocation_cwd / arg).resolve()
     if path.is_dir():
-        return [], sorted(p for p in path.rglob("*") if p.is_file())
+        return [], sorted(
+            p for p in path.rglob("*") if p.is_file() and not p.name.startswith(".")
+        )
     if path.is_file():
         return [], [path]
     return [], []
@@ -391,6 +453,32 @@ def leading_comment_block(text: str) -> str:
     return "\n".join(lines)
 
 
+def leading_table_block(text: str) -> str:
+    """Return the file's leading blank lines and its first markdown table, joined by newline.
+
+    Bounded the same way `leading_comment_block` bounds the G-code case: `format_markdown`
+    always writes this script's own header as the file's leading table, so a report that
+    quotes a *different* artifact's provenance table later in its body (the kind of report
+    28-oracle-parity writes, comparing two goldens) must never have that quoted table
+    mistaken for this file's own header.
+    """
+    lines = []
+    in_table = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            in_table = True
+            lines.append(line)
+            continue
+        if in_table:
+            break
+        if stripped == "":
+            lines.append(line)
+            continue
+        break
+    return "\n".join(lines)
+
+
 def header_commit(path: Path) -> str | None:
     """Read the recorded oracle-commit out of one file, or None if it has no header.
 
@@ -415,7 +503,9 @@ def header_commit(path: Path) -> str | None:
         value = provenance.get("oracle-commit")
         return value if isinstance(value, str) else None
     if suffix == ".md":
-        match = re.search(r"\|\s*oracle-commit\s*\|\s*`?([0-9a-fA-F]+)`?\s*\|", text)
+        match = re.search(
+            r"\|\s*oracle-commit\s*\|\s*`?([0-9a-fA-F]+)`?\s*\|", leading_table_block(text)
+        )
         return match.group(1) if match else None
     match = re.search(r"^\s*;\s*oracle-commit:\s*(\S+)", leading_comment_block(text), re.MULTILINE)
     return match.group(1) if match else None
