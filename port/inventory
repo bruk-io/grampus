@@ -6,17 +6,23 @@
 # ]
 # ///
 
-"""Regenerate port/manifest.tsv from the vendored libslic3r tree.
+"""Regenerate port/manifest.tsv and port/cut.tsv from the vendored libslic3r tree.
 
 Walk every ``.h``, ``.hpp``, ``.cpp`` and ``.mm`` file under
-``vendor/OrcaSlicer/src/libslic3r`` and write one manifest row per file, filling only the
-four columns this task owns: path, subsystem, lines and the file-level include-DAG level.
-The remaining eleven columns are later parts of plan step 11's work and are left empty here.
+``vendor/OrcaSlicer/src/libslic3r`` and write one manifest row per file: path, subsystem,
+lines, the file-level include-DAG level (task 03-manifest-file-set); in scope or out with a
+reason, and pipeline stage or none (task 06-manifest-scope); and crate-level level, target
+crate and target module (task 07-crate-cut, this task). The five judgement columns and status
+are seeded empty here and are later parts of plan step 11's and step 14's work.
 
 The row set always comes from the filesystem walk, never from
 ``src/libslic3r/CMakeLists.txt``. That build file is parsed only to cross-check that every
 file it names also has a row, because the build file itself omits files that are produced by
 other means (an orphan pass, dead code still compiled in, Apple-only sources).
+
+``port/cut.tsv`` is the named feedback-arc cut of the module graph (not the file graph, which
+is already acyclic): see the "Crate cut" section below for the module derivation, the cut
+algorithm, and the file's own schema (``CUT_HEADER``).
 """
 
 from __future__ import annotations
@@ -60,7 +66,8 @@ HEADER = [
     "file-level include-DAG level",
     "crate-level level",
     "in scope or out with a reason",
-    "target crate and module",
+    "target crate",
+    "target module",
     "pipeline stage or none",
     "template-heavy",
     "equality tier",
@@ -77,6 +84,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 LIBSLIC3R_ROOT = REPO_ROOT / "vendor/OrcaSlicer/src/libslic3r"
 CMAKELISTS = LIBSLIC3R_ROOT / "CMakeLists.txt"
 MANIFEST_PATH = REPO_ROOT / "port/manifest.tsv"
+CUT_PATH = REPO_ROOT / "port/cut.tsv"
 
 INCLUDE_RE = re.compile(r'#include\s*(?:"([^"]+)"|<([^>]+)>)')
 
@@ -1478,6 +1486,511 @@ def compute_pipeline_stages(
     return cells
 
 
+#
+# --- Crate cut (R8/R9, task 07-crate-cut) ---------------------------------------------------
+#
+# Crate boundaries are drawn over MODULES, not files and not the `subsystem` column (see
+# `compute_module_of_map`'s own docstring for why `subsystem` cannot serve this). A module is
+# either:
+#
+#   - a file directly under src/libslic3r: its module is its own same-stem unit (the `.cpp`
+#     and its same-stem `.hpp`/`.h`, or a lone header), named by that bare stem; or
+#   - a file under a subdirectory of src/libslic3r: its module is that subdirectory at its
+#     full nested path, suffixed here with a trailing "/" — "GCode/", "Fill/Lightning/",
+#     "Arachne/utils/" — so a directory module's name can never collide, as a *dict key*,
+#     with a same-named root same-stem unit (`Geometry.{cpp,hpp}` at the root and the
+#     `Geometry/` directory are two different modules at the pin; `GCode`/`GCode/` is the
+#     same split, and the one place that pair is a *merge* group rather than a naming
+#     accident — see MERGE_INTO below and the pull request body for how `Geometry/`'s crate
+#     name is disambiguated instead).
+
+# The two mutual clusters the cut cannot break cheaply (C10's decision): maps a directory
+# module onto the root same-stem unit it is merged into, before any ordering or cutting. Keyed
+# and valued by the module names `compute_module_of_map` produces (see its docstring for the
+# trailing "/" convention). If either name on either side of this mapping is not a module that
+# actually occurs in the whole-library module set, `assert_merge_modules_exist` below exits
+# non-zero naming it — which only fires if the module derivation above is changed.
+MERGE_INTO = {
+    "GCode/": "GCode",
+    "Format/": "Model",
+}
+
+
+def compute_module_of_map(relpaths: list[str]) -> dict[str, str]:
+    """Return relpath -> module, per the rule this task derives (not the `subsystem` column:
+    `subsystem` is the file's top-level subdirectory, pinned to one of fifteen names plus
+    `root`, which collapses `Print.cpp` and `GCode.cpp` into one vertex, never makes `Model`
+    a module, and cannot hold a 39-module strongly connected component — see this task's own
+    prose for the full argument).
+
+    A file under a subdirectory of src/libslic3r belongs to the module named by that
+    subdirectory at its full nested path, with a trailing "/" so this string can never be
+    confused, as a dict key, with a root same-stem unit of the same spelling. A file directly
+    under src/libslic3r belongs to its own same-stem unit, named by its bare stem (no
+    extension): the `.cpp` and its same-stem `.hpp`/`.h` share this name.
+
+    That pairing is resolved case-insensitively, via `same_stem_cpp`'s own casefold index —
+    exactly the convention pass 2 of scope already uses, and for the same reason: at the pin,
+    `utils.cpp` and `Utils.hpp` are two tracked files whose stems differ only by case, and
+    `same_stem_cpp`'s own docstring is explicit that they are "the same translation unit's
+    pair on this filesystem regardless of case". A header resolved to a `.cpp` sibling this
+    way takes the sibling's own stem (its canonical spelling) as the module name, so `Utils.hpp`
+    is in the same module as `utils.cpp`, not a one-file module of its own — the one case where
+    getting this wrong would silently crown a 165th root module from a single existing pair.
+    A lone header (no sibling, case-insensitively) takes its own stem.
+    """
+    tracked = set(relpaths)
+    casefold_index = build_casefold_index(tracked)
+    modules: dict[str, str] = {}
+    for relpath in relpaths:
+        if "/" in relpath:
+            modules[relpath] = posixpath.dirname(relpath) + "/"
+            continue
+        if relpath.endswith((".h", ".hpp")):
+            sib = same_stem_cpp(relpath, casefold_index)
+            if sib is not None:
+                stem, _, _ = sib.rpartition(".")
+                modules[relpath] = stem
+                continue
+        stem, _, _ = relpath.rpartition(".")
+        modules[relpath] = stem
+    return modules
+
+
+def assert_merge_modules_exist(all_modules: set[str]) -> None:
+    """Exit non-zero naming any MERGE_INTO module absent from the whole-library module set."""
+    named = set(MERGE_INTO) | set(MERGE_INTO.values())
+    missing = named - all_modules
+    if missing:
+        raise SystemExit(
+            f"inventory: the merge group names {sorted(missing)} are not modules the "
+            "derivation above produces; MERGE_INTO must name real modules"
+        )
+
+
+def canonical_module(module: str) -> str:
+    """Return module's canonical (post-merge) vertex name: itself, unless MERGE_INTO folds
+    it into another module's vertex."""
+    return MERGE_INTO.get(module, module)
+
+
+# Splits a camel/Pascal-case identifier into snake_case, treating a run of capitals followed
+# by a lowercase tail as one "word" boundary (`AABBTreeIndirect` -> `aabb_tree_indirect`,
+# `GCodeProcessor` -> `g_code_processor`). This is the one place this task states its own
+# snake_case rule, since neither the spec nor the task names one; printed examples of it
+# appear in this run's own output and in the pull request body.
+_SNAKE_CASE_WORD_RE = re.compile(r"(.)([A-Z][a-z]+)")
+_SNAKE_CASE_BOUNDARY_RE = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def to_snake_case(name: str) -> str:
+    """Return name (a file stem or directory name, with no extension) in snake_case."""
+    step1 = _SNAKE_CASE_WORD_RE.sub(r"\1_\2", name)
+    step2 = _SNAKE_CASE_BOUNDARY_RE.sub(r"\1_\2", step1)
+    return re.sub(r"[^A-Za-z0-9]+", "_", step2).lower().strip("_")
+
+
+_CRATE_NAME_COLLAPSE_RE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def generic_crate_name(module: str) -> str:
+    """Apply R8's target-crate rule to a bare module name: `slic3r-<module, lowercased with
+    every run of non-alphanumeric characters replaced by a hyphen>`. The module's own trailing
+    "/" (a directory module) is stripped first, since the rule's "module" is the name a reader
+    writes, not this script's internal dict key."""
+    bare = module.rstrip("/")
+    return "slic3r-" + _CRATE_NAME_COLLAPSE_RE.sub("-", bare).lower()
+
+
+def assign_crate_names(vertices: set[str]) -> tuple[dict[str, str], list[str]]:
+    """Return (vertex -> crate name, printable collision report) for the merged, in-scope
+    module vertices in `vertices`.
+
+    The two merge-group vertices get C10's stated override names directly. Every other vertex
+    gets the generic rule's name, *unless* two or more non-merge-group vertices' generic names
+    collide — which happens once at the pin: the root same-stem unit `Geometry` and the
+    directory module `Geometry/` both produce `slic3r-geometry`. The task states a
+    disambiguation rule for a *target module* path collision inside one crate, but not for this
+    — a crate NAME collision between two otherwise-unrelated modules — so this is this script's
+    own, analogous, deterministic choice: the root same-stem unit keeps the plain name, and each
+    colliding directory module's name takes a `-dir` suffix (de-duplicated with a numeral if more
+    than one directory module collides with the same name). It is reported here, not asserted
+    silently, because it is exactly this task's own prose about `port/cut.tsv`'s five downstream
+    consumers: a reader of this pull request must be able to see every crate name's origin."""
+    crate_name_of: dict[str, str] = {}
+    report: list[str] = []
+    for v in sorted(vertices):
+        if v == "GCode":
+            crate_name_of[v] = "slic3r-gcode"
+        elif v == "Model":
+            crate_name_of[v] = "slic3r-model"
+
+    ordinary = sorted(v for v in vertices if v not in crate_name_of)
+    by_generic: dict[str, list[str]] = {}
+    for v in ordinary:
+        by_generic.setdefault(generic_crate_name(v), []).append(v)
+
+    for generic, members in sorted(by_generic.items()):
+        if len(members) == 1:
+            crate_name_of[members[0]] = generic
+            continue
+        # Deterministic: a root same-stem unit (no trailing "/") keeps the plain name; each
+        # directory module (trailing "/") takes a "-dir" suffix, de-duplicated if needed.
+        ordered = sorted(members, key=lambda m: (m.endswith("/"), m))
+        taken: set[str] = set(crate_name_of.values())
+        for i, member in enumerate(ordered):
+            if i == 0 and not member.endswith("/"):
+                crate_name_of[member] = generic
+                taken.add(generic)
+                continue
+            candidate = generic + "-dir"
+            n = 2
+            while candidate in taken:
+                candidate = f"{generic}-dir{n}"
+                n += 1
+            crate_name_of[member] = candidate
+            taken.add(candidate)
+        report.append(
+            f"crate name collision: {ordered} all normalize to {generic!r} by the generic "
+            f"rule; disambiguated to {[crate_name_of[m] for m in ordered]}"
+        )
+
+    values = list(crate_name_of.values())
+    if len(values) != len(set(values)):
+        raise SystemExit(
+            f"inventory: two module vertices still share one crate name after "
+            f"disambiguation: {crate_name_of}"
+        )
+    return crate_name_of, report
+
+
+def build_module_reference_edges(
+    file_set: list[str],
+    graph: dict[str, set[str]],
+    module_of_file: dict[str, str],
+    canonicalize: bool,
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Roll the file-level include graph up to module level, restricted to `file_set` (both
+    endpoints of an edge must be in it), weighting each module edge with the include
+    references (file, header) pairs it carries. Self-edges — a file including another file of
+    its own module, or, when `canonicalize` is set, two merged modules including each other —
+    are dropped, per this task's own rule."""
+    allowed = set(file_set)
+    edges: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for file in file_set:
+        src = module_of_file[file]
+        if canonicalize:
+            src = canonical_module(src)
+        for header in graph.get(file, ()):
+            if header not in allowed:
+                continue
+            dst = module_of_file[header]
+            if canonicalize:
+                dst = canonical_module(dst)
+            if src == dst:
+                continue
+            edges.setdefault((src, dst), []).append((file, header))
+    return edges
+
+
+def greedy_fas_order(vertices: list[str], weight: dict[tuple[str, str], int]) -> list[str]:
+    """Return a deterministic linear order over vertices by the weighted Eades-Lin-Smyth
+    greedy feedback-arc-set heuristic: repeatedly strip every current sink to the end of the
+    order and every current source to its start, and when neither remains, move the vertex
+    maximizing (weighted out-degree - weighted in-degree) to the start. Every tie — which
+    sinks or sources to remove in one pass, which vertex maximizes the degree difference — is
+    broken by vertex name ascending, so the whole order is a total, reproducible function of
+    `vertices` and `weight` alone."""
+    out_w: dict[str, dict[str, int]] = {v: {} for v in vertices}
+    in_w: dict[str, dict[str, int]] = {v: {} for v in vertices}
+    for (u, v), w in weight.items():
+        out_w[u][v] = out_w[u].get(v, 0) + w
+        in_w[v][u] = in_w[v].get(u, 0) + w
+
+    remaining = set(vertices)
+    prefix: list[str] = []
+    suffix: list[str] = []
+
+    def out_degree(v: str) -> int:
+        return sum(w for t, w in out_w[v].items() if t in remaining)
+
+    def in_degree(v: str) -> int:
+        return sum(w for t, w in in_w[v].items() if t in remaining)
+
+    while remaining:
+        shrank = True
+        while shrank:
+            shrank = False
+            for v in sorted(x for x in remaining if out_degree(x) == 0):
+                suffix.insert(0, v)
+                remaining.discard(v)
+                shrank = True
+            if not remaining:
+                break
+            for v in sorted(x for x in remaining if in_degree(x) == 0):
+                prefix.append(v)
+                remaining.discard(v)
+                shrank = True
+        if not remaining:
+            break
+        best = min(remaining, key=lambda v: (-(out_degree(v) - in_degree(v)), v))
+        prefix.append(best)
+        remaining.discard(best)
+
+    return prefix + suffix
+
+
+def compute_crate_levels(vertices: set[str], retained: dict[tuple[str, str], int]) -> dict[str, int]:
+    """Return each vertex's crate-level level: 0 if it has no retained (uncut) outgoing
+    dependency edge, else 1 + the greatest level among the crates it depends on. `retained`
+    must already be acyclic (asserted by the caller before this runs)."""
+    deps: dict[str, set[str]] = {v: set() for v in vertices}
+    for (src, dst) in retained:
+        deps[src].add(dst)
+    levels: dict[str, int] = {}
+
+    def level_of(v: str) -> int:
+        if v in levels:
+            return levels[v]
+        levels[v] = 0  # placeholder; retained is proven acyclic before this runs
+        value = 1 + max((level_of(d) for d in deps[v]), default=-1)
+        levels[v] = value
+        return value
+
+    for v in vertices:
+        level_of(v)
+    return levels
+
+
+def compute_crate_cut(
+    relpaths: list[str],
+    graph: dict[str, set[str]],
+    in_scope_map: dict[str, bool],
+    lines_by_path: dict[str, int],
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], list[list[str]]]:
+    """Compute the crate cut (R8/R9, task 07-crate-cut): each in-scope row's `crate-level
+    level`, `target crate` and `target module` manifest cells, and every row of `port/cut.tsv`.
+
+    Returns (crate_level_cells, target_crate_cells, target_module_cells, cut_rows), each cell
+    dict keyed by relpath and populated only for in-scope rows (an out-of-scope row's three
+    cells are left for the caller to default to empty)."""
+    module_of_file = compute_module_of_map(relpaths)
+    all_modules = set(module_of_file.values())
+    assert_merge_modules_exist(all_modules)
+
+    # --- Measure before cutting anything: the whole-library module graph, unmerged, every
+    # row — reported beside the spec's 43 modules, 5 components, 39-module/321,722-line
+    # component and 2,696 references, never asserted against them (this task's derivation is
+    # coarser by construction; see the task's own prose for why).
+    whole_edges = build_module_reference_edges(relpaths, graph, module_of_file, canonicalize=False)
+    whole_adjacency: dict[str, set[str]] = {m: set() for m in all_modules}
+    for (src, dst) in whole_edges:
+        whole_adjacency[src].add(dst)
+    whole_components = tarjan_scc(whole_adjacency)
+    module_lines: dict[str, int] = {m: 0 for m in all_modules}
+    for p in relpaths:
+        module_lines[module_of_file[p]] += lines_by_path[p]
+    largest = max(whole_components, key=len)
+    largest_lines = sum(module_lines[m] for m in largest)
+    whole_refs = sum(len(v) for v in whole_edges.values())
+    print(
+        f"inventory: whole-library module graph (measured, not asserted): {len(all_modules)} "
+        f"modules, {len(whole_components)} strongly connected components, the largest holding "
+        f"{len(largest)} modules and {largest_lines} lines, {len(whole_edges)} module edges "
+        f"carrying {whole_refs} include references"
+    )
+
+    # --- The cut: in-scope rows only, the two merge groups applied before any ordering.
+    in_scope_relpaths = [p for p in relpaths if in_scope_map.get(p, False)]
+    raw_edges = build_module_reference_edges(
+        in_scope_relpaths, graph, module_of_file, canonicalize=False
+    )
+    merged_edges: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for (src, dst), refs in raw_edges.items():
+        csrc, cdst = canonical_module(src), canonical_module(dst)
+        if csrc == cdst:
+            continue
+        merged_edges.setdefault((csrc, cdst), []).extend(refs)
+    vertices = {canonical_module(module_of_file[p]) for p in in_scope_relpaths}
+    weight = {k: len(v) for k, v in merged_edges.items()}
+
+    order = greedy_fas_order(sorted(vertices), weight)
+    position = {v: i for i, v in enumerate(order)}
+    retained = {k: w for k, w in weight.items() if position[k[0]] < position[k[1]]}
+    cut = {k: v for k, v in merged_edges.items() if position[k[0]] > position[k[1]]}
+    print(
+        f"inventory: in-scope crate cut: {len(vertices)} crates, {len(retained)} retained "
+        f"dependency edges, {len(cut)} cut edges carrying "
+        f"{sum(len(v) for v in cut.values())} of {sum(len(v) for v in merged_edges.values())} "
+        "in-scope include references"
+    )
+
+    retained_adjacency: dict[str, set[str]] = {v: set() for v in vertices}
+    for (src, dst) in retained:
+        retained_adjacency[src].add(dst)
+    bad = non_trivial_components(retained_adjacency)
+    if bad:
+        raise SystemExit(
+            f"inventory: the crate graph still has a non-trivial strongly connected component "
+            f"after the cut: {bad[0]}; the greedy feedback-arc-set ordering did not make it "
+            "acyclic"
+        )
+    print(
+        "inventory: no non-trivial strongly connected component exists over the crate "
+        "dependency graph after the cut (the module graph is acyclic at crate granularity)"
+    )
+
+    # Each merge group lies wholly inside one crate: the merged-away directory name ("GCode/",
+    # "Format/") must never itself survive as a vertex of the cut or retained graph — every
+    # edge that once touched it was re-keyed onto its group's canonical name
+    # (build_module_reference_edges's `canonicalize=True`-equivalent folding, done inline
+    # above) before ordering or cutting ever ran, so no edge — cut or retained — can have an
+    # endpoint naming "GCode/" or "Format/", and therefore none can run inside either group.
+    merged_away = {"GCode/", "Format/"}
+    stray = merged_away & (vertices | {s for e in (retained, cut) for pair in e for s in pair})
+    if stray:
+        raise SystemExit(
+            f"inventory: {sorted(stray)} survived the merge as its own vertex; the merge "
+            "did not keep its group inside one crate"
+        )
+    print(
+        "inventory: both merge groups ({'GCode', 'GCode/'} and {'Model', 'Format/'}) lie "
+        "wholly inside one crate each — neither 'GCode/' nor 'Format/' survives the merge as "
+        "a vertex of the cut or retained graph, so no edge can run inside either group"
+    )
+
+    crate_name_of, collision_report = assign_crate_names(vertices)
+    for line in collision_report:
+        print(f"inventory: {line}")
+    if not collision_report:
+        print("inventory: no crate name collision needed disambiguation")
+
+    levels = compute_crate_levels(vertices, retained)
+
+    modules_held: dict[str, set[str]] = {c: set() for c in crate_name_of.values()}
+    files_held: dict[str, list[str]] = {c: [] for c in crate_name_of.values()}
+    for p in in_scope_relpaths:
+        crate = crate_name_of[canonical_module(module_of_file[p])]
+        modules_held[crate].add(module_of_file[p])
+        files_held[crate].append(p)
+
+    # --- target module: the unit (a .cpp plus its same-stem in-scope .hpp/.h, or a lone
+    # in-scope header) shares one Rust module path. Two in-scope files whose stems collide
+    # inside one crate would otherwise share one path; disambiguated by prefixing the
+    # colliding unit's own parent directory, snake_cased, and printed either way.
+    tracked = set(relpaths)
+    casefold_index = build_casefold_index(tracked)
+    headers = {p for p in relpaths if p.endswith((".h", ".hpp"))}
+
+    def unit_identity(relpath: str) -> str:
+        if relpath in headers:
+            sib = same_stem_cpp(relpath, casefold_index)
+            if sib is not None and in_scope_map.get(sib, False):
+                relpath = sib
+        stem, _, _ = relpath.rpartition(".")
+        return stem
+
+    groups: dict[tuple[str, str], set[str]] = {}
+    for p in in_scope_relpaths:
+        crate = crate_name_of[canonical_module(module_of_file[p])]
+        identity = unit_identity(p)
+        stem = posixpath.basename(identity)
+        path_key = f"crates/{crate}/src/{to_snake_case(stem)}.rs"
+        groups.setdefault((crate, path_key), set()).add(identity)
+
+    target_module_of_identity: dict[str, str] = {}
+    disambiguated: list[str] = []
+    for (crate, path_key), identities in groups.items():
+        if len(identities) == 1:
+            target_module_of_identity[next(iter(identities))] = path_key
+            continue
+        ordered = sorted(identities, key=lambda i: ("/" not in i, i))
+        for i, identity in enumerate(ordered):
+            parent = posixpath.dirname(identity)
+            stem = posixpath.basename(identity)
+            if i == 0 and parent == "":
+                target_module_of_identity[identity] = path_key
+                continue
+            prefix = to_snake_case(parent) if parent else "root"
+            target_module_of_identity[identity] = (
+                f"crates/{crate}/src/{prefix}_{to_snake_case(stem)}.rs"
+            )
+        disambiguated.append(
+            f"{sorted(identities)} all map to {path_key!r}; disambiguated to "
+            f"{[target_module_of_identity[i] for i in ordered]}"
+        )
+
+    for line in disambiguated:
+        print(f"inventory: target module collision: {line}")
+    if not disambiguated:
+        print("inventory: no target module path needed disambiguation")
+
+    crate_level_cells: dict[str, str] = {}
+    target_crate_cells: dict[str, str] = {}
+    target_module_cells: dict[str, str] = {}
+    for p in in_scope_relpaths:
+        crate = crate_name_of[canonical_module(module_of_file[p])]
+        crate_level_cells[p] = str(levels[canonical_module(module_of_file[p])])
+        target_crate_cells[p] = crate
+        target_module_cells[p] = target_module_of_identity[unit_identity(p)]
+
+    # --- port/cut.tsv rows, sorted so re-running is byte-identical.
+    cut_rows: list[list[str]] = []
+    for crate in crate_name_of.values():
+        vertex = next(v for v, c in crate_name_of.items() if c == crate)
+        cut_rows.append(
+            [
+                "crate",
+                crate,
+                str(levels[vertex]),
+                ", ".join(sorted(modules_held[crate])),
+                str(len(files_held[crate])),
+                str(sum(lines_by_path[p] for p in files_held[crate])),
+                "", "", "", "", "",
+            ]
+        )
+    for (src, dst), w in retained.items():
+        cut_rows.append(
+            ["dep", "", "", "", "", "", crate_name_of[src], crate_name_of[dst], str(w), "", ""]
+        )
+    for (src, dst), refs in cut.items():
+        file, header = min(refs)
+        cut_rows.append(
+            ["edge", "", "", "", "", "", src, dst, str(len(refs)), file, header]
+        )
+
+    def crate_sort_key(row: list[str]) -> tuple:
+        return (int(row[2]), row[1])
+
+    def dep_sort_key(row: list[str]) -> tuple:
+        return (row[6], row[7])
+
+    def edge_sort_key(row: list[str]) -> tuple:
+        return (row[6], row[7], row[9])
+
+    crate_rows = sorted((r for r in cut_rows if r[0] == "crate"), key=crate_sort_key)
+    dep_rows = sorted((r for r in cut_rows if r[0] == "dep"), key=dep_sort_key)
+    edge_rows = sorted((r for r in cut_rows if r[0] == "edge"), key=edge_sort_key)
+    cut_rows = crate_rows + dep_rows + edge_rows
+
+    return crate_level_cells, target_crate_cells, target_module_cells, cut_rows
+
+
+CUT_HEADER = [
+    "kind",
+    "crate",
+    "level",
+    "modules",
+    "in_scope_files",
+    "in_scope_lines",
+    "source",
+    "target",
+    "references",
+    "path",
+    "header",
+]
+
+
 def run_selftest() -> None:
     """Prove the SCC pass's negative case on a synthetic three-node cycle, untouched tree.
 
@@ -1570,16 +2083,31 @@ def main(selftest: bool, prove_orphan_pass: bool) -> None:
 
     stage_cells = compute_pipeline_stages(relpaths, graph, in_scope_map)
 
+    lines_by_path = {p: count_lines(LIBSLIC3R_ROOT / p) for p in relpaths}
+
+    crate_level_cells, target_crate_cells, target_module_cells, cut_rows = compute_crate_cut(
+        relpaths, graph, in_scope_map, lines_by_path
+    )
+    crate_count = sum(1 for r in cut_rows if r[0] == "crate")
+    print(
+        f"inventory: the cut produced {crate_count} crates; beside the spec's 43 modules, 5 "
+        "components and one 39-module/321,722-line component, see the whole-library module "
+        "measurement line above, and this task's own prose for why this derivation's module "
+        "count differs"
+    )
+
     rows = []
     total_lines = 0
     for relpath in relpaths:
         subsystem = subsystem_of(relpath)
-        lines = count_lines(LIBSLIC3R_ROOT / relpath)
+        lines = lines_by_path[relpath]
         total_lines += lines
         level = levels[relpath]
-        row = [relpath, subsystem, str(lines), str(level), ""]
+        row = [relpath, subsystem, str(lines), str(level)]
+        row.append(crate_level_cells.get(relpath, ""))
         row.append(scope_cells[relpath])
-        row.append("")
+        row.append(target_crate_cells.get(relpath, ""))
+        row.append(target_module_cells.get(relpath, ""))
         row.append(stage_cells[relpath])
         row.extend([""] * (len(HEADER) - len(row)))
         rows.append(row)
@@ -1597,7 +2125,12 @@ def main(selftest: bool, prove_orphan_pass: bool) -> None:
     out_lines.extend("\t".join(row) for row in rows)
     MANIFEST_PATH.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
 
+    cut_out_lines = ["\t".join(CUT_HEADER)]
+    cut_out_lines.extend("\t".join(row) for row in cut_rows)
+    CUT_PATH.write_text("\n".join(cut_out_lines) + "\n", encoding="utf-8")
+
     print(f"inventory: wrote {len(rows)} rows, {total_lines} total lines, to {MANIFEST_PATH}")
+    print(f"inventory: wrote {len(cut_rows)} rows to {CUT_PATH}")
 
 
 if __name__ == "__main__":
