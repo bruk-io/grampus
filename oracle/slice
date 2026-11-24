@@ -239,6 +239,11 @@ def main(
         cmd += ["--load-settings", f"{machine_path};{process_path}"]
     filament_paths = [str(resolve_preset(f)) for f in filaments]
     cmd += ["--load-filaments", ";".join(filament_paths)]
+    # --slice and --arrange are coInt (PrintConfig.cpp:12935-12940), whose read_cli() DOES
+    # consume a following space-separated token as the value (Config.cpp's read_cli guards that
+    # consumption on `type != coBool && type != coBools`, not on these two). The equals form the
+    # overrides below use is required for a coBool override like enable_support; it is not
+    # required here, and the space form matches this script's own docstring template.
     cmd += ["--slice", "0", "--arrange", "0", "--outputdir", str(out_dir)]
     for key, value in overrides:
         cmd.append(f"--{key.replace('_', '-')}={value}")
