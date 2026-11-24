@@ -59,3 +59,11 @@ config-goldens:
 # CONFIG_BLOCK does not, and the keys the config block carries that the JSON does not (R11)
 config-block-diff golden gcode:
     ./port/config-block-diff {{golden}} {{gcode}}
+
+# regenerate port/reports/order-containers.md and port/reports/order-comparators.md (R18, step
+# 13 part 1, task 17-order-audits): every unordered container that is iterated rather than only
+# looked up, and every comparator that is not a total order, over the manifest's in-scope rows,
+# read at run time. Not a check a port task passes (just audit-check, 18-divergences-regeneration,
+# is); this recipe only regenerates the two reports.
+audit-order:
+    ./port/audit-order
