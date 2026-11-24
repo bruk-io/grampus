@@ -331,11 +331,14 @@ flags or anything under `vendor/OrcaSlicer/`, so `brew install autoconf automake
 was added before the build step — the same category of addition as the existing
 `setup-uv`/`setup-just` steps, needed for this task's one step to run at all.
 
-With that gap closed, the job **completed stage one in full**, for real, from an empty prefix on a
-from-scratch `macos-15` runner, on three separate runs: 21 dependencies, no further missing tools.
-All three stage-one summaries, each printed by `oracle/build-libslic3r` from an equally cold start
-(no superbuild cache exists — that is `24-port-check-ci`'s half), are listed because they span
-almost a factor of two:
+With that gap closed, the job **completed stage one in full**, for real, from an empty prefix, on
+every from-scratch `macos-15` run that got past the autotools gap: 21 dependencies, no further
+missing tools. Stage one's wall-clock on those runs spans **26m11s to 48m53s**, each figure printed
+by `oracle/build-libslic3r` from an equally cold start (no superbuild cache exists — that is
+`24-port-check-ci`'s half). Three summaries, the fastest and slowest among them, are listed because
+the span is nearly a factor of two; a fourth run,
+[45408522763](https://github.com/bruk-io/grampus/actions/runs/45408522763), logged 40m57s
+(2457.3s) with the same 622M prefix, inside that span:
 
 | Run | Stage one wall-clock | Build directory | Install prefix |
 |---|---|---|---|
@@ -345,9 +348,9 @@ almost a factor of two:
 
 None of them is the recorded figure — PR #7's 227.3s on this dev machine is, per task.md — and the
 spread is hosted-runner variance, not a difference in what was built: same 21 dependencies, same
-3.3G build tree, same 622M prefix every time. All three are listed because a reader sizing a CI
-timeout from one of them would be misled by any single one (the job's current 90-minute timeout is
-set against the slowest, not the fastest). Note also that the install prefix measures **622M** on
+3.3G build tree, same 622M prefix on every run. The span rather than a single number is what to
+read off this table, because a reader sizing a CI timeout from any one figure would be misled (the
+job's current 90-minute timeout is set against the slowest, not the fastest). Note also that the install prefix measures **622M** on
 every CI run, against 625M in PR #7 and 637M in this worktree: three real measurements of the same
 prefix path, same kind of spread as noted above the table.
 
