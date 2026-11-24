@@ -11,3 +11,11 @@ path = "src/main.rs"
 [lib]
 name = "oracle_compare"
 path = "src/lib.rs"
+
+[dependencies]
+# Exactly 1.0.117 ("=", not "^"), per task 10-comparator-json: `src/json.rs` parses the two JSON
+# artifacts, locates a first difference as a JSON pointer, and compares per key, which a
+# hand-written parser with pointer locations and no `unwrap` on input data is not a size-2 task.
+# This is the one dependency step 5 is allowed to add (plan.md); no later Phase A/B port task may
+# add another.
+serde_json = "=1.0.117"
