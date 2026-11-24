@@ -1,3 +1,6 @@
 .claude/settings.local.json
 oracle/.cache/
 /target/
+
+# port/inventory (and any other uv-run script here) leaves this behind.
+__pycache__/
