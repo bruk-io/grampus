@@ -293,9 +293,8 @@ What a porter stops at rather than ports:
   implementations are out.
 - **Arrange and orient** (C14's decision): the application does call this code, but R24 fixes
   placement in the fixture and R2 passes `--arrange 0`, so no arranger runs in any comparison.
-- **The two Objective-C++ files** (`MacUtils.mm`, `Format/ModelIO.mm`), which the manifest deducts
-  along with the rest of their deduction groups where applicable — no porting rule in this document
-  has to cover Objective-C++.
+- **The two Objective-C++ (`.mm`) files in the file set**, each deducted in `port/manifest.tsv`
+  with its own reason — so no porting rule in this document has to cover Objective-C++ at all.
 - **An `assert` body.** The oracle's release build compiles assertions out (see
   `### Error sets` below), so an `assert` is not ported as a live check of any kind.
 
@@ -313,6 +312,7 @@ Each entry names what is banned and the check that catches it, where one exists.
 | Any fused multiply-add, including `f64::mul_add` | None automated yet; the normative oracle is built with `-ffp-contract=off` and never fuses, so a port that fuses diverges from it. |
 | Multiplying by the reciprocal of `SCALING_FACTOR` instead of dividing by it | None automated yet; `### Scaling conversions` below. |
 | Locale-dependent or `format!`-based number formatting in emitted G-code | None automated yet; `### Number formatting` below. |
+| Widening or narrowing an error set — adding a variant libslic3r's exception hierarchy has no sibling for, or collapsing two of its variants into one | None automated yet; `### Error sets` below. |
 | Returning `Result` from a function that cannot fail, or a live `panic!` where the oracle compiles the assertion out | None automated yet; `### Error sets` below. |
 | A comparator that is not a total order, substituted for one of the port's deliberate total-order comparators | None automated yet. This substitution is itself the port's **deliberate divergence** where the oracle's comparator is not a total order: the port's choice at such a site carries a `// FIDELITY(port):` marker, and that marker is what puts the site in `port/reports/divergences.md`. `17-order-audits` has already classified the comparator shapes found in in-scope files (`port/reports/order-comparators.md`): 85 sites are still `undecided` and are judged per-site during porting, and 15 already have a resolved shape — `tolerance`/EPSILON comparisons (4 sites: the port's choice is the same comparison with the tolerance removed, with the row's equality tier deciding equality instead), a non-strict relation (6 sites: the port's choice is the strict form of the same relation), and a comparator with disjunctive branches (5 sites: the port's choice is a nested lexicographic chain over the same fields in the same order). That report, not this document, is the per-site authority; a porter reads the row for their unit's comparator rather than re-deriving its shape. |
 
