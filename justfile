@@ -89,8 +89,8 @@ ownership:
 # row count of port/ownership.tsv on success -- the plan's recorded proof line for R30.
 ownership-check:
     ./port/ownership --check
-# the one command that rewrites every generated report (task 18-divergences-regeneration):
-# today, just audit-order; 23-perf-backlog adds the perf-backlog regeneration to this same seam
+# the one command that rewrites every generated report: just audit-order, then the
+# perf-backlog half (task 18-divergences-regeneration; task 23-perf-backlog adds the latter)
 regenerate:
     ./port/regenerate
 # the drift-detecting variant of audit-order: regenerates order-containers.md,
@@ -101,3 +101,12 @@ regenerate:
 # regeneration pass (23-perf-backlog) is what runs it, on main.
 audit-check:
     ./port/audit-order --check
+
+# the drift-detecting variant of the perf-backlog half of regenerate: regenerates
+# port/reports/perf-backlog.md in memory and fails, with a diff, when it differs from the
+# committed file (R15, task 23-perf-backlog). Not a check a port task passes -- see
+# port/regenerate's module docstring and this task's own task.md -- so this recipe is
+# deliberately in neither `.asdlc/checks` nor `just port-check`; step 14's regeneration pass is
+# what runs it, on main, alongside `just audit-check`.
+perf-check:
+    ./port/regenerate --check
