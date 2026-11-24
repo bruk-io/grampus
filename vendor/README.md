@@ -149,6 +149,15 @@ C7 anticipated.
 |---|---|---|---|
 | Stage one | 3 minutes 47 seconds (227.3s), configure 0.9s + build 226.4s | 3.3G | 625M |
 
+**That 227.3s is a dev-machine figure, and it is not what stage one costs in CI.** The same cold
+stage one, from an equally empty prefix, takes **26m11s to 48m53s** on a GitHub-hosted `macos-15`
+runner — 7x to 13x the recorded figure (the runs are tabulated under "Its own CI line" below).
+`24-port-check-ci`, which reads this section to decide whether `just oracle-build` and
+`just oracle-parity` stay on every pull request or move to `main` only, should size that decision
+on **the CI span, not on 227.3s**: the recipe is minutes on this many-core dev machine and is
+tens of minutes on a hosted runner. The recorded figure below answers "what does a cold stage one
+cost here", not "what does this recipe cost per pull request".
+
 Measured in [PR #7](https://github.com/bruk-io/grampus/pull/7) (`02-deps-superbuild`), from an
 empty `deps/build/arm64` with `deps/DL_CACHE` also empty, with no compiler cache. Transcribed
 here, not re-measured: this task does not rebuild stage one from an empty prefix on purpose.
@@ -350,7 +359,10 @@ None of them is the recorded figure — PR #7's 227.3s on this dev machine is, p
 spread is hosted-runner variance, not a difference in what was built: same 21 dependencies, same
 3.3G build tree, same 622M prefix on every run. The span rather than a single number is what to
 read off this table, because a reader sizing a CI timeout from any one figure would be misled (the
-job's current 90-minute timeout is set against the slowest, not the fastest). Note also that the install prefix measures **622M** on
+job's current 90-minute timeout is set against the slowest, not the fastest). **This span, not the
+227.3s recorded above, is what `24-port-check-ci` should size the move-to-`main`-only decision on**
+— the same point is made beside the recorded figure, since either end of the file may be read
+first. Note also that the install prefix measures **622M** on
 every CI run, against 625M in PR #7 and 637M in this worktree: three real measurements of the same
 prefix path, same kind of spread as noted above the table.
 
