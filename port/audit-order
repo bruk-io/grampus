@@ -1141,7 +1141,7 @@ def write_divergences(path: Path, result: DivergencesResult) -> None:
         "| " + " | ".join(["---"] * len(DIVERGENCES_HEADER)) + " |",
     ]
     for row in result.rows:
-        lines.append("| " + " | ".join(row) + " |")
+        lines.append("| " + " | ".join(escape_cell(c) for c in row) + " |")
     lines.append("")
     lines.append("## Sources")
     lines.append("")
@@ -1664,8 +1664,38 @@ def _selftest_tsv_sources() -> list[str]:
     return failures
 
 
+def _selftest_build_divergences() -> list[str]:
+    """End-to-end: build_divergences itself, not just the per-source readers, against the
+    `sources-present` fixture -- catches a regression where a reader returns rows that the
+    combining/sorting step then drops or miscounts, which the per-source tests above cannot."""
+    failures = []
+    fixture = SELFTEST_ROOT / "sources-present"
+    # Two synthetic order-audit rows (one container, one comparator), both diverging, plus one
+    # looked-up (non-diverging) container row that must NOT appear in the output.
+    container_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "n/a", "r", "c", "yes"],
+    ]
+    comparator_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "definition", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "s", "r", "c", "yes"],
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "definition", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "s", "r", "c", "no"],
+    ]
+    result = build_divergences(
+        container_table, comparator_table, fixture / "crates", fixture / "oracle-parity.tsv", fixture / "determinism.tsv"
+    )
+    counts = {name: count for name, _present, count in result.summary}
+    presence = {name: present for name, present, _count in result.summary}
+    expected_counts = {"order-audit": 2, "fidelity-marker": 1, "oracle-parity": 1, "determinism": 1}
+    if counts != expected_counts:
+        failures.append(f"build_divergences: expected counts {expected_counts!r}, got {counts!r}")
+    if not all(presence.values()):
+        failures.append(f"build_divergences: expected every source present for this fixture, got {presence!r}")
+    if len(result.rows) != sum(expected_counts.values()):
+        failures.append(f"build_divergences: expected {sum(expected_counts.values())} total rows, got {len(result.rows)}")
+    return failures
+
+
 def run_selftest() -> int:
-    failures = _selftest_source2() + _selftest_tsv_sources()
+    failures = _selftest_source2() + _selftest_tsv_sources() + _selftest_build_divergences()
     if failures:
         for failure in failures:
             click.echo(f"self-test: FAILED: {failure}")
