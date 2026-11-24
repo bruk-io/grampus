@@ -195,15 +195,15 @@ Support/TreeSupport.hpp	65	SupportNode	NO_PARENT	static constexpr SupportNode *	
 Support/TreeSupport.hpp	177	SupportNode	parent	SupportNode *	back-reference	Support/TreeSupport.cpp:3995, Support/TreeSupport.cpp:4005, Support/TreeSupport.hpp:86, Support/TreeSupport.hpp:100	Option<usize>
 Support/TreeSupport.hpp	178	SupportNode	parents	std::vector<SupportNode*>	back-reference	Support/TreeSupport.cpp:3995, Support/TreeSupport.cpp:4005, Support/TreeSupport.hpp:93, Support/TreeSupport.hpp:103	Vec<usize>
 Support/TreeSupport.hpp	179	SupportNode	child	SupportNode *	back-reference	Support/TreeSupport.cpp:3995, Support/TreeSupport.cpp:4005, Support/TreeSupport.hpp:100, Support/TreeSupport.hpp:102	Option<usize>
-Support/TreeSupport.hpp	188	SupportNode	merged_neighbours	std::list<SupportNode*>	back-reference	Support/TreeSupport.cpp:3995, Support/TreeSupport.cpp:4005, Support/TreeSupport.hpp:101, Support/TreeSupport.cpp:3108	VecDeque<usize>
+Support/TreeSupport.hpp	188	SupportNode	merged_neighbours	std::list<SupportNode*>	back-reference	Support/TreeSupport.cpp:3995, Support/TreeSupport.cpp:4005, Support/TreeSupport.hpp:101, Support/TreeSupport.cpp:3108	std::collections::VecDeque<usize>
 Support/TreeSupport.hpp	418	TreeSupport	m_print_config	const PrintConfig *	borrowed	Support/TreeSupport.cpp:682	&'a PrintConfig
-Support/TreeSupport.hpp	426	TreeSupport	overhang_types	std::map<const ExPolygon*, OverhangType>	borrowed	Support/TreeSupport.cpp:1291, Support/TreeSupport.cpp:1232, Layer.hpp:179	BTreeMap<*const ExPolygon, OverhangType>
-Support/TreeSupport.hpp	436	TreeSupport	contact_nodes	std::vector<std::vector<SupportNode*>>	borrowed	Support/TreeSupport.hpp:263, Support/TreeSupport.cpp:3995, Support/TreeSupport.cpp:4005, Support/TreeSupport.cpp:3714	Vec<Vec<usize>>
+Support/TreeSupport.hpp	426	TreeSupport	overhang_types	std::map<const ExPolygon*, OverhangType>	borrowed	Support/TreeSupport.cpp:1291, Support/TreeSupport.cpp:1232, Layer.hpp:179	std::collections::BTreeMap<*const ExPolygon, OverhangType>
+Support/TreeSupport.hpp	436	TreeSupport	contact_nodes	std::vector<std::vector<SupportNode*>>	back-reference	Support/TreeSupport.hpp:263, Support/TreeSupport.cpp:3995, Support/TreeSupport.cpp:4005, Support/TreeSupport.cpp:3714	Vec<Vec<usize>>
 Support/TreeSupport.hpp	439	TreeSupport	m_object	PrintObject *	back-reference	Support/TreeSupport.cpp:680, PrintObject.cpp:5091	usize
 Support/TreeSupport.hpp	440	TreeSupport	m_object_config	const PrintObjectConfig *	borrowed	Support/TreeSupport.cpp:680	&'a PrintObjectConfig
-Support/TreeSupportCommon.hpp	787	InterfacePlacer	top_contacts	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3578, Support/TreeSupport3D.cpp:3606	&'a mut Vec<Option<*mut SupportGeneratorLayer>>
-Support/TreeSupportCommon.hpp	788	InterfacePlacer	top_interfaces	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3580, Support/TreeSupport3D.cpp:3606	&'a mut Vec<Option<*mut SupportGeneratorLayer>>
-Support/TreeSupportCommon.hpp	789	InterfacePlacer	top_base_interfaces	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3581, Support/TreeSupport3D.cpp:3606	&'a mut Vec<Option<*mut SupportGeneratorLayer>>
+Support/TreeSupportCommon.hpp	787	InterfacePlacer	top_contacts	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3578, Support/TreeSupport3D.cpp:3606	&'a mut Vec<*mut SupportGeneratorLayer>
+Support/TreeSupportCommon.hpp	788	InterfacePlacer	top_interfaces	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3580, Support/TreeSupport3D.cpp:3606	&'a mut Vec<*mut SupportGeneratorLayer>
+Support/TreeSupportCommon.hpp	789	InterfacePlacer	top_base_interfaces	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3581, Support/TreeSupport3D.cpp:3606	&'a mut Vec<*mut SupportGeneratorLayer>
 Utils.hpp	544	FilePtr	f	FILE *			
 calib.hpp	289	CalibPressureAdvanceLine	mp_gcodegen	GCode *			
 clonable_ptr.hpp	141	clonable_ptr	px	T *			
