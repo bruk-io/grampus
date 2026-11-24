@@ -9,6 +9,9 @@ check:
 guard *branch:
     {{asdlc}} branch check {{branch}}
 
+# fetch and verify the pinned oracle release binary (R1)
+oracle-fetch:
+    ./oracle/fetch-release
 # build the vendored OrcaSlicer tree on this platform
 oracle-build:
     ./oracle/build-libslic3r

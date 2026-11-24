@@ -113,6 +113,22 @@ deliberate migration:
 4. Regenerate all oracle outputs and review the differences.
 5. Commit the submodule pointer and this file together.
 
+### Oracle release asset
+
+`oracle/fetch-release` (R1) does not build OrcaSlicer from this submodule. It downloads the
+matching v2.5.2 release binary and verifies it against the value recorded here before using it
+as the test oracle, so the check is not circular:
+
+| | |
+|---|---|
+| Release tag | `v2.5.2` |
+| Release asset | `OrcaSlicer_Mac_universal_V2.5.2.dmg` |
+| Recorded sha256 | `6ea1afcdffb7e9ab011e2d6f6db665cb18463d1c4774591cd5db7ee0225479d9` |
+
+That sha256 was measured on a download of that asset during this intent's research. It is the
+one value `oracle/fetch-release` reads; the script never rewrites it, and a mismatch fails the
+command instead. See `docs/ORACLE.md` for how the fetched binary is used.
+
 ### Licensing
 
 OrcaSlicer is AGPL-3.0. Code in grampus written by reading or translating this source is a
