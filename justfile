@@ -38,3 +38,9 @@ fixture-export *NAMES:
 # spelling for the same call
 assert-placement fixture run_dir:
     ./oracle/assert-placement {{fixture}} {{run_dir}}
+
+# regenerate port/manifest.tsv and port/cut.tsv into memory and fail, with a diff, when a
+# *derived* column has drifted from the vendored tree (task 14-manifest-columns); never
+# touches the six judgement columns, never compares status, and never writes either file
+inventory-check:
+    ./port/inventory --check
