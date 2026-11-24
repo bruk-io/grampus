@@ -335,13 +335,11 @@ def run_stage_two(env: dict[str, str]) -> dict[str, object]:
     """
     STAGE2_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     # Resolved to an absolute path, not left as task.md's `DEPS=...` literal relative
-    # string: CMake resolves a relative CMAKE_PREFIX_PATH entry against
-    # CMAKE_CURRENT_SOURCE_DIR (vendor/OrcaSlicer) at the point it is consulted, not
-    # against the invocation's working directory, which doubles the "vendor/OrcaSlicer"
-    # segment and finds nothing — verified empirically: the literal relative string makes
-    # this configure fail to find Boost at all ("Could not find a package configuration
-    # file provided by Boost"), while the resolved absolute path finds it correctly. Same
-    # install prefix either way; only the form passed to CMake differs.
+    # string. Verified empirically, mechanism not inspected further: passing the literal
+    # relative string as CMAKE_PREFIX_PATH makes this configure fail to find Boost at all
+    # ("Could not find a package configuration file provided by Boost"), while the
+    # resolved absolute path finds it correctly and proceeds. Same install prefix either
+    # way; only the string form passed to CMake differs.
     deps_prefix = str((REPO_ROOT / INSTALL_PREFIX).resolve())
 
     def configure_cmd() -> list[str]:
