@@ -149,15 +149,6 @@ C7 anticipated.
 |---|---|---|---|
 | Stage one | 3 minutes 47 seconds (227.3s), configure 0.9s + build 226.4s | 3.3G | 625M |
 
-**That 227.3s is a dev-machine figure, and it is not what stage one costs in CI.** The same cold
-stage one, from an equally empty prefix, takes **26m11s to 48m53s** on a GitHub-hosted `macos-15`
-runner — 7x to 13x the recorded figure (the runs are tabulated under "Its own CI line" below).
-`24-port-check-ci`, which reads this section to decide whether `just oracle-build` and
-`just oracle-parity` stay on every pull request or move to `main` only, should size that decision
-on **the CI span, not on 227.3s**: the recipe is minutes on this many-core dev machine and is
-tens of minutes on a hosted runner. The recorded figure below answers "what does a cold stage one
-cost here", not "what does this recipe cost per pull request".
-
 Measured in [PR #7](https://github.com/bruk-io/grampus/pull/7) (`02-deps-superbuild`), from an
 empty `deps/build/arm64` with `deps/DL_CACHE` also empty, with no compiler cache. Transcribed
 here, not re-measured: this task does not rebuild stage one from an empty prefix on purpose.
@@ -165,6 +156,15 @@ It was, however, necessarily built once for real in this task's own worktree (th
 no prefix yet), measured at 226.9s; PR #7's 227.3s is kept as the recorded figure per task.md's
 "transcribed, not re-measured" instruction, with this run noted here so the two records do not
 read as contradicting each other.
+
+**That 227.3s is a dev-machine figure, and it is not what stage one costs in CI.** The same cold
+stage one, from an equally empty prefix, takes **26m11s to 48m53s** on a GitHub-hosted `macos-15`
+runner — 6.9x to 12.9x the recorded figure (those runs are tabulated under "Its own CI line"
+below). `24-port-check-ci`, which reads this section to decide whether `just oracle-build` and
+`just oracle-parity` stay on every pull request or move to `main` only, should size that decision
+on **the CI span, not on 227.3s**: the recipe is minutes on this many-core dev machine and tens of
+minutes on a hosted runner. The figure in the table above answers "what does a cold stage one cost
+on this dev machine", not "what does this recipe cost per pull request".
 
 The install prefix's on-disk size drifts with the exact set of dependency versions resolved at
 build time: PR #7 measured 625M; a `du -sh` of the same prefix path in this task's own build
