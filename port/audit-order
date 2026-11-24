@@ -737,6 +737,42 @@ _GUARD_HEAD_RE = re.compile(r"^(" + _FIELD_EXPR + r")\s*<\s*(" + _FIELD_EXPR + r
 _GUARD_INNER_RE = re.compile(r"^(" + _FIELD_EXPR + r")\s*==\s*(" + _FIELD_EXPR + r")\s*&&\s*(.*)$", re.DOTALL)
 
 
+def strip_outer_parens(expr: str) -> str:
+    """Strip parentheses that wrap `expr` as a whole, repeatedly.
+
+    Only a `(` at index 0 whose *matching* `)` is the last character wraps the whole expression,
+    so `(a < b || (a == b && c < d))` is unwrapped while `(a < b) || (c < d)` -- whose leading
+    `(` closes in the middle -- is left exactly as it was. The lexicographic chains in this tree
+    wrap their tail (`l.x() < r.x() || (l.x() == r.x() && (l.y() < r.y() || (...)))`), so the
+    recursive call below is handed a wholly-parenthesised string and has to unwrap it before any
+    pattern can match.
+    """
+    expr = expr.strip()
+    while expr.startswith("("):
+        close = find_matching(expr, 0)
+        if close is None or close != len(expr) - 1:
+            break
+        expr = expr[1:-1].strip()
+    return expr
+
+
+def strip_paired_parens(left: str, right: str) -> tuple[str, str]:
+    """Undo a parenthesised *comparison*, whose `(`/`)` land in two different captured fields.
+
+    `_FIELD_EXPR` admits `(` and `)` so that `l.x()`, `pos(1)` and `a.getX()` count as fields,
+    which means a parenthesised comparison -- `(density < other.density) || ...`, or the guard
+    `((weight == other.weight) && ...)` -- is captured as the unbalanced pair `('(density',
+    'other.density)')`. Neither half is individually balanced, so a per-field strip is a no-op;
+    the parens have to come off as a pair. Only done when the result leaves *both* halves
+    balanced, so `f(x` / `g(y)` is left alone.
+    """
+    if left.startswith("(") and right.endswith(")"):
+        cand_l, cand_r = left[1:].strip(), right[:-1].strip()
+        if cand_l.count("(") == cand_l.count(")") and cand_r.count("(") == cand_r.count(")"):
+            return cand_l, cand_r
+    return left, right
+
+
 def is_lexicographic_or_chain(expr: str) -> bool:
     """True when `expr` is `F < F`, or the short-circuited chain `F < F || (F == F && ...)`.
 
@@ -751,14 +787,24 @@ def is_lexicographic_or_chain(expr: str) -> bool:
     guard, and must fall through to ``DISJUNCTION_RE`` instead of being waved through as clean.
     Recursion (via `find_matching`, so a mismatched guard can never recurse past the string it
     was given) accepts a chain of any depth.
+
+    Parentheses are stripped in the two places the idiom actually puts them, because
+    `_FIELD_EXPR` admits `(`/`)` (for `l.x()`, `pos(1)`) and so swallows them into the captured
+    fields: `strip_outer_parens` unwraps a wholly-parenthesised expression (which is what the
+    recursive call is handed, since these chains parenthesise their tail), and
+    `strip_paired_parens` undoes a parenthesised *comparison* in the head (`(density <
+    other.density) || ...`, `Fill/FillHoneycomb.hpp:42`) or in the guard (`((weight ==
+    other.weight) && ...)`, `Geometry.cpp:96`). Without them the guard-field equality below
+    compares `{'(density', 'other.density)'}` against `{'density', 'other.density'}`, fails, and
+    a genuine chain is reported as a "disjunction" -- a false claim about the vendored source.
     """
-    expr = expr.strip()
+    expr = strip_outer_parens(expr)
     if _SINGLE_LT_RE.match(expr):
         return True
     head = _GUARD_HEAD_RE.match(expr)
     if not head:
         return False
-    head_a, head_b = head.group(1).strip(), head.group(2).strip()
+    head_a, head_b = strip_paired_parens(head.group(1).strip(), head.group(2).strip())
     open_paren = head.end() - 1  # the "(" the pattern itself ends on, not any "(" in a.getX()
     close_paren = find_matching(expr, open_paren)
     if close_paren is None or close_paren != len(expr) - 1:
@@ -767,7 +813,7 @@ def is_lexicographic_or_chain(expr: str) -> bool:
     m = _GUARD_INNER_RE.match(inner)
     if not m:
         return False
-    guard_a, guard_b = m.group(1).strip(), m.group(2).strip()
+    guard_a, guard_b = strip_paired_parens(m.group(1).strip(), m.group(2).strip())
     if {guard_a, guard_b} != {head_a, head_b}:
         return False
     return is_lexicographic_or_chain(m.group(3))
