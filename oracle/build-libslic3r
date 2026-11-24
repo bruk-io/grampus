@@ -1,0 +1,286 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1",
+# ]
+# ///
+
+"""Build the vendored OrcaSlicer tree on this platform.
+
+Stage one is the dependency superbuild at ``vendor/OrcaSlicer/deps``: one CMake
+project, configured once, that fetches and builds the 21 large third-party
+libraries libslic3r links against into one install prefix. Tracked content
+under ``vendor/OrcaSlicer`` is never modified; the script only writes into
+``vendor/OrcaSlicer/deps/build/arm64`` and the vendored ``DL_CACHE``, both of
+which the vendored tree's own ``.gitignore`` already excludes.
+
+If a dependency cannot be built, this script reports which target failed, with
+its error, and stops. It never falls back to a system, Homebrew or MacPorts
+copy of a library, never substitutes a different version, and never drops a
+target from the list: a build that cannot be made to work is reported, not
+worked around.
+"""
+
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# The upstream default location. OCCT's patch step only applies while the
+# configure process sees itself inside a git work tree, which is decided by
+# where this directory sits relative to the vendored submodule's own .git —
+# so this path is not configurable.
+DEPS_SOURCE = Path("vendor/OrcaSlicer/deps")
+DEPS_BUILD = Path("vendor/OrcaSlicer/deps/build/arm64")
+INSTALL_PREFIX = DEPS_BUILD / "OrcaSlicer_dep" / "usr" / "local"
+
+LOG_PATH = Path("oracle/.cache/build/deps-arm64.log")
+
+# Named individually rather than through the project's own aggregate target,
+# which also pulls in the desktop GUI's own libraries — none of which a
+# headless build of the slicing engine needs, and all of which cost build
+# time. The bundled CPython interpreter (near the end of this list) is
+# required regardless, and is the longest single item here. The last target
+# exists only because the superbuild's own CAD option defaults on, and a
+# later stage needs that default honoured.
+DEP_TARGETS = [
+    "dep_Boost",
+    "dep_TBB",
+    "dep_Eigen",
+    "dep_CGAL",
+    "dep_OCCT",
+    "dep_OpenCV",
+    "dep_OpenVDB",
+    "dep_Assimp",
+    "dep_Draco",
+    "dep_NLopt",
+    "dep_Cereal",
+    "dep_Qhull",
+    "dep_GLFW",
+    "dep_PNG",
+    "dep_EXPAT",
+    "dep_JPEG",
+    "dep_libnoise",
+    "dep_OpenSSL",
+    "dep_CURL",
+    "dep_python3",
+    "dep_SLVS",
+]
+
+# CMake 4.x refuses a project whose own minimum predates 3.10. The superbuild
+# sets this into its own cache, but each dependency configures through a
+# separate CMake invocation that only the environment variable reaches.
+CMAKE_POLICY_VERSION_MINIMUM = "3.10"
+
+# Keeps Homebrew and MacPorts libraries out of find_package resolution, so a
+# dependency this stage builds is never silently satisfied from outside it.
+CMAKE_IGNORE_PREFIX_PATH = "/opt/local;/usr/local;/opt/homebrew"
+
+# Ninja 1.11+ prefixes the failed edge with a bracketed status code, e.g.
+# `FAILED: [code=1] vendor/.../dep_OCCT-prefix/src/dep_OCCT-stamp/dep_OCCT-build`
+# (verified against this host's ninja 1.13.2 in a scratch build). The optional
+# group tolerates that prefix without requiring it, so the pattern still
+# matches an older ninja that prints the bare `FAILED: <output>` form.
+FAILED_RE = re.compile(r"^FAILED:\s+(?:\[[^\]]*\]\s+)?(\S+)")
+
+# The failed ninja output path (e.g. a `...-stamp/dep_OCCT-build` sentinel)
+# does not itself read as a dep_* target name, so the report below scans it,
+# and the lines immediately before it, for this token instead.
+DEP_TARGET_RE = re.compile(r"dep_[A-Za-z0-9]+")
+
+# Marks the extracted OCCT source as patched, independent of whether this
+# particular run executed the patch step or ninja skipped it as already
+# stamped done. Needed because an unpatched OCCT configures and builds
+# successfully and fails only much later, in meshing, with no mention of a
+# patch (see OCCT.cmake:28-30 and the module docstring above) — so "the build
+# exited 0" is not sufficient evidence that OCCT was patched, and this is
+# checked every run rather than only inferred from the log.
+OCCT_PATCHED_MARKER = "Select the correct pcurve of the seam-edge"
+OCCT_PATCHED_SOURCE = (
+    Path("vendor/OrcaSlicer/deps/build/arm64")
+    / "dep_OCCT-prefix"
+    / "src"
+    / "dep_OCCT"
+    / "src"
+    / "ModelingAlgorithms"
+    / "TKMesh"
+    / "BRepMesh"
+    / "BRepMesh_ModelPreProcessor.cxx"
+)
+
+
+def du_sh(path: Path) -> str:
+    """Return `du -sh`'s on-disk size for a directory, or a placeholder if unavailable."""
+    if not path.is_dir():
+        return "(not created)"
+    result = subprocess.run(["du", "-sh", str(path)], capture_output=True, text=True)
+    if result.returncode != 0:
+        return "(size unavailable: " + result.stderr.strip().splitlines()[-1] + ")"
+    return result.stdout.split("\t")[0].strip()
+
+
+def occt_was_patched() -> bool:
+    """Check the extracted OCCT source for the seam-pcurve patch's own text."""
+    if not OCCT_PATCHED_SOURCE.is_file():
+        return False
+    return OCCT_PATCHED_MARKER in OCCT_PATCHED_SOURCE.read_text()
+
+
+def run_logged(cmd: list[str], env: dict[str, str], log) -> int:
+    """Run `cmd`, streaming combined output to stdout and to the open log file."""
+    click.echo(f"+ {shlex.join(cmd)}")
+    log.write(f"+ {shlex.join(cmd)}\n")
+    log.flush()
+    process = subprocess.Popen(
+        cmd,
+        cwd=REPO_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for line in process.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        log.write(line)
+    log.flush()
+    return process.wait()
+
+
+def tail_failure(log_path: Path) -> tuple[str | None, list[str]]:
+    """Pick the first failed ninja edge and its surrounding output out of the log."""
+    lines = log_path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        match = FAILED_RE.match(line)
+        if match:
+            context = lines[max(0, i - 1) : min(len(lines), i + 40)]
+            # The matched output path (e.g. a `...-stamp/dep_OCCT-build`
+            # sentinel) rarely names a dep_* target on its own, so look for
+            # one in it first and fall back to the ninja command line that
+            # built it (one line up, which names the real target's sources).
+            target_match = DEP_TARGET_RE.search(match.group(1))
+            if target_match is None and i > 0:
+                target_match = DEP_TARGET_RE.search(lines[i - 1])
+            target = target_match.group(0) if target_match else match.group(1)
+            return target, context
+    # No "FAILED:" edge (e.g. configure itself failed): fall back to the tail.
+    return None, lines[-60:]
+
+
+@click.command()
+def main() -> None:
+    """Configure and build the vendored dependency superbuild for this platform."""
+    os.chdir(REPO_ROOT)
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    env = os.environ.copy()
+    env["CMAKE_POLICY_VERSION_MINIMUM"] = CMAKE_POLICY_VERSION_MINIMUM
+
+    configure_cmd = [
+        "cmake",
+        "-S",
+        str(DEPS_SOURCE),
+        "-B",
+        str(DEPS_BUILD),
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_OSX_ARCHITECTURES=arm64",
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0",
+        f"-DCMAKE_IGNORE_PREFIX_PATH={CMAKE_IGNORE_PREFIX_PATH}",
+        f"-DCMAKE_POLICY_VERSION_MINIMUM={CMAKE_POLICY_VERSION_MINIMUM}",
+    ]
+    build_cmd = [
+        "cmake",
+        "--build",
+        str(DEPS_BUILD),
+        "--target",
+        *DEP_TARGETS,
+        # Verbose: the build's stdout is the only record of what each step
+        # did (no per-step logs are ever written here), and without this flag
+        # the build tool prints only a one-line description per step, which
+        # loses the exact command a later check has to find.
+        "--verbose",
+    ]
+
+    def fail(rc: int, *, patch_missing: bool = False) -> None:
+        click.echo("\n--- stage one failed ---", err=True)
+        if patch_missing:
+            click.echo(
+                "OCCT built successfully but was not patched — "
+                f"{OCCT_PATCHED_MARKER!r} is absent from "
+                f"{OCCT_PATCHED_SOURCE}. This is the silent failure mode "
+                "task.md warns about: it configures and compiles fine and "
+                "fails much later, in meshing, with no mention of a patch.",
+                err=True,
+            )
+        else:
+            target, context = tail_failure(LOG_PATH)
+            if target:
+                click.echo(f"Failing step: {target}", err=True)
+            click.echo("Error context (from the log):", err=True)
+            for line in context:
+                click.echo(f"  {line}", err=True)
+        click.echo("What was tried:", err=True)
+        click.echo(f"  {shlex.join(configure_cmd)}", err=True)
+        click.echo(f"  {shlex.join(build_cmd)}", err=True)
+        click.echo(f"\nFull output: {LOG_PATH}", err=True)
+        click.echo(
+            "Not falling back to a system, Homebrew or MacPorts copy, and not"
+            " dropping a target: report and stop.",
+            err=True,
+        )
+        sys.exit(rc or 1)
+
+    start = time.monotonic()
+    with open(LOG_PATH, "w") as log:
+        rc = run_logged(configure_cmd, env, log)
+        configure_elapsed = time.monotonic() - start
+        if rc != 0:
+            click.echo(f"\nConfigure failed (exit {rc}). See {LOG_PATH}.", err=True)
+            sys.exit(rc)
+
+        build_start = time.monotonic()
+        rc = run_logged(build_cmd, env, log)
+        build_elapsed = time.monotonic() - build_start
+    elapsed = time.monotonic() - start
+
+    if rc != 0:
+        fail(rc)
+
+    if not occt_was_patched():
+        fail(1, patch_missing=True)
+
+    minutes, seconds = divmod(int(elapsed), 60)
+    hours, minutes = divmod(minutes, 60)
+    summary_lines = [
+        "",
+        "--- stage one: dependency superbuild ---",
+        f"Wall-clock: {hours:d}:{minutes:02d}:{seconds:02d} ({elapsed:.1f}s)"
+        f"  [configure {configure_elapsed:.1f}s + build {build_elapsed:.1f}s]",
+        f"Build directory ({DEPS_BUILD}): {du_sh(DEPS_BUILD)}",
+        f"Install prefix ({INSTALL_PREFIX}): {du_sh(INSTALL_PREFIX)}",
+    ]
+    for line in summary_lines:
+        click.echo(line)
+    # Appended after the log is closed, so a size-measurement hiccup above
+    # can never cost the timing; written into the log itself (rather than
+    # left only on stdout) so the one artefact this script is asked to
+    # produce stays self-contained even if a caller's own stdout capture is
+    # lost.
+    with open(LOG_PATH, "a") as log:
+        log.write("\n".join(summary_lines) + "\n")
+
+
+if __name__ == "__main__":
+    main()

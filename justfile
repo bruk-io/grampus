@@ -9,6 +9,9 @@ check:
 guard *branch:
     {{asdlc}} branch check {{branch}}
 
+# build the vendored OrcaSlicer tree on this platform
+oracle-build:
+    ./oracle/build-libslic3r
 # regenerate port/manifest.tsv's file set and per-file derived columns from the vendored tree
 inventory:
     ./port/inventory
