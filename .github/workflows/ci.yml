@@ -65,14 +65,18 @@ jobs:
       - uses: extractions/setup-just@v3
 
       # dep_MPFR (vendor/OrcaSlicer/deps/MPFR/MPFR.cmake, pulled in transitively by dep_OCCT)
-      # runs `autoreconf -f -i` as its configure step; macos-15's hosted image carries
-      # Homebrew itself but not these formulae (confirmed empirically: the first run of this
-      # job on this label failed stage one with `/bin/sh: autoreconf: command not found`,
-      # exit 127, even though stage one builds without this step on a Homebrew-equipped dev
-      # machine that already has them). Nothing under vendor/OrcaSlicer/ changes; this only
-      # makes the tool its own vendored configure step calls for available on the runner.
-      - name: Install autotools (dep_MPFR's configure step needs autoreconf)
-        run: brew install autoconf automake libtool
+      # runs `autoreconf -f -i` as its configure step, which regenerates its Makefile to
+      # include doc targets that need `makeinfo` (texinfo); macos-15's hosted image carries
+      # Homebrew itself but not these formulae (confirmed empirically, iteratively: the
+      # first run of this job on this label failed stage one's configure with `autoreconf:
+      # command not found` (exit 127); installing autoconf/automake/libtool got past that
+      # and failed stage one's build instead with `missing: line 85: makeinfo: command not
+      # found` (exit 2) — both missing on this runner despite a Homebrew-equipped dev
+      # machine already having them). Nothing under vendor/OrcaSlicer/ changes; this only
+      # makes the tools its own vendored configure/build steps call for available on the
+      # runner.
+      - name: Install autotools (dep_MPFR's configure/build steps need autoreconf, makeinfo)
+        run: brew install autoconf automake libtool texinfo
 
       # Reads the gitlink entry directly, so it works before the submodule step above and
       # changes whenever vendor/README.md's "Changing the pin" procedure moves the pin.

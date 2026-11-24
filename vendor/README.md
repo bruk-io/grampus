@@ -290,17 +290,20 @@ came back `cancelled` with zero steps executed, confirmed via the Actions API
 never be scheduled. Changed to `runs-on: macos-15` (still arm64 by default) so the job actually
 executes.
 
-That run then surfaced a second, genuinely new finding: it failed inside *stage one*, at
-`dep_MPFR` (pulled in transitively by `dep_OCCT`), with `/bin/sh: autoreconf: command not found`
-(exit 127) — `vendor/OrcaSlicer/deps/MPFR/MPFR.cmake` runs `autoreconf -f -i` as its configure
-step, and `macos-15`'s hosted image carries Homebrew itself but not the `autoconf`/`automake`/
-`libtool` formulae, which a Homebrew-equipped dev machine (this one) already has. This is a gap
-in the CI job's own scaffolding, not stage one's CMake flags or anything under
-`vendor/OrcaSlicer/`, so a `brew install autoconf automake libtool` step was added before the
-build step — the same category of addition as the existing `setup-uv`/`setup-just` steps, needed
-for this task's one step to run at all. Whether the job then reaches the same LibLZMA failure as
-this host once that gap is closed (confirming the "host-contingent" framing above) or configures
-cleanly (proving it) is for the PR's next CI run to show.
+That run then surfaced a second, genuinely new finding, in two parts, both inside *stage one* at
+`dep_MPFR` (pulled in transitively by `dep_OCCT`): `vendor/OrcaSlicer/deps/MPFR/MPFR.cmake` runs
+`autoreconf -f -i` as its configure step, which regenerates a Makefile carrying doc-build targets.
+`macos-15`'s hosted image carries Homebrew itself but not every formula a Homebrew-equipped dev
+machine (this one) already has. First run on this label: `/bin/sh: autoreconf: command not found`
+(exit 127) at configure. After adding `autoconf`/`automake`/`libtool`: configure passed, and the
+*build* step then failed with `missing: line 85: makeinfo: command not found` (exit 2) — so
+`texinfo` was missing too. Both are a gap in the CI job's own scaffolding, not stage one's CMake
+flags or anything under `vendor/OrcaSlicer/`, so `brew install autoconf automake libtool texinfo`
+was added before the build step — the same category of addition as the existing
+`setup-uv`/`setup-just` steps, needed for this task's one step to run at all. Whether the job then
+reaches the same LibLZMA failure as this host once these gaps are closed (confirming the
+"host-contingent" framing above) or configures cleanly (proving it) is for the PR's next CI run to
+show.
 
 ### Licensing
 
