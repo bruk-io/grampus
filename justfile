@@ -8,3 +8,7 @@ check:
 # the guard: this branch changes only what its documents on main allow
 guard *branch:
     {{asdlc}} branch check {{branch}}
+
+# build the vendored OrcaSlicer tree on this platform
+oracle-build:
+    ./oracle/build-libslic3r
