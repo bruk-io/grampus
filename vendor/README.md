@@ -344,10 +344,14 @@ With that gap closed, the job **completed stage one in full**, for real, from an
 every from-scratch `macos-15` run that got past the autotools gap: 21 dependencies, no further
 missing tools. Stage one's wall-clock on those runs spans **26m11s to 48m53s**, each figure printed
 by `oracle/build-libslic3r` from an equally cold start (no superbuild cache exists — that is
-`24-port-check-ci`'s half). Three summaries, the fastest and slowest among them, are listed because
-the span is nearly a factor of two; a fourth run,
-[45408522763](https://github.com/bruk-io/grampus/actions/runs/45408522763), logged 40m57s
-(2457.3s) with the same 622M prefix, inside that span:
+`24-port-check-ci`'s half). Three summaries, the fastest and the slowest measured so far, are
+listed because the span is nearly a factor of two. Further runs on this branch have each landed
+inside it rather than widening it — [45408522763](https://github.com/bruk-io/grampus/actions/runs/45408522763)
+at 40m57s (2457.3s), [45416651382](https://github.com/bruk-io/grampus/actions/runs/45416651382) at
+42m03s (2523.6s) and [45427388980](https://github.com/bruk-io/grampus/actions/runs/45427388980) at
+37m59s (2279.0s), all with the same 622M prefix. That list is the runs measured when this was
+written, not a count of every run the branch will accumulate; the span's endpoints are what the
+table records:
 
 | Run | Stage one wall-clock | Build directory | Install prefix |
 |---|---|---|---|
