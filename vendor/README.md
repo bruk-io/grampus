@@ -301,15 +301,14 @@ spread this file previously recorded as unexplained drift: see "Idempotence" bel
 comes from. Stage two's figures exclude the two `ctest` runs, measured right after the build so the
 disk figure never includes test artifacts.
 
-**That 5m43s is a dev-machine figure (28 cores), and it is not what this recipe costs in CI.**
-Stage one alone has measured **26m11s to 48m53s** on a GitHub-hosted `macos-15` runner — 6.9x to
-12.9x its figure here (those runs are tabulated under "Its own workflow" below, and they measured
-the pre-hermetic script; nothing re-measured them after the fix). `24-port-check-ci`, which reads
+**That 5m47s is a dev-machine figure (28 cores), and it is not what this recipe costs in CI.** The
+same cold recipe on a GitHub-hosted `macos-15` runner measured **46m12s for stage one and 35m08s
+for stage two** — about 89 minutes of runner time end to end, roughly **15x** the table above
+(tabulated with the suite times under "Its own workflow" below). `24-port-check-ci`, which reads
 this section to decide whether `just oracle-build` and `just oracle-parity` stay on every pull
 request or move to `main` only, should size that decision on **the CI figures, not on the table
-above**: this recipe is minutes on this many-core dev machine and tens of minutes to hours on a
-hosted runner, which is why the oracle build has its own workflow with a paths filter rather than
-a step in `ci.yml`.
+above**, and should note that a cached run skips both builds entirely. It is why the oracle build
+has its own workflow with a paths filter rather than a step in `ci.yml`.
 
 #### What the build produces, and what the test suites say
 
@@ -429,7 +428,32 @@ for the Makefile that regenerates: `macos-15`'s image carries Homebrew but neith
 (exit 127) and then `missing: line 85: makeinfo: command not found` (exit 2). One
 `brew install autoconf automake libtool texinfo` step covers both.
 
-With those closed, the job completed **stage one in full** on every from-scratch run that got past
+**What a cold run of the whole recipe costs on a hosted runner, measured.** Run
+[45457280332](https://github.com/bruk-io/grampus/actions/runs/45457280332), on `macos-15`, from
+nothing — no cache for either tree — with the hermetic stage one:
+
+| | Wall-clock | Build directory | Install prefix |
+|---|---|---|---|
+| Stage one | 46m12s (2772.1s), configure 2.8s + build 2769.3s | 3.3G | 622M |
+| Stage two | 35m08s (2108.9s), configure 7.6s + 1.0s + build 2100.3s | 1.0G | — |
+| `tests/fff_print` | 277.6s | 657 of 657 passed | — |
+| `tests/libslic3r` | 114.2s | 1718 of 1718 passed | — |
+
+About 89 minutes of runner time end to end, against 5m47s for the same two stages on a 28-core dev
+machine — **roughly 15x**, which is why this workflow has a paths filter instead of being a job on
+every pull request, and what `24-port-check-ci` should size its decision on. Both caches saved
+(1.24 GiB for the superbuild, 409 MiB for the main build tree), so a later run on the same pin and
+script skips both builds.
+
+That run also found fix 2 above on a second host, independently: its stage-one summary listed
+**seven** host-resolved entries, the two dep_OpenCV Python ones and dep_Boost's five Homebrew
+OpenSSL ones, because it predates the `dep_OpenSSL`-first ordering. The LibLZMA half was already
+fixed there — `Boost.Iostreams: ZLIB ON, BZip2 OFF, LZMA OFF, Zstd OFF` in its log — so the
+toolchain file works on a runner as it does here. Neither suite hit the deadlock on that run, and
+nothing timed out.
+
+Before stage two worked, the job ran repeatedly against the pre-hermetic script and completed
+**stage one in full** on every from-scratch run that got past
 the autotools gap, which is independent confirmation that `02-deps-superbuild`'s stage one is
 sound on a machine that is not this one. Its wall-clock there spanned 26m11s to 48m53s:
 
