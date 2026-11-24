@@ -27,3 +27,13 @@ compare a b *ARGS:
 # forwards its arguments to oracle/slice unchanged and adds no flag of its own
 oracle-slice *ARGS:
     ./oracle/slice {{ARGS}}
+
+# export, place and freeze the committed fixture set from their vendored models (R24, R25);
+# with no NAMES, (re)produces all three
+fixture-export *NAMES:
+    ./oracle/export-fixture {{NAMES}}
+# check a run directory's reported object placement against its fixture's vendor/README.md
+# record (R24); named here so 41-compare-benchy and 42-compare-fixtures do not each invent a
+# spelling for the same call
+assert-placement fixture run_dir:
+    ./oracle/assert-placement {{fixture}} {{run_dir}}
