@@ -67,3 +67,8 @@ config-block-diff golden gcode:
 # is); this recipe only regenerates the two reports.
 audit-order:
     ./port/audit-order
+# batch port/manifest.tsv and port/cut.tsv's rows into one of the four plan-step cut files
+# (R8, R9; task 15-task-cuts): ownership, foundation, phase-a or phase-b. Variadic so a caller
+# can also pass `--out <dir>` to redirect the write away from the committed port/ tree.
+task-cuts phase *ARGS:
+    ./port/cut-tasks {{phase}} {{ARGS}}
