@@ -59,3 +59,45 @@ config-goldens:
 # CONFIG_BLOCK does not, and the keys the config block carries that the JSON does not (R11)
 config-block-diff golden gcode:
     ./port/config-block-diff {{golden}} {{gcode}}
+
+# check every ported module's PORT STATUS trailer and port markers (R14, R15, R16 part);
+# variadic so `just port-status --per-commit` and the later `--pr-body <file>` (36-pr-body-check)
+# both reach it without this recipe being rewritten (task 21-port-status-markers)
+port-status *args:
+    ./port/port-status {{args}}
+# regenerate port/reports/order-containers.md and port/reports/order-comparators.md (R18, step
+# 13 part 1, task 17-order-audits): every unordered container that is iterated rather than only
+# looked up, and every comparator that is not a total order, over the manifest's in-scope rows,
+# read at run time. Not a check a port task passes (just audit-check, 18-divergences-regeneration,
+# is); this recipe only regenerates the two reports.
+audit-order:
+    ./port/audit-order
+# batch port/manifest.tsv and port/cut.tsv's rows into one of the four plan-step cut files
+# (R8, R9; task 15-task-cuts): ownership, foundation, phase-a or phase-b. Variadic so a caller
+# can also pass `--out <dir>` to redirect the write away from the committed port/ tree.
+task-cuts phase *ARGS:
+    ./port/cut-tasks {{phase}} {{ARGS}}
+
+# regenerate port/ownership.tsv's field list from the vendored headers (R30, task
+# 16-ownership-spike): one row per raw-pointer field, and per field that is a container of raw
+# pointers, declared in a header port/manifest.tsv marks in scope. Rewrites the committed file --
+# for a person regenerating deliberately.
+ownership:
+    ./port/ownership
+# the drift-detecting variant: regenerates into a scratch directory and fails, with a diff and
+# every invalid row, when port/ownership.tsv disagrees with the headers at the pin. Prints the
+# row count of port/ownership.tsv on success -- the plan's recorded proof line for R30.
+ownership-check:
+    ./port/ownership --check
+# the one command that rewrites every generated report (task 18-divergences-regeneration):
+# today, just audit-order; 23-perf-backlog adds the perf-backlog regeneration to this same seam
+regenerate:
+    ./port/regenerate
+# the drift-detecting variant of audit-order: regenerates order-containers.md,
+# order-comparators.md and divergences.md into a scratch directory and fails when a committed
+# one differs byte for byte (R18, task 18-divergences-regeneration). Not a check a port task
+# passes -- see port/audit-order's module docstring and this task's own task.md -- so this
+# recipe is deliberately in neither `.asdlc/checks` nor `just port-check`; step 14's
+# regeneration pass (23-perf-backlog) is what runs it, on main.
+audit-check:
+    ./port/audit-order --check

@@ -1,0 +1,1847 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Regenerate port/reports/order-containers.md and port/reports/order-comparators.md (R18).
+
+``port/audit-order`` walks the in-scope rows of ``port/manifest.tsv`` (read at run time; no
+file list is written into this script or into a document) and writes two static-analysis
+reports:
+
+- ``port/reports/order-containers.md`` -- every unordered container
+  (``std::unordered_map/set/multimap/multiset``, ``boost::unordered_*``,
+  ``ankerl::unordered_dense::map/set``, ``tbb::concurrent_unordered_map/set``) that is
+  **iterated** rather than only looked up.
+- ``port/reports/order-comparators.md`` -- every comparator (an ``operator<``/``<=``/``>``
+  definition, a ``std::map``/``set``/``multimap``/``multiset``/``priority_queue``'s ``Compare``
+  argument, or a comparator passed at an ordering-algorithm call site) that is **not a total
+  order**.
+
+Both reports are fully derived: every cell is computed from the vendored tree on every run, none
+is hand-edited, and running this script twice leaves both files byte-identical. Part 2 of this
+step (18-divergences-regeneration) adds ``port/reports/divergences.md``, ``port/regenerate`` and
+``just audit-check``; this script writes only the two reports above.
+
+This is a heuristic static analyser, not a C++ parser. It masks out comments and string/char
+literals, then recovers enough structure with brace matching (which header opened a given ``{``:
+a class/struct body, a function body, or neither) to answer two questions per site: for a
+container, is every one of its uses a lookup (``find``/``count``/``contains``/``at``/``[]``/
+``insert``/``emplace``/``erase``-by-key/``size``/``empty``/``clear``), or does it get iterated
+(range-``for``, ``begin``/``end``/``cbegin``/``cend``, or handed to an algorithm or a reduction)?
+For a comparator, does its body match one of the three non-total-order shapes (a disjunction of
+``<`` over different fields, a top-level ``<=``/``>=``, or a floating-point tolerance/``EPSILON``
+compare), or one of the recognised total-order shapes (``std::tie(...) < std::tie(...)``, a
+single-field compare, a nested lexicographic if-chain, or a nested ternary chain)?
+
+This script also regenerates ``port/reports/divergences.md`` (task 18-divergences-regeneration,
+part 2 of this step), from exactly four sources and no other: the rows of the two reports above
+whose own ``diverges`` cell is ``yes``, read from this run's own in-memory tables rather than
+from the files just written; every ``// FIDELITY(port):`` marker under ``crates/``; every row of
+``port/reports/oracle-parity.tsv`` whose two oracles do not reach L1; and every row of
+``port/reports/determinism.tsv`` whose gate is ``none``. The last two files are written by later
+tasks and are absent today -- an absent source contributes zero rows and is not an error, but a
+source that is present with an unreadable header (a renamed column) is. ``--out DIR`` redirects
+all three reports to ``DIR`` instead of the committed ``port/reports/`` tree (what ``just
+audit-check`` uses to regenerate into a scratch directory and diff); ``--self-test`` runs the
+fixtures under ``port/tests/audit-order/`` and asserts their expected result.
+
+**Every one of those four questions is answered conservatively.** Where the script cannot decide
+whether a container is only looked up, it reports the row as iterated. Where it cannot decide
+whether a comparator is a total order, it reports the row as not one. In both cases the reason
+cell says the classification is undecided. The port's-choice mapping (``container_port_choice``
+and ``comparator_port_choice``) and the diverges rule (``diverges``) are likewise written as
+explicit, named branches below, not as
+literals folded into a row dict, because the point of writing them in code is that a reviewer can
+point at the branch that produced a given cell.
+
+This script never attempts to establish whether a given site's order actually reaches compared
+output -- that is a dynamic question a static audit cannot answer -- so ``diverges`` defaults to
+``yes`` with a reason noting the reaches-output question is undecided, for every row this script
+emits. The only branch that can answer ``no`` is a port's choice that provably carries no order at
+all (a looked-up-only container, which is why that branch is never reached here: such containers
+are not iterated, so no row is emitted for them). See ``diverges`` below for the one other named
+exception the task describes (an already-strict relation under a non-strict textual shape), which
+this static script has no way to detect and therefore never emits.
+"""
+
+from __future__ import annotations
+
+import bisect
+import contextlib
+import csv
+import difflib
+import re
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LIBSLIC3R_ROOT = REPO_ROOT / "vendor" / "OrcaSlicer" / "src" / "libslic3r"
+LIBSLIC3R_PREFIX = "vendor/OrcaSlicer/src/libslic3r/"
+MANIFEST_PATH = REPO_ROOT / "port" / "manifest.tsv"
+CONTAINERS_REPORT = REPO_ROOT / "port" / "reports" / "order-containers.md"
+COMPARATORS_REPORT = REPO_ROOT / "port" / "reports" / "order-comparators.md"
+DIVERGENCES_REPORT = REPO_ROOT / "port" / "reports" / "divergences.md"
+CRATES_ROOT = REPO_ROOT / "crates"
+ORACLE_PARITY_TSV = REPO_ROOT / "port" / "reports" / "oracle-parity.tsv"
+DETERMINISM_TSV = REPO_ROOT / "port" / "reports" / "determinism.tsv"
+# just audit-check's own scratch directory (git-ignored; task 18-divergences-regeneration),
+# the same convention port/.cache/inventory-check uses (task 14-manifest-columns).
+SCRATCH_ROOT = REPO_ROOT / "port" / ".cache" / "audit-check"
+SELFTEST_ROOT = REPO_ROOT / "port" / "tests" / "audit-order"
+
+
+# --------------------------------------------------------------------------------------------
+# Manifest: the in-scope file set, read at run time, never written into this script.
+# --------------------------------------------------------------------------------------------
+
+
+def in_scope_paths(manifest_path: Path) -> list[str]:
+    """Return the in-scope rows' paths, relative to LIBSLIC3R_ROOT, sorted.
+
+    A row is in scope when its "in scope or out with a reason" column is exactly "in" or starts
+    with "in:" (an in-scope row with a note); every other value starts with "out:".
+    """
+    with manifest_path.open(newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+    scope_col = "in scope or out with a reason"
+    paths = [r["path"] for r in rows if r[scope_col] == "in" or r[scope_col].startswith("in:")]
+    paths.sort()
+    return paths
+
+
+# --------------------------------------------------------------------------------------------
+# Source masking: blank out comments and string/char literals, preserving length and newlines,
+# so regexes over "code" text never match inside a comment or a literal. Masking preserves every
+# newline so line numbers computed from the masked text are the same as the original's.
+# --------------------------------------------------------------------------------------------
+
+
+def mask_source(text: str) -> str:
+    """Replace comment and string/char literal bodies with spaces, keeping length and newlines."""
+    out = list(text)
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            j = i
+            while j < n and text[j] != "\n":
+                out[j] = " "
+                j += 1
+            i = j
+        elif c == "/" and i + 1 < n and text[i + 1] == "*":
+            j = i
+            out[j] = " "
+            out[j + 1] = " "
+            j += 2
+            while j + 1 < n and not (text[j] == "*" and text[j + 1] == "/"):
+                if text[j] != "\n":
+                    out[j] = " "
+                j += 1
+            if j + 1 < n:
+                out[j] = " "
+                out[j + 1] = " "
+                j += 2
+            i = j
+        elif c in ('"', "'"):
+            quote = c
+            # Raw string literal R"delim(...)delim" -- detect the R immediately before the quote.
+            is_raw = i > 0 and text[i - 1] == "R" and quote == '"'
+            if is_raw:
+                paren = text.find("(", i)
+                if paren == -1:
+                    out[i] = " "
+                    i += 1
+                    continue
+                delim = text[i + 1 : paren]
+                closer = ")" + delim + '"'
+                end = text.find(closer, paren)
+                end = n if end == -1 else end + len(closer)
+                for k in range(i, end):
+                    if text[k] != "\n":
+                        out[k] = " "
+                i = end
+                continue
+            j = i + 1
+            out[i] = " "
+            while j < n and text[j] != quote:
+                if text[j] == "\\" and j + 1 < n:
+                    if text[j] != "\n":
+                        out[j] = " "
+                    if text[j + 1] != "\n":
+                        out[j + 1] = " "
+                    j += 2
+                    continue
+                if text[j] != "\n":
+                    out[j] = " "
+                j += 1
+            if j < n:
+                out[j] = " "
+                j += 1
+            i = j
+        else:
+            i += 1
+    return "".join(out)
+
+
+def line_index(text: str) -> list[int]:
+    """Return the offset just after every newline in `text`, for a bisect-based line lookup."""
+    offsets = [0]
+    for m in re.finditer("\n", text):
+        offsets.append(m.end())
+    return offsets
+
+
+def line_of(offsets: list[int], idx: int) -> int:
+    """Return the 1-based line number of offset `idx`, using `offsets` from `line_index`."""
+    return bisect.bisect_right(offsets, idx)
+
+
+# --------------------------------------------------------------------------------------------
+# Bracket helpers: a single depth counter across (), <>, [], {} is enough to split a comma list
+# at top level, and a matched-pair finder for one bracket kind is enough to parse template
+# argument lists and call argument lists. Both are heuristics over masked text, not a parser.
+# --------------------------------------------------------------------------------------------
+
+_OPEN = {"(": ")", "<": ">", "[": "]", "{": "}"}
+_CLOSE = {v: k for k, v in _OPEN.items()}
+
+
+def find_matching(text: str, open_idx: int) -> int | None:
+    """Return the index of the bracket matching text[open_idx], or None if unbalanced."""
+    open_ch = text[open_idx]
+    close_ch = _OPEN[open_ch]
+    depth = 0
+    i = open_idx
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def split_top_level(text: str, sep: str = ",") -> list[str]:
+    """Split `text` on `sep`, ignoring any `sep` nested inside (), <>, [] or {}."""
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, c in enumerate(text):
+        if c in _OPEN:
+            depth += 1
+        elif c in _CLOSE:
+            depth -= 1
+        elif c == sep and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return parts
+
+
+# --------------------------------------------------------------------------------------------
+# Scope scanner: one pass of brace matching over a masked file, classifying each `{...}` block
+# as a class/struct body, a function body (with its name, and its owning class if it is an
+# out-of-class member definition `Class::method(...)`), or an anonymous/transparent block
+# (if/for/while/switch/lambda/namespace bodies, which do not themselves gate declaring scope).
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass
+class FunctionScope:
+    name: str  # bare function/operator name, e.g. "operator<", "sort_by_z"
+    owner: str | None  # the class name for a member function, else None
+    file: str  # path relative to LIBSLIC3R_ROOT
+    sig_start: int  # start of the signature (return type through the parameter list)
+    start: int  # start of the body (just after the opening `{`)
+    end: int
+    start_line: int
+
+
+@dataclass
+class ClassScope:
+    name: str
+    file: str
+    start: int
+    end: int
+
+
+_CLASS_HEADER_RE = re.compile(r"\b(?:class|struct)\s+(\w+)(?:\s+final)?\s*(?::[^{]*)?$")
+# A function header: `... name ( params ) [const] [noexcept(...)] [override|final] [: init...]`.
+# We find the LAST top-level `(...)` in the header and read the identifier right before it: an
+# operator name (`operator<`, `operator()`, ...), optionally qualified by its owning class, or a
+# plain name, likewise optionally qualified.
+_OPERATOR_TAIL_RE = re.compile(r"(?:([A-Za-z_]\w*)\s*::\s*)?operator\s*(<=|>=|<|>|\(\)|\[\])\s*$")
+_PLAIN_NAME_TAIL_RE = re.compile(r"(?:([A-Za-z_]\w*)\s*::\s*)?([A-Za-z_~]\w*)\s*$")
+# A control-flow header's condition can itself end in a call (`if (!x.empty())`, `for (auto&
+# v : foo())`), and picking the LAST top-level `(...)` (below) would then read the call's own
+# name as a function name. Reject any header whose own leading keyword (after an optional
+# leading `else`) is a control-flow keyword, before ever looking at its parens.
+_CONTROL_HEAD_RE = re.compile(r"^(?:else\s+)?(if|for|while|switch|catch)\b")
+
+
+_OPERATOR_SYMBOL_RE = re.compile(r"operator\s*(<<|>>|<=|>=|<|>)")
+
+
+def _mask_operator_symbols(text: str) -> str:
+    """Blank the `<`/`>` characters of an `operator<`/`<=`/`>`/`>=`/`<<`/`>>` token's own
+    symbol, keeping length and every other character's position, so a bracket-depth scan over
+    the header (see `_top_level_open_positions`) never mistakes the operator's own symbol for
+    template/bracket punctuation -- an unmatched `<` from `operator<` would otherwise corrupt
+    the depth count for the rest of the header and hide the real parameter list entirely."""
+    out = list(text)
+    for m in _OPERATOR_SYMBOL_RE.finditer(text):
+        for i in range(m.start(1), m.end(1)):
+            out[i] = " "
+    return "".join(out)
+
+
+def _top_level_open_positions(text: str, target_open: str) -> list[int]:
+    """Return every position of `target_open` that sits at depth 0 across *all* bracket kinds
+    (`()`, `[]`, `{}` and `<>` together), not just its own kind.
+
+    A plain same-kind depth count (as `find_matching` uses, correctly, once given the right
+    starting position) is not enough to *find* a header's own parameter-list paren: a return
+    type or parameter type can itself carry a template argument list containing its own parens
+    (`std::function<bool(int, int)>`), and those are nested *inside* a `<...>` the naive count
+    never sees, so a same-kind-only scan reads the template's inner `(` as another top-level
+    paren and, being later in the text, is picked over the real one. Treating `<`/`>` as
+    brackets too (alongside `()[]{}` ) correctly nests that inner `(` one level deeper.
+    """
+    stack: list[str] = []
+    positions: list[int] = []
+    for i, c in enumerate(text):
+        if c in _OPEN:
+            if not stack and c == target_open:
+                positions.append(i)
+            stack.append(c)
+        elif c in _CLOSE:
+            if stack and stack[-1] == _CLOSE[c]:
+                stack.pop()
+            # A mismatched closer (e.g. a `>` that was really "greater than", not a template
+            # close) is ignored rather than corrupting the rest of the scan.
+    return positions
+
+
+def classify_header(header: str) -> tuple[str, str | None, str | None]:
+    """Classify the text immediately before a `{`.
+
+    Returns (kind, name, owner) where kind is "class", "function" or "other". `name` is the
+    class name or the function/operator name; `owner` is the owning class of a member function
+    defined out of class (`Class::method`), else None.
+    """
+    h = header.strip()
+    if not h:
+        return "other", None, None
+    m = _CLASS_HEADER_RE.search(h)
+    if m:
+        return "class", m.group(1), None
+    if _CONTROL_HEAD_RE.match(h):
+        return "other", None, None
+    # Function: the header must end with `)` possibly followed by const/noexcept/override/final
+    # and/or an initializer list `: a(...), b(...)`. Strip a trailing initializer list first (it
+    # can itself contain parens, so strip from the first top-level `:` after the parameter list).
+    stripped = h
+    paren_positions = _top_level_open_positions(_mask_operator_symbols(stripped), "(")
+    last_open = None
+    for i in paren_positions:
+        end = find_matching(stripped, i)
+        if end is not None:
+            last_open, last_close = i, end
+    if last_open is None:
+        return "other", None, None
+    before = stripped[:last_open]
+    after = stripped[last_close + 1 :]
+    # `after` must look like specifiers/initializer-list only, no stray `{`/`;` (masking already
+    # removed strings/comments, so this is a reasonably safe check).
+    if "{" in after or ";" in after:
+        return "other", None, None
+    om = _OPERATOR_TAIL_RE.search(before)
+    if om:
+        owner, op = om.group(1), om.group(2)
+        return "function", "operator" + op, owner
+    pm = _PLAIN_NAME_TAIL_RE.search(before)
+    if not pm:
+        return "other", None, None
+    owner, fname = pm.group(1), pm.group(2)
+    # Reject common control-flow / keyword false positives that can precede a `(...)`.
+    if fname in {"if", "for", "while", "switch", "catch", "return", "sizeof", "static_assert"}:
+        return "other", None, None
+    return "function", fname, owner
+
+
+def scan_file(path: str, masked: str) -> tuple[list[FunctionScope], list[ClassScope]]:
+    """Brace-match `masked`, returning every function scope and every class/struct scope."""
+    functions: list[FunctionScope] = []
+    classes: list[ClassScope] = []
+    offsets = line_index(masked)
+    # (kind, name, owner, sig_start, body_start)
+    stack: list[tuple[str, str | None, str | None, int, int]] = []
+    last_stmt_end = 0
+    i = 0
+    n = len(masked)
+    while i < n:
+        c = masked[i]
+        if c == "{":
+            header = masked[last_stmt_end:i]
+            kind, name, owner = classify_header(header)
+            if kind == "function" and owner is None:
+                # An inline member function's header carries no `Class::` qualifier (that form
+                # is only for a definition out of class), so its owner is the nearest enclosing
+                # class/struct scope already on the stack, if any.
+                for s_kind, s_name, *_ in reversed(stack):
+                    if s_kind == "class":
+                        owner = s_name
+                        break
+            stack.append((kind, name, owner, last_stmt_end, i + 1))
+            last_stmt_end = i + 1
+        elif c == "}":
+            if stack:
+                kind, name, owner, sig_start, start = stack.pop()
+                end = i
+                if kind == "function" and name is not None:
+                    functions.append(
+                        FunctionScope(
+                            name=name, owner=owner, file=path, sig_start=sig_start, start=start, end=end, start_line=line_of(offsets, start)
+                        )
+                    )
+                elif kind == "class" and name is not None:
+                    classes.append(ClassScope(name=name, file=path, start=start, end=end))
+            last_stmt_end = i + 1
+        elif c == ";":
+            last_stmt_end = i + 1
+        i += 1
+    return functions, classes
+
+
+def enclosing_scope(pos: int, functions: list[FunctionScope], classes: list[ClassScope]) -> tuple[str, str, str]:
+    """Return (kind, name, owner_or_empty) of the innermost scope containing `pos`.
+
+    kind is "function", "class" or "file"; a bare "file" scope means pos is not inside any
+    recognised function or class body (e.g. a file-scope static/global declaration).
+    """
+    best: tuple[str, str, str, int] | None = None  # (kind, name, owner, size)
+    for f in functions:
+        # sig_start, not start: a parameter declared by reference in the signature is "a
+        # function it is passed to by reference" (the task's own words for the container rule),
+        # so it must resolve to this function, not fall through to file scope.
+        if f.sig_start <= pos < f.end:
+            size = f.end - f.sig_start
+            if best is None or size < best[3]:
+                best = ("function", f.name, f.owner or "", size)
+    for cl in classes:
+        if cl.start <= pos < cl.end:
+            size = cl.end - cl.start
+            if best is None or size < best[3]:
+                best = ("class", cl.name, "", size)
+    if best is None:
+        return "file", "<file scope>", ""
+    return best[0], best[1], best[2]
+
+
+# --------------------------------------------------------------------------------------------
+# Container audit.
+# --------------------------------------------------------------------------------------------
+
+CONTAINER_TYPE_RE = re.compile(
+    r"(std::unordered_(?:map|set|multimap|multiset)"
+    r"|boost::unordered_[a-z_]+"
+    r"|ankerl::unordered_dense::(?:map|set)"
+    r"|tbb::concurrent_unordered_(?:map|set))\b"
+)
+
+MAP_KINDS = {
+    "std::unordered_map",
+    "std::unordered_multimap",
+    "ankerl::unordered_dense::map",
+    "tbb::concurrent_unordered_map",
+    "boost::unordered_map",
+    "boost::unordered_multimap",
+}
+SET_KINDS = {
+    "std::unordered_set",
+    "std::unordered_multiset",
+    "ankerl::unordered_dense::set",
+    "tbb::concurrent_unordered_set",
+    "boost::unordered_set",
+    "boost::unordered_multiset",
+}
+
+_DECLARATOR_NAME_RE = re.compile(r"([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)*$")
+
+LOOKUP_METHODS = r"find|count|contains|at|insert|emplace(?:_hint)?|erase|size|empty|clear"
+ALGORITHM_NAMES = (
+    r"std::sort|std::stable_sort|std::partial_sort|std::nth_element|std::accumulate|"
+    r"std::for_each|std::transform|std::copy|std::count_if|std::find_if|std::all_of|"
+    r"std::any_of|std::none_of|std::max_element|std::min_element|std::reduce|"
+    r"std::transform_reduce|tbb::parallel_for|tbb::parallel_for_each|tbb::parallel_reduce|"
+    r"boost::accumulate"
+)
+
+
+@dataclass
+class ContainerDecl:
+    file: str
+    line: int
+    pos: int
+    type_name: str
+    var_name: str | None  # None when the declarator could not be parsed (reported undecided)
+
+
+def find_container_decls(
+    path: str, masked: str, offsets: list[int], funcs: list[FunctionScope], classes: list[ClassScope]
+) -> list[ContainerDecl]:
+    """Find every unordered-container variable declaration in `masked`.
+
+    A container type's own match can sit in a variable declaration (`Type v;`, `Type v{...};`,
+    `Type v = {...};`, `Type v(args);`, a reference parameter `Type& p` with or without a
+    `= {}` default), in a function's return type or a parameter type (whether the function goes
+    on to a body or is a bare prototype), or inside a `using`/`typedef` alias (skipped above).
+    Only the first case names a container instance to audit; the rest produce no row.
+    """
+    decls: list[ContainerDecl] = []
+    n = len(masked)
+    for m in CONTAINER_TYPE_RE.finditer(masked):
+        type_name = m.group(1)
+        # Skip a type alias (`using X = std::unordered_map<...>;` / `typedef ... X;`): it names
+        # no container instance, so there is nothing to classify. Look back to the nearest
+        # preceding statement boundary for a `using`/`typedef` keyword on the same statement.
+        stmt_start = max(masked.rfind(";", 0, m.start()), masked.rfind("{", 0, m.start()), masked.rfind("}", 0, m.start())) + 1
+        if re.search(r"\b(?:using|typedef)\b", masked[stmt_start : m.start()]):
+            continue
+        after_type = m.end()
+        # Only a declaration if the type name is directly followed by a template arg list.
+        j = after_type
+        while j < n and masked[j] in " \t":
+            j += 1
+        if j >= n or masked[j] != "<":
+            continue
+        close = find_matching(masked, j)
+        if close is None:
+            continue
+
+        def undecided() -> None:
+            decls.append(
+                ContainerDecl(file=path, line=line_of(offsets, m.start()), pos=m.start(), type_name=type_name, var_name=None)
+            )
+
+        # Scan forward from just after the type's own closing `>` to the first top-level `(`,
+        # `=`, `{`, `;` or `,`, or an unmatched closing bracket (`)`/`]`/`}`) that exits a
+        # structure this scan never opened -- a parameter declared last in an enclosing
+        # parameter list ends exactly this way, at the function's own closing `)`, with no `;`
+        # or `,` of its own. That one boundary tells a bare declaration (`;`/`,`/a closing
+        # bracket) or a brace-/equals-initialised variable (`{`/`=`) apart from a parenthesised
+        # form (`(`, ambiguous between a direct-init variable `Type v(args);` and a function
+        # signature) -- without a parameter list's or a constructor call's own parens ever being
+        # mistaken for the declarator boundary (the previous version bumped a depth counter at
+        # every one of those and never actually stopped there, which is how a `{` deep inside a
+        # parameter's default argument reached the old blanket "`{` in declarator" check and
+        # dropped every genuine brace-init variable along with it).
+        k = close + 1
+        depth = 0
+        stop_char: str | None = None
+        stop_pos = k
+        while k < n:
+            c = masked[k]
+            if depth == 0 and c in "(={;,":
+                stop_char, stop_pos = c, k
+                break
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                if depth == 0:
+                    stop_char, stop_pos = c, k
+                    break
+                depth -= 1
+            k += 1
+        if stop_char is None:
+            # Ran off the end of the file: an unusual declarator form. Conservatively undecided.
+            undecided()
+            continue
+
+        if stop_char != "(":
+            # A bare, brace- or equals-initialised variable declaration (`;`/`,`/`{`/`=`). Cut
+            # the declarator here, before any initialiser expression, so the trailing-identifier
+            # match below reads the declared name and never a name inside the initialiser.
+            name_source = masked[close + 1 : stop_pos]
+        else:
+            # `(`: a parameter list or a direct-init call -- ambiguous with a function's own
+            # signature on the page alone. Resolve it from where this declaration sits.
+            rparen = find_matching(masked, stop_pos)
+            if rparen is None:
+                undecided()
+                continue
+            # What follows the parameter list: specifiers and/or an initialiser list, then the
+            # first top-level `{` (a body) or `;` (a prototype, or a direct-init statement).
+            q = rparen + 1
+            depth2 = 0
+            after_stop: str | None = None
+            while q < n:
+                c = masked[q]
+                if depth2 == 0 and c in "{;":
+                    after_stop = c
+                    break
+                if c in "([{":
+                    depth2 += 1
+                elif c in ")]}":
+                    if depth2 == 0:
+                        break
+                    depth2 -= 1
+                q += 1
+            in_function_body = any(f.start <= m.start() < f.end for f in funcs)
+            in_class_only = (not in_function_body) and any(cl.start <= m.start() < cl.end for cl in classes)
+            if in_function_body:
+                # Nested named functions don't exist in C++: inside a function body this is a
+                # local variable, direct-initialised with constructor arguments.
+                name_source = masked[close + 1 : stop_pos]
+            elif in_class_only:
+                # In a class body, and not inside any method body, `Type member(args);` is
+                # always a member function declaration -- a class has no syntax for
+                # direct-initialising a data member with parens (the same "most vexing parse"
+                # rule the language itself resolves this with). Whether it is a bare prototype
+                # or defined inline, there is no container instance here to audit.
+                continue
+            elif after_stop == "{":
+                # File/namespace scope, unambiguous: a body follows, so this is a function
+                # definition's return type or parameter type, not a variable.
+                continue
+            elif after_stop == ";":
+                # File/namespace scope, genuinely ambiguous between a forward-declared function
+                # returning this container type and a direct-init variable definition.
+                # Conservative: treat it as a variable rather than risk dropping a real
+                # container, the same direction as every other undecided branch.
+                name_source = masked[close + 1 : stop_pos]
+            else:
+                undecided()
+                continue
+
+        nm = _DECLARATOR_NAME_RE.search(name_source)
+        if not nm or nm.group(1) in {"typedef", "using", "static", "const", "constexpr"}:
+            # The declarator parse failed to find a plausible variable name (an unusual
+            # declarator form this heuristic doesn't cover). Conservatively undecided rather
+            # than silently dropped: `var_name=None` skips straight to that verdict below.
+            undecided()
+            continue
+        var_name = nm.group(1)
+        decls.append(ContainerDecl(file=path, line=line_of(offsets, m.start()), pos=m.start(), type_name=type_name, var_name=var_name))
+    return decls
+
+
+def classify_container_usage(var_name: str, search_text: str) -> tuple[str, str, int | None]:
+    """Classify every occurrence of `var_name` in `search_text`.
+
+    Returns (verdict, reason, line_offset_of_evidence) where verdict is "iterated",
+    "looked_up" or "undecided", `reason` is a short fixed phrase (no raw source text, so a `|`
+    in source code can never break the Markdown table), and `line_offset_of_evidence` is the
+    character offset of the usage that decided it (for the "iteration path:line" cell), or None
+    when there is none (the looked-up and the no-usage-found undecided cases).
+    """
+    name_re = re.escape(var_name)
+    occ_re = re.compile(r"\b" + name_re + r"\b")
+    range_for_re = re.compile(r"for\s*\([^;)]*:\s*" + name_re + r"\s*\)")
+    begin_end_re = re.compile(
+        r"(?:" + name_re + r"\s*\.\s*(?:begin|end|cbegin|cend)\s*\(|(?:std::)?(?:begin|end|cbegin|cend)\s*\(\s*" + name_re + r"\s*\))"
+    )
+    algo_re = re.compile(r"(?:" + ALGORITHM_NAMES + r")\s*\([^;]*\b" + name_re + r"\b")
+    lookup_re = re.compile(name_re + r"\s*(?:\.\s*(?:" + LOOKUP_METHODS + r")\s*\(|\[)")
+    # A `.end()`/`.cend()` immediately on one side of `==`/`!=` is the `find(k) != m.end()`
+    # lookup idiom (the task's own rule lists `find` as lookup evidence), not an iteration --
+    # even though the same call is also named as begin()/end() iteration evidence. Recognise
+    # that idiom so the reason and evidence cells never claim an iteration at a lookup line.
+    eq_before_re = re.compile(r"(==|!=)\s*$")
+
+    saw_any = False
+    saw_unknown = False
+    saw_idiom_only = False
+    idiom_pos: int | None = None
+    first_iter_pos: int | None = None
+    first_iter_reason: str | None = None
+    for occ in occ_re.finditer(search_text):
+        saw_any = True
+        pos = occ.start()
+        window_start = max(0, pos - 120)
+        window_end = min(len(search_text), pos + 120)
+        window = search_text[window_start:window_end]
+        # The evidence position is the *matched pattern's own* position (offset by
+        # window_start), not `pos` (the occurrence that triggered the window search) -- those
+        # differ whenever the real begin()/end()/range-for/algorithm call sits near, but is not
+        # at, this occurrence (e.g. an earlier `.find(...)` on the same variable, with the
+        # variable's real iterating use a few lines later in the same window).
+        m = range_for_re.search(window)
+        if m:
+            if first_iter_pos is None:
+                first_iter_pos, first_iter_reason = window_start + m.start(), "range-for over the container"
+            continue
+        m = begin_end_re.search(window)
+        if m:
+            abs_pos = window_start + m.start()
+            if eq_before_re.search(search_text[max(0, abs_pos - 4) : abs_pos]):
+                saw_idiom_only = True
+                if idiom_pos is None:
+                    idiom_pos = abs_pos
+                continue
+            if first_iter_pos is None:
+                first_iter_pos, first_iter_reason = abs_pos, "begin()/end() (or cbegin()/cend()) called on the container"
+            continue
+        m = algo_re.search(window)
+        if m:
+            if first_iter_pos is None:
+                first_iter_pos, first_iter_reason = window_start + m.start(), "handed to an algorithm or a reduction"
+            continue
+        if lookup_re.match(search_text, pos):
+            continue
+        saw_unknown = True
+
+    if first_iter_pos is not None:
+        return "iterated", first_iter_reason or "iterated", first_iter_pos
+    if saw_idiom_only and not saw_unknown:
+        return (
+            "undecided",
+            "classification undecided: the only begin()/end() use found is a find()/end() "
+            "lookup comparison (== or != against end()/cend()), which the begin()/end() "
+            "iteration rule does not clearly cover",
+            idiom_pos,
+        )
+    if saw_any and not saw_unknown:
+        return "looked_up", "every use is find/count/contains/at/insert/emplace/erase/size/empty/clear", None
+    return "undecided", "classification undecided: no recognised iterating or lookup-only use found", None
+
+
+# --------------------------------------------------------------------------------------------
+# Comparator audit.
+# --------------------------------------------------------------------------------------------
+
+COMPARATOR_OPERATORS = {"operator<", "operator<=", "operator>"}
+
+TIE_SHAPE_RE = re.compile(r"return\s+std::tie\([^;]*\)\s*<\s*std::tie\([^;]*\)\s*;?\s*$")
+SINGLE_FIELD_RE = re.compile(r"^return\s+[\w.\->()]+\s*<\s*[\w.\->()]+\s*;?\s*$")
+IF_CHAIN_STEP = r"if\s*\(\s*[\w.\->()]+\s*!=\s*[\w.\->()]+\s*\)\s*return\s+[\w.\->()]+\s*<\s*[\w.\->()]+\s*;\s*"
+IF_CHAIN_RE = re.compile(r"^(?:" + IF_CHAIN_STEP + r")+return\s+[\w.\->()]+\s*<\s*[\w.\->()]+\s*;?\s*$")
+TERNARY_STEP = r"[\w.\->()]+\s*!=\s*[\w.\->()]+\s*\?\s*[\w.\->()]+\s*<\s*[\w.\->()]+\s*:\s*"
+TERNARY_CHAIN_RE = re.compile(r"^return\s+(?:" + TERNARY_STEP + r")+[\w.\->()]+\s*<\s*[\w.\->()]+\s*;?\s*$")
+
+NON_STRICT_RE = re.compile(r"return\b[^;{}]*?(<=|>=)[^;{}]*?;")
+TOLERANCE_RE = re.compile(r"\bEPSILON\b|\b(?:std::)?(?:fabs|abs)\s*\(")
+DISJUNCTION_RE = re.compile(r"return\b[^;{}]*<[^;{}]*\|\|[^;{}]*<[^;{}]*;")
+
+# The comparator surface also includes operator>, so a single `return X > Y;` (the common
+# max-heap-style idiom, e.g. a priority_queue's Compare functor, or `this->field > other.field`)
+# must be recognised as a clean total order too, not left undecided just because every other
+# clean-shape pattern looks for `<`. A bare `>` -- the real comparator, not the `->` of a
+# ubiquitous `this->field`/`obj->field` access, and not a `>=` -- is one not immediately preceded
+# by `-` and not immediately followed by `=`.
+_BARE_GT_RE = re.compile(r"(?<!-)>(?!=)")
+
+
+def is_single_gt_compare(expr: str) -> bool:
+    """True when `expr` (a `return` statement's expression, `;` already stripped) is a single,
+    unparenthesized `A > B` and nothing else -- no `&&`/`||` (which would mean more than one
+    comparison is involved), no negation (`!(*this > val)` is a `<=` wearing a `>` costume, not
+    a clean `>` compare), and exactly one bare `>` in the whole expression."""
+    if "&&" in expr or "||" in expr or "!" in expr:
+        return False
+    return len(_BARE_GT_RE.findall(expr)) == 1
+
+_FIELD_EXPR = r"[\w.\->()\[\]]+"
+_SINGLE_LT_RE = re.compile(r"^" + _FIELD_EXPR + r"\s*<\s*" + _FIELD_EXPR + r"$")
+_GUARD_HEAD_RE = re.compile(r"^(" + _FIELD_EXPR + r")\s*<\s*(" + _FIELD_EXPR + r")\s*\|\|\s*\(")
+_GUARD_INNER_RE = re.compile(r"^(" + _FIELD_EXPR + r")\s*==\s*(" + _FIELD_EXPR + r")\s*&&\s*(.*)$", re.DOTALL)
+
+
+def strip_outer_parens(expr: str) -> str:
+    """Strip parentheses that wrap `expr` as a whole, repeatedly.
+
+    Only a `(` at index 0 whose *matching* `)` is the last character wraps the whole expression,
+    so `(a < b || (a == b && c < d))` is unwrapped while `(a < b) || (c < d)` -- whose leading
+    `(` closes in the middle -- is left exactly as it was. The lexicographic chains in this tree
+    wrap their tail (`l.x() < r.x() || (l.x() == r.x() && (l.y() < r.y() || (...)))`), so the
+    recursive call below is handed a wholly-parenthesised string and has to unwrap it before any
+    pattern can match.
+    """
+    expr = expr.strip()
+    while expr.startswith("("):
+        close = find_matching(expr, 0)
+        if close is None or close != len(expr) - 1:
+            break
+        expr = expr[1:-1].strip()
+    return expr
+
+
+def strip_paired_parens(left: str, right: str) -> tuple[str, str]:
+    """Undo a parenthesised *comparison*, whose `(`/`)` land in two different captured fields.
+
+    `_FIELD_EXPR` admits `(` and `)` so that `l.x()`, `pos(1)` and `a.getX()` count as fields,
+    which means a parenthesised comparison -- `(density < other.density) || ...`, or the guard
+    `((weight == other.weight) && ...)` -- is captured as the unbalanced pair `('(density',
+    'other.density)')`. Neither half is individually balanced, so a per-field strip is a no-op;
+    the parens have to come off as a pair. Only done when the result leaves *both* halves
+    balanced, so `f(x` / `g(y)` is left alone.
+    """
+    if left.startswith("(") and right.endswith(")"):
+        cand_l, cand_r = left[1:].strip(), right[:-1].strip()
+        if cand_l.count("(") == cand_l.count(")") and cand_r.count("(") == cand_r.count(")"):
+            return cand_l, cand_r
+    return left, right
+
+
+def is_lexicographic_or_chain(expr: str) -> bool:
+    """True when `expr` is `F < F`, or the short-circuited chain `F < F || (F == F && ...)`.
+
+    This is the common pre-``std::tie`` lexicographic-compare idiom (e.g.
+    ``a.x < b.x || (a.x == b.x && a.y < b.y)``): textually it contains a `<` ... `||` ... `<`,
+    the same shape ``DISJUNCTION_RE`` looks for, but the second comparison is only reached when
+    the first pair compares equal, so it is a proper nested lexicographic chain over the fields
+    in order, not two independently-orderable fields. ``classify_comparator_shape`` checks this
+    *before* ``DISJUNCTION_RE`` so this idiom is recognised as a clean total order instead of a
+    false-positive "disjunction". The guard's `==` must compare the *same* two fields the head's
+    `<` compared (in either order) -- otherwise this is a real disjunction wearing an unrelated
+    guard, and must fall through to ``DISJUNCTION_RE`` instead of being waved through as clean.
+    Recursion (via `find_matching`, so a mismatched guard can never recurse past the string it
+    was given) accepts a chain of any depth.
+
+    Parentheses are stripped in the two places the idiom actually puts them, because
+    `_FIELD_EXPR` admits `(`/`)` (for `l.x()`, `pos(1)`) and so swallows them into the captured
+    fields: `strip_outer_parens` unwraps a wholly-parenthesised expression (which is what the
+    recursive call is handed, since these chains parenthesise their tail), and
+    `strip_paired_parens` undoes a parenthesised *comparison* in the head (`(density <
+    other.density) || ...`, `Fill/FillHoneycomb.hpp:42`) or in the guard (`((weight ==
+    other.weight) && ...)`, `Geometry.cpp:96`). Without them the guard-field equality below
+    compares `{'(density', 'other.density)'}` against `{'density', 'other.density'}`, fails, and
+    a genuine chain is reported as a "disjunction" -- a false claim about the vendored source.
+    """
+    expr = strip_outer_parens(expr)
+    if _SINGLE_LT_RE.match(expr):
+        return True
+    head = _GUARD_HEAD_RE.match(expr)
+    if not head:
+        return False
+    head_a, head_b = strip_paired_parens(head.group(1).strip(), head.group(2).strip())
+    open_paren = head.end() - 1  # the "(" the pattern itself ends on, not any "(" in a.getX()
+    close_paren = find_matching(expr, open_paren)
+    if close_paren is None or close_paren != len(expr) - 1:
+        return False
+    inner = expr[open_paren + 1 : close_paren].strip()
+    m = _GUARD_INNER_RE.match(inner)
+    if not m:
+        return False
+    guard_a, guard_b = strip_paired_parens(m.group(1).strip(), m.group(2).strip())
+    if {guard_a, guard_b} != {head_a, head_b}:
+        return False
+    return is_lexicographic_or_chain(m.group(3))
+
+ORDER_ALGO_MIN_ARGS = {
+    "std::sort": 2,
+    "std::stable_sort": 2,
+    "std::partial_sort": 3,
+    "std::nth_element": 3,
+    "std::lower_bound": 3,
+    "std::upper_bound": 3,
+    "std::binary_search": 3,
+    "std::max_element": 2,
+    "std::min_element": 2,
+}
+ORDER_ALGO_RE = re.compile(r"\b(" + "|".join(re.escape(k) for k in ORDER_ALGO_MIN_ARGS) + r")\s*\(")
+
+ORDERED_CONTAINER_TEMPLATE_RE = re.compile(r"\b(std::map|std::multimap|std::set|std::multiset|std::priority_queue)\b")
+# Fixed positions of the Compare argument for each ordered-container template.
+COMPARE_ARG_INDEX = {
+    "std::map": 2,
+    "std::multimap": 2,
+    "std::set": 1,
+    "std::multiset": 1,
+    "std::priority_queue": 2,
+}
+DEFAULT_COMPARE_RE = re.compile(r"^\s*std::(?:less|greater)\b")
+
+
+def classify_comparator_shape(body: str, operator_name: str | None = None) -> tuple[str | None, str]:
+    """Classify a comparator body.
+
+    Returns (shape, reason). shape is one of "disjunction", "non_strict", "tolerance" (a
+    not-a-total-order shape, in that priority order), None (recognised as a clean total order,
+    so not reported), or "undecided" (reported, conservatively, as not a total order).
+
+    `operator_name`, when this body is an `operator<=`/`operator>=` *definition*, settles the
+    shape immediately: the operator's own name already establishes a non-strict relation (e.g.
+    ``operator<=`` returning ``!(*this > val)`` is a `<=` by definition, however its body reads),
+    so no clean-shape recogniser below is ever allowed to wave it through as a strict total
+    order. TOLERANCE_RE and NON_STRICT_RE also run before the clean-shape recognisers, because
+    neither can ever match a genuinely clean shape (those only ever use a bare `<`/`>`, never
+    `<=`/`>=`/`EPSILON`/`fabs`/`abs`) -- so checking them first only catches bodies a clean
+    recogniser would otherwise have swallowed by accident (e.g. ``fabs(a - b) < EPSILON``, whose
+    single `<` also matches the single-field clean shape). DISJUNCTION_RE, by contrast, can and
+    does match a genuine short-circuited lexicographic OR chain (`A < B || (A == B && C < D)`)
+    as plain text, so it must stay *after* `is_lexicographic_or_chain`, which is the only check
+    that tells the two apart.
+    """
+    normalized = re.sub(r"\s+", " ", body).strip()
+    if operator_name in ("operator<=", "operator>="):
+        return "non_strict", f"the comparator is {operator_name}: equal elements compare true by definition"
+    if NON_STRICT_RE.search(normalized):
+        return "non_strict", "the top-level return uses <= or >=: equal elements compare true"
+    if TOLERANCE_RE.search(normalized):
+        return "tolerance", "the comparison goes through a tolerance or EPSILON: the relation is non-transitive"
+    ret_m = re.match(r"^return\s+(.*)$", normalized)
+    if ret_m:
+        expr = ret_m.group(1).rstrip()
+        if expr.endswith(";"):
+            expr = expr[:-1].rstrip()
+        if is_lexicographic_or_chain(expr):
+            return None, "recognised total-order shape (short-circuited lexicographic OR chain)"
+        if is_single_gt_compare(expr):
+            return None, "recognised total-order shape (single > comparison)"
+    if DISJUNCTION_RE.search(normalized):
+        return "disjunction", "a disjunction of < over different fields: two distinct elements can each compare less than the other"
+    if (
+        TIE_SHAPE_RE.search(normalized)
+        or SINGLE_FIELD_RE.match(normalized)
+        or IF_CHAIN_RE.match(normalized)
+        or TERNARY_CHAIN_RE.match(normalized)
+    ):
+        return None, "recognised total-order shape"
+    return "undecided", "classification undecided: the body matches none of the recognised total-order or non-total-order shapes"
+
+
+def repo_path_line(path: str, line: int) -> str:
+    return f"{LIBSLIC3R_PREFIX}{path}:{line}"
+
+
+# --------------------------------------------------------------------------------------------
+# Port's choice and the diverges rule: explicit, named branches (see module docstring).
+# --------------------------------------------------------------------------------------------
+
+
+def container_port_choice(type_name: str, verdict: str) -> str:
+    """The fixed mapping from a container's classification to the port's choice."""
+    if verdict == "looked_up":
+        return "same container kind, no ordering guarantee"
+    # verdict is "iterated" or "undecided" (reported conservatively as iterated).
+    if type_name in MAP_KINDS:
+        return "insertion-ordered map"
+    if type_name in SET_KINDS:
+        return "insertion-ordered set"
+    raise AssertionError(f"unrecognised container type {type_name!r}")
+
+
+def comparator_port_choice(shape: str) -> str:
+    """The fixed mapping from a comparator's matched shape to the port's choice."""
+    if shape == "disjunction":
+        return "nested lexicographic chain over the same fields in the same order"
+    if shape == "non_strict":
+        return "the strict form of the same relation"
+    if shape == "tolerance":
+        return "the same comparison with the tolerance removed; the row's tier decides equality"
+    if shape == "undecided":
+        return "total-order comparator"
+    raise AssertionError(f"unrecognised comparator shape {shape!r}")
+
+
+def diverges(port_choice: str) -> tuple[str, str]:
+    """Whether `port_choice` differs from the oracle's relation or iteration order.
+
+    `yes` for every mapping except two named exceptions: a looked-up-only container (the port
+    keeps the same container kind with no ordering guarantee, because its order never reaches
+    output -- this branch is never reached by a row this script emits, since a looked-up-only
+    container is never written to the report), and a non-strict-shaped comparator whose relation
+    is already, in fact, strict despite the textual shape -- which a static script has no way to
+    establish, so that branch is documented here but never taken: no code path below returns
+    "no" for it.
+
+    This script never attempts to decide whether a given site's order reaches compared output
+    (a dynamic question a static audit cannot answer), so every row it emits carries that
+    undecided note in its reason.
+    """
+    if port_choice == "same container kind, no ordering guarantee":
+        return "no", "the container is only looked up; its order never reaches output"
+    return "yes", "reaches-output undecided: this script does not establish whether this site's order reaches compared output"
+
+
+# --------------------------------------------------------------------------------------------
+# divergences.md (task 18-divergences-regeneration, part 2 of step 13; R18).
+#
+# Exactly four sources, named here and nowhere else:
+#   1. order-audit       -- the rows of the two reports above whose own `diverges` cell is
+#                            `yes`, read from this run's in-memory tables (never the files just
+#                            written, so one run cannot mix two generations).
+#   2. fidelity-marker    -- every `// FIDELITY(port):` marker under crates/.
+#   3. oracle-parity      -- every row of port/reports/oracle-parity.tsv whose two oracles do
+#                            not reach L1.
+#   4. determinism        -- every row of port/reports/determinism.tsv whose gate is `none`.
+#
+# Sources 3 and 4 are written by later, independent tasks and are absent today: an absent
+# source contributes zero rows and is not an error. A *present* source whose header is missing
+# one of the three literal columns this task fixes (`level reached`, `normative oracle`,
+# `gate`) is a failure, naming the column, so a silent rename can never be read as zero rows.
+# --------------------------------------------------------------------------------------------
+
+DIVERGENCES_HEADER = ["source", "place", "level", "configuration", "fixture", "artifact"]
+# Fixed row order (1-4 above), used for the deterministic sort key, not for anything semantic.
+SOURCE_ORDER = ["order-audit", "fidelity-marker", "oracle-parity", "determinism"]
+NA = "n/a"
+
+# Source 1's "level it is checked at instead": spec.md:696 says these sites are "checked at a
+# looser level (R18, R27, and the gate table from R3)" -- there is no per-site empirical level
+# for a static audit to report (unlike sources 3 and 4, which each read one off their own TSV
+# row), so every order-audit and fidelity-marker row names that gate table by a fixed literal
+# rather than inventing one. This is a judgement call the task leaves open; see the pull
+# request body.
+STATIC_SITE_LEVEL = "the gate table in docs/ORACLE.md (R3)"
+
+FIDELITY_MARKER_RE = re.compile(r"//\s*FIDELITY\(port\):")
+
+
+def fidelity_marker_rows(crates_root: Path) -> list[list[str]]:
+    """Every `// FIDELITY(port):` marker anywhere under `crates_root` (source 2).
+
+    `crates_root` not existing contributes zero rows, not an error -- true today (no module has
+    landed; `crates/` is created by 08-comparator-workspace, which this task does not depend
+    on) and true of a fixture tree that simply has no `crates/` of its own. Paths are reported
+    relative to `crates_root`'s parent, so pointing this at the real repository root
+    (`crates_root = REPO_ROOT / "crates"`) reports `crates/...` paths exactly as committed,
+    and pointing it at a self-contained fixture directory reports paths relative to that
+    fixture, the same convention `port/port-status --tree` uses.
+
+    This is deliberately `rglob("*.rs")`, not the narrower `*/src/**/*.rs` shape
+    `port/port-status` uses to define a *ported module* -- that definition is port-status's own
+    and states its exclusion out loud (a marker's declaration here is "anywhere under `crates/`",
+    per this task's Done-when line, with no exclusion: a marker in `tests/`, `build.rs`, a
+    nested-workspace member's `src/`, or `crates/slic3r-ffi/fuzz/fuzz_targets/` (the planned
+    fuzz-target location, R19/plan.md) must still produce a row). A `target/` path component is
+    skipped regardless, since a local build can drop generated `.rs` under a crate's own
+    `target/` and this report must stay byte-identical on a fresh clone that never built anything.
+    A file that cannot be read is a failure, not a silent skip, for the same reason a present but
+    unreadable `.tsv` source is: the row would otherwise vanish with nothing failing.
+    """
+    rows: list[list[str]] = []
+    if not crates_root.is_dir():
+        return rows
+    tree_root = crates_root.parent
+    for rs_path in sorted(crates_root.rglob("*.rs")):
+        if "target" in rs_path.relative_to(crates_root).parts:
+            continue
+        try:
+            text = rs_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            raise SystemExit(f"audit-order: {rs_path} could not be read: {exc}") from exc
+        relpath = rs_path.relative_to(tree_root).as_posix()
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if FIDELITY_MARKER_RE.search(line):
+                place = f"{relpath}:{lineno}"
+                rows.append(["fidelity-marker", place, STATIC_SITE_LEVEL, NA, NA, NA])
+    return rows
+
+
+def order_audit_rows(container_table: list[list[str]], comparator_table: list[list[str]]) -> list[list[str]]:
+    """Source 1: every row of the two just-generated tables whose last cell (`diverges`) is
+    `yes`, read from the tables `run()` returns -- never from the committed `.md` files, so a
+    stale committed report can never be read back into its own regeneration.
+
+    A single container declaration iterated at two different sites (two rows in
+    `order-containers.md` that share a declaration line but differ in `iteration`) projects to
+    the same `place` here, since this source's `place` is the declaration site, not the
+    iteration site. Rather than carry a second cell into `place` and change what it means, the
+    resulting byte-identical duplicate rows are collapsed to one: `divergences.md` names every
+    *place*, once, and the per-site detail stays in `order-containers.md` where it is already
+    recorded.
+    """
+    rows: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
+    for table in (container_table, comparator_table):
+        for row in table:
+            if row[-1] == "yes":
+                out = ["order-audit", row[0], STATIC_SITE_LEVEL, NA, NA, NA]
+                key = tuple(out)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(out)
+    return rows
+
+
+def read_tsv_source(
+    path: Path, required_columns: list[str], predicate, row_builder
+) -> tuple[list[list[str]], bool]:
+    """Read one of sources 3/4's `.tsv` files by column name.
+
+    Returns (rows, present). `path` not existing is `([], False)`, not an error (the rule an
+    absent source is never a failure). `path` existing with a header missing any of
+    `required_columns` exits non-zero naming the column(s) -- the other rule, that a present
+    but unreadable source is a failure rather than silently zero rows. A data row shorter than
+    the header (`csv.DictReader` fills a missing trailing cell with `None`) is the same failure,
+    named by its 1-based data-row number rather than coerced to an empty string: coercing would
+    make a missing `gate` or `level reached` cell read as `""`, fail the `== "none"` /
+    `not in {...}` test, and vanish as if the row simply did not diverge -- the row-loss
+    direction this task exists to prevent. Row order follows the file; the caller sorts the
+    combined table.
+    """
+    if not path.is_file():
+        return [], False
+    with path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        fieldnames = list(reader.fieldnames or [])
+        missing = [c for c in required_columns if c not in fieldnames]
+        if missing:
+            raise SystemExit(
+                f"audit-order: {path} is missing column(s) {missing!r}; its header is "
+                f"{fieldnames!r} but {required_columns!r} are required"
+            )
+        rows: list[list[str]] = []
+        for lineno, raw_row in enumerate(reader, start=1):
+            short = [c for c in required_columns if raw_row.get(c) is None]
+            if short:
+                raise SystemExit(
+                    f"audit-order: {path} data row {lineno} is missing value(s) for "
+                    f"column(s) {short!r} (fewer fields than the header)"
+                )
+            if predicate(raw_row):
+                rows.append(row_builder(raw_row))
+    return rows, True
+
+
+ORACLE_PARITY_REQUIRED = ["configuration", "fixture", "artifact", "level reached", "normative oracle"]
+# Levels that count as "reaching L1": L0 (strictly more bytes-identical) and L1 itself.
+ORACLE_PARITY_REACHES_L1 = {"L0", "L1"}
+
+
+def _oracle_parity_predicate(row: dict[str, str]) -> bool:
+    return row["level reached"].strip() not in ORACLE_PARITY_REACHES_L1
+
+
+def _oracle_parity_row(row: dict[str, str]) -> list[str]:
+    place = f"configuration: {row['configuration'].strip()}, fixture: {row['fixture'].strip()}, artifact: {row['artifact'].strip()}"
+    return ["oracle-parity", place, row["level reached"].strip(), NA, NA, NA]
+
+
+DETERMINISM_REQUIRED = ["configuration", "fixture", "artifact", "gate"]
+
+
+def _determinism_predicate(row: dict[str, str]) -> bool:
+    return row["gate"].strip() == "none"
+
+
+def _determinism_row(row: dict[str, str]) -> list[str]:
+    configuration, fixture, artifact = row["configuration"].strip(), row["fixture"].strip(), row["artifact"].strip()
+    place = f"configuration: {configuration}, fixture: {fixture}, artifact: {artifact}"
+    return ["determinism", place, "none", configuration, fixture, artifact]
+
+
+@dataclass
+class DivergencesResult:
+    rows: list[list[str]]
+    # (source name, present, row count), in SOURCE_ORDER.
+    summary: list[tuple[str, bool, int]]
+
+
+def build_divergences(
+    container_table: list[list[str]],
+    comparator_table: list[list[str]],
+    crates_root: Path,
+    oracle_parity_path: Path,
+    determinism_path: Path,
+) -> DivergencesResult:
+    order_rows = order_audit_rows(container_table, comparator_table)
+    fidelity_rows = fidelity_marker_rows(crates_root)
+    oracle_rows, oracle_present = read_tsv_source(
+        oracle_parity_path, ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row
+    )
+    determinism_rows, determinism_present = read_tsv_source(
+        determinism_path, DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row
+    )
+
+    by_source = {
+        "order-audit": order_rows,
+        "fidelity-marker": fidelity_rows,
+        "oracle-parity": oracle_rows,
+        "determinism": determinism_rows,
+    }
+    presence = {
+        "order-audit": True,  # this run's own in-memory tables: always present.
+        "fidelity-marker": crates_root.is_dir(),
+        "oracle-parity": oracle_present,
+        "determinism": determinism_present,
+    }
+
+    all_rows = [row for name in SOURCE_ORDER for row in by_source[name]]
+    all_rows.sort(key=lambda r: (SOURCE_ORDER.index(r[0]), r[1], r[2], r[3], r[4], r[5]))
+    summary = [(name, presence[name], len(by_source[name])) for name in SOURCE_ORDER]
+    return DivergencesResult(rows=all_rows, summary=summary)
+
+
+def write_divergences(path: Path, result: DivergencesResult) -> None:
+    lines = [
+        "| " + " | ".join(DIVERGENCES_HEADER) + " |",
+        "| " + " | ".join(["---"] * len(DIVERGENCES_HEADER)) + " |",
+    ]
+    for row in result.rows:
+        lines.append("| " + " | ".join(escape_cell(c) for c in row) + " |")
+    lines.append("")
+    lines.append("## Sources")
+    lines.append("")
+    lines.append(
+        "Every row above comes from exactly one of these four sources; a source that was "
+        "absent when this file was regenerated contributed zero rows, not a failure."
+    )
+    lines.append("")
+    # The first cell is prefixed `source: ` (unlike a data row's bare source name) so
+    # `grep '^| <source> '` against a data row never also matches this summary row -- a data
+    # row's second cell is a place, this row's is `yes`/`no`, and a consumer that greps by
+    # first cell alone (e.g. 23-perf-backlog, matching `fidelity-marker` rows against markers
+    # still in the tree) must not have to special-case this table to avoid it.
+    lines.append("| source | present | rows contributed |")
+    lines.append("| --- | --- | --- |")
+    for name, present, count in result.summary:
+        lines.append(f"| source: {name} | {'yes' if present else 'no'} | {count} |")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+# --------------------------------------------------------------------------------------------
+# Markdown table writer.
+# --------------------------------------------------------------------------------------------
+
+
+def write_table(path: Path, header: list[str], rows: list[list[str]]) -> None:
+    lines = ["| " + " | ".join(header) + " |", "| " + " | ".join(["---"] * len(header)) + " |"]
+    for row in rows:
+        lines.append("| " + " | ".join(row) + " |")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def escape_cell(text: str) -> str:
+    """Escape a cell so raw source text (which may carry `|`) can never break a Markdown row."""
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+# --------------------------------------------------------------------------------------------
+# Main pass.
+# --------------------------------------------------------------------------------------------
+
+
+def run(manifest_path: Path) -> tuple[list[list[str]], list[list[str]]]:
+    paths = in_scope_paths(manifest_path)
+
+    file_masked: dict[str, str] = {}
+    file_offsets: dict[str, list[int]] = {}
+    all_functions: list[FunctionScope] = []
+    all_classes: list[ClassScope] = []
+    functions_by_owner: dict[str, list[FunctionScope]] = {}
+    functions_by_name: list[FunctionScope] = []
+
+    for rel in paths:
+        abspath = LIBSLIC3R_ROOT / rel
+        text = abspath.read_text(encoding="utf-8", errors="replace")
+        masked = mask_source(text)
+        file_masked[rel] = masked
+        file_offsets[rel] = line_index(masked)
+        funcs, classes = scan_file(rel, masked)
+        all_functions.extend(funcs)
+        all_classes.extend(classes)
+        for f in funcs:
+            if f.owner:
+                functions_by_owner.setdefault(f.owner, []).append(f)
+            else:
+                functions_by_name.append(f)
+
+    functions_by_file: dict[str, list[FunctionScope]] = {}
+    classes_by_file: dict[str, list[ClassScope]] = {}
+    for f in all_functions:
+        functions_by_file.setdefault(f.file, []).append(f)
+    for c in all_classes:
+        classes_by_file.setdefault(c.file, []).append(c)
+
+    # -------------------------------------------------------------------------------------
+    # Containers.
+    # -------------------------------------------------------------------------------------
+    container_rows: list[tuple[str, int, list[str]]] = []
+    seen_container_keys: set[tuple[str, int, str]] = set()
+    for rel in paths:
+        masked = file_masked[rel]
+        offsets = file_offsets[rel]
+        funcs = functions_by_file.get(rel, [])
+        classes = classes_by_file.get(rel, [])
+        for decl in find_container_decls(rel, masked, offsets, funcs, classes):
+            pos = decl.pos
+            key = (rel, decl.line, decl.var_name)
+            if key in seen_container_keys:
+                continue
+
+            if decl.var_name is None:
+                # The declarator could not be parsed to a variable name at all (see
+                # find_container_decls); there is no name to search usages for, so this is
+                # conservatively undecided with no scope or iteration site to report.
+                seen_container_keys.add(key)
+                choice = container_port_choice(decl.type_name, "undecided")
+                div, div_reason = diverges(choice)
+                reason_cell = "classification undecided: the declarator could not be parsed to find a variable name; " + div_reason
+                container_rows.append(
+                    (
+                        rel,
+                        decl.line,
+                        [
+                            repo_path_line(rel, decl.line),
+                            decl.type_name,
+                            "<unparsed declarator>",
+                            "n/a",
+                            escape_cell(reason_cell),
+                            choice,
+                            div,
+                        ],
+                    )
+                )
+                continue
+
+            scope_kind, scope_name, owner = enclosing_scope(pos, funcs, classes)
+            # `segments`: every (file, base_offset, masked_text) span this declaration's uses
+            # could appear in -- just the declaring function's own body for a local variable,
+            # but every method of the class (inline or defined in another in-scope file via
+            # `Class::method`) for a data member, since "the scope that declares it" extends to
+            # the whole class for a member (see the task's container rule).
+            if scope_kind == "function":
+                fn_slice = funcs_start_end(funcs, pos)
+                segments = [(rel, fn_slice.start, masked[fn_slice])]
+                declaring_scope = scope_name if not owner else f"{owner}::{scope_name}"
+            elif scope_kind == "class":
+                segments = [(rel, c.start, masked[c.start : c.end]) for c in classes if c.name == scope_name and c.file == rel]
+                segments.extend((mf.file, mf.start, file_masked[mf.file][mf.start : mf.end]) for mf in functions_by_owner.get(scope_name, []))
+                declaring_scope = scope_name
+            else:
+                segments = [(rel, 0, masked)]
+                declaring_scope = "<file scope>"
+
+            combined_parts: list[str] = []
+            boundaries: list[tuple[int, str, int]] = []  # (combined_start, file, base_offset)
+            cursor = 0
+            for seg_file, seg_base, seg_text in segments:
+                boundaries.append((cursor, seg_file, seg_base))
+                combined_parts.append(seg_text)
+                cursor += len(seg_text) + 1  # +1 for the "\n" join separator below
+            search_text = "\n".join(combined_parts)
+
+            verdict, reason, evidence_pos = classify_container_usage(decl.var_name, search_text)
+            if verdict == "looked_up" and scope_kind == "function":
+                # The task's rule also counts a container iterated "in a function it is passed
+                # to by reference" -- a local that looks only-looked-up in its own declaring
+                # function can still be handed by reference to another call this script does
+                # not resolve a call graph to check. Named branch, kept explicit for the same
+                # reason `diverges` below documents its own never-taken branch: by construction
+                # this one is not reachable either. `lookup_re` only ever matches the variable
+                # immediately followed by `.<method>(` or `[`, so the one textual shape that
+                # would mean "passed as a bare argument" -- the name directly preceded by `(` or
+                # `,` and followed by `,` or `)` -- can never also satisfy `lookup_re`; any such
+                # occurrence already fails every recognised pattern and is already caught as an
+                # "unknown" occurrence by `classify_container_usage` itself, which already
+                # returns "undecided" rather than "looked_up" for it. Kept as its own branch
+                # anyway (rather than relying on that as an implicit side effect) so a reviewer
+                # can point at the rule by name; if `lookup_re` ever grows a method whose own
+                # call syntax also matches this shape, this branch is what keeps the row
+                # conservative instead of silently reintroducing exactly the gap it closes.
+                bare_arg_re = re.compile(r"[(,]\s*&?\s*" + re.escape(decl.var_name) + r"\s*[,)]")
+                if bare_arg_re.search(search_text):
+                    verdict = "undecided"
+                    reason = (
+                        "classification undecided: the container is passed as an argument to a "
+                        "call in its declaring scope; this script does not resolve the callee "
+                        "to check whether it is iterated there"
+                    )
+                    evidence_pos = None
+            if verdict == "looked_up":
+                continue  # only iterated (incl. undecided) containers are rows in this report.
+            seen_container_keys.add(key)
+
+            if evidence_pos is not None:
+                starts = [b[0] for b in boundaries]
+                seg_idx = bisect.bisect_right(starts, evidence_pos) - 1
+                seg_start, seg_file, seg_base = boundaries[seg_idx]
+                iter_line = line_of(file_offsets[seg_file], seg_base + (evidence_pos - seg_start))
+                iter_path_line = repo_path_line(seg_file, iter_line)
+            else:
+                iter_path_line = "n/a"
+
+            choice = container_port_choice(decl.type_name, verdict)
+            div, div_reason = diverges(choice)
+            reason_cell = reason + "; " + div_reason
+            container_rows.append(
+                (
+                    rel,
+                    decl.line,
+                    [
+                        repo_path_line(rel, decl.line),
+                        decl.type_name,
+                        declaring_scope,
+                        iter_path_line,
+                        escape_cell(reason_cell),
+                        choice,
+                        div,
+                    ],
+                )
+            )
+
+    container_rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    container_table = [row for _, _, row in container_rows]
+
+    # -------------------------------------------------------------------------------------
+    # Comparators.
+    # -------------------------------------------------------------------------------------
+    comparator_rows: list[tuple[str, int, list[str]]] = []
+    seen_comparator_keys: set[tuple[str, int, str, str, int]] = set()
+
+    def emit_comparator(
+        comp_file: str, comp_line: int, reach: str, use_file: str, use_line: int, shape: str, reason: str
+    ) -> None:
+        """Record one comparator row. `comp_*` is the comparator's own site (cell 1); `use_*` is
+        the site named in cell 2's "how it reaches an ordering" (the same site as `comp_*` for a
+        definition or an inline lambda, but the call site or container declaration for a
+        comparator resolved from elsewhere)."""
+        key = (comp_file, comp_line, reach, use_file, use_line)
+        if key in seen_comparator_keys:
+            return
+        seen_comparator_keys.add(key)
+        choice = comparator_port_choice(shape)
+        div, div_reason = diverges(choice)
+        comparator_rows.append(
+            (
+                comp_file,
+                comp_line,
+                [
+                    repo_path_line(comp_file, comp_line),
+                    reach,
+                    repo_path_line(use_file, use_line),
+                    shape,
+                    escape_cell(reason + "; " + div_reason),
+                    choice,
+                    div,
+                ],
+            )
+        )
+
+    # Reach A: operator< / operator<= / operator> definitions. The comparator's own site and the
+    # "use" are the same place: the definition is what a standard algorithm invokes directly.
+    for f in all_functions:
+        if f.name not in COMPARATOR_OPERATORS:
+            continue
+        body = file_masked[f.file][f.start : f.end]
+        shape, reason = classify_comparator_shape(body, operator_name=f.name)
+        if shape is None:
+            continue
+        emit_comparator(f.file, f.start_line, "definition", f.file, f.start_line, shape, reason)
+
+    # Reach B: the Compare template argument of an ordered container.
+    for rel in paths:
+        masked = file_masked[rel]
+        offsets = file_offsets[rel]
+        for m in ORDERED_CONTAINER_TEMPLATE_RE.finditer(masked):
+            kind = m.group(1)
+            j = m.end()
+            while j < len(masked) and masked[j] in " \t":
+                j += 1
+            if j >= len(masked) or masked[j] != "<":
+                continue
+            close = find_matching(masked, j)
+            if close is None:
+                continue
+            args = split_top_level(masked[j + 1 : close])
+            idx = COMPARE_ARG_INDEX[kind]
+            if len(args) <= idx:
+                continue
+            cmp_arg = args[idx].strip()
+            if not cmp_arg or DEFAULT_COMPARE_RE.match(cmp_arg):
+                continue
+            line = line_of(offsets, m.start())
+            cmp_name = cmp_arg.split("<")[0].strip().rsplit("::", 1)[-1]
+            candidates = functions_by_owner.get(cmp_name, [])
+            op_funcs = [f for f in candidates if f.name == "operator()" or f.name in COMPARATOR_OPERATORS]
+            if not op_funcs:
+                emit_comparator(
+                    rel,
+                    line,
+                    "container Compare argument",
+                    rel,
+                    line,
+                    "undecided",
+                    f"classification undecided: the comparator type {cmp_name!r}'s body is not found among the in-scope files",
+                )
+                continue
+            for f in op_funcs:
+                body = file_masked[f.file][f.start : f.end]
+                shape, reason = classify_comparator_shape(body, operator_name=f.name)
+                if shape is None:
+                    continue
+                emit_comparator(f.file, f.start_line, "container Compare argument", rel, line, shape, reason)
+
+    # Reach C: the comparator passed at an ordering-algorithm call site.
+    LAMBDA_HEAD_RE = re.compile(r"^\[[^\]]*\]\s*\([^)]*\)\s*(?:->\s*[\w:<>, ]+\s*)?\{")
+    for rel in paths:
+        masked = file_masked[rel]
+        offsets = file_offsets[rel]
+        for m in ORDER_ALGO_RE.finditer(masked):
+            algo = m.group(1)
+            open_paren = m.end() - 1
+            close_paren = find_matching(masked, open_paren)
+            if close_paren is None:
+                continue
+            args = split_top_level(masked[open_paren + 1 : close_paren])
+            if len(args) <= ORDER_ALGO_MIN_ARGS[algo]:
+                continue  # no comparator argument supplied; uses the default std::less.
+            last_arg_raw = args[-1]
+            cmp_arg = last_arg_raw.strip()
+            line = line_of(offsets, m.start())
+            lam = LAMBDA_HEAD_RE.match(cmp_arg)
+            if lam:
+                # Offsets below are into `masked` and must use the *unstripped* arg text's own
+                # length (from split_top_level) to stay aligned; `cmp_arg` is only for matching.
+                last_arg_start = open_paren + 1 + sum(len(a) + 1 for a in args[:-1])
+                brace_rel = last_arg_raw.find("{")
+                abs_open = last_arg_start + brace_rel
+                abs_close = find_matching(masked, abs_open)
+                lambda_line = line_of(offsets, abs_open)
+                # Interior only (no braces), matching the convention FunctionScope bodies use,
+                # since classify_comparator_shape's patterns are anchored to a bare `return ...`.
+                body = masked[abs_open + 1 : abs_close] if abs_close is not None else cmp_arg
+                shape, reason = classify_comparator_shape(body)
+                if shape is None:
+                    continue
+                # The lambda is defined at the call site, so comparator site == use site.
+                emit_comparator(rel, lambda_line, "call-site comparator", rel, line, shape, reason)
+                continue
+            fname = cmp_arg.rsplit("::", 1)[-1].strip()
+            if not re.fullmatch(r"[A-Za-z_]\w*", fname):
+                # Not a lambda and not a plain identifier (a bind expression, a functor instance,
+                # a qualified template name, ...): this parse cannot resolve the comparator, so
+                # report it conservatively as not a total order rather than drop it.
+                emit_comparator(
+                    rel,
+                    line,
+                    "call-site comparator",
+                    rel,
+                    line,
+                    "undecided",
+                    f"classification undecided: the comparator expression {cmp_arg!r} passed to {algo} is not a lambda or a plain name this parse resolves",
+                )
+                continue
+            named = [f for f in functions_by_name if f.name == fname]
+            if not named:
+                emit_comparator(
+                    rel,
+                    line,
+                    "call-site comparator",
+                    rel,
+                    line,
+                    "undecided",
+                    f"classification undecided: the comparator {fname!r} passed to {algo} is not found among the in-scope files",
+                )
+                continue
+            for f in named:
+                body = file_masked[f.file][f.start : f.end]
+                shape, reason = classify_comparator_shape(body, operator_name=f.name)
+                if shape is None:
+                    continue
+                emit_comparator(f.file, f.start_line, "call-site comparator", rel, line, shape, reason)
+
+    comparator_rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    comparator_table = [row for _, _, row in comparator_rows]
+
+    return container_table, comparator_table
+
+
+def funcs_start_end(funcs: list[FunctionScope], pos: int) -> slice:
+    """Return the (signature-through-body) slice of the innermost function containing `pos`.
+
+    Starting at `sig_start` (not `start`, the body) means a parameter declaration is included in
+    the search text along with the body, consistent with `enclosing_scope` using the same span.
+    """
+    best: FunctionScope | None = None
+    for f in funcs:
+        if f.sig_start <= pos < f.end:
+            if best is None or (f.end - f.sig_start) < (best.end - best.sig_start):
+                best = f
+    if best is None:
+        return slice(0, 0)
+    return slice(best.sig_start, best.end)
+
+
+def regenerate_all(out_dir: Path | None) -> tuple[Path, Path, Path, DivergencesResult]:
+    """Run the full pass (parts 1 and 2) and write all three reports under `out_dir`, or the
+    committed `port/reports/` tree when `out_dir` is None. Returns the three report paths and
+    the divergences result, so a caller (`main`, `run_check`) can print or diff without
+    re-running the pass."""
+    container_table, comparator_table = run(MANIFEST_PATH)
+
+    if out_dir is None:
+        containers_path, comparators_path, divergences_path = CONTAINERS_REPORT, COMPARATORS_REPORT, DIVERGENCES_REPORT
+    else:
+        containers_path = out_dir / "order-containers.md"
+        comparators_path = out_dir / "order-comparators.md"
+        divergences_path = out_dir / "divergences.md"
+
+    # build_divergences runs -- and can raise (a present-but-unreadable source 2/3/4) -- before
+    # either part-1 report is written, so a failure here leaves all three reports untouched
+    # rather than two freshly regenerated and one stale.
+    result = build_divergences(container_table, comparator_table, CRATES_ROOT, ORACLE_PARITY_TSV, DETERMINISM_TSV)
+    write_table(
+        containers_path,
+        ["declaration", "container type", "declaring scope", "iteration", "reason", "port's choice", "diverges"],
+        container_table,
+    )
+    write_table(
+        comparators_path,
+        ["comparator", "reach", "use", "shape", "reason", "port's choice", "diverges"],
+        comparator_table,
+    )
+    write_divergences(divergences_path, result)
+    click.echo(f"{containers_path if out_dir else containers_path.relative_to(REPO_ROOT)}: {len(container_table)} rows")
+    click.echo(f"{comparators_path if out_dir else comparators_path.relative_to(REPO_ROOT)}: {len(comparator_table)} rows")
+    counts = ", ".join(f"{name}={count}" for name, _present, count in result.summary)
+    click.echo(
+        f"{divergences_path if out_dir else divergences_path.relative_to(REPO_ROOT)}: "
+        f"{len(result.rows)} rows ({counts})"
+    )
+    return containers_path, comparators_path, divergences_path, result
+
+
+DIFF_LINE_LIMIT = 40
+
+
+def run_check() -> None:
+    """`just audit-check`: regenerate all three reports into a scratch directory (git-ignored)
+    and fail, with a diff, when a committed one differs byte for byte. The regeneration's own
+    chatter is captured to a log file rather than printed, so a clean tree's check prints
+    nothing at all (part 1's two reports and divergences.md are already byte-stable by
+    construction: no timestamp, no machine-specific path, deterministic sort)."""
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    log_path = SCRATCH_ROOT / "audit-check.log"
+    with log_path.open("w", encoding="utf-8") as log_file, contextlib.redirect_stdout(log_file):
+        fresh_containers, fresh_comparators, fresh_divergences, _result = regenerate_all(SCRATCH_ROOT)
+
+    drifted: list[tuple[Path, Path, str, str]] = []
+    for committed, fresh in (
+        (CONTAINERS_REPORT, fresh_containers),
+        (COMPARATORS_REPORT, fresh_comparators),
+        (DIVERGENCES_REPORT, fresh_divergences),
+    ):
+        committed_text = committed.read_text(encoding="utf-8") if committed.is_file() else ""
+        fresh_text = fresh.read_text(encoding="utf-8")
+        if committed_text != fresh_text:
+            drifted.append((committed, fresh, committed_text, fresh_text))
+
+    if drifted:
+        print(f"audit-check: drift found (the regeneration's own output is at {log_path}):")
+        for committed, fresh, committed_text, fresh_text in drifted:
+            relpath = committed.relative_to(REPO_ROOT)
+            print(f"  {relpath} has drifted from its regeneration (fresh copy at {fresh}):")
+            diff_lines = list(
+                difflib.unified_diff(
+                    committed_text.splitlines(keepends=True),
+                    fresh_text.splitlines(keepends=True),
+                    fromfile=f"{relpath} (committed)",
+                    tofile=f"{relpath} (regenerated)",
+                )
+            )
+            for line in diff_lines[:DIFF_LINE_LIMIT]:
+                print("    " + line.rstrip("\n"))
+            if len(diff_lines) > DIFF_LINE_LIMIT:
+                print(f"    ... ({len(diff_lines) - DIFF_LINE_LIMIT} more diff lines omitted)")
+        raise SystemExit(1)
+
+
+# --------------------------------------------------------------------------------------------
+# --self-test
+# --------------------------------------------------------------------------------------------
+
+
+def _selftest_source2() -> list[str]:
+    """Source 2's two rules: an absent `crates/` contributes zero rows (not an error), and a
+    marker under a present tree produces exactly one row per marker."""
+    failures = []
+    absent_dir = SELFTEST_ROOT / "sources-absent" / "crates"
+    rows = fidelity_marker_rows(absent_dir)
+    if rows:
+        failures.append(f"fidelity-marker: expected 0 rows for an absent {absent_dir}, got {rows!r}")
+
+    present_dir = SELFTEST_ROOT / "sources-present" / "crates"
+    rows = fidelity_marker_rows(present_dir)
+    if len(rows) != 1:
+        failures.append(f"fidelity-marker: expected 1 row for {present_dir}, got {rows!r}")
+    elif rows[0][0] != "fidelity-marker":
+        failures.append(f"fidelity-marker: expected source cell 'fidelity-marker', got {rows[0]!r}")
+
+    # The Done-when line is "anywhere under crates/", not just `<crate>/src/**/*.rs` -- a
+    # marker in `<crate>/tests/` must still produce a row (the narrower glob
+    # `port/port-status` uses for a *ported module* would silently miss it).
+    outside_src_dir = SELFTEST_ROOT / "sources-present-outside-src" / "crates"
+    rows = fidelity_marker_rows(outside_src_dir)
+    if len(rows) != 1:
+        failures.append(f"fidelity-marker: expected 1 row for a marker outside <crate>/src/ under {outside_src_dir}, got {rows!r}")
+    elif "tests/t.rs" not in rows[0][1]:
+        failures.append(f"fidelity-marker: expected the row's place to name tests/t.rs, got {rows[0]!r}")
+    return failures
+
+
+def _selftest_tsv_sources() -> list[str]:
+    """Sources 3 and 4's two rules: an absent file contributes zero rows (not an error), a
+    present file with every required column contributes its matching rows, and a present file
+    missing a required column raises (the "present but unreadable is a failure" rule)."""
+    failures = []
+
+    absent_dir = SELFTEST_ROOT / "sources-absent"
+    rows, present = read_tsv_source(
+        absent_dir / "oracle-parity.tsv", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row
+    )
+    if present or rows:
+        failures.append(f"oracle-parity: expected absent/0 rows for a missing file, got present={present} rows={rows!r}")
+    rows, present = read_tsv_source(
+        absent_dir / "determinism.tsv", DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row
+    )
+    if present or rows:
+        failures.append(f"determinism: expected absent/0 rows for a missing file, got present={present} rows={rows!r}")
+
+    present_dir = SELFTEST_ROOT / "sources-present"
+    rows, present = read_tsv_source(
+        present_dir / "oracle-parity.tsv", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row
+    )
+    if not present or len(rows) != 1:
+        failures.append(f"oracle-parity: expected present/1 row for {present_dir}, got present={present} rows={rows!r}")
+    rows, present = read_tsv_source(
+        present_dir / "determinism.tsv", DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row
+    )
+    if not present or len(rows) != 1:
+        failures.append(f"determinism: expected present/1 row for {present_dir}, got present={present} rows={rows!r}")
+
+    for fixture, required, predicate, builder, bad_column in (
+        ("renamed-level-reached", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row, "level reached"),
+        ("renamed-normative-oracle", ORACLE_PARITY_REQUIRED, _oracle_parity_predicate, _oracle_parity_row, "normative oracle"),
+    ):
+        path = SELFTEST_ROOT / fixture / "oracle-parity.tsv"
+        try:
+            read_tsv_source(path, required, predicate, builder)
+            failures.append(f"{fixture}: expected SystemExit naming {bad_column!r}, got no error")
+        except SystemExit as exc:
+            if bad_column not in str(exc):
+                failures.append(f"{fixture}: expected the error to name {bad_column!r}, got {exc}")
+
+    path = SELFTEST_ROOT / "renamed-gate" / "determinism.tsv"
+    try:
+        read_tsv_source(path, DETERMINISM_REQUIRED, _determinism_predicate, _determinism_row)
+        failures.append("renamed-gate: expected SystemExit naming 'gate', got no error")
+    except SystemExit as exc:
+        if "gate" not in str(exc):
+            failures.append(f"renamed-gate: expected the error to name 'gate', got {exc}")
+
+    return failures
+
+
+def _selftest_build_divergences() -> list[str]:
+    """End-to-end: build_divergences itself, not just the per-source readers, against the
+    `sources-present` fixture -- catches a regression where a reader returns rows that the
+    combining/sorting step then drops or miscounts, which the per-source tests above cannot."""
+    failures = []
+    fixture = SELFTEST_ROOT / "sources-present"
+    # Two synthetic order-audit rows (one container, one comparator), both diverging, plus one
+    # looked-up (non-diverging) container row that must NOT appear in the output.
+    container_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "n/a", "r", "c", "yes"],
+    ]
+    comparator_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "definition", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "s", "r", "c", "yes"],
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "definition", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "s", "r", "c", "no"],
+    ]
+    result = build_divergences(
+        container_table, comparator_table, fixture / "crates", fixture / "oracle-parity.tsv", fixture / "determinism.tsv"
+    )
+    counts = {name: count for name, _present, count in result.summary}
+    presence = {name: present for name, present, _count in result.summary}
+    expected_counts = {"order-audit": 2, "fidelity-marker": 1, "oracle-parity": 1, "determinism": 1}
+    if counts != expected_counts:
+        failures.append(f"build_divergences: expected counts {expected_counts!r}, got {counts!r}")
+    if not all(presence.values()):
+        failures.append(f"build_divergences: expected every source present for this fixture, got {presence!r}")
+    if len(result.rows) != sum(expected_counts.values()):
+        failures.append(f"build_divergences: expected {sum(expected_counts.values())} total rows, got {len(result.rows)}")
+    return failures
+
+
+def _selftest_order_audit_dedup() -> list[str]:
+    """One container declaration iterated at two sites yields two rows in
+    `order-containers.md` that share a declaration (`place`) but differ in `iteration` --
+    `order_audit_rows` must collapse those to a single `divergences.md` row, not emit the same
+    place twice."""
+    failures = []
+    container_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "r", "c", "yes"],
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "r", "c", "yes"],
+    ]
+    rows = order_audit_rows(container_table, [])
+    if len(rows) != 1:
+        failures.append(f"order_audit_rows: expected 1 deduplicated row for two iteration sites of one declaration, got {rows!r}")
+    return failures
+
+
+def run_selftest() -> int:
+    failures = (
+        _selftest_source2()
+        + _selftest_tsv_sources()
+        + _selftest_build_divergences()
+        + _selftest_order_audit_dedup()
+    )
+    if failures:
+        for failure in failures:
+            click.echo(f"self-test: FAILED: {failure}")
+        return 1
+    click.echo("self-test: OK (source 2's absent/present rule, sources 3-4's absent/present/unreadable rules)")
+    return 0
+
+
+# --------------------------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------------------------
+
+
+@click.command()
+@click.option(
+    "--out",
+    "out_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write order-containers.md, order-comparators.md and divergences.md under DIR instead "
+    "of the committed port/reports/ tree. Lets a run be proved deterministic, and is what "
+    "just audit-check uses to regenerate into a scratch directory, without committing anything.",
+)
+@click.option(
+    "--check",
+    "check",
+    is_flag=True,
+    help="just audit-check: regenerate all three reports into a scratch directory and fail, "
+    "with a diff, when a committed one differs byte for byte. Never writes port/reports/.",
+)
+@click.option(
+    "--self-test",
+    "self_test",
+    is_flag=True,
+    help="Run every fixture under port/tests/audit-order/ and assert its expected result.",
+)
+def main(out_dir: Path | None, check: bool, self_test: bool) -> None:
+    """Regenerate port/reports/order-containers.md, port/reports/order-comparators.md and
+    port/reports/divergences.md."""
+    if self_test:
+        sys.exit(run_selftest())
+    if check:
+        if out_dir is not None:
+            raise SystemExit("audit-order: --out and --check are mutually exclusive")
+        run_check()
+        return
+    regenerate_all(out_dir)
+
+
+if __name__ == "__main__":
+    main()

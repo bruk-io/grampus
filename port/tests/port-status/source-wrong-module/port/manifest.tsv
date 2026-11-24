@@ -1,0 +1,2 @@
+path	target crate	target module	equality tier
+Geometry/Circle.cpp	other-crate	crates/other-crate/src/other.rs	exact
