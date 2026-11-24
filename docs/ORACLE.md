@@ -98,3 +98,125 @@ that value is consumed by the perimeter generator at `FuzzySkin.cpp:320,337,375,
 still exits 0 with a non-empty `plate_1.gcode`, which is all this row's Done-when line requires;
 `27-oracle-determinism` is where a normalisation or tolerance for this row's byte comparison has
 to be decided.
+
+## Resolved-configuration goldens
+
+`port/goldens/configs/` holds one resolved configuration per row of the table above — `base-fff`,
+`tree-support`, `wipe-tower-multi-filament`, `fuzzy-skin` — each named after its row and regenerated
+by `just config-goldens`. Every golden is the JSON `just oracle-slice <fixture> <configuration>
+--export-settings` writes on an unarmed run with a fresh, throwaway `--datadir`, with one key added:
+`provenance`, the nine-item header `oracle/provenance --oracle release --syntax json` prints for the
+same `<fixture>`/`<configuration>` pair. `port/merge-provenance` performs that merge — it runs
+`oracle/slice` and `oracle/provenance` as subprocesses, neither of which is modified, and writes the
+combined document; `just config-goldens` calls it once per row. Re-running it leaves every committed
+golden byte-identical, including `fuzzy-skin`'s: that row's G-code is not byte-reproducible (above),
+but its *resolved configuration* carries no entropy, and two consecutive
+`just oracle-slice frog_legs.stl fuzzy-skin --export-settings` runs were measured to produce an
+identical `settings.json` before this was relied on here.
+
+Every row's `Fixtures` cell above names `frog_legs.stl`, so every golden is sliced against that
+fixture, not `3DBenchy.stl`: `04-oracle-slice` chose `frog_legs.stl` for all four rows (`d420266`),
+before the fixture set existed, and `11-fixture-set` left that choice as it found it — its own task
+restricted it to correcting the column's *spelling* (the bare stem to the literal basename), not
+reassigning rows to different frozen fixtures. This task's own task.md names `3DBenchy.stl` as the
+base-FFF row's fixture, which this table does not; that line is stale, and this task follows the
+table on `main`, which `04-oracle-slice` owns and this task's own "Done when" leaves undisturbed,
+over the task description's example.
+
+**The credential fields the throwaway datadir keeps empty.** The exported JSON carries all seven
+`printhost_*` fields; the pinned CLI never offers a way to select `--datadir`, so none of them is
+ever populated from a real credential store. The five string-valued ones export as `""`
+(`printhost_apikey`, `printhost_port`, `printhost_cafile`, `printhost_user`, `printhost_password`);
+the `coBool` `printhost_ssl_ignore_revoke` exports its default `"0"` and the `coEnum`
+`printhost_authorization_type` its default `"key"` — never `""`, because neither is a string field.
+
+**The measured relationship between the exported JSON and the G-code's `CONFIG_BLOCK`.** Measured by
+`port/config-block-diff`, a standalone script beside `port/inventory` (not under `port/goldens/`,
+which `oracle/provenance --check` covers in full and which has no oracle or fixture of its own to
+carry a header for), against `port/goldens/configs/base-fff.json` and the `plate_1.gcode` from the
+same `just oracle-slice frog_legs.stl base-fff --export-settings` run:
+
+```
+$ just config-block-diff port/goldens/configs/base-fff.json <that run's plate_1.gcode>
+json only (52):
+  deretract_speed_extruder_change
+  farthest_point_timelapse
+  filament_deretraction_speed
+  filament_extruder_compatibility
+  filament_flush_temp_fast
+  filament_ironing_flow
+  filament_ironing_inset
+  filament_ironing_spacing
+  filament_ironing_speed
+  filament_retract_after_wipe
+  filament_retract_before_wipe
+  filament_retract_length_toolchange
+  filament_retract_lift_above
+  filament_retract_lift_below
+  filament_retract_lift_enforce
+  filament_retract_restart_extra
+  filament_retract_restart_extra_toolchange
+  filament_retract_when_changing_layer
+  filament_retraction_length
+  filament_retraction_minimum_travel
+  filament_retraction_speed
+  filament_wipe
+  filament_wipe_distance
+  filament_z_hop
+  filament_z_hop_types
+  flush_multiplier_fast
+  from
+  imex_carriage_margin
+  imex_firmware_managed_zones
+  imex_gantry_count
+  imex_head_filament_map
+  imex_mode_active_tools
+  imex_mode_gcodes
+  imex_mode_names
+  imex_nozzle_clearance_x
+  imex_nozzle_clearance_y
+  imex_parallel_mode
+  imex_tool_layout
+  imex_tools_per_gantry
+  imex_viz_theme
+  is_imex
+  name
+  prime_volume_mode
+  print_host
+  print_host_webui
+  printhost_apikey
+  printhost_cafile
+  printhost_password
+  printhost_port
+  printhost_user
+  support_fast_purge_mode
+  version
+gcode only (2):
+  first_layer_bed_temperature
+  first_layer_temperature
+```
+
+The 52 JSON-only keys are `append_full_config`'s own ban list
+(`vendor/OrcaSlicer/src/libslic3r/GCode.cpp:8328-8385`, which explicitly excludes
+`printhost_apikey`, `printhost_cafile`, `printhost_user`, `printhost_password` and `printhost_port`
+— `print_host`/`print_host_webui` besides — from every G-code it writes) plus the keys
+`cfg.option(key)->is_nil()` skips for this configuration (`GCode.cpp:8388-8389`); the comparison
+excludes the golden's own `provenance` key, which is this task's bookkeeping, not part of
+libslic3r's resolved configuration, and was never a candidate for either set. `printhost_authorization_type`
+and `printhost_ssl_ignore_revoke` are not in this list: neither is a string field (above), and both
+are written into the config block like any other key (`; printhost_authorization_type = key`,
+`; printhost_ssl_ignore_revoke = 0`).
+
+The two G-code-only keys are `first_layer_bed_temperature` and `first_layer_temperature`, written by
+`vendor/OrcaSlicer/src/libslic3r/GCode.cpp:4325-4335` directly after `append_full_config` returns —
+not through `cfg.keys()`, and so never reachable by `--export-settings` — using
+`compat_first_layer_bed_temp`/`compat_first_layer_nozzle_temp`, values the oracle derives at G-code
+emission time, not part of the resolved configuration `--export-settings` dumps.
+
+**Emission is not resolution, and stays in scope.** The deduction above only removes preset
+resolution (preset files, the `inherits` chain, preset-bundle resolution) from the port's work (R11):
+the port still writes the G-code `HEADER_BLOCK` and `CONFIG_BLOCK` from the resolved input, selecting
+and formatting the same keys the oracle writes (`GCode.cpp:4255-4335`, the span from
+`HEADER_BLOCK_START` through `CONFIG_BLOCK_END` that this section measures), including deriving the
+two G-code-only keys above. The print-time estimator whose line the header carries
+(`GCode/GCodeProcessor.cpp:1310`) is in scope too, because L1 compares both.
