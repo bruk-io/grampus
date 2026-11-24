@@ -26,6 +26,7 @@ EdgeGrid.hpp	99	Contour	m_end	const Slic3r::Point *
 Extruder.hpp	99	Extruder	m_config	GCodeConfig *			
 ExtrusionEntityCollection.hpp	39	ExtrusionEntityCollection	entities	ExtrusionEntitiesPtr			
 Fill/AdaptiveInfillField.hpp	31	Slice	expolygons	const ExPolygons *			
+Fill/AdaptiveInfillField.hpp	116	AdaptiveTpms	equation	float (*)(float x, float y, float z)			
 Fill/Fill.hpp	35	Filler	fill	Fill *			
 Fill/FillBase.hpp	120	FillParams	config	const           PrintRegionConfig *			
 Fill/FillBase.hpp	165	Fill	adapt_fill_octree	FillAdaptive::Octree *			

@@ -52,14 +52,24 @@ A declaration can name more than one declarator sharing a base type (``Type *a, 
 becomes its own row. A field is included when its own declarator segment's text contains a literal
 ``*``, or when its base type's identifier tokens include a pointer-alias name.
 
+**The one shape the `(` guard still has to see through.** A method/operator declaration and a
+call-style initializer both hold ``(`` and are never fields -- that part of the guard is
+deliberate and stays. A function-pointer *field* (``RET (*name)(ARGS);``) also holds ``(``, but it
+is a field, so it is read before the guard fires: this codebase's own bare-call-splitting (see
+``walk_statements``) already yields it as its own fragment ending in ``(*name)`` -- re-reading the
+original header text from that fragment's own start to its terminating ``;`` recovers the whole
+declarator, which is enough to tell it apart from the two things the guard is actually for.
+
 ``just ownership`` rewrites the committed file (for a person regenerating deliberately).
-``just ownership-check`` (``--check`` here) regenerates into a scratch directory, diffs the result
-against the committed file byte-for-byte, and additionally validates every row's own class/evidence
-rule (not just a byte diff, since those three cells are carried forward and so would diff clean
-even when they are individually invalid): a ``class`` other than ``unknown`` with no evidence
-fails, and an ``unknown`` row missing either its evidence ``path:line`` or its Rust type fails.
-``just ownership-check`` prints the row count of ``port/ownership.tsv`` on success -- the plan's
-recorded proof line for R30.
+``just ownership-check`` (``--check`` here) regenerates into a scratch directory, writes the
+regenerated list there too (``ownership.tsv``, next to the always-empty stdout log), and compares
+it against the committed file as an ordered, duplicate-sensitive list -- not a byte diff, but not a
+set either, so neither a reordered nor a duplicated committed row passes. It additionally validates
+every row's own class/evidence rule (not caught by that comparison, since those three cells are
+carried forward and so would compare equal even when individually invalid): a ``class`` other than
+``unknown`` with no evidence fails, and an ``unknown`` row missing either its evidence ``path:line``
+or its Rust type fails. ``just ownership-check`` prints the committed file's own row count on
+success -- the plan's recorded proof line for R30.
 """
 
 from __future__ import annotations
@@ -205,6 +215,12 @@ TEMPLATE_PARAMS_RE = re.compile(r"template\s*<[^>]*>")
 # Requires an actual body (eventually a '{', with no ';', '{' or '}' first), so a forward
 # declaration ("class Foo;") is never read as an opener -- it terminates as a plain statement
 # instead and is filtered out by the ordinary field-inclusion test (see classify_declarator).
+#
+# Known limitation: a template *specialization* opener ("struct hash<Slic3r::Vec2d> {") does not
+# match (no bare name before '<'), so its whole body is read as a function body and skipped --
+# invisible to both field and alias collection. At the v2.5.2 pin this cost 0 pointer fields and
+# 0 pointer aliases across the 54 in-scope specialization blocks (checked by hand); a future pin
+# bump could change that silently, since `ownership-check` regenerates with this same scanner.
 CLASS_OPENER_RE = re.compile(
     r"\b(?:class|struct|union)\s+([A-Za-z_]\w*)\b(?:\s*final)?(?:\s*:[^;{}]*)?\s*$"
 )
@@ -455,6 +471,37 @@ DECLARATOR_TAIL_RE = re.compile(r"([*&\s]*)([A-Za-z_]\w*)((?:\s*\[[^\]]*\])*)\s*
 
 FIELD_SKIP_PREFIXES = ("friend", "static_assert", "using namespace", "#")
 
+# walk_statements's bare-call split (see its own comment) breaks a function-pointer field's
+# declarator in two at the name's own closing ')', because a bare identifier immediately followed
+# by '(' cannot be told apart, fragment by fragment, from this codebase's semicolon-less macro
+# field style. The first fragment it yields ends in exactly this shape: a base type, then
+# "(*name)", nothing after. A real split macro-call leftover never ends this way (its own
+# fragment is either the bare "MACRO(args)" call itself or, for the statement that follows it, an
+# ordinary declaration with no stray "(*name)" tail), so this is a safe, narrow trigger to re-read
+# the full declarator for.
+FUNC_PTR_FRAGMENT_TAIL_RE = re.compile(r"\(\s*\*+\s*[A-Za-z_]\w*\s*\)\s*$")
+
+# The full declarator, reread from the fragment's own start to its terminating ';' in the header's
+# scannable text (recovering the parameter list the fragment above doesn't carry): a base type,
+# "(*name)", then the parameter list in its own parentheses, and nothing else.
+FUNC_PTR_FIELD_RE = re.compile(
+    r"^(?P<base>[^()]+?)\(\s*\*+\s*(?P<name>[A-Za-z_]\w*)\s*\)\s*\((?P<params>.*)\)\s*$",
+    re.DOTALL,
+)
+
+
+def try_parse_function_pointer_field(full_decl: str) -> tuple[str, str] | None:
+    """Return (field name, C++ type) if full_decl -- the complete declarator text from a
+    statement's own start through its terminating ';' in the header's scannable text, not just
+    the single fragment ``walk_statements`` yields for it -- is a function-pointer field
+    (``RET (*name)(ARGS)``); else None."""
+    m = FUNC_PTR_FIELD_RE.match(full_decl.strip())
+    if not m:
+        return None
+    base = re.sub(r"\s+", " ", m.group("base")).strip()
+    params = re.sub(r"\s+", " ", m.group("params")).strip()
+    return m.group("name"), f"{base} (*)({params})"
+
 
 def cut_initializer(text: str) -> str:
     """Return text up to (not including) its first top-level '=' or '{' -- a default member
@@ -612,10 +659,19 @@ def collect_fields(
             # (ExtrusionEntityCollection.hpp:39, Model.hpp:189) exactly rather than off by
             # whatever the previous statement happened to leave behind.
             leading_ws = len(stmt_text) - len(stmt_text.lstrip())
+            line = str(line_of(text, pos + leading_ws))
+
+            if FUNC_PTR_FRAGMENT_TAIL_RE.search(stmt_text.strip()):
+                semi = text.find(";", pos)
+                full_decl = text[pos:semi] if semi != -1 else stmt_text
+                func_field = try_parse_function_pointer_field(full_decl)
+                if func_field is not None:
+                    name, cpp_type = func_field
+                    rows.append([relpath, line, declaring_type, name, cpp_type])
+                    continue
+
             for name, cpp_type in parse_fields(stmt_text, declaring_type, pointer_aliases):
-                rows.append(
-                    [relpath, str(line_of(text, pos + leading_ws)), declaring_type, name, cpp_type]
-                )
+                rows.append([relpath, line, declaring_type, name, cpp_type])
     return rows
 
 
@@ -634,6 +690,11 @@ def load_committed(path: Path) -> dict[tuple[str, str, str, str], list[str]]:
     header, rows = read_tsv(path)
     if header != HEADER:
         raise SystemExit(f"ownership: {path}'s header row is {header!r}, expected {HEADER!r}")
+    for i, row in enumerate(rows, start=2):
+        if len(row) != len(HEADER):
+            raise SystemExit(
+                f"ownership: {path}:{i} has {len(row)} cell(s), expected {len(HEADER)}: {row!r}"
+            )
     key_i = tuple(header.index(name) for name in ("header path", "line", "declaring type", "field"))
     return {tuple(row[i] for i in key_i): row for row in rows}
 
@@ -693,8 +754,10 @@ def run_check() -> None:
     committed file disagrees, and separately validate every row's own class/evidence rule."""
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     log_path = SCRATCH_ROOT / "ownership-check.log"
+    scratch_tsv_path = SCRATCH_ROOT / "ownership.tsv"
     with log_path.open("w", encoding="utf-8") as log_file, contextlib.redirect_stdout(log_file):
         rows = generate()
+    write_tsv(scratch_tsv_path, HEADER, rows)
 
     if not OWNERSHIP_PATH.is_file():
         raise SystemExit(f"ownership-check: {OWNERSHIP_PATH} does not exist")
@@ -704,21 +767,32 @@ def run_check() -> None:
     diffs: list[str] = []
     if committed_lines[:1] != fresh_lines[:1]:
         diffs.append(f"header row: committed {committed_lines[:1]!r}, expected {fresh_lines[:1]!r}")
-    committed_set = set(committed_lines[1:])
-    fresh_set = set(fresh_lines[1:])
-    added = sorted(fresh_set - committed_set)
-    removed = sorted(committed_set - fresh_set)
-    if added:
-        diffs.append(f"row(s) the committed file is missing: {added}")
-    if removed:
-        diffs.append(f"row(s) the committed file has that regeneration does not: {removed}")
+    # An ordered, duplicate-sensitive comparison of the body rows -- not a byte diff (carried-
+    # forward class/evidence/rust-type cells mean a regenerated row can differ from a hand's-eye
+    # read of the committed one in ways that are still correct), but not a set either: a set
+    # comparison would pass a committed file with its rows reordered or with one duplicated, and
+    # neither is a shape `just ownership` ever writes.
+    if committed_lines[1:] != fresh_lines[1:]:
+        committed_set = set(committed_lines[1:])
+        fresh_set = set(fresh_lines[1:])
+        added = sorted(fresh_set - committed_set)
+        removed = sorted(committed_set - fresh_set)
+        if added:
+            diffs.append(f"row(s) the committed file is missing: {added}")
+        if removed:
+            diffs.append(f"row(s) the committed file has that regeneration does not: {removed}")
+        if not added and not removed:
+            diffs.append(
+                "the committed file's rows are reordered or contain a duplicate relative to "
+                "regeneration, although the same rows are present as a set"
+            )
 
     problems = validate_rows(rows)
 
     if diffs or problems:
         print(
             "ownership-check: port/ownership.tsv has drifted from the vendored headers or holds "
-            f"an invalid row (regeneration's own output is at {log_path}):"
+            f"an invalid row (the regenerated list is at {scratch_tsv_path}):"
         )
         for line in diffs:
             print(f"  drift: {line}")
@@ -726,7 +800,7 @@ def run_check() -> None:
             print(f"  invalid: {line}")
         raise SystemExit(1)
 
-    print(f"ownership-check: port/ownership.tsv holds {len(rows)} row(s)")
+    print(f"ownership-check: port/ownership.tsv holds {len(committed_lines) - 1} row(s)")
 
 
 @click.command()
