@@ -445,14 +445,31 @@ def classify_lines(text: str) -> list[LineInfo]:
         is_pure_comment = stripped.startswith("//")
         exempt = False
         if in_cfg_test:
-            exempt = True
-            opens = code.count("{")
-            closes = code.count("}")
-            if opens:
-                cfg_test_seen_open = True
-            cfg_test_depth += opens - closes
-            if cfg_test_seen_open and cfg_test_depth <= 0:
+            # Braces are counted on `mask_strings(code)`, never on raw `code`: a `{` or a `}`
+            # written inside a string or char literal is text, not a block delimiter, and must
+            # not move the depth in either direction. Counting it either strands the exemption
+            # on to end of file (a silent per-file opt-out from the numeric-constant rule,
+            # which --help says does not exist) or drops it early inside a real test body.
+            masked_code = mask_strings(code)
+            semi = masked_code.find(";")
+            first_open = masked_code.find("{")
+            if not cfg_test_seen_open and semi != -1 and (first_open == -1 or semi < first_open):
+                # The no-body case: the attribute's item ended at its own semicolon without
+                # ever opening a block (`#[cfg(test)] use ...;`, `#[cfg(test)] mod tests;`), so
+                # the exemption ends on this line instead of waiting for a brace that never
+                # comes. This line is not exempt either: the closed exempt position is "inside
+                # a #[cfg(test)] module", and a braceless item is not a module, so a literal
+                # written on it still needs its marker (the fail-closed reading).
                 in_cfg_test = False
+            else:
+                exempt = True
+                opens = masked_code.count("{")
+                closes = masked_code.count("}")
+                if opens:
+                    cfg_test_seen_open = True
+                cfg_test_depth += opens - closes
+                if cfg_test_seen_open and cfg_test_depth <= 0:
+                    in_cfg_test = False
         elif CFG_TEST_RE.match(stripped):
             exempt = True
             in_cfg_test = True
@@ -992,6 +1009,11 @@ SELFTEST_FIXTURES: list[tuple[str, bool, str | None]] = [
     ("two-literals-one-marker", False, "placeholder-constant"),
     ("marker-matches-no-literal", False, "unmatched-port-src"),
     ("unrecognized-marker", False, "unrecognized-marker"),
+    # The two shapes that must not turn `#[cfg(test)]`'s exempt position into a silent
+    # per-file opt-out from the numeric-constant rule: an attribute whose item has no block at
+    # all, and a brace written inside a string literal in the test body.
+    ("cfg-test-braceless-item", False, "missing-port-src"),
+    ("cfg-test-brace-in-string", False, "missing-port-src"),
 ]
 
 

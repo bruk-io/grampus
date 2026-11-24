@@ -62,6 +62,11 @@ fn block_comment_marker() {}
 #[cfg(test)]
 #[allow(clippy::approx_constant)]
 mod tests {
+    // A brace written inside a string literal must not move the cfg(test) brace depth: this
+    // closing brace is text, so everything below it is still inside the test module and still
+    // exempt.
+    const CLOSING_BRACE: &str = "}";
+
     #[test]
     fn resolution_is_small() {
         assert!(0.0125 < 1.0);
