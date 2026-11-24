@@ -18,6 +18,24 @@ is laid out, and how to change the pin.
 | `vendor/OrcaSlicer/` | Upstream OrcaSlicer, unmodified, pinned. |
 | `vendor/README.md` | Documentation for the vendored source. |
 | `LICENSE` | AGPL-3.0 text. |
+| `intent/` | asdlc documents: intents, specs, plans and tasks. Created by the first intent. |
+| `.asdlc/checks` | The commands a task has to pass. |
+| `justfile` | `just check` and `just guard`. |
+
+## How work happens
+
+This repository uses [asdlc](https://github.com/bruk-io/asdlc). Work bigger than a small fix
+starts as an intent, then a spec, a plan and tasks: Markdown files under `intent/<slug>/`, each
+added by a pull request and accepted when a person merges it.
+
+- **Plugin:** `.claude/settings.json` enables the asdlc Claude Code plugin for this project. It
+  lints a document when Claude writes it and guards a branch before Claude pushes it.
+- **Checks:** `.asdlc/checks` lists what a task has to pass. Today that is `just check`, which
+  lints the asdlc documents. Code checks get added to the `check` recipe as code arrives.
+- **CI:** `.github/workflows/ci.yml` runs `just check` on every push and pull request, and the
+  guard on pull requests.
+- **Merging:** pull requests are merged with a merge commit. asdlc reads task state from merge
+  commits, so squash and rebase merges are turned off on GitHub.
 
 ## Getting started
 
