@@ -1,0 +1,113 @@
+//! Exercises L0 and L1 against the committed fragments under `tests/data/`. L2, L3 and L4 are
+//! always [`oracle_compare::LevelOutcome::NotEvaluated`] from this task; that is asserted here
+//! too, since an honest "not evaluated" standing in for unwritten-scaffolding macros is this
+//! task's entire point.
+
+use oracle_compare::{compare, FailLocation, Level, LevelOutcome};
+
+fn data_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data")
+}
+
+fn read_pair(name: &str) -> (Vec<u8>, Vec<u8>) {
+    let dir = data_dir().join(name);
+    let a = std::fs::read(dir.join("a.gcode"))
+        .unwrap_or_else(|e| panic!("reading {}/a.gcode: {e}", dir.display()));
+    let b = std::fs::read(dir.join("b.gcode"))
+        .unwrap_or_else(|e| panic!("reading {}/b.gcode: {e}", dir.display()));
+    (a, b)
+}
+
+fn assert_not_evaluated_above_l1(report: &oracle_compare::Report) {
+    for level in [Level::L2, Level::L3, Level::L4] {
+        assert_eq!(
+            *report.outcome(level),
+            LevelOutcome::NotEvaluated,
+            "{level} should be not-evaluated by this task"
+        );
+    }
+}
+
+#[test]
+fn identical_pair_passes_l0_and_l1_and_names_l1_strongest() {
+    let (a, b) = read_pair("identical");
+    let report = compare(&a, &b);
+    assert_eq!(*report.outcome(Level::L0), LevelOutcome::Pass);
+    assert_eq!(*report.outcome(Level::L1), LevelOutcome::Pass);
+    assert_eq!(report.strongest_evaluated_pass, Some(Level::L1));
+    assert_eq!(report.stricter_failure, None);
+    assert_eq!(report.first_differing_byte, None);
+    assert_not_evaluated_above_l1(&report);
+}
+
+#[test]
+fn generated_by_pair_fails_l0_with_byte_offset_and_passes_l1() {
+    let (a, b) = read_pair("generated_by");
+    let report = compare(&a, &b);
+    match report.outcome(Level::L0) {
+        LevelOutcome::Fail(FailLocation::ByteOffset(_)) => {}
+        other => panic!("expected L0 byte-offset failure, got {other:?}"),
+    }
+    assert_eq!(*report.outcome(Level::L1), LevelOutcome::Pass);
+    assert_eq!(report.strongest_evaluated_pass, Some(Level::L1));
+    match &report.stricter_failure {
+        Some((Level::L0, FailLocation::ByteOffset(_))) => {}
+        other => panic!("expected a stricter L0 byte-offset failure, got {other:?}"),
+    }
+    assert_not_evaluated_above_l1(&report);
+}
+
+#[test]
+fn plugin_armed_pair_passes_l1() {
+    let (a, b) = read_pair("plugin_armed");
+    let report = compare(&a, &b);
+    assert!(
+        !report.passed(Level::L0),
+        "the two files differ by a whole line, L0 must fail"
+    );
+    assert_eq!(*report.outcome(Level::L1), LevelOutcome::Pass);
+    assert_eq!(report.strongest_evaluated_pass, Some(Level::L1));
+}
+
+#[test]
+fn model_label_pair_passes_l1() {
+    let (a, b) = read_pair("model_label");
+    let report = compare(&a, &b);
+    assert!(!report.passed(Level::L0));
+    assert_eq!(*report.outcome(Level::L1), LevelOutcome::Pass);
+}
+
+#[test]
+fn one_coordinate_pair_fails_both_l0_and_l1_with_a_line() {
+    let (a, b) = read_pair("one_coordinate");
+    let report = compare(&a, &b);
+    assert!(!report.passed(Level::L0));
+    match report.outcome(Level::L1) {
+        LevelOutcome::Fail(FailLocation::Line { number, .. }) => {
+            assert!(*number > 0);
+        }
+        other => panic!("expected an L1 line failure, got {other:?}"),
+    }
+    assert_eq!(report.strongest_evaluated_pass, None);
+    assert!(report.first_differing_byte.is_some());
+}
+
+#[test]
+fn unrelated_pair_fails_both_from_the_first_byte() {
+    let (a, b) = read_pair("unrelated");
+    let report = compare(&a, &b);
+    assert!(!report.passed(Level::L0));
+    assert!(!report.passed(Level::L1));
+    assert_eq!(report.strongest_evaluated_pass, None);
+    assert_eq!(report.first_differing_byte, Some(0));
+}
+
+#[test]
+fn empty_input_normalises_to_empty() {
+    assert_eq!(oracle_compare::normalise(b""), Vec::<u8>::new());
+}
+
+#[test]
+fn missing_final_newline_gains_one() {
+    assert_eq!(oracle_compare::normalise(b"G28"), b"G28\n".to_vec());
+}
