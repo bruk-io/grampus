@@ -218,9 +218,15 @@ TEMPLATE_PARAMS_RE = re.compile(r"template\s*<[^>]*>")
 #
 # Known limitation: a template *specialization* opener ("struct hash<Slic3r::Vec2d> {") does not
 # match (no bare name before '<'), so its whole body is read as a function body and skipped --
-# invisible to both field and alias collection. At the v2.5.2 pin this cost 0 pointer fields and
-# 0 pointer aliases across the 54 in-scope specialization blocks (checked by hand); a future pin
-# bump could change that silently, since `ownership-check` regenerates with this same scanner.
+# invisible to both field and alias collection. At the v2.5.2 pin there are 50 such blocks: ones
+# whose opener has the form `class|struct|union NAME<...>` and that the scan actually reaches and
+# skips. That is a count of skipped blocks, not of textual "NAME<" matches -- a plain class with a
+# *templated base* ("struct ImageColorscale:Image<unsigned char>", PNGReadWrite.hpp) carries a '<'
+# in its opener but is matched by the `:[^;{}]*` base-clause branch below and is not skipped at
+# all. Those 50 cost 0 pointer fields and 0 pointer aliases, measured by re-walking each skipped
+# block's body with this module's own walk_statements and parse_fields against the real
+# pointer-alias set -- not by eye. A future pin bump could change that silently, since
+# `ownership-check` regenerates with this same scanner.
 CLASS_OPENER_RE = re.compile(
     r"\b(?:class|struct|union)\s+([A-Za-z_]\w*)\b(?:\s*final)?(?:\s*:[^;{}]*)?\s*$"
 )
