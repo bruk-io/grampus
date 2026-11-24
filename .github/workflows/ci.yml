@@ -103,5 +103,16 @@ jobs:
           restore-keys: |
             oracle-build-arm64-${{ steps.submodule.outputs.sha }}-
 
+      # EXPECTED RED, as of task 13-build-libslic3r: stage one (the 21-dependency
+      # superbuild) completes, and stage two then fails its first configure with
+      # `Could NOT find LibLZMA (missing: LIBLZMA_INCLUDE_DIR)`. That is a real,
+      # reported finding, not a regression in whatever change you are looking at:
+      # vendor/README.md's "Building libslic3r locally (`just oracle-build`)" section
+      # carries the error, the evidence for the mechanism and the untried next step,
+      # and C7 in intent/libslic3r-rust-port/spec.md is the decision to report it
+      # rather than work around it. No `continue-on-error` here on purpose: the step
+      # should go green by fixing the build, and until then the red is the signal.
+      # Because the step exits non-zero, the cache above restores but never saves
+      # (actions/cache only saves in its post step on job success).
       - name: Build the vendored libslic3r (just oracle-build)
         run: just oracle-build
