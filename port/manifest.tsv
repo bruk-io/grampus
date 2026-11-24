@@ -1,608 +1,608 @@
-path	subsystem	lines	file-level include-DAG level	crate-level level	in scope or out with a reason	target crate and module	pipeline stage or none	template-heavy	equality tier	tolerance	comparison function	proof path	fuzz target	status
-AABBMesh.cpp	root	330	12		in		none							
-AABBMesh.hpp	root	146	11		in		none							
-AABBTreeIndirect.hpp	root	997	9		in		posSlice							
-AABBTreeLines.hpp	root	379	10		in		posSlice							
-AStar.hpp	root	161	1		out: No caller in the four entry points' closure.		none							
-Algorithm/LineSplit.cpp	Algorithm	322	13		in		none							
-Algorithm/LineSplit.hpp	Algorithm	76	12		in		none							
-Algorithm/RegionExpansion.cpp	Algorithm	575	12		in		none							
-Algorithm/RegionExpansion.hpp	Algorithm	119	9		in		posPerimeters							
-AnyPtr.hpp	root	131	0		out: No caller in the four entry points' closure.		none							
-AppConfig.cpp	root	1983	12		in		none							
-AppConfig.hpp	root	506	11		in		posSlice							
-Arachne/BeadingStrategy/BeadingStrategy.cpp	Arachne	79	4		in		none							
-Arachne/BeadingStrategy/BeadingStrategy.hpp	Arachne	121	3		in		none							
-Arachne/BeadingStrategy/BeadingStrategyFactory.cpp	Arachne	59	5		in		none							
-Arachne/BeadingStrategy/BeadingStrategyFactory.hpp	Arachne	39	4		in		none							
-Arachne/BeadingStrategy/DistributedBeadingStrategy.cpp	Arachne	101	5		in		none							
-Arachne/BeadingStrategy/DistributedBeadingStrategy.hpp	Arachne	41	4		in		none							
-Arachne/BeadingStrategy/LimitedBeadingStrategy.cpp	Arachne	131	5		in		none							
-Arachne/BeadingStrategy/LimitedBeadingStrategy.hpp	Arachne	52	4		in		none							
-Arachne/BeadingStrategy/OuterWallInsetBeadingStrategy.cpp	Arachne	63	5		in		none							
-Arachne/BeadingStrategy/OuterWallInsetBeadingStrategy.hpp	Arachne	38	4		in		none							
-Arachne/BeadingStrategy/RedistributeBeadingStrategy.cpp	Arachne	101	5		in		none							
-Arachne/BeadingStrategy/RedistributeBeadingStrategy.hpp	Arachne	59	4		in		none							
-Arachne/BeadingStrategy/WideningBeadingStrategy.cpp	Arachne	101	5		in		none							
-Arachne/BeadingStrategy/WideningBeadingStrategy.hpp	Arachne	50	4		in		none							
-Arachne/SkeletalTrapezoidation.cpp	Arachne	2119	14		in		none							
-Arachne/SkeletalTrapezoidation.hpp	Arachne	557	13		in		none							
-Arachne/SkeletalTrapezoidationEdge.hpp	Arachne	124	5		in		none							
-Arachne/SkeletalTrapezoidationGraph.cpp	Arachne	478	7		in		none							
-Arachne/SkeletalTrapezoidationGraph.hpp	Arachne	115	6		in		none							
-Arachne/SkeletalTrapezoidationJoint.hpp	Arachne	61	4		in		none							
-Arachne/WallToolPaths.cpp	Arachne	902	14		in		none							
-Arachne/WallToolPaths.hpp	Arachne	153	13		in		none							
-Arachne/utils/ExtrusionJunction.hpp	Arachne	69	4		in		none							
-Arachne/utils/ExtrusionLine.cpp	Arachne	308	13		in		none							
-Arachne/utils/ExtrusionLine.hpp	Arachne	301	12		in		none							
-Arachne/utils/HalfEdge.hpp	Arachne	39	0		in		none							
-Arachne/utils/HalfEdgeGraph.hpp	Arachne	31	5		in		none							
-Arachne/utils/HalfEdgeNode.hpp	Arachne	38	4		in		none							
-Arachne/utils/PolygonsPointIndex.hpp	Arachne	181	8		in		none							
-Arachne/utils/PolygonsSegmentIndex.hpp	Arachne	53	9		in		none							
-Arachne/utils/PolylineStitcher.cpp	Arachne	52	13		in		none							
-Arachne/utils/PolylineStitcher.hpp	Arachne	241	9		in		none							
-Arachne/utils/SparseGrid.hpp	Arachne	135	5		in		none							
-Arachne/utils/SparseLineGrid.hpp	Arachne	81	6		in		none							
-Arachne/utils/SparsePointGrid.hpp	Arachne	67	6		in		none							
-Arachne/utils/SquareGrid.cpp	Arachne	154	5		in		none							
-Arachne/utils/SquareGrid.hpp	Arachne	113	4		in		none							
-Arachne/utils/linearAlg2D.hpp	Arachne	68	4		in		none							
-ArcFitter.cpp	root	158	7		in		none							
-ArcFitter.hpp	root	56	5		in		posSlice							
-Arrange.cpp	root	1430	18		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-Arrange.hpp	root	253	17		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-BeltBrim.cpp	root	602	17		in		none							
-BeltBrim.hpp	root	178	10		in		posSlice							
-BeltGCode.cpp	root	50	20		in		none							
-BeltGCode.hpp	root	25	19		in		psWipeTower							
-BeltPurge.cpp	root	433	17		in		psWipeTower							
-BeltSliceStrategy.cpp	root	82	16		in		none							
-BeltSliceStrategy.hpp	root	34	15		in		posSlice							
-BeltTransform.cpp	root	192	15		in		posSlice							
-BeltTransform.hpp	root	142	10		in		posSlice							
-BlacklistedLibraryCheck.cpp	root	88	1		out: No caller in the four entry points' closure.		none							
-BlacklistedLibraryCheck.hpp	root	46	0		out: No caller in the four entry points' closure.		none							
-BoundingBox.cpp	root	292	9		in		none							
-BoundingBox.hpp	root	322	8		in		posSlice							
-BridgeDetector.cpp	root	485	12		in		none							
-BridgeDetector.hpp	root	138	11		in		posPerimeters							
-Brim.cpp	root	1016	19		in		none							
-Brim.hpp	root	36	9		in		psWipeTower							
-BrimEarsPoint.hpp	root	70	4		in		posSlice							
-BuildVolume.cpp	root	620	13		in		none							
-BuildVolume.hpp	root	170	9		in		posPrepareInfill							
-CAD/CadDocument.cpp	CAD	4764	12		out: No caller in the four entry points' closure.		none							
-CAD/CadDocument.hpp	CAD	920	11		out: No caller in the four entry points' closure.		none							
-CAD/GeometryEngine.cpp	CAD	734	11		out: No caller in the four entry points' closure.		none							
-CAD/GeometryEngine.hpp	CAD	155	10		out: No caller in the four entry points' closure.		none							
-CAD/SketchConstraints.cpp	CAD	312	5		out: No caller in the four entry points' closure.		none							
-CAD/SketchConstraints.hpp	CAD	69	4		out: No caller in the four entry points' closure.		none							
-CAD/SketchEngine.cpp	CAD	2577	11		out: No caller in the four entry points' closure.		none							
-CAD/SketchEngine.hpp	CAD	359	10		out: No caller in the four entry points' closure.		none							
-CAD/SketchImport.cpp	CAD	159	12		out: No caller in the four entry points' closure.		none							
-CAD/SketchImport.hpp	CAD	45	4		out: No caller in the four entry points' closure.		none							
-CAD/SketchInference.cpp	CAD	255	12		out: No caller in the four entry points' closure.		none							
-CAD/SketchInference.hpp	CAD	61	11		out: No caller in the four entry points' closure.		none							
-CAD/SketchSolver.cpp	CAD	685	11		out: No caller in the four entry points' closure.		none							
-CAD/SketchSolver.hpp	CAD	44	0		out: No caller in the four entry points' closure.		none							
-CAD/ThreadStandards.cpp	CAD	97	1		out: No caller in the four entry points' closure.		none							
-CAD/ThreadStandards.hpp	CAD	41	0		out: No caller in the four entry points' closure.		none							
-CSGMesh/CSGMesh.hpp	CSGMesh	125	10		out: No caller in the four entry points' closure.		none							
-CSGMesh/CSGMeshCopy.hpp	CSGMesh	84	11		out: No caller in the four entry points' closure.		none							
-CSGMesh/ModelToCSGMesh.hpp	CSGMesh	96	15		out: No caller in the four entry points' closure.		none							
-CSGMesh/PerformCSGMeshBooleans.hpp	CSGMesh	388	11		out: No caller in the four entry points' closure.		none							
-CSGMesh/SliceCSGMesh.hpp	CSGMesh	139	11		out: No caller in the four entry points' closure.		none							
-CSGMesh/TriangleMeshAdapter.hpp	CSGMesh	96	11		out: No caller in the four entry points' closure.		none							
-Channel.hpp	root	104	0		out: No caller in the four entry points' closure.		none							
-Circle.cpp	root	632	5		in		none							
-Circle.hpp	root	147	4		in		posSlice							
-ClipperUtils.cpp	root	1578	11		in		none							
-ClipperUtils.hpp	root	618	10		in		posSlice							
-ClipperZUtils.cpp	root	80	12		in		none							
-ClipperZUtils.hpp	root	160	11		in		none							
-Color.cpp	root	436	3		in		none							
-Color.hpp	root	188	0		in		posSlice							
-ColorDecomposeRecipe.cpp	root	532	4		in		none							
-ColorDecomposeRecipe.hpp	root	64	0		in		none							
-CommonDefs.hpp	root	21	0		in		posSlice							
-Config.cpp	root	2204	10		in		none							
-Config.hpp	root	3154	4		in		posSlice							
-ConnectedBodies.cpp	root	295	11		in		none							
-ConnectedBodies.hpp	root	63	10		in		posSlice							
-ContourZ.cpp	root	252	17		in		posContouring							
-CustomGCode.cpp	root	117	1		in		none							
-CustomGCode.hpp	root	103	0		in		posSlice							
-CutSurface.cpp	root	4129	12		out: No caller in the four entry points' closure.		none							
-CutSurface.hpp	root	78	9		out: No caller in the four entry points' closure.		none							
-CutUtils.cpp	root	794	16		out: No caller in the four entry points' closure.		none							
-CutUtils.hpp	root	76	15		out: No caller in the four entry points' closure.		none							
-EdgeGrid.cpp	root	1645	11		in		none							
-EdgeGrid.hpp	root	438	9		in		posSlice							
-ElephantFootCompensation.cpp	root	653	11		in		none							
-ElephantFootCompensation.hpp	root	18	9		in		posSlice							
-Emboss.cpp	root	2276	12		out: No caller in the four entry points' closure.		none							
-Emboss.hpp	root	481	11		out: No caller in the four entry points' closure.		none							
-EmbossShape.hpp	root	145	10		out: No caller in the four entry points' closure.		none							
-ExPolygon.cpp	root	559	11		in		none							
-ExPolygon.hpp	root	623	8		in		posSlice							
-ExPolygonCollection.cpp	root	136	10		in		none							
-ExPolygonCollection.hpp	root	44	9		in		none							
-ExPolygonSerialize.hpp	root	29	9		out: No caller in the four entry points' closure.		none							
-ExPolygonsIndex.cpp	root	89	10		out: No caller in the four entry points' closure.		none							
-ExPolygonsIndex.hpp	root	76	9		out: No caller in the four entry points' closure.		none							
-Exception.hpp	root	55	0		in		posSlice							
-ExclusionVolumeGeometry.cpp	root	186	17		in		none							
-ExclusionVolumeGeometry.hpp	root	63	9		in		psWipeTower							
-Execution/Execution.hpp	Execution	129	3		in		posContouring							
-Execution/ExecutionSeq.hpp	Execution	87	4		in		posContouring							
-Execution/ExecutionTBB.hpp	Execution	81	4		in		posContouring							
-Extruder.cpp	root	263	10		in		psGCodeExport							
-Extruder.hpp	root	131	3		in		posSlice							
-ExtrusionEntity.cpp	root	789	11		in		none							
-ExtrusionEntity.hpp	root	702	8		in		posSlice							
-ExtrusionEntityCollection.cpp	root	161	10		in		psSkirtBrim							
-ExtrusionEntityCollection.hpp	root	197	9		in		posSlice							
-ExtrusionSimulator.cpp	root	1041	10		out: Dead at the pin.		none							
-ExtrusionSimulator.hpp	root	59	9		out: Dead at the pin.		none							
-FaceDetector.cpp	root	94	12		out: No caller in the four entry points' closure.		none							
-FaceDetector.hpp	root	26	4		out: No caller in the four entry points' closure.		none							
-Feature/FuzzySkin/FuzzySkin.cpp	Feature	866	17		in		none							
-Feature/FuzzySkin/FuzzySkin.hpp	Feature	29	8		in		none							
-Feature/Interlocking/InterlockingGenerator.cpp	Feature	357	17		in		none							
-Feature/Interlocking/InterlockingGenerator.hpp	Feature	185	10		in		posSlice							
-Feature/Interlocking/VoxelUtils.cpp	Feature	231	11		in		none							
-Feature/Interlocking/VoxelUtils.hpp	Feature	217	9		in		posSlice							
-FilamentGroup.cpp	root	1571	12		in		none							
-FilamentGroup.hpp	root	278	11		in		psWipeTower							
-FilamentGroupUtils.cpp	root	360	11		in		none							
-FilamentGroupUtils.hpp	root	115	10		in		psWipeTower							
-FilamentMixer.cpp	root	908	5		in		none							
-FilamentMixer.hpp	root	187	0		in		posSlice							
-FilamentMixerModel.hpp	root	819	0		in		none							
-FileParserError.hpp	root	54	3		out: No caller in the four entry points' closure.		none							
-Fill/AdaptiveInfillField.cpp	Fill	823	12		in		none							
-Fill/AdaptiveInfillField.hpp	Fill	143	11		in		posSlice							
-Fill/Fill.cpp	Fill	1934	17		in		posInfill							
-Fill/Fill.hpp	Fill	41	11		in		posSlice							
-Fill/Fill3DHoneycomb.cpp	Fill	437	12		in		none							
-Fill/Fill3DHoneycomb.hpp	Fill	41	11		in		none							
-Fill/FillAdaptive.cpp	Fill	2105	17		in		none							
-Fill/FillAdaptive.hpp	Fill	126	11		in		posSlice							
-Fill/FillBase.cpp	Fill	3161	12		in		none							
-Fill/FillBase.hpp	Fill	273	10		in		posSlice							
-Fill/FillConcentric.cpp	Fill	203	14		in		none							
-Fill/FillConcentric.hpp	Fill	39	11		in		posInfill							
-Fill/FillConcentricInternal.cpp	Fill	120	14		in		none							
-Fill/FillConcentricInternal.hpp	Fill	27	11		in		posInfill							
-Fill/FillCornerSmoothing.cpp	Fill	331	9		in		none							
-Fill/FillCornerSmoothing.hpp	Fill	140	8		in		posSlice							
-Fill/FillCrossHatch.cpp	Fill	245	12		in		none							
-Fill/FillCrossHatch.hpp	Fill	35	11		in		none							
-Fill/FillGyroid.cpp	Fill	405	12		in		none							
-Fill/FillGyroid.hpp	Fill	47	11		in		none							
-Fill/FillHoneycomb.cpp	Fill	96	12		in		none							
-Fill/FillHoneycomb.hpp	Fill	65	11		in		none							
-Fill/FillLightning.cpp	Fill	59	17		in		none							
-Fill/FillLightning.hpp	Fill	49	11		in		posSlice							
-Fill/FillLine.cpp	Fill	134	12		in		none							
-Fill/FillLine.hpp	Fill	55	11		in		none							
-Fill/FillPlanePath.cpp	Fill	427	12		in		none							
-Fill/FillPlanePath.hpp	Fill	109	11		in		none							
-Fill/FillRectilinear.cpp	Fill	4086	12		in		none							
-Fill/FillRectilinear.hpp	Fill	241	11		in		posInfill							
-Fill/FillSpiralInset.cpp	Fill	495	14		in		none							
-Fill/FillSpiralInset.hpp	Fill	42	11		in		none							
-Fill/FillTpmsD.cpp	Fill	194	12		in		none							
-Fill/FillTpmsD.hpp	Fill	45	11		in		posInfill							
-Fill/FillTpmsFK.cpp	Fill	197	12		in		none							
-Fill/FillTpmsFK.hpp	Fill	39	11		in		posInfill							
-Fill/Lightning/DistanceField.cpp	Fill	191	12		in		none							
-Fill/Lightning/DistanceField.hpp	Fill	216	9		in		none							
-Fill/Lightning/Generator.cpp	Fill	309	17		in		none							
-Fill/Lightning/Generator.hpp	Fill	142	11		in		posSlice							
-Fill/Lightning/Layer.cpp	Fill	462	12		in		none							
-Fill/Lightning/Layer.hpp	Fill	97	10		in		posSlice							
-Fill/Lightning/TreeNode.cpp	Fill	453	12		in		none							
-Fill/Lightning/TreeNode.hpp	Fill	319	11		in		none							
-Flow.cpp	root	280	17		in		none							
-Flow.hpp	root	151	9		in		posSlice							
-FlushVolCalc.cpp	root	133	10		out: No caller in the four entry points' closure.		none							
-FlushVolCalc.hpp	root	41	9		out: No caller in the four entry points' closure.		none							
-FlushVolPredictor.cpp	root	353	4		in		none							
-FlushVolPredictor.hpp	root	52	0		in		none							
-Format/3mf.cpp	Format	3377	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/3mf.hpp	Format	65	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/AMF.cpp	Format	1405	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/AMF.hpp	Format	20	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/AssembleList.cpp	Format	211	1		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/AssembleList.hpp	Format	60	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/AssimpImport.cpp	Format	336	1		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/AssimpImport.hpp	Format	11	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/DRC.cpp	Format	192	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/DRC.hpp	Format	26	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/ModelIO.hpp	Format	21	0		out: It is not itself Objective-C++, so its reason is its own — out, as the header of an Apple-only importer no in-scope caller reaches.		none							
-Format/ModelIO.mm	Format	26	1		out: Format/ModelIO.mm is 26 lines whose whole content is make_temp_stl_with_modelio, an Apple-only importer that converts an asset to a temporary STL before the tree's own readers run, and every committed fixture is already an STL.		none							
-Format/OBJ.cpp	Format	419	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/OBJ.hpp	Format	51	4		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/ProjectStrategy.hpp	Format	78	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/ResourcePathUtils.hpp	Format	243	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/SL1.cpp	Format	543	18		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/SL1.hpp	Format	73	17		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/STEP.cpp	Format	793	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/STEP.hpp	Format	133	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/STL.cpp	Format	64	15		in		none							
-Format/STL.hpp	Format	21	0		in		posSlice							
-Format/ZipperArchiveImport.cpp	Format	156	10		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/ZipperArchiveImport.hpp	Format	56	9		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/bbs_3mf.cpp	Format	10211	19		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/bbs_3mf.hpp	Format	308	13		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/objparser.cpp	Format	971	1		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/objparser.hpp	Format	143	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/svg.cpp	Format	408	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-Format/svg.hpp	Format	10	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.		none							
-GCode.cpp	root	11805	19		in		psSkirtBrim							
-GCode.hpp	root	1087	18		in		psWipeTower							
-GCode/AdaptivePAInterpolator.cpp	GCode	120	2		in		none							
-GCode/AdaptivePAInterpolator.hpp	GCode	54	1		in		psWipeTower							
-GCode/AdaptivePAProcessor.cpp	GCode	442	19		in		none							
-GCode/AdaptivePAProcessor.hpp	GCode	107	2		in		psWipeTower							
-GCode/AvoidCrossingPerimeters.cpp	GCode	1753	19		in		none							
-GCode/AvoidCrossingPerimeters.hpp	GCode	79	10		in		psWipeTower							
-GCode/BeltBackTransform.cpp	GCode	33	11		in		none							
-GCode/BeltBackTransform.hpp	GCode	38	9		in		psWipeTower							
-GCode/BeltKinematics.cpp	GCode	29	11		in		none							
-GCode/BeltKinematics.hpp	GCode	59	10		in		psWipeTower							
-GCode/ConflictChecker.cpp	GCode	352	18		in		psConflictCheck							
-GCode/ConflictChecker.hpp	GCode	160	17		in		psWipeTower							
-GCode/CoolingBuffer.cpp	GCode	1110	19		in		none							
-GCode/CoolingBuffer.hpp	GCode	73	4		in		psWipeTower							
-GCode/ElegooGCodeProcessorHelper.cpp	GCode	193	13		in		none							
-GCode/ExclusionVolumePathCheck.cpp	GCode	234	12		in		none							
-GCode/ExclusionVolumePathCheck.hpp	GCode	90	11		in		posSlice							
-GCode/ExclusionVolumeTravelAvoidance.cpp	GCode	672	11		in		none							
-GCode/ExclusionVolumeTravelAvoidance.hpp	GCode	78	9		in		psWipeTower							
-GCode/ExtrusionProcessor.hpp	GCode	718	12		in		psWipeTower							
-GCode/FanMover.cpp	GCode	550	11		in		none							
-GCode/FanMover.hpp	GCode	107	10		in		psWipeTower							
-GCode/GCodeProcessor.cpp	GCode	8391	17		in		psGCodeExport							
-GCode/GCodeProcessor.hpp	GCode	1766	12		in		posSlice							
-GCode/GCodeStatistics.cpp	GCode	200	13		in: the application calls export_gcode_statistics (src/OrcaSlicer.cpp:7231), which this file defines; nothing inside vendor/OrcaSlicer/src/libslic3r reaches it.		none							
-GCode/GCodeStatistics.hpp	GCode	16	0		in: the application calls export_gcode_statistics (src/OrcaSlicer.cpp:7231), which this file defines; nothing inside vendor/OrcaSlicer/src/libslic3r reaches it.		none							
-GCode/MachineFrameTransform.cpp	GCode	89	10		in		none							
-GCode/MachineFrameTransform.hpp	GCode	54	9		in		posSlice							
-GCode/MachineKinematics.cpp	GCode	25	5		in		none							
-GCode/MachineKinematics.hpp	GCode	92	4		in		posSlice							
-GCode/OrderingStrategies.cpp	GCode	550	18		in		none							
-GCode/OrderingStrategies.hpp	GCode	153	17		in		psSkirtBrim							
-GCode/PchipInterpolatorHelper.cpp	GCode	104	1		in		none							
-GCode/PchipInterpolatorHelper.hpp	GCode	76	0		in		psWipeTower							
-GCode/PreciseSeam.cpp	GCode	1061	17		in		none							
-GCode/PreciseSeam.hpp	GCode	200	15		in		none							
-GCode/PreciseSeamInternal.hpp	GCode	42	16		in		none							
-GCode/PressureEqualizer.cpp	GCode	969	19		in		none							
-GCode/PressureEqualizer.hpp	GCode	218	9		in		psWipeTower							
-GCode/PrintExtents.cpp	GCode	204	17		in		none							
-GCode/PrintExtents.hpp	GCode	30	3		in		psSkirtBrim							
-GCode/RetractWhenCrossingPerimeters.cpp	GCode	65	12		in		none							
-GCode/RetractWhenCrossingPerimeters.hpp	GCode	33	10		in		psWipeTower							
-GCode/SeamContour.cpp	GCode	261	11		in		none							
-GCode/SeamContour.hpp	GCode	61	10		in		none							
-GCode/SeamPlacer.cpp	GCode	2453	17		in		none							
-GCode/SeamPlacer.hpp	GCode	197	5		in		psWipeTower							
-GCode/SmallAreaInfillFlowCompensator.cpp	GCode	123	10		in		none							
-GCode/SmallAreaInfillFlowCompensator.hpp	GCode	37	9		in		psWipeTower							
-GCode/SpiralVase.cpp	GCode	227	11		in		none							
-GCode/SpiralVase.hpp	GCode	55	10		in		psWipeTower							
-GCode/ThumbnailData.cpp	GCode	90	5		in		none							
-GCode/ThumbnailData.hpp	GCode	84	4		in		posSlice							
-GCode/Thumbnails.cpp	GCode	623	10		in		none							
-GCode/Thumbnails.hpp	GCode	112	9		in		psSkirtBrim							
-GCode/TimelapsePosPicker.cpp	GCode	685	18		in		none							
-GCode/TimelapsePosPicker.hpp	GCode	92	17		in		psWipeTower							
-GCode/ToolOrderUtils.cpp	GCode	1493	11		in		none							
-GCode/ToolOrderUtils.hpp	GCode	216	10		in		psWipeTower							
-GCode/ToolOrdering.cpp	GCode	3723	17		in		psWipeTower							
-GCode/ToolOrdering.hpp	GCode	451	10		in		posSlice							
-GCode/WipePathHelpers.cpp	GCode	962	11		in		none							
-GCode/WipePathHelpers.hpp	GCode	101	9		in		psSkirtBrim							
-GCode/WipeTower.cpp	GCode	5567	13		in		none							
-GCode/WipeTower.hpp	GCode	779	10		in		posSlice							
-GCode/WipeTower2.cpp	GCode	2804	13		in		none							
-GCode/WipeTower2.hpp	GCode	462	11		in		posSlice							
-GCode/WipeTowerEstimate.cpp	GCode	287	12		in		none							
-GCode/WipeTowerEstimate.hpp	GCode	72	9		in		psWipeTower							
-GCodeReader.cpp	root	382	10		in		none							
-GCodeReader.hpp	root	217	9		in		posSlice							
-GCodeWriter.cpp	root	1749	13		in		none							
-GCodeWriter.hpp	root	434	9		in		posSlice							
-Geometry.cpp	root	910	11		in		none							
-Geometry.hpp	root	580	9		in		posSlice							
-Geometry/ArcWelder.cpp	Geometry	32	4		in		none							
-Geometry/ArcWelder.hpp	Geometry	73	3		in		psGCodeExport							
-Geometry/Bicubic.hpp	Geometry	293	0		in		none							
-Geometry/Circle.cpp	Geometry	148	5		in		none							
-Geometry/Circle.hpp	Geometry	190	4		in		posPrepareInfill							
-Geometry/ConvexHull.cpp	Geometry	433	10		in		none							
-Geometry/ConvexHull.hpp	Geometry	38	8		in		posPrepareInfill							
-Geometry/Curves.hpp	Geometry	224	4		in		none							
-Geometry/MedialAxis.cpp	Geometry	710	11		in		none							
-Geometry/MedialAxis.hpp	Geometry	53	9		in		none							
-Geometry/Voronoi.cpp	Geometry	370	10		in		none							
-Geometry/Voronoi.hpp	Geometry	210	4		in		none							
-Geometry/VoronoiOffset.cpp	Geometry	1646	10		in		none							
-Geometry/VoronoiOffset.hpp	Geometry	150	8		in		none							
-Geometry/VoronoiUtils.cpp	Geometry	354	10		in		none							
-Geometry/VoronoiUtils.hpp	Geometry	164	9		in		none							
-Geometry/VoronoiUtilsCgal.cpp	Geometry	343	10		in		none							
-Geometry/VoronoiUtilsCgal.hpp	Geometry	27	0		in		none							
-Geometry/VoronoiVisualUtils.hpp	Geometry	470	11		in		none							
-I18N.hpp	root	37	0		in		posSlice							
-IMEXArrange.cpp	root	220	19		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-IMEXArrange.hpp	root	101	18		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-IMEXHelpers.cpp	root	714	13		in		none							
-IMEXHelpers.hpp	root	609	9		in		psWipeTower							
-IMEXZones.cpp	root	379	10		in		none							
-IMEXZones.hpp	root	94	9		in		psWipeTower							
-InstanceLock.cpp	root	170	1		in		none							
-InstanceLock.hpp	root	60	0		in		none							
-Int128.hpp	root	301	0		in		none							
-IntersectionPoints.cpp	root	51	11		in		none							
-IntersectionPoints.hpp	root	27	9		in		none							
-KDTreeIndirect.hpp	root	409	4		in		psWipeTower							
-LayOnFace.cpp	root	244	15		out: No caller in the four entry points' closure.		none							
-LayOnFace.hpp	root	55	4		out: No caller in the four entry points' closure.		none							
-Layer.cpp	root	515	17		in		posSlice							
-Layer.hpp	root	371	11		in		posSlice							
-LayerRegion.cpp	root	1129	17		in		posPerimeters							
-LifecycleEvents.hpp	root	249	0		in		psWipeTower							
-Line.cpp	root	150	10		in		none							
-Line.hpp	root	341	4		in		posSlice							
-LocalesUtils.cpp	root	144	1		in		none							
-LocalesUtils.hpp	root	57	0		in		posSlice							
-MTUtils.hpp	root	143	3		in		posPrepareInfill							
-MacUtils.hpp	root	10	0		in		none							
-MacUtils.mm	root	23	0		out: MacUtils.mm is 23 lines holding is_macos_support_boost_add_file_log and is_mac_version_15, two OS-version predicates no in-scope caller reaches.		none							
-MarchingSquares.hpp	root	657	5		in		none							
-MaterialType.cpp	root	172	1		in		none							
-MaterialType.hpp	root	32	0		in		posSlice							
-Measure.cpp	root	1452	11		out: No caller in the four entry points' closure.		none							
-Measure.hpp	root	239	4		out: No caller in the four entry points' closure.		none							
-MeasureUtils.hpp	root	393	4		out: No caller in the four entry points' closure.		none							
-MeshBoolean.cpp	root	1028	11		out: No caller in the four entry points' closure.		none							
-MeshBoolean.hpp	root	128	10		out: No caller in the four entry points' closure.		none							
-MeshRepair.cpp	root	1215	10		in		none							
-MeshRepair.hpp	root	28	0		in		posPrepareInfill							
-MeshSplitImpl.hpp	root	290	10		in		posContouring							
-MinAreaBoundingBox.cpp	root	114	9		out: No caller in the four entry points' closure.		none							
-MinAreaBoundingBox.hpp	root	55	4		out: No caller in the four entry points' closure.		none							
-MinimumSpanningTree.cpp	root	146	5		in		none							
-MinimumSpanningTree.hpp	root	79	4		in		posSlice							
-Model.cpp	root	4443	19		in		posPrepareInfill							
-Model.hpp	root	1981	14		in		posSlice							
-ModelArrange.cpp	root	204	19		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-ModelArrange.hpp	root	103	18		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-MultiMaterialSegmentation.cpp	root	2504	17		in		none							
-MultiMaterialSegmentation.hpp	root	89	5		in		posSlice							
-MultiNozzleUtils.cpp	root	980	10		in		none							
-MultiNozzleUtils.hpp	root	298	9		in		posSlice							
-MultiPoint.cpp	root	662	9		in		none							
-MultiPoint.hpp	root	200	5		in		posSlice							
-MutablePolygon.cpp	root	391	10		in		none							
-MutablePolygon.hpp	root	379	9		in		posSlice							
-MutablePriorityQueue.hpp	root	457	0		in		none							
-NSVGUtils.cpp	root	555	12		out: No caller in the four entry points' closure.		none							
-NSVGUtils.hpp	root	85	11		out: No caller in the four entry points' closure.		none							
-NormalUtils.cpp	root	147	16		in		none							
-NormalUtils.hpp	root	70	15		in		none							
-ObjColorUtils.cpp	root	16	2		out: No caller in the four entry points' closure.		none							
-ObjColorUtils.hpp	root	274	1		out: No caller in the four entry points' closure.		none							
-ObjectID.cpp	root	25	1		in		none							
-ObjectID.hpp	root	218	0		in		posSlice							
-OpenVDBUtils.cpp	root	151	11		out: No caller in the four entry points' closure.		none							
-OpenVDBUtils.hpp	root	51	10		out: No caller in the four entry points' closure.		none							
-Optimize/BruteforceOptimizer.hpp	Optimize	145	1		out: No caller in the four entry points' closure.		none							
-Optimize/NLoptOptimizer.hpp	Optimize	239	1		out: No caller in the four entry points' closure.		none							
-Optimize/Optimizer.hpp	Optimize	184	0		out: No caller in the four entry points' closure.		none							
-Orient.cpp	root	740	15		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-Orient.hpp	root	129	10		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.		none							
-PNGReadWrite.cpp	root	416	1		in		none							
-PNGReadWrite.hpp	root	112	0		in		none							
-ParallelResolve.hpp	root	65	1		out: No caller in the four entry points' closure.		none							
-ParameterUtils.cpp	root	143	10		in		none							
-ParameterUtils.hpp	root	22	9		in		psWipeTower							
-PerimeterGenerator.cpp	root	3231	14		in		none							
-PerimeterGenerator.hpp	root	194	12		in		posSlice							
-PlaceholderParser.cpp	root	2713	10		in		none							
-PlaceholderParser.hpp	root	99	5		in		posSlice							
-Platform.cpp	root	177	1		in		none							
-Platform.hpp	root	46	0		in		none							
-Point.cpp	root	356	9		in		none							
-Point.hpp	root	850	3		in		posSlice							
-Polygon.cpp	root	807	11		in		none							
-Polygon.hpp	root	398	7		in		posSlice							
-PolygonTrimmer.cpp	root	62	10		out: Dead at the pin.		none							
-PolygonTrimmer.hpp	root	29	8		out: Dead at the pin.		none							
-Polyline.cpp	root	1052	9		in		none							
-Polyline.hpp	root	363	6		in		posSlice							
-Preset.cpp	root	5266	13		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.		none							
-Preset.hpp	root	1358	9		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.		none							
-PresetBundle.cpp	root	9351	15		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.		none							
-PresetBundle.hpp	root	974	12		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.		none							
-PresetCacheFormat.cpp	root	666	11		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.		none							
-PresetCacheFormat.hpp	root	213	10		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.		none							
-PrincipalComponents2D.cpp	root	145	9		in		none							
-PrincipalComponents2D.hpp	root	22	8		in		posPerimeters							
-Print.cpp	root	7310	20		in		psWipeTower							
-Print.hpp	root	1697	16		in		posSlice							
-PrintApply.cpp	root	2320	17		in		none							
-PrintBase.cpp	root	171	16		in		none							
-PrintBase.hpp	root	699	15		in		posSlice							
-PrintConfig.cpp	root	14438	11		in		none							
-PrintConfig.hpp	root	2809	8		in		posSlice							
-PrintConfigConstants.hpp	root	7	0		in		none							
-PrintObject.cpp	root	5574	23		in		posSlice							
-PrintObjectSlice.cpp	root	1816	17		in		posSlice							
-PrintRegion.cpp	root	120	17		in		none							
-PrinterBedAssets.hpp	root	20	1		out: No caller in the four entry points' closure.		none							
-ProjectTask.cpp	root	198	1		in		none							
-ProjectTask.hpp	root	350	0		in		posSlice							
-PublishSettings.cpp	root	628	13		out: No caller in the four entry points' closure.		none							
-PublishSettings.hpp	root	161	0		out: No caller in the four entry points' closure.		none							
-QuadricEdgeCollapse.cpp	root	983	11		out: No caller in the four entry points' closure.		none							
-QuadricEdgeCollapse.hpp	root	30	10		out: No caller in the four entry points' closure.		none							
-SLA/AGGRaster.hpp	SLA	233	10		out: declares the raster-image types SLA/RasterBase.cpp and SLA/RasterToPolygons.cpp use; no in-scope caller invokes SLA rasterization.		none							
-SLA/BoostAdapter.hpp	SLA	146	9		out: boost::geometry point-type adapter used by SLA/SpatIndex.cpp and SLA/Clustering.cpp; no in-scope caller invokes it.		none							
-SLA/Clustering.cpp	SLA	160	11		out: SLA support-point clustering; no in-scope caller invokes it.		none							
-SLA/Clustering.hpp	SLA	86	10		out: declares SLA support-point clustering; no in-scope caller invokes it.		none							
-SLA/ConcaveHull.cpp	SLA	155	11		out: SLA concave-hull implementation; no in-scope caller invokes it. The hollowing, pad and concave-hull implementations are out per R9.		none							
-SLA/ConcaveHull.hpp	SLA	57	9		out: declares SLA pad-outline (concave hull) computation; SLA/ConcaveHull.cpp is out for the same reason per R9.		none							
-SLA/Concurrency.hpp	SLA	72	5		in: SLA/IndexedMesh.cpp includes it directly.		none							
-SLA/Hollowing.cpp	SLA	582	15		out: SLA hollowing implementation; SLA/Hollowing.hpp stays in (Model.hpp, AABBMesh.cpp carry it as data), but no in-scope caller invokes this file's functions. The hollowing, pad and concave-hull implementations are out per R9.		none							
-SLA/Hollowing.hpp	SLA	114	10		in: carried by SLA/IndexedMesh.hpp (which includes it). Model.hpp and AABBMesh.cpp also include it, carrying the hollowing config type it declares as data only; the hollowing implementation itself (SLA/Hollowing.cpp) is out per R9.		posSlice							
-SLA/IndexedMesh.cpp	SLA	470	12		in: Z-contouring calls it (ContourZ.cpp, which includes SLA/IndexedMesh.hpp), with AABBMesh.cpp, PrintObject.cpp and Layer.hpp in the same closure.		none							
-SLA/IndexedMesh.hpp	SLA	159	11		in: Z-contouring calls it (ContourZ.cpp, which includes SLA/IndexedMesh.hpp), with AABBMesh.cpp, PrintObject.cpp and Layer.hpp in the same closure.		posSlice							
-SLA/JobController.hpp	SLA	32	0		in: carried transitively — SLA/Hollowing.hpp includes it, and SLA/Hollowing.hpp is carried by SLA/IndexedMesh.hpp.		posSlice							
-SLA/Pad.cpp	SLA	532	11		out: SLA pad implementation; no in-scope caller invokes it. The hollowing, pad and concave-hull implementations are out per R9.		none							
-SLA/Pad.hpp	SLA	97	4		out: declares SLA base-pad generation; SLA/Pad.cpp is out for the same reason per R9.		none							
-SLA/RasterBase.cpp	SLA	98	11		out: SLA rasterization (converting a sliced layer into an exposure image); no in-scope caller invokes it.		none							
-SLA/RasterBase.hpp	SLA	123	9		out: declares SLA rasterization's base types; no in-scope caller invokes it.		none							
-SLA/RasterToPolygons.cpp	SLA	98	11		out: converts an SLA raster back to polygons (used only by the SLA rasterization pipeline and its own test); no in-scope caller invokes it.		none							
-SLA/RasterToPolygons.hpp	SLA	16	9		out: declares the SLA raster-to-polygons conversion; no in-scope caller invokes it.		none							
-SLA/ReprojectPointsOnMesh.hpp	SLA	48	15		out: reprojects SLA support points onto a transformed mesh; no includer anywhere in the vendored libslic3r tree names it.		none							
-SLA/Rotfinder.cpp	SLA	490	15		out: SLA automatic rotation/orientation optimizer; no in-scope caller invokes it.		none							
-SLA/Rotfinder.hpp	SLA	73	4		out: declares the SLA rotation/orientation optimizer; no in-scope caller invokes it.		none							
-SLA/SpatIndex.cpp	SLA	169	10		out: spatial index (R-tree) used by SLA support generation and clustering; no in-scope caller invokes it.		none							
-SLA/SpatIndex.hpp	SLA	100	9		out: declares the SLA spatial index; no in-scope caller invokes it.		none							
-SLA/SupportPoint.hpp	SLA	71	4		in: Model.hpp includes it directly, carrying the SLA support-point type as a data member.		posSlice							
-SLA/SupportPointGenerator.cpp	SLA	682	12		out: automatic SLA support-point generation; no in-scope caller invokes it.		none							
-SLA/SupportPointGenerator.hpp	SLA	245	11		out: declares automatic SLA support-point generation; no in-scope caller invokes it.		none							
-SLA/SupportTree.cpp	SLA	105	15		out: SLA support-tree (pillar/branch) generation; no in-scope caller invokes it.		none							
-SLA/SupportTree.hpp	SLA	175	12		out: declares SLA support-tree generation; no in-scope caller invokes it.		none							
-SLA/SupportTreeBuilder.cpp	SLA	243	15		out: builds SLA support-tree pillars and branches; no in-scope caller invokes it.		none							
-SLA/SupportTreeBuilder.hpp	SLA	456	13		out: declares the SLA support-tree builder; no in-scope caller invokes it.		none							
-SLA/SupportTreeBuildsteps.cpp	SLA	1300	15		out: SLA support-tree generation's per-step algorithm; no in-scope caller invokes it.		none							
-SLA/SupportTreeBuildsteps.hpp	SLA	397	14		out: declares the SLA support-tree build steps; no in-scope caller invokes it.		none							
-SLA/SupportTreeMesher.cpp	SLA	279	15		out: meshes the generated SLA support tree; no in-scope caller invokes it.		none							
-SLA/SupportTreeMesher.hpp	SLA	133	14		out: declares SLA support-tree meshing; no in-scope caller invokes it.		none							
-SLAPrint.cpp	root	1289	18		out: No caller in the four entry points' closure.		none							
-SLAPrint.hpp	root	616	16		out: No caller in the four entry points' closure.		none							
-SLAPrintSteps.cpp	root	1172	18		out: No caller in the four entry points' closure.		none							
-SLAPrintSteps.hpp	root	75	17		out: No caller in the four entry points' closure.		none							
-SVG.cpp	root	453	11		in		none							
-SVG.hpp	root	190	10		in		posSlice							
-Semver.cpp	root	8	2		in		none							
-Semver.hpp	root	222	1		in		posSlice							
-ShortEdgeCollapse.cpp	root	191	16		in		none							
-ShortEdgeCollapse.hpp	root	17	10		in		none							
-ShortestPath.cpp	root	2618	18		in		none							
-ShortestPath.hpp	root	70	9		in		posSlice							
-SlicesToTriangleMesh.cpp	root	146	11		out: No caller in the four entry points' closure.		none							
-SlicesToTriangleMesh.hpp	root	27	10		out: No caller in the four entry points' closure.		none							
-Slicing.cpp	root	1028	15		in		none							
-Slicing.hpp	root	235	4		in		posSlice							
-SlicingAdaptive.cpp	root	222	15		in		none							
-SlicingAdaptive.hpp	root	47	5		in		none							
-StreamUtils.hpp	root	61	9		out: No caller in the four entry points' closure.		none							
-Support/BeltFloorContext.cpp	Support	132	10		in		none							
-Support/BeltFloorContext.hpp	Support	83	9		in		none							
-Support/SupportCommon.cpp	Support	2201	19		in		none							
-Support/SupportCommon.hpp	Support	195	18		in		posSlice							
-Support/SupportLayer.hpp	Support	150	11		in		posSlice							
-Support/SupportMaterial.cpp	Support	3530	19		in		none							
-Support/SupportMaterial.hpp	Support	102	18		in		posSlice							
-Support/SupportParameters.hpp	Support	341	17		in		posSlice							
-Support/SupportSpotsGenerator.cpp	Support	1295	13		in		none							
-Support/SupportSpotsGenerator.hpp	Support	160	9		in		posSlice							
-Support/TreeModelVolumes.cpp	Support	945	21		in		none							
-Support/TreeModelVolumes.hpp	Support	567	20		in		posSlice							
-Support/TreeSupport.cpp	Support	4059	23		in		none							
-Support/TreeSupport.hpp	Support	555	22		in		posSlice							
-Support/TreeSupport3D.cpp	Support	4332	23		in		none							
-Support/TreeSupport3D.hpp	Support	344	21		in		posSlice							
-Support/TreeSupportCommon.hpp	Support	810	19		in		posSlice							
-Surface.cpp	root	100	11		in		none							
-Surface.hpp	root	319	9		in		posSlice							
-SurfaceCollection.cpp	root	174	11		in		none							
-SurfaceCollection.hpp	root	92	10		in		posSlice							
-SurfaceMesh.hpp	root	168	10		out: No caller in the four entry points' closure.		none							
-Technologies.hpp	root	54	0		in		none							
-Tesselate.cpp	root	260	9		in		none							
-Tesselate.hpp	root	26	4		in		posSlice							
-TextConfiguration.hpp	root	189	4		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeDebug.cpp	TextureBake	227	5		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeDebug.hpp	TextureBake	126	4		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeDecimate.cpp	TextureBake	572	6		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeDecimate.hpp	TextureBake	76	5		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeDisplace.cpp	TextureBake	292	6		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeDisplace.hpp	TextureBake	69	5		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeFlip.cpp	TextureBake	219	7		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeFlip.hpp	TextureBake	58	6		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeIndex.cpp	TextureBake	28	5		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeIndex.hpp	TextureBake	160	4		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeMesh.cpp	TextureBake	78	11		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeMesh.hpp	TextureBake	24	10		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakePipeline.cpp	TextureBake	403	8		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakePipeline.hpp	TextureBake	175	7		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeRegularize.cpp	TextureBake	400	6		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeRegularize.hpp	TextureBake	74	5		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeRelocate.cpp	TextureBake	211	7		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeRelocate.hpp	TextureBake	73	6		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeRepair.cpp	TextureBake	241	6		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeRepair.hpp	TextureBake	54	5		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeSubdivide.cpp	TextureBake	492	6		out: No caller in the four entry points' closure.		none							
-TextureBake/TextureBakeSubdivide.hpp	TextureBake	99	5		out: No caller in the four entry points' closure.		none							
-TextureDisplacement.cpp	root	5980	15		out: No caller in the four entry points' closure.		none							
-TextureDisplacement.hpp	root	1354	11		out: No caller in the four entry points' closure.		none							
-TexturePainting.cpp	root	758	15		out: No caller in the four entry points' closure.		none							
-TexturePainting.hpp	root	137	0		out: No caller in the four entry points' closure.		none							
-TextureToColor/Callbacks.hpp	TextureToColor	15	0		out: No caller in the four entry points' closure.		none							
-TextureToColor/CgalUtils.hpp	TextureToColor	175	5		out: No caller in the four entry points' closure.		none							
-TextureToColor/ColorUtils.cpp	TextureToColor	1665	10		out: No caller in the four entry points' closure.		none							
-TextureToColor/ColorUtils.hpp	TextureToColor	208	5		out: No caller in the four entry points' closure.		none							
-TextureToColor/Repair.hpp	TextureToColor	258	6		out: No caller in the four entry points' closure.		none							
-TextureToColor/TextureToColor.cpp	TextureToColor	1056	10		out: No caller in the four entry points' closure.		none							
-TextureToColor/TextureToColor.hpp	TextureToColor	110	5		out: No caller in the four entry points' closure.		none							
-TextureToColor/TriMesh.hpp	TextureToColor	31	4		out: No caller in the four entry points' closure.		none							
-Thread.cpp	root	289	1		in		none							
-Thread.hpp	root	78	0		in		psWipeTower							
-Time.cpp	root	313	1		in		none							
-Time.hpp	root	80	0		in		psWipeTower							
-Timer.cpp	root	23	1		in		none							
-Timer.hpp	root	94	0		in		posSlice							
-TriangleMesh.cpp	root	1829	11		in		posContouring							
-TriangleMesh.hpp	root	423	9		in		posSlice							
-TriangleMeshDeal.cpp	root	43	11		out: No caller in the four entry points' closure.		none							
-TriangleMeshDeal.hpp	root	11	10		out: No caller in the four entry points' closure.		none							
-TriangleMeshSlicer.cpp	root	2698	11		in		none							
-TriangleMeshSlicer.hpp	root	142	9		in		posSlice							
-TriangleSelector.cpp	root	2617	11		in		none							
-TriangleSelector.hpp	root	603	10		in		posSlice							
-TriangleSetSampling.cpp	root	76	5		in		none							
-TriangleSetSampling.hpp	root	22	4		in		none							
-TriangulateWall.cpp	root	158	9		out: No caller in the four entry points' closure.		none							
-TriangulateWall.hpp	root	156	8		out: No caller in the four entry points' closure.		none							
-Triangulation.cpp	root	346	10		in		none							
-Triangulation.hpp	root	73	9		in		none							
-TryCatchSignal.cpp	root	5	2		out: No caller in the four entry points' closure.		none							
-TryCatchSignal.hpp	root	20	1		out: No caller in the four entry points' closure.		none							
-TryCatchSignalSEH.cpp	root	43	1		out: No caller in the four entry points' closure.		none							
-TryCatchSignalSEH.hpp	root	27	0		out: No caller in the four entry points' closure.		none							
-Utils.hpp	root	866	3		in		posSlice							
-VariableWidth.cpp	root	248	10		in		none							
-VariableWidth.hpp	root	15	9		in		none							
-Zipper.cpp	root	155	1		out: No caller in the four entry points' closure.		none							
-Zipper.hpp	root	95	0		out: No caller in the four entry points' closure.		none							
-calib.cpp	root	1008	19		in		none							
-calib.hpp	root	398	10		in		posSlice							
-clonable_ptr.hpp	root	170	0		in		posSlice							
-enum_bitmask.hpp	root	91	0		in		posSlice							
-format.hpp	root	58	0		in		posSlice							
-libslic3r.cpp	root	3	3		in		none							
-libslic3r.h	root	437	2		in		posSlice							
-miniz_extension.cpp	root	314	4		out: No caller in the four entry points' closure.		none							
-miniz_extension.hpp	root	43	0		out: No caller in the four entry points' closure.		none							
-pchheader.cpp	root	1	12		out: No caller in the four entry points' closure.		none							
-pchheader.hpp	root	129	11		out: No caller in the four entry points' closure.		none							
-utils.cpp	root	2398	11		in		none							
+path	subsystem	lines	file-level include-DAG level	crate-level level	in scope or out with a reason	target crate	target module	pipeline stage or none	template-heavy	equality tier	tolerance	comparison function	proof path	fuzz target	status
+AABBMesh.cpp	root	330	12	14	in	slic3r-aabbmesh	crates/slic3r-aabbmesh/src/aabb_mesh.rs	none							
+AABBMesh.hpp	root	146	11	14	in	slic3r-aabbmesh	crates/slic3r-aabbmesh/src/aabb_mesh.rs	none							
+AABBTreeIndirect.hpp	root	997	9	5	in	slic3r-aabbtreeindirect	crates/slic3r-aabbtreeindirect/src/aabb_tree_indirect.rs	posSlice							
+AABBTreeLines.hpp	root	379	10	6	in	slic3r-aabbtreelines	crates/slic3r-aabbtreelines/src/aabb_tree_lines.rs	posSlice							
+AStar.hpp	root	161	1		out: No caller in the four entry points' closure.			none							
+Algorithm/LineSplit.cpp	Algorithm	322	13	14	in	slic3r-algorithm	crates/slic3r-algorithm/src/line_split.rs	none							
+Algorithm/LineSplit.hpp	Algorithm	76	12	14	in	slic3r-algorithm	crates/slic3r-algorithm/src/line_split.rs	none							
+Algorithm/RegionExpansion.cpp	Algorithm	575	12	14	in	slic3r-algorithm	crates/slic3r-algorithm/src/region_expansion.rs	none							
+Algorithm/RegionExpansion.hpp	Algorithm	119	9	14	in	slic3r-algorithm	crates/slic3r-algorithm/src/region_expansion.rs	posPerimeters							
+AnyPtr.hpp	root	131	0		out: No caller in the four entry points' closure.			none							
+AppConfig.cpp	root	1983	12	16	in	slic3r-appconfig	crates/slic3r-appconfig/src/app_config.rs	none							
+AppConfig.hpp	root	506	11	16	in	slic3r-appconfig	crates/slic3r-appconfig/src/app_config.rs	posSlice							
+Arachne/BeadingStrategy/BeadingStrategy.cpp	Arachne	79	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/beading_strategy.rs	none							
+Arachne/BeadingStrategy/BeadingStrategy.hpp	Arachne	121	3	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/beading_strategy.rs	none							
+Arachne/BeadingStrategy/BeadingStrategyFactory.cpp	Arachne	59	5	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/beading_strategy_factory.rs	none							
+Arachne/BeadingStrategy/BeadingStrategyFactory.hpp	Arachne	39	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/beading_strategy_factory.rs	none							
+Arachne/BeadingStrategy/DistributedBeadingStrategy.cpp	Arachne	101	5	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/distributed_beading_strategy.rs	none							
+Arachne/BeadingStrategy/DistributedBeadingStrategy.hpp	Arachne	41	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/distributed_beading_strategy.rs	none							
+Arachne/BeadingStrategy/LimitedBeadingStrategy.cpp	Arachne	131	5	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/limited_beading_strategy.rs	none							
+Arachne/BeadingStrategy/LimitedBeadingStrategy.hpp	Arachne	52	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/limited_beading_strategy.rs	none							
+Arachne/BeadingStrategy/OuterWallInsetBeadingStrategy.cpp	Arachne	63	5	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/outer_wall_inset_beading_strategy.rs	none							
+Arachne/BeadingStrategy/OuterWallInsetBeadingStrategy.hpp	Arachne	38	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/outer_wall_inset_beading_strategy.rs	none							
+Arachne/BeadingStrategy/RedistributeBeadingStrategy.cpp	Arachne	101	5	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/redistribute_beading_strategy.rs	none							
+Arachne/BeadingStrategy/RedistributeBeadingStrategy.hpp	Arachne	59	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/redistribute_beading_strategy.rs	none							
+Arachne/BeadingStrategy/WideningBeadingStrategy.cpp	Arachne	101	5	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/widening_beading_strategy.rs	none							
+Arachne/BeadingStrategy/WideningBeadingStrategy.hpp	Arachne	50	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/widening_beading_strategy.rs	none							
+Arachne/SkeletalTrapezoidation.cpp	Arachne	2119	14	17	in	slic3r-arachne	crates/slic3r-arachne/src/skeletal_trapezoidation.rs	none							
+Arachne/SkeletalTrapezoidation.hpp	Arachne	557	13	17	in	slic3r-arachne	crates/slic3r-arachne/src/skeletal_trapezoidation.rs	none							
+Arachne/SkeletalTrapezoidationEdge.hpp	Arachne	124	5	17	in	slic3r-arachne	crates/slic3r-arachne/src/skeletal_trapezoidation_edge.rs	none							
+Arachne/SkeletalTrapezoidationGraph.cpp	Arachne	478	7	17	in	slic3r-arachne	crates/slic3r-arachne/src/skeletal_trapezoidation_graph.rs	none							
+Arachne/SkeletalTrapezoidationGraph.hpp	Arachne	115	6	17	in	slic3r-arachne	crates/slic3r-arachne/src/skeletal_trapezoidation_graph.rs	none							
+Arachne/SkeletalTrapezoidationJoint.hpp	Arachne	61	4	17	in	slic3r-arachne	crates/slic3r-arachne/src/skeletal_trapezoidation_joint.rs	none							
+Arachne/WallToolPaths.cpp	Arachne	902	14	17	in	slic3r-arachne	crates/slic3r-arachne/src/wall_tool_paths.rs	none							
+Arachne/WallToolPaths.hpp	Arachne	153	13	17	in	slic3r-arachne	crates/slic3r-arachne/src/wall_tool_paths.rs	none							
+Arachne/utils/ExtrusionJunction.hpp	Arachne	69	4	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/extrusion_junction.rs	none							
+Arachne/utils/ExtrusionLine.cpp	Arachne	308	13	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/extrusion_line.rs	none							
+Arachne/utils/ExtrusionLine.hpp	Arachne	301	12	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/extrusion_line.rs	none							
+Arachne/utils/HalfEdge.hpp	Arachne	39	0	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/half_edge.rs	none							
+Arachne/utils/HalfEdgeGraph.hpp	Arachne	31	5	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/half_edge_graph.rs	none							
+Arachne/utils/HalfEdgeNode.hpp	Arachne	38	4	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/half_edge_node.rs	none							
+Arachne/utils/PolygonsPointIndex.hpp	Arachne	181	8	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/polygons_point_index.rs	none							
+Arachne/utils/PolygonsSegmentIndex.hpp	Arachne	53	9	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/polygons_segment_index.rs	none							
+Arachne/utils/PolylineStitcher.cpp	Arachne	52	13	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/polyline_stitcher.rs	none							
+Arachne/utils/PolylineStitcher.hpp	Arachne	241	9	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/polyline_stitcher.rs	none							
+Arachne/utils/SparseGrid.hpp	Arachne	135	5	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/sparse_grid.rs	none							
+Arachne/utils/SparseLineGrid.hpp	Arachne	81	6	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/sparse_line_grid.rs	none							
+Arachne/utils/SparsePointGrid.hpp	Arachne	67	6	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/sparse_point_grid.rs	none							
+Arachne/utils/SquareGrid.cpp	Arachne	154	5	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/square_grid.rs	none							
+Arachne/utils/SquareGrid.hpp	Arachne	113	4	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/square_grid.rs	none							
+Arachne/utils/linearAlg2D.hpp	Arachne	68	4	14	in	slic3r-arachne-utils	crates/slic3r-arachne-utils/src/linear_alg2_d.rs	none							
+ArcFitter.cpp	root	158	7	7	in	slic3r-arcfitter	crates/slic3r-arcfitter/src/arc_fitter.rs	none							
+ArcFitter.hpp	root	56	5	7	in	slic3r-arcfitter	crates/slic3r-arcfitter/src/arc_fitter.rs	posSlice							
+Arrange.cpp	root	1430	18		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+Arrange.hpp	root	253	17		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+BeltBrim.cpp	root	602	17	17	in	slic3r-beltbrim	crates/slic3r-beltbrim/src/belt_brim.rs	none							
+BeltBrim.hpp	root	178	10	17	in	slic3r-beltbrim	crates/slic3r-beltbrim/src/belt_brim.rs	posSlice							
+BeltGCode.cpp	root	50	20	15	in	slic3r-beltgcode	crates/slic3r-beltgcode/src/belt_g_code.rs	none							
+BeltGCode.hpp	root	25	19	15	in	slic3r-beltgcode	crates/slic3r-beltgcode/src/belt_g_code.rs	psWipeTower							
+BeltPurge.cpp	root	433	17	24	in	slic3r-beltpurge	crates/slic3r-beltpurge/src/belt_purge.rs	psWipeTower							
+BeltSliceStrategy.cpp	root	82	16	18	in	slic3r-beltslicestrategy	crates/slic3r-beltslicestrategy/src/belt_slice_strategy.rs	none							
+BeltSliceStrategy.hpp	root	34	15	18	in	slic3r-beltslicestrategy	crates/slic3r-beltslicestrategy/src/belt_slice_strategy.rs	posSlice							
+BeltTransform.cpp	root	192	15	10	in	slic3r-belttransform	crates/slic3r-belttransform/src/belt_transform.rs	posSlice							
+BeltTransform.hpp	root	142	10	10	in	slic3r-belttransform	crates/slic3r-belttransform/src/belt_transform.rs	posSlice							
+BlacklistedLibraryCheck.cpp	root	88	1		out: No caller in the four entry points' closure.			none							
+BlacklistedLibraryCheck.hpp	root	46	0		out: No caller in the four entry points' closure.			none							
+BoundingBox.cpp	root	292	9	4	in	slic3r-boundingbox	crates/slic3r-boundingbox/src/bounding_box.rs	none							
+BoundingBox.hpp	root	322	8	4	in	slic3r-boundingbox	crates/slic3r-boundingbox/src/bounding_box.rs	posSlice							
+BridgeDetector.cpp	root	485	12	13	in	slic3r-bridgedetector	crates/slic3r-bridgedetector/src/bridge_detector.rs	none							
+BridgeDetector.hpp	root	138	11	13	in	slic3r-bridgedetector	crates/slic3r-bridgedetector/src/bridge_detector.rs	posPerimeters							
+Brim.cpp	root	1016	19	19	in	slic3r-brim	crates/slic3r-brim/src/brim.rs	none							
+Brim.hpp	root	36	9	19	in	slic3r-brim	crates/slic3r-brim/src/brim.rs	psWipeTower							
+BrimEarsPoint.hpp	root	70	4	4	in	slic3r-brimearspoint	crates/slic3r-brimearspoint/src/brim_ears_point.rs	posSlice							
+BuildVolume.cpp	root	620	13	13	in	slic3r-buildvolume	crates/slic3r-buildvolume/src/build_volume.rs	none							
+BuildVolume.hpp	root	170	9	13	in	slic3r-buildvolume	crates/slic3r-buildvolume/src/build_volume.rs	posPrepareInfill							
+CAD/CadDocument.cpp	CAD	4764	12		out: No caller in the four entry points' closure.			none							
+CAD/CadDocument.hpp	CAD	920	11		out: No caller in the four entry points' closure.			none							
+CAD/GeometryEngine.cpp	CAD	734	11		out: No caller in the four entry points' closure.			none							
+CAD/GeometryEngine.hpp	CAD	155	10		out: No caller in the four entry points' closure.			none							
+CAD/SketchConstraints.cpp	CAD	312	5		out: No caller in the four entry points' closure.			none							
+CAD/SketchConstraints.hpp	CAD	69	4		out: No caller in the four entry points' closure.			none							
+CAD/SketchEngine.cpp	CAD	2577	11		out: No caller in the four entry points' closure.			none							
+CAD/SketchEngine.hpp	CAD	359	10		out: No caller in the four entry points' closure.			none							
+CAD/SketchImport.cpp	CAD	159	12		out: No caller in the four entry points' closure.			none							
+CAD/SketchImport.hpp	CAD	45	4		out: No caller in the four entry points' closure.			none							
+CAD/SketchInference.cpp	CAD	255	12		out: No caller in the four entry points' closure.			none							
+CAD/SketchInference.hpp	CAD	61	11		out: No caller in the four entry points' closure.			none							
+CAD/SketchSolver.cpp	CAD	685	11		out: No caller in the four entry points' closure.			none							
+CAD/SketchSolver.hpp	CAD	44	0		out: No caller in the four entry points' closure.			none							
+CAD/ThreadStandards.cpp	CAD	97	1		out: No caller in the four entry points' closure.			none							
+CAD/ThreadStandards.hpp	CAD	41	0		out: No caller in the four entry points' closure.			none							
+CSGMesh/CSGMesh.hpp	CSGMesh	125	10		out: No caller in the four entry points' closure.			none							
+CSGMesh/CSGMeshCopy.hpp	CSGMesh	84	11		out: No caller in the four entry points' closure.			none							
+CSGMesh/ModelToCSGMesh.hpp	CSGMesh	96	15		out: No caller in the four entry points' closure.			none							
+CSGMesh/PerformCSGMeshBooleans.hpp	CSGMesh	388	11		out: No caller in the four entry points' closure.			none							
+CSGMesh/SliceCSGMesh.hpp	CSGMesh	139	11		out: No caller in the four entry points' closure.			none							
+CSGMesh/TriangleMeshAdapter.hpp	CSGMesh	96	11		out: No caller in the four entry points' closure.			none							
+Channel.hpp	root	104	0		out: No caller in the four entry points' closure.			none							
+Circle.cpp	root	632	5	6	in	slic3r-circle	crates/slic3r-circle/src/circle.rs	none							
+Circle.hpp	root	147	4	6	in	slic3r-circle	crates/slic3r-circle/src/circle.rs	posSlice							
+ClipperUtils.cpp	root	1578	11	12	in	slic3r-clipperutils	crates/slic3r-clipperutils/src/clipper_utils.rs	none							
+ClipperUtils.hpp	root	618	10	12	in	slic3r-clipperutils	crates/slic3r-clipperutils/src/clipper_utils.rs	posSlice							
+ClipperZUtils.cpp	root	80	12	13	in	slic3r-clipperzutils	crates/slic3r-clipperzutils/src/clipper_z_utils.rs	none							
+ClipperZUtils.hpp	root	160	11	13	in	slic3r-clipperzutils	crates/slic3r-clipperzutils/src/clipper_z_utils.rs	none							
+Color.cpp	root	436	3	3	in	slic3r-color	crates/slic3r-color/src/color.rs	none							
+Color.hpp	root	188	0	3	in	slic3r-color	crates/slic3r-color/src/color.rs	posSlice							
+ColorDecomposeRecipe.cpp	root	532	4	6	in	slic3r-colordecomposerecipe	crates/slic3r-colordecomposerecipe/src/color_decompose_recipe.rs	none							
+ColorDecomposeRecipe.hpp	root	64	0	6	in	slic3r-colordecomposerecipe	crates/slic3r-colordecomposerecipe/src/color_decompose_recipe.rs	none							
+CommonDefs.hpp	root	21	0	0	in	slic3r-commondefs	crates/slic3r-commondefs/src/common_defs.rs	posSlice							
+Config.cpp	root	2204	10	4	in	slic3r-config	crates/slic3r-config/src/config.rs	none							
+Config.hpp	root	3154	4	4	in	slic3r-config	crates/slic3r-config/src/config.rs	posSlice							
+ConnectedBodies.cpp	root	295	11	17	in	slic3r-connectedbodies	crates/slic3r-connectedbodies/src/connected_bodies.rs	none							
+ConnectedBodies.hpp	root	63	10	17	in	slic3r-connectedbodies	crates/slic3r-connectedbodies/src/connected_bodies.rs	posSlice							
+ContourZ.cpp	root	252	17	21	in	slic3r-contourz	crates/slic3r-contourz/src/contour_z.rs	posContouring							
+CustomGCode.cpp	root	117	1	0	in	slic3r-customgcode	crates/slic3r-customgcode/src/custom_g_code.rs	none							
+CustomGCode.hpp	root	103	0	0	in	slic3r-customgcode	crates/slic3r-customgcode/src/custom_g_code.rs	posSlice							
+CutSurface.cpp	root	4129	12		out: No caller in the four entry points' closure.			none							
+CutSurface.hpp	root	78	9		out: No caller in the four entry points' closure.			none							
+CutUtils.cpp	root	794	16		out: No caller in the four entry points' closure.			none							
+CutUtils.hpp	root	76	15		out: No caller in the four entry points' closure.			none							
+EdgeGrid.cpp	root	1645	11	14	in	slic3r-edgegrid	crates/slic3r-edgegrid/src/edge_grid.rs	none							
+EdgeGrid.hpp	root	438	9	14	in	slic3r-edgegrid	crates/slic3r-edgegrid/src/edge_grid.rs	posSlice							
+ElephantFootCompensation.cpp	root	653	11	15	in	slic3r-elephantfootcompensation	crates/slic3r-elephantfootcompensation/src/elephant_foot_compensation.rs	none							
+ElephantFootCompensation.hpp	root	18	9	15	in	slic3r-elephantfootcompensation	crates/slic3r-elephantfootcompensation/src/elephant_foot_compensation.rs	posSlice							
+Emboss.cpp	root	2276	12		out: No caller in the four entry points' closure.			none							
+Emboss.hpp	root	481	11		out: No caller in the four entry points' closure.			none							
+EmbossShape.hpp	root	145	10		out: No caller in the four entry points' closure.			none							
+ExPolygon.cpp	root	559	11	9	in	slic3r-expolygon	crates/slic3r-expolygon/src/ex_polygon.rs	none							
+ExPolygon.hpp	root	623	8	9	in	slic3r-expolygon	crates/slic3r-expolygon/src/ex_polygon.rs	posSlice							
+ExPolygonCollection.cpp	root	136	10	10	in	slic3r-expolygoncollection	crates/slic3r-expolygoncollection/src/ex_polygon_collection.rs	none							
+ExPolygonCollection.hpp	root	44	9	10	in	slic3r-expolygoncollection	crates/slic3r-expolygoncollection/src/ex_polygon_collection.rs	none							
+ExPolygonSerialize.hpp	root	29	9		out: No caller in the four entry points' closure.			none							
+ExPolygonsIndex.cpp	root	89	10		out: No caller in the four entry points' closure.			none							
+ExPolygonsIndex.hpp	root	76	9		out: No caller in the four entry points' closure.			none							
+Exception.hpp	root	55	0	0	in	slic3r-exception	crates/slic3r-exception/src/exception.rs	posSlice							
+ExclusionVolumeGeometry.cpp	root	186	17	17	in	slic3r-exclusionvolumegeometry	crates/slic3r-exclusionvolumegeometry/src/exclusion_volume_geometry.rs	none							
+ExclusionVolumeGeometry.hpp	root	63	9	17	in	slic3r-exclusionvolumegeometry	crates/slic3r-exclusionvolumegeometry/src/exclusion_volume_geometry.rs	psWipeTower							
+Execution/Execution.hpp	Execution	129	3	3	in	slic3r-execution	crates/slic3r-execution/src/execution.rs	posContouring							
+Execution/ExecutionSeq.hpp	Execution	87	4	3	in	slic3r-execution	crates/slic3r-execution/src/execution_seq.rs	posContouring							
+Execution/ExecutionTBB.hpp	Execution	81	4	3	in	slic3r-execution	crates/slic3r-execution/src/execution_tbb.rs	posContouring							
+Extruder.cpp	root	263	10	9	in	slic3r-extruder	crates/slic3r-extruder/src/extruder.rs	psGCodeExport							
+Extruder.hpp	root	131	3	9	in	slic3r-extruder	crates/slic3r-extruder/src/extruder.rs	posSlice							
+ExtrusionEntity.cpp	root	789	11	10	in	slic3r-extrusionentity	crates/slic3r-extrusionentity/src/extrusion_entity.rs	none							
+ExtrusionEntity.hpp	root	702	8	10	in	slic3r-extrusionentity	crates/slic3r-extrusionentity/src/extrusion_entity.rs	posSlice							
+ExtrusionEntityCollection.cpp	root	161	10	9	in	slic3r-extrusionentitycollection	crates/slic3r-extrusionentitycollection/src/extrusion_entity_collection.rs	psSkirtBrim							
+ExtrusionEntityCollection.hpp	root	197	9	9	in	slic3r-extrusionentitycollection	crates/slic3r-extrusionentitycollection/src/extrusion_entity_collection.rs	posSlice							
+ExtrusionSimulator.cpp	root	1041	10		out: Dead at the pin.			none							
+ExtrusionSimulator.hpp	root	59	9		out: Dead at the pin.			none							
+FaceDetector.cpp	root	94	12		out: No caller in the four entry points' closure.			none							
+FaceDetector.hpp	root	26	4		out: No caller in the four entry points' closure.			none							
+Feature/FuzzySkin/FuzzySkin.cpp	Feature	866	17	17	in	slic3r-feature-fuzzyskin	crates/slic3r-feature-fuzzyskin/src/fuzzy_skin.rs	none							
+Feature/FuzzySkin/FuzzySkin.hpp	Feature	29	8	17	in	slic3r-feature-fuzzyskin	crates/slic3r-feature-fuzzyskin/src/fuzzy_skin.rs	none							
+Feature/Interlocking/InterlockingGenerator.cpp	Feature	357	17	23	in	slic3r-feature-interlocking	crates/slic3r-feature-interlocking/src/interlocking_generator.rs	none							
+Feature/Interlocking/InterlockingGenerator.hpp	Feature	185	10	23	in	slic3r-feature-interlocking	crates/slic3r-feature-interlocking/src/interlocking_generator.rs	posSlice							
+Feature/Interlocking/VoxelUtils.cpp	Feature	231	11	23	in	slic3r-feature-interlocking	crates/slic3r-feature-interlocking/src/voxel_utils.rs	none							
+Feature/Interlocking/VoxelUtils.hpp	Feature	217	9	23	in	slic3r-feature-interlocking	crates/slic3r-feature-interlocking/src/voxel_utils.rs	posSlice							
+FilamentGroup.cpp	root	1571	12	11	in	slic3r-filamentgroup	crates/slic3r-filamentgroup/src/filament_group.rs	none							
+FilamentGroup.hpp	root	278	11	11	in	slic3r-filamentgroup	crates/slic3r-filamentgroup/src/filament_group.rs	psWipeTower							
+FilamentGroupUtils.cpp	root	360	11	10	in	slic3r-filamentgrouputils	crates/slic3r-filamentgrouputils/src/filament_group_utils.rs	none							
+FilamentGroupUtils.hpp	root	115	10	10	in	slic3r-filamentgrouputils	crates/slic3r-filamentgrouputils/src/filament_group_utils.rs	psWipeTower							
+FilamentMixer.cpp	root	908	5	5	in	slic3r-filamentmixer	crates/slic3r-filamentmixer/src/filament_mixer.rs	none							
+FilamentMixer.hpp	root	187	0	5	in	slic3r-filamentmixer	crates/slic3r-filamentmixer/src/filament_mixer.rs	posSlice							
+FilamentMixerModel.hpp	root	819	0	0	in	slic3r-filamentmixermodel	crates/slic3r-filamentmixermodel/src/filament_mixer_model.rs	none							
+FileParserError.hpp	root	54	3		out: No caller in the four entry points' closure.			none							
+Fill/AdaptiveInfillField.cpp	Fill	823	12	22	in	slic3r-fill	crates/slic3r-fill/src/adaptive_infill_field.rs	none							
+Fill/AdaptiveInfillField.hpp	Fill	143	11	22	in	slic3r-fill	crates/slic3r-fill/src/adaptive_infill_field.rs	posSlice							
+Fill/Fill.cpp	Fill	1934	17	22	in	slic3r-fill	crates/slic3r-fill/src/fill.rs	posInfill							
+Fill/Fill.hpp	Fill	41	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill.rs	posSlice							
+Fill/Fill3DHoneycomb.cpp	Fill	437	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill3_d_honeycomb.rs	none							
+Fill/Fill3DHoneycomb.hpp	Fill	41	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill3_d_honeycomb.rs	none							
+Fill/FillAdaptive.cpp	Fill	2105	17	22	in	slic3r-fill	crates/slic3r-fill/src/fill_adaptive.rs	none							
+Fill/FillAdaptive.hpp	Fill	126	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_adaptive.rs	posSlice							
+Fill/FillBase.cpp	Fill	3161	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_base.rs	none							
+Fill/FillBase.hpp	Fill	273	10	22	in	slic3r-fill	crates/slic3r-fill/src/fill_base.rs	posSlice							
+Fill/FillConcentric.cpp	Fill	203	14	22	in	slic3r-fill	crates/slic3r-fill/src/fill_concentric.rs	none							
+Fill/FillConcentric.hpp	Fill	39	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_concentric.rs	posInfill							
+Fill/FillConcentricInternal.cpp	Fill	120	14	22	in	slic3r-fill	crates/slic3r-fill/src/fill_concentric_internal.rs	none							
+Fill/FillConcentricInternal.hpp	Fill	27	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_concentric_internal.rs	posInfill							
+Fill/FillCornerSmoothing.cpp	Fill	331	9	22	in	slic3r-fill	crates/slic3r-fill/src/fill_corner_smoothing.rs	none							
+Fill/FillCornerSmoothing.hpp	Fill	140	8	22	in	slic3r-fill	crates/slic3r-fill/src/fill_corner_smoothing.rs	posSlice							
+Fill/FillCrossHatch.cpp	Fill	245	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_cross_hatch.rs	none							
+Fill/FillCrossHatch.hpp	Fill	35	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_cross_hatch.rs	none							
+Fill/FillGyroid.cpp	Fill	405	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_gyroid.rs	none							
+Fill/FillGyroid.hpp	Fill	47	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_gyroid.rs	none							
+Fill/FillHoneycomb.cpp	Fill	96	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_honeycomb.rs	none							
+Fill/FillHoneycomb.hpp	Fill	65	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_honeycomb.rs	none							
+Fill/FillLightning.cpp	Fill	59	17	22	in	slic3r-fill	crates/slic3r-fill/src/fill_lightning.rs	none							
+Fill/FillLightning.hpp	Fill	49	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_lightning.rs	posSlice							
+Fill/FillLine.cpp	Fill	134	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_line.rs	none							
+Fill/FillLine.hpp	Fill	55	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_line.rs	none							
+Fill/FillPlanePath.cpp	Fill	427	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_plane_path.rs	none							
+Fill/FillPlanePath.hpp	Fill	109	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_plane_path.rs	none							
+Fill/FillRectilinear.cpp	Fill	4086	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_rectilinear.rs	none							
+Fill/FillRectilinear.hpp	Fill	241	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_rectilinear.rs	posInfill							
+Fill/FillSpiralInset.cpp	Fill	495	14	22	in	slic3r-fill	crates/slic3r-fill/src/fill_spiral_inset.rs	none							
+Fill/FillSpiralInset.hpp	Fill	42	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_spiral_inset.rs	none							
+Fill/FillTpmsD.cpp	Fill	194	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_tpms_d.rs	none							
+Fill/FillTpmsD.hpp	Fill	45	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_tpms_d.rs	posInfill							
+Fill/FillTpmsFK.cpp	Fill	197	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_tpms_fk.rs	none							
+Fill/FillTpmsFK.hpp	Fill	39	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_tpms_fk.rs	posInfill							
+Fill/Lightning/DistanceField.cpp	Fill	191	12	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/distance_field.rs	none							
+Fill/Lightning/DistanceField.hpp	Fill	216	9	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/distance_field.rs	none							
+Fill/Lightning/Generator.cpp	Fill	309	17	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/generator.rs	none							
+Fill/Lightning/Generator.hpp	Fill	142	11	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/generator.rs	posSlice							
+Fill/Lightning/Layer.cpp	Fill	462	12	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/layer.rs	none							
+Fill/Lightning/Layer.hpp	Fill	97	10	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/layer.rs	posSlice							
+Fill/Lightning/TreeNode.cpp	Fill	453	12	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/tree_node.rs	none							
+Fill/Lightning/TreeNode.hpp	Fill	319	11	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/tree_node.rs	none							
+Flow.cpp	root	280	17	9	in	slic3r-flow	crates/slic3r-flow/src/flow.rs	none							
+Flow.hpp	root	151	9	9	in	slic3r-flow	crates/slic3r-flow/src/flow.rs	posSlice							
+FlushVolCalc.cpp	root	133	10		out: No caller in the four entry points' closure.			none							
+FlushVolCalc.hpp	root	41	9		out: No caller in the four entry points' closure.			none							
+FlushVolPredictor.cpp	root	353	4	4	in	slic3r-flushvolpredictor	crates/slic3r-flushvolpredictor/src/flush_vol_predictor.rs	none							
+FlushVolPredictor.hpp	root	52	0	4	in	slic3r-flushvolpredictor	crates/slic3r-flushvolpredictor/src/flush_vol_predictor.rs	none							
+Format/3mf.cpp	Format	3377	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/3mf.hpp	Format	65	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/AMF.cpp	Format	1405	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/AMF.hpp	Format	20	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/AssembleList.cpp	Format	211	1		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/AssembleList.hpp	Format	60	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/AssimpImport.cpp	Format	336	1		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/AssimpImport.hpp	Format	11	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/DRC.cpp	Format	192	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/DRC.hpp	Format	26	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/ModelIO.hpp	Format	21	0		out: It is not itself Objective-C++, so its reason is its own — out, as the header of an Apple-only importer no in-scope caller reaches.			none							
+Format/ModelIO.mm	Format	26	1		out: Format/ModelIO.mm is 26 lines whose whole content is make_temp_stl_with_modelio, an Apple-only importer that converts an asset to a temporary STL before the tree's own readers run, and every committed fixture is already an STL.			none							
+Format/OBJ.cpp	Format	419	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/OBJ.hpp	Format	51	4		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/ProjectStrategy.hpp	Format	78	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/ResourcePathUtils.hpp	Format	243	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/SL1.cpp	Format	543	18		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/SL1.hpp	Format	73	17		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/STEP.cpp	Format	793	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/STEP.hpp	Format	133	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/STL.cpp	Format	64	15	17	in	slic3r-model	crates/slic3r-model/src/stl.rs	none							
+Format/STL.hpp	Format	21	0	17	in	slic3r-model	crates/slic3r-model/src/stl.rs	posSlice							
+Format/ZipperArchiveImport.cpp	Format	156	10		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/ZipperArchiveImport.hpp	Format	56	9		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/bbs_3mf.cpp	Format	10211	19		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/bbs_3mf.hpp	Format	308	13		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/objparser.cpp	Format	971	1		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/objparser.hpp	Format	143	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/svg.cpp	Format	408	15		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+Format/svg.hpp	Format	10	0		out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including Format/bbs_3mf.cpp.			none							
+GCode.cpp	root	11805	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/g_code.rs	psSkirtBrim							
+GCode.hpp	root	1087	18	23	in	slic3r-gcode	crates/slic3r-gcode/src/g_code.rs	psWipeTower							
+GCode/AdaptivePAInterpolator.cpp	GCode	120	2	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_interpolator.rs	none							
+GCode/AdaptivePAInterpolator.hpp	GCode	54	1	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_interpolator.rs	psWipeTower							
+GCode/AdaptivePAProcessor.cpp	GCode	442	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_processor.rs	none							
+GCode/AdaptivePAProcessor.hpp	GCode	107	2	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_processor.rs	psWipeTower							
+GCode/AvoidCrossingPerimeters.cpp	GCode	1753	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/avoid_crossing_perimeters.rs	none							
+GCode/AvoidCrossingPerimeters.hpp	GCode	79	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/avoid_crossing_perimeters.rs	psWipeTower							
+GCode/BeltBackTransform.cpp	GCode	33	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/belt_back_transform.rs	none							
+GCode/BeltBackTransform.hpp	GCode	38	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/belt_back_transform.rs	psWipeTower							
+GCode/BeltKinematics.cpp	GCode	29	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/belt_kinematics.rs	none							
+GCode/BeltKinematics.hpp	GCode	59	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/belt_kinematics.rs	psWipeTower							
+GCode/ConflictChecker.cpp	GCode	352	18	23	in	slic3r-gcode	crates/slic3r-gcode/src/conflict_checker.rs	psConflictCheck							
+GCode/ConflictChecker.hpp	GCode	160	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/conflict_checker.rs	psWipeTower							
+GCode/CoolingBuffer.cpp	GCode	1110	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/cooling_buffer.rs	none							
+GCode/CoolingBuffer.hpp	GCode	73	4	23	in	slic3r-gcode	crates/slic3r-gcode/src/cooling_buffer.rs	psWipeTower							
+GCode/ElegooGCodeProcessorHelper.cpp	GCode	193	13	23	in	slic3r-gcode	crates/slic3r-gcode/src/elegoo_g_code_processor_helper.rs	none							
+GCode/ExclusionVolumePathCheck.cpp	GCode	234	12	23	in	slic3r-gcode	crates/slic3r-gcode/src/exclusion_volume_path_check.rs	none							
+GCode/ExclusionVolumePathCheck.hpp	GCode	90	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/exclusion_volume_path_check.rs	posSlice							
+GCode/ExclusionVolumeTravelAvoidance.cpp	GCode	672	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/exclusion_volume_travel_avoidance.rs	none							
+GCode/ExclusionVolumeTravelAvoidance.hpp	GCode	78	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/exclusion_volume_travel_avoidance.rs	psWipeTower							
+GCode/ExtrusionProcessor.hpp	GCode	718	12	23	in	slic3r-gcode	crates/slic3r-gcode/src/extrusion_processor.rs	psWipeTower							
+GCode/FanMover.cpp	GCode	550	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/fan_mover.rs	none							
+GCode/FanMover.hpp	GCode	107	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/fan_mover.rs	psWipeTower							
+GCode/GCodeProcessor.cpp	GCode	8391	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/g_code_processor.rs	psGCodeExport							
+GCode/GCodeProcessor.hpp	GCode	1766	12	23	in	slic3r-gcode	crates/slic3r-gcode/src/g_code_processor.rs	posSlice							
+GCode/GCodeStatistics.cpp	GCode	200	13	23	in: the application calls export_gcode_statistics (src/OrcaSlicer.cpp:7231), which this file defines; nothing inside vendor/OrcaSlicer/src/libslic3r reaches it.	slic3r-gcode	crates/slic3r-gcode/src/g_code_statistics.rs	none							
+GCode/GCodeStatistics.hpp	GCode	16	0	23	in: the application calls export_gcode_statistics (src/OrcaSlicer.cpp:7231), which this file defines; nothing inside vendor/OrcaSlicer/src/libslic3r reaches it.	slic3r-gcode	crates/slic3r-gcode/src/g_code_statistics.rs	none							
+GCode/MachineFrameTransform.cpp	GCode	89	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/machine_frame_transform.rs	none							
+GCode/MachineFrameTransform.hpp	GCode	54	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/machine_frame_transform.rs	posSlice							
+GCode/MachineKinematics.cpp	GCode	25	5	23	in	slic3r-gcode	crates/slic3r-gcode/src/machine_kinematics.rs	none							
+GCode/MachineKinematics.hpp	GCode	92	4	23	in	slic3r-gcode	crates/slic3r-gcode/src/machine_kinematics.rs	posSlice							
+GCode/OrderingStrategies.cpp	GCode	550	18	23	in	slic3r-gcode	crates/slic3r-gcode/src/ordering_strategies.rs	none							
+GCode/OrderingStrategies.hpp	GCode	153	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/ordering_strategies.rs	psSkirtBrim							
+GCode/PchipInterpolatorHelper.cpp	GCode	104	1	23	in	slic3r-gcode	crates/slic3r-gcode/src/pchip_interpolator_helper.rs	none							
+GCode/PchipInterpolatorHelper.hpp	GCode	76	0	23	in	slic3r-gcode	crates/slic3r-gcode/src/pchip_interpolator_helper.rs	psWipeTower							
+GCode/PreciseSeam.cpp	GCode	1061	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/precise_seam.rs	none							
+GCode/PreciseSeam.hpp	GCode	200	15	23	in	slic3r-gcode	crates/slic3r-gcode/src/precise_seam.rs	none							
+GCode/PreciseSeamInternal.hpp	GCode	42	16	23	in	slic3r-gcode	crates/slic3r-gcode/src/precise_seam_internal.rs	none							
+GCode/PressureEqualizer.cpp	GCode	969	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/pressure_equalizer.rs	none							
+GCode/PressureEqualizer.hpp	GCode	218	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/pressure_equalizer.rs	psWipeTower							
+GCode/PrintExtents.cpp	GCode	204	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/print_extents.rs	none							
+GCode/PrintExtents.hpp	GCode	30	3	23	in	slic3r-gcode	crates/slic3r-gcode/src/print_extents.rs	psSkirtBrim							
+GCode/RetractWhenCrossingPerimeters.cpp	GCode	65	12	23	in	slic3r-gcode	crates/slic3r-gcode/src/retract_when_crossing_perimeters.rs	none							
+GCode/RetractWhenCrossingPerimeters.hpp	GCode	33	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/retract_when_crossing_perimeters.rs	psWipeTower							
+GCode/SeamContour.cpp	GCode	261	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/seam_contour.rs	none							
+GCode/SeamContour.hpp	GCode	61	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/seam_contour.rs	none							
+GCode/SeamPlacer.cpp	GCode	2453	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/seam_placer.rs	none							
+GCode/SeamPlacer.hpp	GCode	197	5	23	in	slic3r-gcode	crates/slic3r-gcode/src/seam_placer.rs	psWipeTower							
+GCode/SmallAreaInfillFlowCompensator.cpp	GCode	123	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/small_area_infill_flow_compensator.rs	none							
+GCode/SmallAreaInfillFlowCompensator.hpp	GCode	37	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/small_area_infill_flow_compensator.rs	psWipeTower							
+GCode/SpiralVase.cpp	GCode	227	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/spiral_vase.rs	none							
+GCode/SpiralVase.hpp	GCode	55	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/spiral_vase.rs	psWipeTower							
+GCode/ThumbnailData.cpp	GCode	90	5	23	in	slic3r-gcode	crates/slic3r-gcode/src/thumbnail_data.rs	none							
+GCode/ThumbnailData.hpp	GCode	84	4	23	in	slic3r-gcode	crates/slic3r-gcode/src/thumbnail_data.rs	posSlice							
+GCode/Thumbnails.cpp	GCode	623	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/thumbnails.rs	none							
+GCode/Thumbnails.hpp	GCode	112	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/thumbnails.rs	psSkirtBrim							
+GCode/TimelapsePosPicker.cpp	GCode	685	18	23	in	slic3r-gcode	crates/slic3r-gcode/src/timelapse_pos_picker.rs	none							
+GCode/TimelapsePosPicker.hpp	GCode	92	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/timelapse_pos_picker.rs	psWipeTower							
+GCode/ToolOrderUtils.cpp	GCode	1493	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/tool_order_utils.rs	none							
+GCode/ToolOrderUtils.hpp	GCode	216	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/tool_order_utils.rs	psWipeTower							
+GCode/ToolOrdering.cpp	GCode	3723	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/tool_ordering.rs	psWipeTower							
+GCode/ToolOrdering.hpp	GCode	451	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/tool_ordering.rs	posSlice							
+GCode/WipePathHelpers.cpp	GCode	962	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_path_helpers.rs	none							
+GCode/WipePathHelpers.hpp	GCode	101	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_path_helpers.rs	psSkirtBrim							
+GCode/WipeTower.cpp	GCode	5567	13	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower.rs	none							
+GCode/WipeTower.hpp	GCode	779	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower.rs	posSlice							
+GCode/WipeTower2.cpp	GCode	2804	13	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower2.rs	none							
+GCode/WipeTower2.hpp	GCode	462	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower2.rs	posSlice							
+GCode/WipeTowerEstimate.cpp	GCode	287	12	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower_estimate.rs	none							
+GCode/WipeTowerEstimate.hpp	GCode	72	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower_estimate.rs	psWipeTower							
+GCodeReader.cpp	root	382	10	9	in	slic3r-gcodereader	crates/slic3r-gcodereader/src/g_code_reader.rs	none							
+GCodeReader.hpp	root	217	9	9	in	slic3r-gcodereader	crates/slic3r-gcodereader/src/g_code_reader.rs	posSlice							
+GCodeWriter.cpp	root	1749	13	14	in	slic3r-gcodewriter	crates/slic3r-gcodewriter/src/g_code_writer.rs	none							
+GCodeWriter.hpp	root	434	9	14	in	slic3r-gcodewriter	crates/slic3r-gcodewriter/src/g_code_writer.rs	posSlice							
+Geometry.cpp	root	910	11	9	in	slic3r-geometry	crates/slic3r-geometry/src/geometry.rs	none							
+Geometry.hpp	root	580	9	9	in	slic3r-geometry	crates/slic3r-geometry/src/geometry.rs	posSlice							
+Geometry/ArcWelder.cpp	Geometry	32	4	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/arc_welder.rs	none							
+Geometry/ArcWelder.hpp	Geometry	73	3	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/arc_welder.rs	psGCodeExport							
+Geometry/Bicubic.hpp	Geometry	293	0	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/bicubic.rs	none							
+Geometry/Circle.cpp	Geometry	148	5	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/circle.rs	none							
+Geometry/Circle.hpp	Geometry	190	4	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/circle.rs	posPrepareInfill							
+Geometry/ConvexHull.cpp	Geometry	433	10	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/convex_hull.rs	none							
+Geometry/ConvexHull.hpp	Geometry	38	8	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/convex_hull.rs	posPrepareInfill							
+Geometry/Curves.hpp	Geometry	224	4	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/curves.rs	none							
+Geometry/MedialAxis.cpp	Geometry	710	11	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/medial_axis.rs	none							
+Geometry/MedialAxis.hpp	Geometry	53	9	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/medial_axis.rs	none							
+Geometry/Voronoi.cpp	Geometry	370	10	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi.rs	none							
+Geometry/Voronoi.hpp	Geometry	210	4	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi.rs	none							
+Geometry/VoronoiOffset.cpp	Geometry	1646	10	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi_offset.rs	none							
+Geometry/VoronoiOffset.hpp	Geometry	150	8	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi_offset.rs	none							
+Geometry/VoronoiUtils.cpp	Geometry	354	10	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi_utils.rs	none							
+Geometry/VoronoiUtils.hpp	Geometry	164	9	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi_utils.rs	none							
+Geometry/VoronoiUtilsCgal.cpp	Geometry	343	10	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi_utils_cgal.rs	none							
+Geometry/VoronoiUtilsCgal.hpp	Geometry	27	0	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi_utils_cgal.rs	none							
+Geometry/VoronoiVisualUtils.hpp	Geometry	470	11	16	in	slic3r-geometry-dir	crates/slic3r-geometry-dir/src/voronoi_visual_utils.rs	none							
+I18N.hpp	root	37	0	0	in	slic3r-i18n	crates/slic3r-i18n/src/i18_n.rs	posSlice							
+IMEXArrange.cpp	root	220	19		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+IMEXArrange.hpp	root	101	18		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+IMEXHelpers.cpp	root	714	13	13	in	slic3r-imexhelpers	crates/slic3r-imexhelpers/src/imex_helpers.rs	none							
+IMEXHelpers.hpp	root	609	9	13	in	slic3r-imexhelpers	crates/slic3r-imexhelpers/src/imex_helpers.rs	psWipeTower							
+IMEXZones.cpp	root	379	10	14	in	slic3r-imexzones	crates/slic3r-imexzones/src/imex_zones.rs	none							
+IMEXZones.hpp	root	94	9	14	in	slic3r-imexzones	crates/slic3r-imexzones/src/imex_zones.rs	psWipeTower							
+InstanceLock.cpp	root	170	1	0	in	slic3r-instancelock	crates/slic3r-instancelock/src/instance_lock.rs	none							
+InstanceLock.hpp	root	60	0	0	in	slic3r-instancelock	crates/slic3r-instancelock/src/instance_lock.rs	none							
+Int128.hpp	root	301	0	0	in	slic3r-int128	crates/slic3r-int128/src/int128.rs	none							
+IntersectionPoints.cpp	root	51	11	10	in	slic3r-intersectionpoints	crates/slic3r-intersectionpoints/src/intersection_points.rs	none							
+IntersectionPoints.hpp	root	27	9	10	in	slic3r-intersectionpoints	crates/slic3r-intersectionpoints/src/intersection_points.rs	none							
+KDTreeIndirect.hpp	root	409	4	4	in	slic3r-kdtreeindirect	crates/slic3r-kdtreeindirect/src/kd_tree_indirect.rs	psWipeTower							
+LayOnFace.cpp	root	244	15		out: No caller in the four entry points' closure.			none							
+LayOnFace.hpp	root	55	4		out: No caller in the four entry points' closure.			none							
+Layer.cpp	root	515	17	16	in	slic3r-layer	crates/slic3r-layer/src/layer.rs	posSlice							
+Layer.hpp	root	371	11	16	in	slic3r-layer	crates/slic3r-layer/src/layer.rs	posSlice							
+LayerRegion.cpp	root	1129	17	21	in	slic3r-layerregion	crates/slic3r-layerregion/src/layer_region.rs	posPerimeters							
+LifecycleEvents.hpp	root	249	0	0	in	slic3r-lifecycleevents	crates/slic3r-lifecycleevents/src/lifecycle_events.rs	psWipeTower							
+Line.cpp	root	150	10	5	in	slic3r-line	crates/slic3r-line/src/line.rs	none							
+Line.hpp	root	341	4	5	in	slic3r-line	crates/slic3r-line/src/line.rs	posSlice							
+LocalesUtils.cpp	root	144	1	0	in	slic3r-localesutils	crates/slic3r-localesutils/src/locales_utils.rs	none							
+LocalesUtils.hpp	root	57	0	0	in	slic3r-localesutils	crates/slic3r-localesutils/src/locales_utils.rs	posSlice							
+MTUtils.hpp	root	143	3	3	in	slic3r-mtutils	crates/slic3r-mtutils/src/mt_utils.rs	posPrepareInfill							
+MacUtils.hpp	root	10	0	0	in	slic3r-macutils	crates/slic3r-macutils/src/mac_utils.rs	none							
+MacUtils.mm	root	23	0		out: MacUtils.mm is 23 lines holding is_macos_support_boost_add_file_log and is_mac_version_15, two OS-version predicates no in-scope caller reaches.			none							
+MarchingSquares.hpp	root	657	5	4	in	slic3r-marchingsquares	crates/slic3r-marchingsquares/src/marching_squares.rs	none							
+MaterialType.cpp	root	172	1	0	in	slic3r-materialtype	crates/slic3r-materialtype/src/material_type.rs	none							
+MaterialType.hpp	root	32	0	0	in	slic3r-materialtype	crates/slic3r-materialtype/src/material_type.rs	posSlice							
+Measure.cpp	root	1452	11		out: No caller in the four entry points' closure.			none							
+Measure.hpp	root	239	4		out: No caller in the four entry points' closure.			none							
+MeasureUtils.hpp	root	393	4		out: No caller in the four entry points' closure.			none							
+MeshBoolean.cpp	root	1028	11		out: No caller in the four entry points' closure.			none							
+MeshBoolean.hpp	root	128	10		out: No caller in the four entry points' closure.			none							
+MeshRepair.cpp	root	1215	10	13	in	slic3r-meshrepair	crates/slic3r-meshrepair/src/mesh_repair.rs	none							
+MeshRepair.hpp	root	28	0	13	in	slic3r-meshrepair	crates/slic3r-meshrepair/src/mesh_repair.rs	posPrepareInfill							
+MeshSplitImpl.hpp	root	290	10	4	in	slic3r-meshsplitimpl	crates/slic3r-meshsplitimpl/src/mesh_split_impl.rs	posContouring							
+MinAreaBoundingBox.cpp	root	114	9		out: No caller in the four entry points' closure.			none							
+MinAreaBoundingBox.hpp	root	55	4		out: No caller in the four entry points' closure.			none							
+MinimumSpanningTree.cpp	root	146	5	4	in	slic3r-minimumspanningtree	crates/slic3r-minimumspanningtree/src/minimum_spanning_tree.rs	none							
+MinimumSpanningTree.hpp	root	79	4	4	in	slic3r-minimumspanningtree	crates/slic3r-minimumspanningtree/src/minimum_spanning_tree.rs	posSlice							
+Model.cpp	root	4443	19	17	in	slic3r-model	crates/slic3r-model/src/model.rs	posPrepareInfill							
+Model.hpp	root	1981	14	17	in	slic3r-model	crates/slic3r-model/src/model.rs	posSlice							
+ModelArrange.cpp	root	204	19		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+ModelArrange.hpp	root	103	18		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+MultiMaterialSegmentation.cpp	root	2504	17	15	in	slic3r-multimaterialsegmentation	crates/slic3r-multimaterialsegmentation/src/multi_material_segmentation.rs	none							
+MultiMaterialSegmentation.hpp	root	89	5	15	in	slic3r-multimaterialsegmentation	crates/slic3r-multimaterialsegmentation/src/multi_material_segmentation.rs	posSlice							
+MultiNozzleUtils.cpp	root	980	10	9	in	slic3r-multinozzleutils	crates/slic3r-multinozzleutils/src/multi_nozzle_utils.rs	none							
+MultiNozzleUtils.hpp	root	298	9	9	in	slic3r-multinozzleutils	crates/slic3r-multinozzleutils/src/multi_nozzle_utils.rs	posSlice							
+MultiPoint.cpp	root	662	9	6	in	slic3r-multipoint	crates/slic3r-multipoint/src/multi_point.rs	none							
+MultiPoint.hpp	root	200	5	6	in	slic3r-multipoint	crates/slic3r-multipoint/src/multi_point.rs	posSlice							
+MutablePolygon.cpp	root	391	10	10	in	slic3r-mutablepolygon	crates/slic3r-mutablepolygon/src/mutable_polygon.rs	none							
+MutablePolygon.hpp	root	379	9	10	in	slic3r-mutablepolygon	crates/slic3r-mutablepolygon/src/mutable_polygon.rs	posSlice							
+MutablePriorityQueue.hpp	root	457	0	0	in	slic3r-mutablepriorityqueue	crates/slic3r-mutablepriorityqueue/src/mutable_priority_queue.rs	none							
+NSVGUtils.cpp	root	555	12		out: No caller in the four entry points' closure.			none							
+NSVGUtils.hpp	root	85	11		out: No caller in the four entry points' closure.			none							
+NormalUtils.cpp	root	147	16	18	in	slic3r-normalutils	crates/slic3r-normalutils/src/normal_utils.rs	none							
+NormalUtils.hpp	root	70	15	18	in	slic3r-normalutils	crates/slic3r-normalutils/src/normal_utils.rs	none							
+ObjColorUtils.cpp	root	16	2		out: No caller in the four entry points' closure.			none							
+ObjColorUtils.hpp	root	274	1		out: No caller in the four entry points' closure.			none							
+ObjectID.cpp	root	25	1	0	in	slic3r-objectid	crates/slic3r-objectid/src/object_id.rs	none							
+ObjectID.hpp	root	218	0	0	in	slic3r-objectid	crates/slic3r-objectid/src/object_id.rs	posSlice							
+OpenVDBUtils.cpp	root	151	11		out: No caller in the four entry points' closure.			none							
+OpenVDBUtils.hpp	root	51	10		out: No caller in the four entry points' closure.			none							
+Optimize/BruteforceOptimizer.hpp	Optimize	145	1		out: No caller in the four entry points' closure.			none							
+Optimize/NLoptOptimizer.hpp	Optimize	239	1		out: No caller in the four entry points' closure.			none							
+Optimize/Optimizer.hpp	Optimize	184	0		out: No caller in the four entry points' closure.			none							
+Orient.cpp	root	740	15		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+Orient.hpp	root	129	10		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none							
+PNGReadWrite.cpp	root	416	1	0	in	slic3r-pngreadwrite	crates/slic3r-pngreadwrite/src/png_read_write.rs	none							
+PNGReadWrite.hpp	root	112	0	0	in	slic3r-pngreadwrite	crates/slic3r-pngreadwrite/src/png_read_write.rs	none							
+ParallelResolve.hpp	root	65	1		out: No caller in the four entry points' closure.			none							
+ParameterUtils.cpp	root	143	10	9	in	slic3r-parameterutils	crates/slic3r-parameterutils/src/parameter_utils.rs	none							
+ParameterUtils.hpp	root	22	9	9	in	slic3r-parameterutils	crates/slic3r-parameterutils/src/parameter_utils.rs	psWipeTower							
+PerimeterGenerator.cpp	root	3231	14	18	in	slic3r-perimetergenerator	crates/slic3r-perimetergenerator/src/perimeter_generator.rs	none							
+PerimeterGenerator.hpp	root	194	12	18	in	slic3r-perimetergenerator	crates/slic3r-perimetergenerator/src/perimeter_generator.rs	posSlice							
+PlaceholderParser.cpp	root	2713	10	10	in	slic3r-placeholderparser	crates/slic3r-placeholderparser/src/placeholder_parser.rs	none							
+PlaceholderParser.hpp	root	99	5	10	in	slic3r-placeholderparser	crates/slic3r-placeholderparser/src/placeholder_parser.rs	posSlice							
+Platform.cpp	root	177	1	0	in	slic3r-platform	crates/slic3r-platform/src/platform.rs	none							
+Platform.hpp	root	46	0	0	in	slic3r-platform	crates/slic3r-platform/src/platform.rs	none							
+Point.cpp	root	356	9	3	in	slic3r-point	crates/slic3r-point/src/point.rs	none							
+Point.hpp	root	850	3	3	in	slic3r-point	crates/slic3r-point/src/point.rs	posSlice							
+Polygon.cpp	root	807	11	7	in	slic3r-polygon	crates/slic3r-polygon/src/polygon.rs	none							
+Polygon.hpp	root	398	7	7	in	slic3r-polygon	crates/slic3r-polygon/src/polygon.rs	posSlice							
+PolygonTrimmer.cpp	root	62	10		out: Dead at the pin.			none							
+PolygonTrimmer.hpp	root	29	8		out: Dead at the pin.			none							
+Polyline.cpp	root	1052	9	8	in	slic3r-polyline	crates/slic3r-polyline/src/polyline.rs	none							
+Polyline.hpp	root	363	6	8	in	slic3r-polyline	crates/slic3r-polyline/src/polyline.rs	posSlice							
+Preset.cpp	root	5266	13		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.			none							
+Preset.hpp	root	1358	9		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.			none							
+PresetBundle.cpp	root	9351	15		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.			none							
+PresetBundle.hpp	root	974	12		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.			none							
+PresetCacheFormat.cpp	root	666	11		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.			none							
+PresetCacheFormat.hpp	root	213	10		out: The port's configuration input is the oracle's resolved config, not preset JSON. C6 carries it.			none							
+PrincipalComponents2D.cpp	root	145	9	8	in	slic3r-principalcomponents2d	crates/slic3r-principalcomponents2d/src/principal_components2_d.rs	none							
+PrincipalComponents2D.hpp	root	22	8	8	in	slic3r-principalcomponents2d	crates/slic3r-principalcomponents2d/src/principal_components2_d.rs	posPerimeters							
+Print.cpp	root	7310	20	20	in	slic3r-print	crates/slic3r-print/src/print.rs	psWipeTower							
+Print.hpp	root	1697	16	20	in	slic3r-print	crates/slic3r-print/src/print.rs	posSlice							
+PrintApply.cpp	root	2320	17	21	in	slic3r-printapply	crates/slic3r-printapply/src/print_apply.rs	none							
+PrintBase.cpp	root	171	16	18	in	slic3r-printbase	crates/slic3r-printbase/src/print_base.rs	none							
+PrintBase.hpp	root	699	15	18	in	slic3r-printbase	crates/slic3r-printbase/src/print_base.rs	posSlice							
+PrintConfig.cpp	root	14438	11	8	in	slic3r-printconfig	crates/slic3r-printconfig/src/print_config.rs	none							
+PrintConfig.hpp	root	2809	8	8	in	slic3r-printconfig	crates/slic3r-printconfig/src/print_config.rs	posSlice							
+PrintConfigConstants.hpp	root	7	0	0	in	slic3r-printconfigconstants	crates/slic3r-printconfigconstants/src/print_config_constants.rs	none							
+PrintObject.cpp	root	5574	23	23	in	slic3r-printobject	crates/slic3r-printobject/src/print_object.rs	posSlice							
+PrintObjectSlice.cpp	root	1816	17	24	in	slic3r-printobjectslice	crates/slic3r-printobjectslice/src/print_object_slice.rs	posSlice							
+PrintRegion.cpp	root	120	17	21	in	slic3r-printregion	crates/slic3r-printregion/src/print_region.rs	none							
+PrinterBedAssets.hpp	root	20	1		out: No caller in the four entry points' closure.			none							
+ProjectTask.cpp	root	198	1	0	in	slic3r-projecttask	crates/slic3r-projecttask/src/project_task.rs	none							
+ProjectTask.hpp	root	350	0	0	in	slic3r-projecttask	crates/slic3r-projecttask/src/project_task.rs	posSlice							
+PublishSettings.cpp	root	628	13		out: No caller in the four entry points' closure.			none							
+PublishSettings.hpp	root	161	0		out: No caller in the four entry points' closure.			none							
+QuadricEdgeCollapse.cpp	root	983	11		out: No caller in the four entry points' closure.			none							
+QuadricEdgeCollapse.hpp	root	30	10		out: No caller in the four entry points' closure.			none							
+SLA/AGGRaster.hpp	SLA	233	10		out: declares the raster-image types SLA/RasterBase.cpp and SLA/RasterToPolygons.cpp use; no in-scope caller invokes SLA rasterization.			none							
+SLA/BoostAdapter.hpp	SLA	146	9		out: boost::geometry point-type adapter used by SLA/SpatIndex.cpp and SLA/Clustering.cpp; no in-scope caller invokes it.			none							
+SLA/Clustering.cpp	SLA	160	11		out: SLA support-point clustering; no in-scope caller invokes it.			none							
+SLA/Clustering.hpp	SLA	86	10		out: declares SLA support-point clustering; no in-scope caller invokes it.			none							
+SLA/ConcaveHull.cpp	SLA	155	11		out: SLA concave-hull implementation; no in-scope caller invokes it. The hollowing, pad and concave-hull implementations are out per R9.			none							
+SLA/ConcaveHull.hpp	SLA	57	9		out: declares SLA pad-outline (concave hull) computation; SLA/ConcaveHull.cpp is out for the same reason per R9.			none							
+SLA/Concurrency.hpp	SLA	72	5	13	in: SLA/IndexedMesh.cpp includes it directly.	slic3r-sla	crates/slic3r-sla/src/concurrency.rs	none							
+SLA/Hollowing.cpp	SLA	582	15		out: SLA hollowing implementation; SLA/Hollowing.hpp stays in (Model.hpp, AABBMesh.cpp carry it as data), but no in-scope caller invokes this file's functions. The hollowing, pad and concave-hull implementations are out per R9.			none							
+SLA/Hollowing.hpp	SLA	114	10	13	in: carried by SLA/IndexedMesh.hpp (which includes it). Model.hpp and AABBMesh.cpp also include it, carrying the hollowing config type it declares as data only; the hollowing implementation itself (SLA/Hollowing.cpp) is out per R9.	slic3r-sla	crates/slic3r-sla/src/hollowing.rs	posSlice							
+SLA/IndexedMesh.cpp	SLA	470	12	13	in: Z-contouring calls it (ContourZ.cpp, which includes SLA/IndexedMesh.hpp), with AABBMesh.cpp, PrintObject.cpp and Layer.hpp in the same closure.	slic3r-sla	crates/slic3r-sla/src/indexed_mesh.rs	none							
+SLA/IndexedMesh.hpp	SLA	159	11	13	in: Z-contouring calls it (ContourZ.cpp, which includes SLA/IndexedMesh.hpp), with AABBMesh.cpp, PrintObject.cpp and Layer.hpp in the same closure.	slic3r-sla	crates/slic3r-sla/src/indexed_mesh.rs	posSlice							
+SLA/JobController.hpp	SLA	32	0	13	in: carried transitively — SLA/Hollowing.hpp includes it, and SLA/Hollowing.hpp is carried by SLA/IndexedMesh.hpp.	slic3r-sla	crates/slic3r-sla/src/job_controller.rs	posSlice							
+SLA/Pad.cpp	SLA	532	11		out: SLA pad implementation; no in-scope caller invokes it. The hollowing, pad and concave-hull implementations are out per R9.			none							
+SLA/Pad.hpp	SLA	97	4		out: declares SLA base-pad generation; SLA/Pad.cpp is out for the same reason per R9.			none							
+SLA/RasterBase.cpp	SLA	98	11		out: SLA rasterization (converting a sliced layer into an exposure image); no in-scope caller invokes it.			none							
+SLA/RasterBase.hpp	SLA	123	9		out: declares SLA rasterization's base types; no in-scope caller invokes it.			none							
+SLA/RasterToPolygons.cpp	SLA	98	11		out: converts an SLA raster back to polygons (used only by the SLA rasterization pipeline and its own test); no in-scope caller invokes it.			none							
+SLA/RasterToPolygons.hpp	SLA	16	9		out: declares the SLA raster-to-polygons conversion; no in-scope caller invokes it.			none							
+SLA/ReprojectPointsOnMesh.hpp	SLA	48	15		out: reprojects SLA support points onto a transformed mesh; no includer anywhere in the vendored libslic3r tree names it.			none							
+SLA/Rotfinder.cpp	SLA	490	15		out: SLA automatic rotation/orientation optimizer; no in-scope caller invokes it.			none							
+SLA/Rotfinder.hpp	SLA	73	4		out: declares the SLA rotation/orientation optimizer; no in-scope caller invokes it.			none							
+SLA/SpatIndex.cpp	SLA	169	10		out: spatial index (R-tree) used by SLA support generation and clustering; no in-scope caller invokes it.			none							
+SLA/SpatIndex.hpp	SLA	100	9		out: declares the SLA spatial index; no in-scope caller invokes it.			none							
+SLA/SupportPoint.hpp	SLA	71	4	13	in: Model.hpp includes it directly, carrying the SLA support-point type as a data member.	slic3r-sla	crates/slic3r-sla/src/support_point.rs	posSlice							
+SLA/SupportPointGenerator.cpp	SLA	682	12		out: automatic SLA support-point generation; no in-scope caller invokes it.			none							
+SLA/SupportPointGenerator.hpp	SLA	245	11		out: declares automatic SLA support-point generation; no in-scope caller invokes it.			none							
+SLA/SupportTree.cpp	SLA	105	15		out: SLA support-tree (pillar/branch) generation; no in-scope caller invokes it.			none							
+SLA/SupportTree.hpp	SLA	175	12		out: declares SLA support-tree generation; no in-scope caller invokes it.			none							
+SLA/SupportTreeBuilder.cpp	SLA	243	15		out: builds SLA support-tree pillars and branches; no in-scope caller invokes it.			none							
+SLA/SupportTreeBuilder.hpp	SLA	456	13		out: declares the SLA support-tree builder; no in-scope caller invokes it.			none							
+SLA/SupportTreeBuildsteps.cpp	SLA	1300	15		out: SLA support-tree generation's per-step algorithm; no in-scope caller invokes it.			none							
+SLA/SupportTreeBuildsteps.hpp	SLA	397	14		out: declares the SLA support-tree build steps; no in-scope caller invokes it.			none							
+SLA/SupportTreeMesher.cpp	SLA	279	15		out: meshes the generated SLA support tree; no in-scope caller invokes it.			none							
+SLA/SupportTreeMesher.hpp	SLA	133	14		out: declares SLA support-tree meshing; no in-scope caller invokes it.			none							
+SLAPrint.cpp	root	1289	18		out: No caller in the four entry points' closure.			none							
+SLAPrint.hpp	root	616	16		out: No caller in the four entry points' closure.			none							
+SLAPrintSteps.cpp	root	1172	18		out: No caller in the four entry points' closure.			none							
+SLAPrintSteps.hpp	root	75	17		out: No caller in the four entry points' closure.			none							
+SVG.cpp	root	453	11	13	in	slic3r-svg	crates/slic3r-svg/src/svg.rs	none							
+SVG.hpp	root	190	10	13	in	slic3r-svg	crates/slic3r-svg/src/svg.rs	posSlice							
+Semver.cpp	root	8	2	1	in	slic3r-semver	crates/slic3r-semver/src/semver.rs	none							
+Semver.hpp	root	222	1	1	in	slic3r-semver	crates/slic3r-semver/src/semver.rs	posSlice							
+ShortEdgeCollapse.cpp	root	191	16	19	in	slic3r-shortedgecollapse	crates/slic3r-shortedgecollapse/src/short_edge_collapse.rs	none							
+ShortEdgeCollapse.hpp	root	17	10	19	in	slic3r-shortedgecollapse	crates/slic3r-shortedgecollapse/src/short_edge_collapse.rs	none							
+ShortestPath.cpp	root	2618	18	11	in	slic3r-shortestpath	crates/slic3r-shortestpath/src/shortest_path.rs	none							
+ShortestPath.hpp	root	70	9	11	in	slic3r-shortestpath	crates/slic3r-shortestpath/src/shortest_path.rs	posSlice							
+SlicesToTriangleMesh.cpp	root	146	11		out: No caller in the four entry points' closure.			none							
+SlicesToTriangleMesh.hpp	root	27	10		out: No caller in the four entry points' closure.			none							
+Slicing.cpp	root	1028	15	5	in	slic3r-slicing	crates/slic3r-slicing/src/slicing.rs	none							
+Slicing.hpp	root	235	4	5	in	slic3r-slicing	crates/slic3r-slicing/src/slicing.rs	posSlice							
+SlicingAdaptive.cpp	root	222	15	3	in	slic3r-slicingadaptive	crates/slic3r-slicingadaptive/src/slicing_adaptive.rs	none							
+SlicingAdaptive.hpp	root	47	5	3	in	slic3r-slicingadaptive	crates/slic3r-slicingadaptive/src/slicing_adaptive.rs	none							
+StreamUtils.hpp	root	61	9		out: No caller in the four entry points' closure.			none							
+Support/BeltFloorContext.cpp	Support	132	10	22	in	slic3r-support	crates/slic3r-support/src/belt_floor_context.rs	none							
+Support/BeltFloorContext.hpp	Support	83	9	22	in	slic3r-support	crates/slic3r-support/src/belt_floor_context.rs	none							
+Support/SupportCommon.cpp	Support	2201	19	22	in	slic3r-support	crates/slic3r-support/src/support_common.rs	none							
+Support/SupportCommon.hpp	Support	195	18	22	in	slic3r-support	crates/slic3r-support/src/support_common.rs	posSlice							
+Support/SupportLayer.hpp	Support	150	11	22	in	slic3r-support	crates/slic3r-support/src/support_layer.rs	posSlice							
+Support/SupportMaterial.cpp	Support	3530	19	22	in	slic3r-support	crates/slic3r-support/src/support_material.rs	none							
+Support/SupportMaterial.hpp	Support	102	18	22	in	slic3r-support	crates/slic3r-support/src/support_material.rs	posSlice							
+Support/SupportParameters.hpp	Support	341	17	22	in	slic3r-support	crates/slic3r-support/src/support_parameters.rs	posSlice							
+Support/SupportSpotsGenerator.cpp	Support	1295	13	22	in	slic3r-support	crates/slic3r-support/src/support_spots_generator.rs	none							
+Support/SupportSpotsGenerator.hpp	Support	160	9	22	in	slic3r-support	crates/slic3r-support/src/support_spots_generator.rs	posSlice							
+Support/TreeModelVolumes.cpp	Support	945	21	22	in	slic3r-support	crates/slic3r-support/src/tree_model_volumes.rs	none							
+Support/TreeModelVolumes.hpp	Support	567	20	22	in	slic3r-support	crates/slic3r-support/src/tree_model_volumes.rs	posSlice							
+Support/TreeSupport.cpp	Support	4059	23	22	in	slic3r-support	crates/slic3r-support/src/tree_support.rs	none							
+Support/TreeSupport.hpp	Support	555	22	22	in	slic3r-support	crates/slic3r-support/src/tree_support.rs	posSlice							
+Support/TreeSupport3D.cpp	Support	4332	23	22	in	slic3r-support	crates/slic3r-support/src/tree_support3_d.rs	none							
+Support/TreeSupport3D.hpp	Support	344	21	22	in	slic3r-support	crates/slic3r-support/src/tree_support3_d.rs	posSlice							
+Support/TreeSupportCommon.hpp	Support	810	19	22	in	slic3r-support	crates/slic3r-support/src/tree_support_common.rs	posSlice							
+Surface.cpp	root	100	11	10	in	slic3r-surface	crates/slic3r-surface/src/surface.rs	none							
+Surface.hpp	root	319	9	10	in	slic3r-surface	crates/slic3r-surface/src/surface.rs	posSlice							
+SurfaceCollection.cpp	root	174	11	14	in	slic3r-surfacecollection	crates/slic3r-surfacecollection/src/surface_collection.rs	none							
+SurfaceCollection.hpp	root	92	10	14	in	slic3r-surfacecollection	crates/slic3r-surfacecollection/src/surface_collection.rs	posSlice							
+SurfaceMesh.hpp	root	168	10		out: No caller in the four entry points' closure.			none							
+Technologies.hpp	root	54	0	0	in	slic3r-technologies	crates/slic3r-technologies/src/technologies.rs	none							
+Tesselate.cpp	root	260	9	10	in	slic3r-tesselate	crates/slic3r-tesselate/src/tesselate.rs	none							
+Tesselate.hpp	root	26	4	10	in	slic3r-tesselate	crates/slic3r-tesselate/src/tesselate.rs	posSlice							
+TextConfiguration.hpp	root	189	4		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeDebug.cpp	TextureBake	227	5		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeDebug.hpp	TextureBake	126	4		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeDecimate.cpp	TextureBake	572	6		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeDecimate.hpp	TextureBake	76	5		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeDisplace.cpp	TextureBake	292	6		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeDisplace.hpp	TextureBake	69	5		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeFlip.cpp	TextureBake	219	7		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeFlip.hpp	TextureBake	58	6		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeIndex.cpp	TextureBake	28	5		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeIndex.hpp	TextureBake	160	4		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeMesh.cpp	TextureBake	78	11		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeMesh.hpp	TextureBake	24	10		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakePipeline.cpp	TextureBake	403	8		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakePipeline.hpp	TextureBake	175	7		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeRegularize.cpp	TextureBake	400	6		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeRegularize.hpp	TextureBake	74	5		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeRelocate.cpp	TextureBake	211	7		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeRelocate.hpp	TextureBake	73	6		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeRepair.cpp	TextureBake	241	6		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeRepair.hpp	TextureBake	54	5		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeSubdivide.cpp	TextureBake	492	6		out: No caller in the four entry points' closure.			none							
+TextureBake/TextureBakeSubdivide.hpp	TextureBake	99	5		out: No caller in the four entry points' closure.			none							
+TextureDisplacement.cpp	root	5980	15		out: No caller in the four entry points' closure.			none							
+TextureDisplacement.hpp	root	1354	11		out: No caller in the four entry points' closure.			none							
+TexturePainting.cpp	root	758	15		out: No caller in the four entry points' closure.			none							
+TexturePainting.hpp	root	137	0		out: No caller in the four entry points' closure.			none							
+TextureToColor/Callbacks.hpp	TextureToColor	15	0		out: No caller in the four entry points' closure.			none							
+TextureToColor/CgalUtils.hpp	TextureToColor	175	5		out: No caller in the four entry points' closure.			none							
+TextureToColor/ColorUtils.cpp	TextureToColor	1665	10		out: No caller in the four entry points' closure.			none							
+TextureToColor/ColorUtils.hpp	TextureToColor	208	5		out: No caller in the four entry points' closure.			none							
+TextureToColor/Repair.hpp	TextureToColor	258	6		out: No caller in the four entry points' closure.			none							
+TextureToColor/TextureToColor.cpp	TextureToColor	1056	10		out: No caller in the four entry points' closure.			none							
+TextureToColor/TextureToColor.hpp	TextureToColor	110	5		out: No caller in the four entry points' closure.			none							
+TextureToColor/TriMesh.hpp	TextureToColor	31	4		out: No caller in the four entry points' closure.			none							
+Thread.cpp	root	289	1	0	in	slic3r-thread	crates/slic3r-thread/src/thread.rs	none							
+Thread.hpp	root	78	0	0	in	slic3r-thread	crates/slic3r-thread/src/thread.rs	psWipeTower							
+Time.cpp	root	313	1	0	in	slic3r-time	crates/slic3r-time/src/time.rs	none							
+Time.hpp	root	80	0	0	in	slic3r-time	crates/slic3r-time/src/time.rs	psWipeTower							
+Timer.cpp	root	23	1	0	in	slic3r-timer	crates/slic3r-timer/src/timer.rs	none							
+Timer.hpp	root	94	0	0	in	slic3r-timer	crates/slic3r-timer/src/timer.rs	posSlice							
+TriangleMesh.cpp	root	1829	11	12	in	slic3r-trianglemesh	crates/slic3r-trianglemesh/src/triangle_mesh.rs	posContouring							
+TriangleMesh.hpp	root	423	9	12	in	slic3r-trianglemesh	crates/slic3r-trianglemesh/src/triangle_mesh.rs	posSlice							
+TriangleMeshDeal.cpp	root	43	11		out: No caller in the four entry points' closure.			none							
+TriangleMeshDeal.hpp	root	11	10		out: No caller in the four entry points' closure.			none							
+TriangleMeshSlicer.cpp	root	2698	11	11	in	slic3r-trianglemeshslicer	crates/slic3r-trianglemeshslicer/src/triangle_mesh_slicer.rs	none							
+TriangleMeshSlicer.hpp	root	142	9	11	in	slic3r-trianglemeshslicer	crates/slic3r-trianglemeshslicer/src/triangle_mesh_slicer.rs	posSlice							
+TriangleSelector.cpp	root	2617	11	13	in	slic3r-triangleselector	crates/slic3r-triangleselector/src/triangle_selector.rs	none							
+TriangleSelector.hpp	root	603	10	13	in	slic3r-triangleselector	crates/slic3r-triangleselector/src/triangle_selector.rs	posSlice							
+TriangleSetSampling.cpp	root	76	5	4	in	slic3r-trianglesetsampling	crates/slic3r-trianglesetsampling/src/triangle_set_sampling.rs	none							
+TriangleSetSampling.hpp	root	22	4	4	in	slic3r-trianglesetsampling	crates/slic3r-trianglesetsampling/src/triangle_set_sampling.rs	none							
+TriangulateWall.cpp	root	158	9		out: No caller in the four entry points' closure.			none							
+TriangulateWall.hpp	root	156	8		out: No caller in the four entry points' closure.			none							
+Triangulation.cpp	root	346	10	11	in	slic3r-triangulation	crates/slic3r-triangulation/src/triangulation.rs	none							
+Triangulation.hpp	root	73	9	11	in	slic3r-triangulation	crates/slic3r-triangulation/src/triangulation.rs	none							
+TryCatchSignal.cpp	root	5	2		out: No caller in the four entry points' closure.			none							
+TryCatchSignal.hpp	root	20	1		out: No caller in the four entry points' closure.			none							
+TryCatchSignalSEH.cpp	root	43	1		out: No caller in the four entry points' closure.			none							
+TryCatchSignalSEH.hpp	root	27	0		out: No caller in the four entry points' closure.			none							
+Utils.hpp	root	866	3	3	in	slic3r-utils	crates/slic3r-utils/src/utils.rs	posSlice							
+VariableWidth.cpp	root	248	10	11	in	slic3r-variablewidth	crates/slic3r-variablewidth/src/variable_width.rs	none							
+VariableWidth.hpp	root	15	9	11	in	slic3r-variablewidth	crates/slic3r-variablewidth/src/variable_width.rs	none							
+Zipper.cpp	root	155	1		out: No caller in the four entry points' closure.			none							
+Zipper.hpp	root	95	0		out: No caller in the four entry points' closure.			none							
+calib.cpp	root	1008	19	15	in	slic3r-calib	crates/slic3r-calib/src/calib.rs	none							
+calib.hpp	root	398	10	15	in	slic3r-calib	crates/slic3r-calib/src/calib.rs	posSlice							
+clonable_ptr.hpp	root	170	0	0	in	slic3r-clonable-ptr	crates/slic3r-clonable-ptr/src/clonable_ptr.rs	posSlice							
+enum_bitmask.hpp	root	91	0	0	in	slic3r-enum-bitmask	crates/slic3r-enum-bitmask/src/enum_bitmask.rs	posSlice							
+format.hpp	root	58	0	0	in	slic3r-format	crates/slic3r-format/src/format.rs	posSlice							
+libslic3r.cpp	root	3	3	2	in	slic3r-libslic3r	crates/slic3r-libslic3r/src/libslic3r.rs	none							
+libslic3r.h	root	437	2	2	in	slic3r-libslic3r	crates/slic3r-libslic3r/src/libslic3r.rs	posSlice							
+miniz_extension.cpp	root	314	4		out: No caller in the four entry points' closure.			none							
+miniz_extension.hpp	root	43	0		out: No caller in the four entry points' closure.			none							
+pchheader.cpp	root	1	12		out: No caller in the four entry points' closure.			none							
+pchheader.hpp	root	129	11		out: No caller in the four entry points' closure.			none							
+utils.cpp	root	2398	11	3	in	slic3r-utils	crates/slic3r-utils/src/utils.rs	none							
