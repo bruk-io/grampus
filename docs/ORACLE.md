@@ -226,9 +226,8 @@ source rather than assumed: **28** are `append_full_config`'s own ban list
 — `print_host`/`print_host_webui` besides — from every G-code it writes), **21** are keys
 `cfg.option(key)->is_nil()` skips for this configuration (`GCode.cpp:8393`) — the `filament_retract_*`,
 `filament_ironing_*`, `filament_wipe*`, `filament_z_hop*` and `filament_deretraction_speed`/
-`filament_retraction_*` family, all nil because `is_nil()` on a vector option is true only when
-every element is nil (`Config.hpp:1085`), which is why `filament_retraction_length`'s own value
-(`["nil", "0.4"]`, one real value and one nil) still counts as nil here — and the remaining **3**
+`filament_retraction_*` family, nil in the narrower config object the block is written from, which
+is not the same as nil in the golden (next paragraph) — and the remaining **3**
 (`from`, `name`, `version`) are not libslic3r config keys at all: they are `--export-settings`'s own
 document header, written by `ConfigBase::save_to_json` (`Config.cpp:1561-1563`) from the arguments
 the CLI passes it (`OrcaSlicer.cpp:6347-6349`: `name="project_settings"`, `from="project"`,
@@ -244,6 +243,26 @@ is this task's bookkeeping, not part of libslic3r's resolved configuration, and 
 candidate for either set. `printhost_authorization_type` and `printhost_ssl_ignore_revoke` are not
 in this list: neither is a string field (above), and both are written into the config block like
 any other key (`; printhost_authorization_type = key`, `; printhost_ssl_ignore_revoke = 0`).
+
+**Which config object those 21 are nil in.** `is_nil()` on a vector option is true only when every
+element is nil (`Config.hpp:1085`). Nineteen of the 21 are `["nil", "nil"]` in the golden, so they
+are nil by that rule in either document. The other two are not: `filament_retraction_length` is
+`["nil", "0.4"]` and `filament_z_hop` is `["nil", "0.6"]`, and `Config.hpp:1085`'s all-element rule
+makes both of those *non*-nil. They are evidence of the cross-object split "Same keys, not
+necessarily the same values" describes below, not examples of the rule — the config block is written
+from `print.full_print_config()` (`GCode.cpp:8296`), one slot per filament, where the golden carries
+one slot per filament-x-nozzle-variant, and the slot that narrower object keeps is the nil one. That
+it keeps the golden's *first* slot is measured, not assumed: of the eleven keys whose golden vector
+holds two different values and which the block writes, nine collapse to the first slot
+(`filament_max_volumetric_speed` `["21", "29"]` → `21`, `outer_wall_speed` `["200", "350"]` → `200`,
+`inner_wall_speed`, `top_surface_speed`, `sparse_infill_speed`, `internal_solid_infill_speed` and
+the three `*_extruder_variant` keys, whose block value is the golden's first variant
+`"Direct Drive Standard"`), and the remaining two (`start_end_points`, `filament_dev_ams_drying_ams_limitations`)
+keep both slots because they are not per-variant vectors at all. The first slot of
+`filament_retraction_length` and `filament_z_hop` is `nil`, which is why `is_nil()` skips them there
+and not here. A port that decides the `CONFIG_BLOCK` skip by applying `Config.hpp:1085` to a
+golden's own wider vectors would keep these two keys where the oracle drops them; the rule has to be
+applied to the per-filament object the oracle builds at emission time.
 
 The two G-code-only keys are `first_layer_bed_temperature` and `first_layer_temperature`, written by
 `vendor/OrcaSlicer/src/libslic3r/GCode.cpp:4325-4335` directly after `append_full_config` returns —
