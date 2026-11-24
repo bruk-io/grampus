@@ -1,0 +1,8 @@
+{
+  "enable_support": "0",
+  "layer_height": "0.3",
+  "nozzle_diameter": [
+    "0.4"
+  ],
+  "slicing_pipeline_plugin": []
+}
