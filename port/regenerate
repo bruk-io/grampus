@@ -1,0 +1,43 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""The one command that rewrites every generated report (task 18-divergences-regeneration).
+
+``port/regenerate`` is the single seam a later pass invokes rather than each regeneration
+command being called separately and the set of them drifting apart. Today it runs
+``just audit-order`` (R18's three reports: ``port/reports/order-containers.md``,
+``port/reports/order-comparators.md`` and ``port/reports/divergences.md``) and nothing else.
+``23-perf-backlog`` (part 3 of step 14) adds the ``port/reports/perf-backlog.md`` regeneration
+to this same script, once the ``// PERF(port):`` markers ``21-port-status-markers`` defines
+exist to drive it; this task does not write that half.
+
+``just audit-order`` is invoked as a subprocess, exactly as a person would type it, rather than
+re-implemented here, so ``git diff port/audit-order`` and ``git diff justfile`` stay the only
+places that script's own behaviour lives.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+@click.command()
+def main() -> None:
+    """Run every generated report's regeneration. Today: just audit-order."""
+    result = subprocess.run(["just", "audit-order"], cwd=REPO_ROOT)
+    sys.exit(result.returncode)
+
+
+if __name__ == "__main__":
+    main()
