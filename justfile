@@ -22,3 +22,8 @@ inventory:
 # and callers across steps 5, 6, 9, 10 and 25-27 each need their own extra flags
 compare a b *ARGS:
     cargo run --quiet --release -p oracle-compare -- {{a}} {{b}} {{ARGS}}
+
+# run the pinned oracle headlessly on a named row of docs/ORACLE.md's configuration table (R2);
+# forwards its arguments to oracle/slice unchanged and adds no flag of its own
+oracle-slice *ARGS:
+    ./oracle/slice {{ARGS}}
