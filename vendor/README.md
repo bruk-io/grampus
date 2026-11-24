@@ -163,9 +163,8 @@ measures 637M. Both are real measurements of the same prefix at different times,
 transcription error; 625M stays the recorded figure (PR #7's, per the same instruction), with
 637M noted here so a reader sizing a CI cache from this table sees the spread.
 
-**Stage two (the main project): does not configure against this host's stage-one prefix
-(see below for why that is not the same as "this platform"). Reported, not worked around, per
-C7's decision.**
+**Stage two (the main project): does not configure, on this host or on a from-scratch GitHub-hosted
+macOS runner alike — see below. Reported, not worked around, per C7's decision.**
 
 The exact command from `intent/libslic3r-rust-port/tasks/13-build-libslic3r/task.md`, run from
 a clean `vendor/OrcaSlicer/build/arm64`, fails at its first configure:
@@ -183,47 +182,48 @@ Call Stack (most recent call first):
   CMakeLists.txt:778 (find_package)
 ```
 
-**Root cause, confirmed by inspection — and corrected from an earlier reading of the same
-evidence.** `liblzma` is not detected via `pkg-config`: stage one's Boost is built through its
-own CMake build (not `b2`), and the `FindLibLZMA.cmake` module its dependency discovery calls
-does a plain `find_path(LIBLZMA_INCLUDE_DIR lzma.h)` — no `pkg-config` hint anywhere in that
-module. What actually lets `/opt/homebrew/include` through is a bug in the *forwarding* of
-`CMAKE_IGNORE_PREFIX_PATH`, not its absence. Stage one's top-level configure
-(`oracle/build-libslic3r`'s own `run_stage_one`) correctly passes
-`-DCMAKE_IGNORE_PREFIX_PATH=/opt/local;/usr/local;/opt/homebrew` to `vendor/OrcaSlicer/deps`'s
-superbuild. That superbuild then forwards the value to every dependency sub-build, unquoted, at
-`deps/CMakeLists.txt:231` and `:285`: `-DCMAKE_IGNORE_PREFIX_PATH:STRING=${CMAKE_IGNORE_PREFIX_PATH}`.
-Because `CMAKE_IGNORE_PREFIX_PATH` is itself a `;`-separated CMake list and this substitution is
-unquoted, CMake flattens it into three separate list elements before `ExternalProject_Add` ever
-sees one argument — confirmed directly in the generated
-`vendor/OrcaSlicer/deps/build/arm64/build.ninja`, where dep_Boost's own configure command carries
-`-DCMAKE_IGNORE_PREFIX_PATH:STRING=/opt/local /usr/local /opt/homebrew` as three bare words, not
-one quoted value. The result lands in
-`dep_Boost-prefix/src/dep_Boost-build/CMakeCache.txt:336`: `CMAKE_IGNORE_PREFIX_PATH:STRING=/opt/local`
-— only the first element survived. `/usr/local` and `/opt/homebrew` are silently *not* ignored by
-that sub-build, so `FindLibLZMA` finds Homebrew's header
-(`CMakeCache.txt:631`, `LIBLZMA_INCLUDE_DIR:PATH=/opt/homebrew/include`) and library
-(`:637`, the Xcode SDK's headerless `.tbd` stub), and `BOOST_IOSTREAMS_ENABLE_LZMA:BOOL=ON`
-(`:92`) gets compiled into `libboost_iostreams.a`. Its exported package config,
-`boost_iostreams-config.cmake:57`, then calls `find_dependency(LibLZMA)` unconditionally on every
-consumer configure, which is what stage two's configure trips over. This bug lives entirely in
-`vendor/OrcaSlicer/deps/CMakeLists.txt`, which this task (and `02-deps-superbuild` before it) is
-forbidden from changing.
+**Root cause, confirmed on two independent hosts — superseding an earlier, narrower reading of
+the same error.** `boost_iostreams`'s exported CMake package config
+(`boost_iostreams-config.cmake:56-57`) calls `find_dependency(ZLIB)` and `find_dependency(LibLZMA)`
+**unconditionally** — not behind any `if(BOOST_IOSTREAMS_ENABLE_LZMA)` guard, not generated
+differently depending on what Boost's own build actually linked. Upstream's
+`deps/Boost/Boost.cmake` turns bzip2 and zstd off explicitly for Boost.Iostreams
+(`-DBOOST_IOSTREAMS_ENABLE_BZIP2:BOOL=OFF`, `...ZSTD:BOOL=OFF`, which is why those two have no
+corresponding `find_dependency` in the generated config) but leaves lzma on the CMake-build
+default, so every consumer of this exported config unconditionally needs a `LibLZMA` that
+`find_package` can see. And `lzma.h` is not part of any stock macOS toolchain: not the Xcode SDK
+(which ships only a headerless `liblzma.tbd` linker stub — its *library* half resolves on every
+host, which is why the error is specifically "missing: `LIBLZMA_INCLUDE_DIR`"), not the Command
+Line Tools, nothing. The only sources of the header are optional package managers — Homebrew's
+`xz` formula, MacPorts' `xz` — which `CMAKE_IGNORE_PREFIX_PATH` is specifically mandated to
+exclude. The two things combine into a failure that is **not host-contingent**: it reproduces
+identically whether or not the host happens to have Homebrew's `xz` installed.
 
-Upstream's own `deps/Boost/Boost.cmake` turns bzip2 and zstd off explicitly for Boost.Iostreams
-(`-DBOOST_IOSTREAMS_ENABLE_BZIP2:BOOL=OFF`, `...ZSTD:BOOL=OFF`) but leaves lzma to plain feature
-detection, with no corresponding off-switch. So whether this particular sub-build ends up linking
-lzma is **host-contingent**, not a fixed property of this platform: it depends on whether
-`/usr/local` or `/opt/homebrew` (the two prefixes the forwarding bug fails to exclude) happen to
-hold an `lzma.h` on the machine running stage one. On this machine they do, via Homebrew's `xz`.
-A clean host without it would not trip this — stage one's Boost would then export no
-`find_dependency(LibLZMA)` at all, and stage two's configure would not hit this error here. So
-**"does not configure on this platform" overstates what was shown**: the accurate statement is
-that stage two does not configure against *the stage-one prefix as built on this host*, because
-that prefix's Boost embeds this host's Homebrew lzma — a contamination bug in how
-`CMAKE_IGNORE_PREFIX_PATH` is forwarded, not a platform limitation. The one environment that would
-settle whether a clean host avoids it is a hosted CI runner with no Homebrew `xz`; see "Its own CI
-line" below for whether that run has actually exercised this.
+This was confirmed the hard way, by first reaching the wrong half of the explanation. Stage one's
+top-level configure (`oracle/build-libslic3r`'s own `run_stage_one`) passes
+`-DCMAKE_IGNORE_PREFIX_PATH=/opt/local;/usr/local;/opt/homebrew`, and `vendor/OrcaSlicer/deps/CMakeLists.txt:231`/`:285`
+forwards that value to every dependency sub-build unquoted:
+`-DCMAKE_IGNORE_PREFIX_PATH:STRING=${CMAKE_IGNORE_PREFIX_PATH}`. Because the value is itself a
+`;`-separated CMake list and the substitution is unquoted, CMake flattens it into three separate
+list elements before `ExternalProject_Add` ever sees one argument — confirmed directly in the
+generated `vendor/OrcaSlicer/deps/build/arm64/build.ninja`, where dep_Boost's own configure
+command carries `-DCMAKE_IGNORE_PREFIX_PATH:STRING=/opt/local /usr/local /opt/homebrew` as three
+bare words, and in `dep_Boost-prefix/src/dep_Boost-build/CMakeCache.txt:336`, where only
+`CMAKE_IGNORE_PREFIX_PATH:STRING=/opt/local` survived. That forwarding bug is real — confirmed
+directly from those two generated files, lives entirely in vendored
+`vendor/OrcaSlicer/deps/CMakeLists.txt`, and this task (like `02-deps-superbuild` before it) is
+forbidden from changing it — but it turned out to be a **red herring for this specific failure**.
+The CI run below (same stage-two command, a from-scratch `macos-15` GitHub-hosted runner with no
+Homebrew `xz` ever installed, so the forwarding bug's truncation has nothing to leak through)
+hit the *identical* `Could NOT find LibLZMA (missing: LIBLZMA_INCLUDE_DIR)` error, at the
+identical call stack, after stage one completed in full. A host where the bug's effect is
+structurally impossible fails the same way a host where it fires does — which only makes sense if
+the forwarding bug was never the actual cause. It is not: `BOOST_IOSTREAMS_ENABLE_LZMA` is never
+set to `OFF` on either host, the exported config's two `find_dependency` calls are unconditional
+regardless, and no plausible value of `CMAKE_IGNORE_PREFIX_PATH` changes that the header still
+doesn't exist anywhere CMake is allowed to look. **So the earlier "host-contingent, a clean host
+would not trip this" framing is now disproven, not merely corrected**: fixing the forwarding bug
+would not fix this.
 
 I confirmed the diagnosis is otherwise complete — nothing else past LibLZMA is broken by this
 configuration — by configuring once, off the record, with
@@ -236,11 +236,14 @@ workaround C7's decision and `02-deps-superbuild`'s own PR (which found and repo
 suppressed, a Homebrew link in the bundled CPython's `_lzma` module) both declined. The three
 things task.md explicitly forbids — patching vendored source, hand-editing `CMakeCache.txt`, and
 turning `SLIC3R_CAD` off — were also considered and are not what this is; none would reach a real
-fix either, since the forwarding bug is upstream of all three. The real next step, left to
-whoever picks this back up (not attempted here, since it touches stage one and task.md forbids
-changing stage one's flags in this task): get the full ignore list to survive the forwarding at
-`deps/CMakeLists.txt:231`/`:285` — unverified what that takes, since the bug is in vendored source
-this task cannot edit to test a fix against.
+fix either, since an unconditional `find_dependency(LibLZMA)` for a header no stock macOS
+toolchain ships is upstream of all three. The real next step, left to whoever picks this back up
+(out of scope here: it means changing stage one's Boost build, which task.md forbids in this
+task): turn `BOOST_IOSTREAMS_ENABLE_LZMA` off explicitly in `deps/Boost/Boost.cmake`, the same way
+`BZIP2`/`ZSTD` already are, so the exported config stops declaring a dependency nothing on this
+platform can satisfy — or vendor a header-only shim, or accept the loss of libslic3r's (if any)
+lzma-backed iostream use. Unverified which is right; that choice is this finding's whole point of
+being left open.
 
 **What this means for the OCCT_LIBS double-configure question.** Against the shipped command, this
 is unanswered: configure fails inside the top-level `CMakeLists.txt`'s dependency discovery,
@@ -300,10 +303,18 @@ machine (this one) already has. First run on this label: `/bin/sh: autoreconf: c
 `texinfo` was missing too. Both are a gap in the CI job's own scaffolding, not stage one's CMake
 flags or anything under `vendor/OrcaSlicer/`, so `brew install autoconf automake libtool texinfo`
 was added before the build step — the same category of addition as the existing
-`setup-uv`/`setup-just` steps, needed for this task's one step to run at all. Whether the job then
-reaches the same LibLZMA failure as this host once these gaps are closed (confirming the
-"host-contingent" framing above) or configures cleanly (proving it) is for the PR's next CI run to
-show.
+`setup-uv`/`setup-just` steps, needed for this task's one step to run at all.
+
+With that gap closed, the job's next run **completed stage one in full**, for real, from an empty
+prefix, on a from-scratch `macos-15` runner with no Homebrew `xz` ever installed: 21 dependencies,
+~26 minutes wall-clock (11:16:16–11:42:33Z), no further missing tools. Stage two then hit the
+*identical* `Could NOT find LibLZMA (missing: LIBLZMA_INCLUDE_DIR)` error, at the identical call
+stack, as this dev host. That is the measurement the root-cause section above is built on: a host
+that structurally cannot have the forwarding bug's effect (there is no Homebrew `xz` here to leak
+through in the first place) fails exactly the same way, which is what disproves "host-contingent"
+rather than merely leaving it unverified. CI's own build-tree cache never populated across any of
+these runs (`actions/cache` only saves on job success, and every run here failed); it will start
+populating once `just oracle-build` exits 0, same as any other.
 
 ### Licensing
 

@@ -58,12 +58,12 @@ task.md names only the C++ spelling, but the orientation/incircle predicates it 
 (Shewchuk's routines in `deps_src/mcut/source/shewchuk.c`, linked into both `libslic3r` and
 `libslic3r_cgal`) are C, not C++, so the faithful reading passes it to both languages.
 
-**This configuration does not currently build against this host's stage-one prefix.** Stage two's
-first configure fails — see `vendor/README.md`'s "Building libslic3r locally" section for the
-exact error, the confirmed root cause (stage one's own `CMAKE_IGNORE_PREFIX_PATH` is truncated by
-an argument-forwarding bug in vendored `deps/CMakeLists.txt`, so Homebrew's `xz` leaks into stage
-one's Boost build on any host that has it), and what was tried. This is host-contingent, not a
-fixed property of macOS arm64: a host with no Homebrew `xz` would not trip it. No upstream
+**This configuration does not currently build.** Stage two's first configure fails — see
+`vendor/README.md`'s "Building libslic3r locally" section for the exact error, the confirmed root
+cause, and what was tried. `boost_iostreams`'s exported CMake package config unconditionally
+requires `LibLZMA`, and no stock macOS toolchain ships `lzma.h` (only an excluded package manager
+does); confirmed identical on this dev host and on a from-scratch GitHub-hosted `macos-15` runner
+that never had Homebrew's `xz` installed, so this is not a quirk of one machine. No upstream
 workflow runs `SLIC3R_GUI=OFF`/`SLIC3R_CAD=ON` on macOS at all; the one upstream script that runs
 it at all (`scripts/CAD/run-kernel-tests.sh:145-158`) does so only on Linux. The flags above are
 what this oracle is specified to use once this is resolved, not evidence that it currently
