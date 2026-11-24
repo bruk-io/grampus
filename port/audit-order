@@ -73,6 +73,7 @@ from __future__ import annotations
 import bisect
 import contextlib
 import csv
+import difflib
 import re
 import sys
 from dataclasses import dataclass
@@ -995,13 +996,13 @@ NA = "n/a"
 # row), so every order-audit and fidelity-marker row names that gate table by a fixed literal
 # rather than inventing one. This is a judgement call the task leaves open; see the pull
 # request body.
-STATIC_SITE_LEVEL = "the gate table in port/reports/determinism.md (R3)"
+STATIC_SITE_LEVEL = "the gate table in docs/ORACLE.md (R3)"
 
 FIDELITY_MARKER_RE = re.compile(r"//\s*FIDELITY\(port\):")
 
 
 def fidelity_marker_rows(crates_root: Path) -> list[list[str]]:
-    """Every `// FIDELITY(port):` marker under `crates_root` (source 2).
+    """Every `// FIDELITY(port):` marker anywhere under `crates_root` (source 2).
 
     `crates_root` not existing contributes zero rows, not an error -- true today (no module has
     landed; `crates/` is created by 08-comparator-workspace, which this task does not depend
@@ -1010,16 +1011,29 @@ def fidelity_marker_rows(crates_root: Path) -> list[list[str]]:
     (`crates_root = REPO_ROOT / "crates"`) reports `crates/...` paths exactly as committed,
     and pointing it at a self-contained fixture directory reports paths relative to that
     fixture, the same convention `port/port-status --tree` uses.
+
+    This is deliberately `rglob("*.rs")`, not the narrower `*/src/**/*.rs` shape
+    `port/port-status` uses to define a *ported module* -- that definition is port-status's own
+    and states its exclusion out loud (a marker's declaration here is "anywhere under `crates/`",
+    per this task's Done-when line, with no exclusion: a marker in `tests/`, `build.rs`, a
+    nested-workspace member's `src/`, or `crates/slic3r-ffi/fuzz/fuzz_targets/` (the planned
+    fuzz-target location, R19/plan.md) must still produce a row). A `target/` path component is
+    skipped regardless, since a local build can drop generated `.rs` under a crate's own
+    `target/` and this report must stay byte-identical on a fresh clone that never built anything.
+    A file that cannot be read is a failure, not a silent skip, for the same reason a present but
+    unreadable `.tsv` source is: the row would otherwise vanish with nothing failing.
     """
     rows: list[list[str]] = []
     if not crates_root.is_dir():
         return rows
     tree_root = crates_root.parent
-    for rs_path in sorted(crates_root.glob("*/src/**/*.rs")):
+    for rs_path in sorted(crates_root.rglob("*.rs")):
+        if "target" in rs_path.relative_to(crates_root).parts:
+            continue
         try:
             text = rs_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+        except OSError as exc:
+            raise SystemExit(f"audit-order: {rs_path} could not be read: {exc}") from exc
         relpath = rs_path.relative_to(tree_root).as_posix()
         for lineno, line in enumerate(text.splitlines(), start=1):
             if FIDELITY_MARKER_RE.search(line):
@@ -1031,12 +1045,27 @@ def fidelity_marker_rows(crates_root: Path) -> list[list[str]]:
 def order_audit_rows(container_table: list[list[str]], comparator_table: list[list[str]]) -> list[list[str]]:
     """Source 1: every row of the two just-generated tables whose last cell (`diverges`) is
     `yes`, read from the tables `run()` returns -- never from the committed `.md` files, so a
-    stale committed report can never be read back into its own regeneration."""
+    stale committed report can never be read back into its own regeneration.
+
+    A single container declaration iterated at two different sites (two rows in
+    `order-containers.md` that share a declaration line but differ in `iteration`) projects to
+    the same `place` here, since this source's `place` is the declaration site, not the
+    iteration site. Rather than carry a second cell into `place` and change what it means, the
+    resulting byte-identical duplicate rows are collapsed to one: `divergences.md` names every
+    *place*, once, and the per-site detail stays in `order-containers.md` where it is already
+    recorded.
+    """
     rows: list[list[str]] = []
+    seen: set[tuple[str, ...]] = set()
     for table in (container_table, comparator_table):
         for row in table:
             if row[-1] == "yes":
-                rows.append(["order-audit", row[0], STATIC_SITE_LEVEL, NA, NA, NA])
+                out = ["order-audit", row[0], STATIC_SITE_LEVEL, NA, NA, NA]
+                key = tuple(out)
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(out)
     return rows
 
 
@@ -1048,8 +1077,13 @@ def read_tsv_source(
     Returns (rows, present). `path` not existing is `([], False)`, not an error (the rule an
     absent source is never a failure). `path` existing with a header missing any of
     `required_columns` exits non-zero naming the column(s) -- the other rule, that a present
-    but unreadable source is a failure rather than silently zero rows. Row order follows the
-    file; the caller sorts the combined table.
+    but unreadable source is a failure rather than silently zero rows. A data row shorter than
+    the header (`csv.DictReader` fills a missing trailing cell with `None`) is the same failure,
+    named by its 1-based data-row number rather than coerced to an empty string: coercing would
+    make a missing `gate` or `level reached` cell read as `""`, fail the `== "none"` /
+    `not in {...}` test, and vanish as if the row simply did not diverge -- the row-loss
+    direction this task exists to prevent. Row order follows the file; the caller sorts the
+    combined table.
     """
     if not path.is_file():
         return [], False
@@ -1062,7 +1096,16 @@ def read_tsv_source(
                 f"audit-order: {path} is missing column(s) {missing!r}; its header is "
                 f"{fieldnames!r} but {required_columns!r} are required"
             )
-        rows = [row_builder(r) for r in reader if predicate(r)]
+        rows: list[list[str]] = []
+        for lineno, raw_row in enumerate(reader, start=1):
+            short = [c for c in required_columns if raw_row.get(c) is None]
+            if short:
+                raise SystemExit(
+                    f"audit-order: {path} data row {lineno} is missing value(s) for "
+                    f"column(s) {short!r} (fewer fields than the header)"
+                )
+            if predicate(raw_row):
+                rows.append(row_builder(raw_row))
     return rows, True
 
 
@@ -1150,10 +1193,15 @@ def write_divergences(path: Path, result: DivergencesResult) -> None:
         "absent when this file was regenerated contributed zero rows, not a failure."
     )
     lines.append("")
+    # The first cell is prefixed `source: ` (unlike a data row's bare source name) so
+    # `grep '^| <source> '` against a data row never also matches this summary row -- a data
+    # row's second cell is a place, this row's is `yes`/`no`, and a consumer that greps by
+    # first cell alone (e.g. 23-perf-backlog, matching `fidelity-marker` rows against markers
+    # still in the tree) must not have to special-case this table to avoid it.
     lines.append("| source | present | rows contributed |")
     lines.append("| --- | --- | --- |")
     for name, present, count in result.summary:
-        lines.append(f"| {name} | {'yes' if present else 'no'} | {count} |")
+        lines.append(f"| source: {name} | {'yes' if present else 'no'} | {count} |")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1537,6 +1585,10 @@ def regenerate_all(out_dir: Path | None) -> tuple[Path, Path, Path, DivergencesR
         comparators_path = out_dir / "order-comparators.md"
         divergences_path = out_dir / "divergences.md"
 
+    # build_divergences runs -- and can raise (a present-but-unreadable source 2/3/4) -- before
+    # either part-1 report is written, so a failure here leaves all three reports untouched
+    # rather than two freshly regenerated and one stale.
+    result = build_divergences(container_table, comparator_table, CRATES_ROOT, ORACLE_PARITY_TSV, DETERMINISM_TSV)
     write_table(
         containers_path,
         ["declaration", "container type", "declaring scope", "iteration", "reason", "port's choice", "diverges"],
@@ -1547,7 +1599,6 @@ def regenerate_all(out_dir: Path | None) -> tuple[Path, Path, Path, DivergencesR
         ["comparator", "reach", "use", "shape", "reason", "port's choice", "diverges"],
         comparator_table,
     )
-    result = build_divergences(container_table, comparator_table, CRATES_ROOT, ORACLE_PARITY_TSV, DETERMINISM_TSV)
     write_divergences(divergences_path, result)
     click.echo(f"{containers_path if out_dir else containers_path.relative_to(REPO_ROOT)}: {len(container_table)} rows")
     click.echo(f"{comparators_path if out_dir else comparators_path.relative_to(REPO_ROOT)}: {len(comparator_table)} rows")
@@ -1557,6 +1608,9 @@ def regenerate_all(out_dir: Path | None) -> tuple[Path, Path, Path, DivergencesR
         f"{len(result.rows)} rows ({counts})"
     )
     return containers_path, comparators_path, divergences_path, result
+
+
+DIFF_LINE_LIMIT = 40
 
 
 def run_check() -> None:
@@ -1570,21 +1624,34 @@ def run_check() -> None:
     with log_path.open("w", encoding="utf-8") as log_file, contextlib.redirect_stdout(log_file):
         fresh_containers, fresh_comparators, fresh_divergences, _result = regenerate_all(SCRATCH_ROOT)
 
-    diffs: list[str] = []
+    drifted: list[tuple[Path, Path, str, str]] = []
     for committed, fresh in (
         (CONTAINERS_REPORT, fresh_containers),
         (COMPARATORS_REPORT, fresh_comparators),
         (DIVERGENCES_REPORT, fresh_divergences),
     ):
-        committed_text = committed.read_text(encoding="utf-8") if committed.is_file() else None
+        committed_text = committed.read_text(encoding="utf-8") if committed.is_file() else ""
         fresh_text = fresh.read_text(encoding="utf-8")
         if committed_text != fresh_text:
-            diffs.append(f"{committed.relative_to(REPO_ROOT)} has drifted from its regeneration")
+            drifted.append((committed, fresh, committed_text, fresh_text))
 
-    if diffs:
+    if drifted:
         print(f"audit-check: drift found (the regeneration's own output is at {log_path}):")
-        for line in diffs:
-            print(f"  {line}")
+        for committed, fresh, committed_text, fresh_text in drifted:
+            relpath = committed.relative_to(REPO_ROOT)
+            print(f"  {relpath} has drifted from its regeneration (fresh copy at {fresh}):")
+            diff_lines = list(
+                difflib.unified_diff(
+                    committed_text.splitlines(keepends=True),
+                    fresh_text.splitlines(keepends=True),
+                    fromfile=f"{relpath} (committed)",
+                    tofile=f"{relpath} (regenerated)",
+                )
+            )
+            for line in diff_lines[:DIFF_LINE_LIMIT]:
+                print("    " + line.rstrip("\n"))
+            if len(diff_lines) > DIFF_LINE_LIMIT:
+                print(f"    ... ({len(diff_lines) - DIFF_LINE_LIMIT} more diff lines omitted)")
         raise SystemExit(1)
 
 
@@ -1608,6 +1675,16 @@ def _selftest_source2() -> list[str]:
         failures.append(f"fidelity-marker: expected 1 row for {present_dir}, got {rows!r}")
     elif rows[0][0] != "fidelity-marker":
         failures.append(f"fidelity-marker: expected source cell 'fidelity-marker', got {rows[0]!r}")
+
+    # The Done-when line is "anywhere under crates/", not just `<crate>/src/**/*.rs` -- a
+    # marker in `<crate>/tests/` must still produce a row (the narrower glob
+    # `port/port-status` uses for a *ported module* would silently miss it).
+    outside_src_dir = SELFTEST_ROOT / "sources-present-outside-src" / "crates"
+    rows = fidelity_marker_rows(outside_src_dir)
+    if len(rows) != 1:
+        failures.append(f"fidelity-marker: expected 1 row for a marker outside <crate>/src/ under {outside_src_dir}, got {rows!r}")
+    elif "tests/t.rs" not in rows[0][1]:
+        failures.append(f"fidelity-marker: expected the row's place to name tests/t.rs, got {rows[0]!r}")
     return failures
 
 
@@ -1694,8 +1771,29 @@ def _selftest_build_divergences() -> list[str]:
     return failures
 
 
+def _selftest_order_audit_dedup() -> list[str]:
+    """One container declaration iterated at two sites yields two rows in
+    `order-containers.md` that share a declaration (`place`) but differ in `iteration` --
+    `order_audit_rows` must collapse those to a single `divergences.md` row, not emit the same
+    place twice."""
+    failures = []
+    container_table = [
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:2", "r", "c", "yes"],
+        ["vendor/OrcaSlicer/src/libslic3r/Fake.cpp:1", "std::unordered_map", "f", "vendor/OrcaSlicer/src/libslic3r/Fake.cpp:3", "r", "c", "yes"],
+    ]
+    rows = order_audit_rows(container_table, [])
+    if len(rows) != 1:
+        failures.append(f"order_audit_rows: expected 1 deduplicated row for two iteration sites of one declaration, got {rows!r}")
+    return failures
+
+
 def run_selftest() -> int:
-    failures = _selftest_source2() + _selftest_tsv_sources() + _selftest_build_divergences()
+    failures = (
+        _selftest_source2()
+        + _selftest_tsv_sources()
+        + _selftest_build_divergences()
+        + _selftest_order_audit_dedup()
+    )
     if failures:
         for failure in failures:
             click.echo(f"self-test: FAILED: {failure}")
