@@ -191,13 +191,15 @@ differently depending on what Boost's own build actually linked. Upstream's
 (`-DBOOST_IOSTREAMS_ENABLE_BZIP2:BOOL=OFF`, `...ZSTD:BOOL=OFF`, which is why those two have no
 corresponding `find_dependency` in the generated config) but leaves lzma on the CMake-build
 default, so every consumer of this exported config unconditionally needs a `LibLZMA` that
-`find_package` can see. And `lzma.h` is not part of any stock macOS toolchain: not the Xcode SDK
-(which ships only a headerless `liblzma.tbd` linker stub — its *library* half resolves on every
-host, which is why the error is specifically "missing: `LIBLZMA_INCLUDE_DIR`"), not the Command
-Line Tools, nothing. The only sources of the header are optional package managers — Homebrew's
-`xz` formula, MacPorts' `xz` — which `CMAKE_IGNORE_PREFIX_PATH` is specifically mandated to
-exclude. The two things combine into a failure that is **not host-contingent**: it reproduces
-identically whether or not the host happens to have Homebrew's `xz` installed.
+`find_package` can see. On neither host tested does `lzma.h` exist anywhere `find_path` is
+permitted to look: the Xcode SDK on both ships only a headerless `liblzma.tbd` linker stub (its
+*library* half resolves on every host, which is why the error is specifically "missing:
+`LIBLZMA_INCLUDE_DIR`"), and on this dev machine the only copies of the header anywhere on disk
+are under Homebrew's `xz` formula and an unrelated `miniconda3` prefix — both of which
+`CMAKE_IGNORE_PREFIX_PATH` is specifically mandated to exclude, and neither of which exists at all
+on the from-scratch CI runner. The two things combine into a failure that is **not
+host-contingent**: it reproduces identically whether or not the host happens to have Homebrew's
+`xz` installed.
 
 This was confirmed the hard way, by first reaching the wrong half of the explanation. Stage one's
 top-level configure (`oracle/build-libslic3r`'s own `run_stage_one`) passes

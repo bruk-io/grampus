@@ -61,9 +61,10 @@ task.md names only the C++ spelling, but the orientation/incircle predicates it 
 **This configuration does not currently build.** Stage two's first configure fails — see
 `vendor/README.md`'s "Building libslic3r locally" section for the exact error, the confirmed root
 cause, and what was tried. `boost_iostreams`'s exported CMake package config unconditionally
-requires `LibLZMA`, and no stock macOS toolchain ships `lzma.h` (only an excluded package manager
-does); confirmed identical on this dev host and on a from-scratch GitHub-hosted `macos-15` runner
-that never had Homebrew's `xz` installed, so this is not a quirk of one machine. No upstream
+requires `LibLZMA`, and `lzma.h` exists nowhere `find_path` is permitted to look on either host
+tested (on the dev host, only under an excluded Homebrew/miniconda prefix; on a from-scratch
+GitHub-hosted `macos-15` runner, not at all) — confirmed identical on both, so this is not a
+quirk of one machine. No upstream
 workflow runs `SLIC3R_GUI=OFF`/`SLIC3R_CAD=ON` on macOS at all; the one upstream script that runs
 it at all (`scripts/CAD/run-kernel-tests.sh:145-158`) does so only on Linux. The flags above are
 what this oracle is specified to use once this is resolved, not evidence that it currently
