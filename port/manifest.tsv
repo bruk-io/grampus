@@ -9,8 +9,8 @@ Algorithm/LineSplit.hpp	Algorithm	76	12	14	in	slic3r-algorithm	crates/slic3r-alg
 Algorithm/RegionExpansion.cpp	Algorithm	575	12	14	in	slic3r-algorithm	crates/slic3r-algorithm/src/region_expansion.rs	none	no	exact			3	required	not-started
 Algorithm/RegionExpansion.hpp	Algorithm	119	9	14	in	slic3r-algorithm	crates/slic3r-algorithm/src/region_expansion.rs	posPerimeters	no	exact			3	required	not-started
 AnyPtr.hpp	root	131	0		out: No caller in the four entry points' closure.			none	no					n/a	not-started
-AppConfig.cpp	root	1983	12	16	in	slic3r-appconfig	crates/slic3r-appconfig/src/app_config.rs	none	no	exact			1	n/a	not-started
-AppConfig.hpp	root	506	11	16	in	slic3r-appconfig	crates/slic3r-appconfig/src/app_config.rs	posSlice	no	exact			2	n/a	not-started
+AppConfig.cpp	root	1983	12	16	in	slic3r-appconfig	crates/slic3r-appconfig/src/app_config.rs	none	no	exact			3	n/a	not-started
+AppConfig.hpp	root	506	11	16	in	slic3r-appconfig	crates/slic3r-appconfig/src/app_config.rs	posSlice	no	exact			3	n/a	not-started
 Arachne/BeadingStrategy/BeadingStrategy.cpp	Arachne	79	4	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/beading_strategy.rs	none	no	exact			1	n/a	not-started
 Arachne/BeadingStrategy/BeadingStrategy.hpp	Arachne	121	3	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/beading_strategy.rs	none	no	exact			1	n/a	not-started
 Arachne/BeadingStrategy/BeadingStrategyFactory.cpp	Arachne	59	5	4	in	slic3r-arachne-beadingstrategy	crates/slic3r-arachne-beadingstrategy/src/beading_strategy_factory.rs	none	no	exact			1	n/a	not-started
@@ -71,8 +71,8 @@ BridgeDetector.hpp	root	138	11	13	in	slic3r-bridgedetector	crates/slic3r-bridged
 Brim.cpp	root	1016	19	19	in	slic3r-brim	crates/slic3r-brim/src/brim.rs	none	no	exact			3	required	not-started
 Brim.hpp	root	36	9	19	in	slic3r-brim	crates/slic3r-brim/src/brim.rs	psWipeTower	no	exact			3	required	not-started
 BrimEarsPoint.hpp	root	70	4	4	in	slic3r-brimearspoint	crates/slic3r-brimearspoint/src/brim_ears_point.rs	posSlice	yes	exact			2	n/a	not-started
-BuildVolume.cpp	root	620	13	13	in	slic3r-buildvolume	crates/slic3r-buildvolume/src/build_volume.rs	none	no	exact			1	n/a	not-started
-BuildVolume.hpp	root	170	9	13	in	slic3r-buildvolume	crates/slic3r-buildvolume/src/build_volume.rs	posPrepareInfill	no	exact			2	n/a	not-started
+BuildVolume.cpp	root	620	13	13	in	slic3r-buildvolume	crates/slic3r-buildvolume/src/build_volume.rs	none	no	exact			3	n/a	not-started
+BuildVolume.hpp	root	170	9	13	in	slic3r-buildvolume	crates/slic3r-buildvolume/src/build_volume.rs	posPrepareInfill	no	exact			3	n/a	not-started
 CAD/CadDocument.cpp	CAD	4764	12		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 CAD/CadDocument.hpp	CAD	920	11		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 CAD/GeometryEngine.cpp	CAD	734	11		out: No caller in the four entry points' closure.			none	no					n/a	not-started
@@ -100,8 +100,8 @@ Circle.cpp	root	632	5	6	in	slic3r-circle	crates/slic3r-circle/src/circle.rs	none
 Circle.hpp	root	147	4	6	in	slic3r-circle	crates/slic3r-circle/src/circle.rs	posSlice	no	exact			2	required	not-started
 ClipperUtils.cpp	root	1578	11	12	in	slic3r-clipperutils	crates/slic3r-clipperutils/src/clipper_utils.rs	none	no	exact			3	required	not-started
 ClipperUtils.hpp	root	618	10	12	in	slic3r-clipperutils	crates/slic3r-clipperutils/src/clipper_utils.rs	posSlice	yes	exact			3	required	not-started
-ClipperZUtils.cpp	root	80	12	13	in	slic3r-clipperzutils	crates/slic3r-clipperzutils/src/clipper_z_utils.rs	none	no	exact			1	required	not-started
-ClipperZUtils.hpp	root	160	11	13	in	slic3r-clipperzutils	crates/slic3r-clipperzutils/src/clipper_z_utils.rs	none	yes	exact			1	required	not-started
+ClipperZUtils.cpp	root	80	12	13	in	slic3r-clipperzutils	crates/slic3r-clipperzutils/src/clipper_z_utils.rs	none	no	exact			3	required	not-started
+ClipperZUtils.hpp	root	160	11	13	in	slic3r-clipperzutils	crates/slic3r-clipperzutils/src/clipper_z_utils.rs	none	yes	exact			3	required	not-started
 Color.cpp	root	436	3	3	in	slic3r-color	crates/slic3r-color/src/color.rs	none	no	exact			3	n/a	not-started
 Color.hpp	root	188	0	3	in	slic3r-color	crates/slic3r-color/src/color.rs	posSlice	no	exact			3	n/a	not-started
 ColorDecomposeRecipe.cpp	root	532	4	6	in	slic3r-colordecomposerecipe	crates/slic3r-colordecomposerecipe/src/color_decompose_recipe.rs	none	no	exact			3	n/a	not-started
@@ -200,14 +200,14 @@ Fill/FillTpmsFK.cpp	Fill	197	12	22	in	slic3r-fill	crates/slic3r-fill/src/fill_tp
 Fill/FillTpmsFK.hpp	Fill	39	11	22	in	slic3r-fill	crates/slic3r-fill/src/fill_tpms_fk.rs	posInfill	no	exact			3	required	not-started
 Fill/Lightning/DistanceField.cpp	Fill	191	12	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/distance_field.rs	none	no	exact			1	required	not-started
 Fill/Lightning/DistanceField.hpp	Fill	216	9	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/distance_field.rs	none	no	exact			1	required	not-started
-Fill/Lightning/Generator.cpp	Fill	309	17	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/generator.rs	none	no	exact			1	n/a	not-started
-Fill/Lightning/Generator.hpp	Fill	142	11	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/generator.rs	posSlice	no	exact			2	n/a	not-started
+Fill/Lightning/Generator.cpp	Fill	309	17	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/generator.rs	none	no	exact			3	n/a	not-started
+Fill/Lightning/Generator.hpp	Fill	142	11	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/generator.rs	posSlice	no	exact			3	n/a	not-started
 Fill/Lightning/Layer.cpp	Fill	462	12	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/layer.rs	none	no	exact			3	required	not-started
 Fill/Lightning/Layer.hpp	Fill	97	10	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/layer.rs	posSlice	no	exact			3	required	not-started
 Fill/Lightning/TreeNode.cpp	Fill	453	12	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/tree_node.rs	none	no	exact			1	required	not-started
 Fill/Lightning/TreeNode.hpp	Fill	319	11	21	in	slic3r-fill-lightning	crates/slic3r-fill-lightning/src/tree_node.rs	none	no	exact			1	required	not-started
-Flow.cpp	root	280	17	9	in	slic3r-flow	crates/slic3r-flow/src/flow.rs	none	no	exact			1	n/a	not-started
-Flow.hpp	root	151	9	9	in	slic3r-flow	crates/slic3r-flow/src/flow.rs	posSlice	no	exact			2	n/a	not-started
+Flow.cpp	root	280	17	9	in	slic3r-flow	crates/slic3r-flow/src/flow.rs	none	no	exact			3	n/a	not-started
+Flow.hpp	root	151	9	9	in	slic3r-flow	crates/slic3r-flow/src/flow.rs	posSlice	no	exact			3	n/a	not-started
 FlushVolCalc.cpp	root	133	10		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 FlushVolCalc.hpp	root	41	9		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 FlushVolPredictor.cpp	root	353	4	4	in	slic3r-flushvolpredictor	crates/slic3r-flushvolpredictor/src/flush_vol_predictor.rs	none	no	exact			1	n/a	not-started
@@ -246,8 +246,8 @@ GCode.cpp	root	11805	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/g_code.rs	psS
 GCode.hpp	root	1087	18	23	in	slic3r-gcode	crates/slic3r-gcode/src/g_code.rs	psWipeTower	no	exact			3	required	not-started
 GCode/AdaptivePAInterpolator.cpp	GCode	120	2	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_interpolator.rs	none	no	exact			1	n/a	not-started
 GCode/AdaptivePAInterpolator.hpp	GCode	54	1	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_interpolator.rs	psWipeTower	no	exact			2	n/a	not-started
-GCode/AdaptivePAProcessor.cpp	GCode	442	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_processor.rs	none	no	exact			1	n/a	not-started
-GCode/AdaptivePAProcessor.hpp	GCode	107	2	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_processor.rs	psWipeTower	no	exact			2	n/a	not-started
+GCode/AdaptivePAProcessor.cpp	GCode	442	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_processor.rs	none	no	exact			3	n/a	not-started
+GCode/AdaptivePAProcessor.hpp	GCode	107	2	23	in	slic3r-gcode	crates/slic3r-gcode/src/adaptive_pa_processor.rs	psWipeTower	no	exact			3	n/a	not-started
 GCode/AvoidCrossingPerimeters.cpp	GCode	1753	19	23	in	slic3r-gcode	crates/slic3r-gcode/src/avoid_crossing_perimeters.rs	none	no	exact			3	required	not-started
 GCode/AvoidCrossingPerimeters.hpp	GCode	79	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/avoid_crossing_perimeters.rs	psWipeTower	no	exact			3	required	not-started
 GCode/BeltBackTransform.cpp	GCode	33	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/belt_back_transform.rs	none	no	exact			1	n/a	not-started
@@ -307,8 +307,8 @@ GCode/ToolOrdering.cpp	GCode	3723	17	23	in	slic3r-gcode	crates/slic3r-gcode/src/
 GCode/ToolOrdering.hpp	GCode	451	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/tool_ordering.rs	posSlice	no	exact			3	n/a	not-started
 GCode/WipePathHelpers.cpp	GCode	962	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_path_helpers.rs	none	no	exact			3	required	not-started
 GCode/WipePathHelpers.hpp	GCode	101	9	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_path_helpers.rs	psSkirtBrim	no	exact			3	required	not-started
-GCode/WipeTower.cpp	GCode	5567	13	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower.rs	none	no	exact			1	required	not-started
-GCode/WipeTower.hpp	GCode	779	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower.rs	posSlice	no	exact			2	required	not-started
+GCode/WipeTower.cpp	GCode	5567	13	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower.rs	none	no	exact			3	required	not-started
+GCode/WipeTower.hpp	GCode	779	10	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower.rs	posSlice	no	exact			3	required	not-started
 GCode/WipeTower2.cpp	GCode	2804	13	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower2.rs	none	no	exact			3	n/a	not-started
 GCode/WipeTower2.hpp	GCode	462	11	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower2.rs	posSlice	no	exact			3	n/a	not-started
 GCode/WipeTowerEstimate.cpp	GCode	287	12	23	in	slic3r-gcode	crates/slic3r-gcode/src/wipe_tower_estimate.rs	none	no	exact			3	required	not-started
@@ -355,7 +355,7 @@ LayOnFace.cpp	root	244	15		out: No caller in the four entry points' closure.			n
 LayOnFace.hpp	root	55	4		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 Layer.cpp	root	515	17	16	in	slic3r-layer	crates/slic3r-layer/src/layer.rs	posSlice	no	exact			3	required	not-started
 Layer.hpp	root	371	11	16	in	slic3r-layer	crates/slic3r-layer/src/layer.rs	posSlice	no	exact			3	required	not-started
-LayerRegion.cpp	root	1129	17	21	in	slic3r-layerregion	crates/slic3r-layerregion/src/layer_region.rs	posPerimeters	no	exact			2	n/a	not-started
+LayerRegion.cpp	root	1129	17	21	in	slic3r-layerregion	crates/slic3r-layerregion/src/layer_region.rs	posPerimeters	no	exact			3	n/a	not-started
 LifecycleEvents.hpp	root	249	0	0	in	slic3r-lifecycleevents	crates/slic3r-lifecycleevents/src/lifecycle_events.rs	psWipeTower	yes	exact			2	n/a	not-started
 Line.cpp	root	150	10	5	in	slic3r-line	crates/slic3r-line/src/line.rs	none	no	exact			1	required	not-started
 Line.hpp	root	341	4	5	in	slic3r-line	crates/slic3r-line/src/line.rs	posSlice	yes	exact			2	required	not-started
@@ -385,8 +385,8 @@ ModelArrange.cpp	root	204	19		out: Placement is fixed in the fixture and `just o
 ModelArrange.hpp	root	103	18		out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from --copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path (:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the deduction, because the application does call this code.			none	no					n/a	not-started
 MultiMaterialSegmentation.cpp	root	2504	17	15	in	slic3r-multimaterialsegmentation	crates/slic3r-multimaterialsegmentation/src/multi_material_segmentation.rs	none	no	exact			3	n/a	not-started
 MultiMaterialSegmentation.hpp	root	89	5	15	in	slic3r-multimaterialsegmentation	crates/slic3r-multimaterialsegmentation/src/multi_material_segmentation.rs	posSlice	no	exact			3	n/a	not-started
-MultiNozzleUtils.cpp	root	980	10	9	in	slic3r-multinozzleutils	crates/slic3r-multinozzleutils/src/multi_nozzle_utils.rs	none	no	exact			1	n/a	not-started
-MultiNozzleUtils.hpp	root	298	9	9	in	slic3r-multinozzleutils	crates/slic3r-multinozzleutils/src/multi_nozzle_utils.rs	posSlice	no	exact			2	n/a	not-started
+MultiNozzleUtils.cpp	root	980	10	9	in	slic3r-multinozzleutils	crates/slic3r-multinozzleutils/src/multi_nozzle_utils.rs	none	no	exact			3	n/a	not-started
+MultiNozzleUtils.hpp	root	298	9	9	in	slic3r-multinozzleutils	crates/slic3r-multinozzleutils/src/multi_nozzle_utils.rs	posSlice	no	exact			3	n/a	not-started
 MultiPoint.cpp	root	662	9	6	in	slic3r-multipoint	crates/slic3r-multipoint/src/multi_point.rs	none	no	exact			1	required	not-started
 MultiPoint.hpp	root	200	5	6	in	slic3r-multipoint	crates/slic3r-multipoint/src/multi_point.rs	posSlice	no	exact			2	required	not-started
 MutablePolygon.cpp	root	391	10	10	in	slic3r-mutablepolygon	crates/slic3r-mutablepolygon/src/mutable_polygon.rs	none	no	exact			3	required	not-started
@@ -414,8 +414,8 @@ ParameterUtils.cpp	root	143	10	9	in	slic3r-parameterutils	crates/slic3r-paramete
 ParameterUtils.hpp	root	22	9	9	in	slic3r-parameterutils	crates/slic3r-parameterutils/src/parameter_utils.rs	psWipeTower	no	exact			2	n/a	not-started
 PerimeterGenerator.cpp	root	3231	14	18	in	slic3r-perimetergenerator	crates/slic3r-perimetergenerator/src/perimeter_generator.rs	none	no	exact			3	required	not-started
 PerimeterGenerator.hpp	root	194	12	18	in	slic3r-perimetergenerator	crates/slic3r-perimetergenerator/src/perimeter_generator.rs	posSlice	no	exact			3	required	not-started
-PlaceholderParser.cpp	root	2713	10	10	in	slic3r-placeholderparser	crates/slic3r-placeholderparser/src/placeholder_parser.rs	none	no	exact			1	n/a	not-started
-PlaceholderParser.hpp	root	99	5	10	in	slic3r-placeholderparser	crates/slic3r-placeholderparser/src/placeholder_parser.rs	posSlice	no	exact			2	n/a	not-started
+PlaceholderParser.cpp	root	2713	10	10	in	slic3r-placeholderparser	crates/slic3r-placeholderparser/src/placeholder_parser.rs	none	no	exact			3	n/a	not-started
+PlaceholderParser.hpp	root	99	5	10	in	slic3r-placeholderparser	crates/slic3r-placeholderparser/src/placeholder_parser.rs	posSlice	no	exact			3	n/a	not-started
 Platform.cpp	root	177	1	0	in	slic3r-platform	crates/slic3r-platform/src/platform.rs	none	no	exact			1	n/a	not-started
 Platform.hpp	root	46	0	0	in	slic3r-platform	crates/slic3r-platform/src/platform.rs	none	no	exact			1	n/a	not-started
 Point.cpp	root	356	9	3	in	slic3r-point	crates/slic3r-point/src/point.rs	none	no	exact			1	required	not-started
@@ -502,8 +502,8 @@ SlicesToTriangleMesh.cpp	root	146	11		out: No caller in the four entry points' c
 SlicesToTriangleMesh.hpp	root	27	10		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 Slicing.cpp	root	1028	15	5	in	slic3r-slicing	crates/slic3r-slicing/src/slicing.rs	none	no	exact			1	n/a	not-started
 Slicing.hpp	root	235	4	5	in	slic3r-slicing	crates/slic3r-slicing/src/slicing.rs	posSlice	no	exact			2	n/a	not-started
-SlicingAdaptive.cpp	root	222	15	3	in	slic3r-slicingadaptive	crates/slic3r-slicingadaptive/src/slicing_adaptive.rs	none	no	exact			1	n/a	not-started
-SlicingAdaptive.hpp	root	47	5	3	in	slic3r-slicingadaptive	crates/slic3r-slicingadaptive/src/slicing_adaptive.rs	none	no	exact			1	n/a	not-started
+SlicingAdaptive.cpp	root	222	15	3	in	slic3r-slicingadaptive	crates/slic3r-slicingadaptive/src/slicing_adaptive.rs	none	no	exact			3	n/a	not-started
+SlicingAdaptive.hpp	root	47	5	3	in	slic3r-slicingadaptive	crates/slic3r-slicingadaptive/src/slicing_adaptive.rs	none	no	exact			3	n/a	not-started
 StreamUtils.hpp	root	61	9		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 Support/BeltFloorContext.cpp	Support	132	10	22	in	slic3r-support	crates/slic3r-support/src/belt_floor_context.rs	none	no	exact			1	required	not-started
 Support/BeltFloorContext.hpp	Support	83	9	22	in	slic3r-support	crates/slic3r-support/src/belt_floor_context.rs	none	no	exact			1	required	not-started

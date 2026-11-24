@@ -2084,9 +2084,16 @@ JUDGEMENT_COLUMNS = (
 )
 JUDGEMENT_INDEXES = tuple(HEADER.index(name) for name in JUDGEMENT_COLUMNS)
 
-# The derived columns `just inventory-check` diffs: every column but the six judgement columns
-# and `status`. Index 0 (`path`) is the join key, not diffed on its own account.
-DERIVED_INDEXES = tuple(range(1, 9))
+# The derived columns `just inventory-check` diffs: every column but `path` (the join key, not
+# diffed on its own account), the six judgement columns and `status`. Derived from HEADER by
+# name, not a hard-coded range, so a column a later task adds to HEADER (15-task-cuts is part 5
+# of this same step) is diffed by default instead of silently escaping the drift check the way
+# an index range frozen at today's column count would.
+DERIVED_INDEXES = tuple(
+    i
+    for i, name in enumerate(HEADER)
+    if name not in JUDGEMENT_COLUMNS and name not in ("path", "status")
+)
 
 TEMPLATE_HEAVY_THRESHOLD = 0.25
 
@@ -2132,24 +2139,65 @@ def same_stem_header(cpp_relpath: str, casefold_index: dict[str, str]) -> str | 
 # whitespace).
 ANON_NAMESPACE_RE = re.compile(r"^\s*namespace\s*\{", re.MULTILINE)
 # A file-scope `static` free function's own column-0 definition (this codebase's house style
-# for every top-level definition, same convention as METHOD_DEFINITION_RE): `(?!.*::)` on the
-# rest of the line excludes a qualified name, so a static *member* function's own definition
-# (which this codebase never re-marks `static` on, only on its declaration) is never
-# miscounted as a free function here.
-STATIC_FREE_FUNCTION_RE = re.compile(r"^static\b(?!.*::)[^\n;{}]*?\b[A-Za-z_]\w*\s*\(", re.MULTILINE)
+# for every top-level definition, same convention as METHOD_DEFINITION_RE). The column-0
+# anchor alone already excludes a static member function's own definition: this codebase always
+# indents one (Tesselate.cpp's tessBeginCB, Geometry/MedialAxis.cpp's parabola_y,
+# Geometry/ConvexHull.cpp's cmpy -- all under a class, all indented), so no further guard
+# against `::` is needed there, and a guard that rejects `::` anywhere in the line was wrong:
+# it also rejected an ordinary free function whose own return type happens to be qualified
+# (`static std::string f(...)`, `static Slic3r::Vec3f f(...)`), which is the common case in
+# this codebase and not the case this guard was meant to stop. The real false positive is a
+# file-scope `static` *variable* initialized by a call (`static bool x = f();`,
+# `static const Slic3r::Vec3f DEFAULT_EXTRUDER_OFFSET = Slic3r::Vec3f::Zero();`); excluding `=`
+# between `static` and the name instead rejects exactly that shape. At the pin this guard
+# changes no file's has_internal_linkage verdict (every file holding one of these initializers
+# also holds a genuine static free function elsewhere), so it is not load-bearing today -- it
+# is here so the next file that has only the initializer shape is read right the first time.
+STATIC_FREE_FUNCTION_RE = re.compile(r"^static\b[^\n;{}=]*?\b[A-Za-z_]\w*\s*\(", re.MULTILINE)
 
 
 def has_internal_linkage(text: str) -> bool:
     """True if text (comments stripped) declares an anonymous namespace or a file-scope static
-    free function -- R19's "no external linkage to call" test for proof path 3. Calibrated,
-    not asserted, against R19's own count at the pin: scanning every vendored .cpp/.mm this way
-    finds an anonymous namespace in exactly 49 files (R19 states 49) and a file-scope static
-    free function in most, short of all, of the 112 R19 names -- a narrower-than-R19 static-
-    free-function scan is the conservative direction for this rule (it only widens how many
-    rows fall through to proof path 1 or 2, it never wrongly empties path 2's Done-when line by
-    over-claiming path 3)."""
+    free function -- R19's "no external linkage to call" test for proof path 3. Measured, not
+    tuned to a target, against the vendored tree at the pin: scanning every vendored .cpp/.mm
+    this way finds an anonymous namespace in exactly 49 files (R19 states 49) and a file-scope
+    static free function in 113 (R19 states 112; see the regex's own comment above for what
+    changed from an earlier, narrower version of this scan and why).
+
+    Over-claiming path 3 is the safe direction for this rule, not under-claiming it: R19 gives
+    path 3 precisely because that code has no external linkage to call, so a row wrongly seeded
+    path 1 (FFI to a symbol that cannot actually be reached) is unprovable, while a row wrongly
+    seeded path 3 (a test translation unit that #includes the .cpp directly) always works
+    regardless of linkage."""
     code = strip_comments(text)
     return bool(ANON_NAMESPACE_RE.search(code)) or bool(STATIC_FREE_FUNCTION_RE.search(code))
+
+
+def assert_internal_linkage_calibration(relpaths: list[str]) -> None:
+    """Assert has_internal_linkage's two component scans still match their calibrated counts at
+    the pin -- an anonymous namespace in exactly 49 .cpp/.mm files, a file-scope static free
+    function in exactly 113 (see has_internal_linkage's own docstring for what these numbers
+    anchor and why). Run on every regeneration, in the style of this script's other anchor
+    assertions (the vendored enums, the CMakeLists cross-check, the row-count re-walk), so a
+    later edit to either regex fails loudly here instead of silently reshuffling which rows seed
+    proof path 3."""
+    anon_count = 0
+    static_count = 0
+    for relpath in relpaths:
+        if not relpath.endswith((".cpp", ".mm")):
+            continue
+        code = strip_comments((LIBSLIC3R_ROOT / relpath).read_bytes().decode("latin-1"))
+        if ANON_NAMESPACE_RE.search(code):
+            anon_count += 1
+        if STATIC_FREE_FUNCTION_RE.search(code):
+            static_count += 1
+    if anon_count != 49 or static_count != 113:
+        raise SystemExit(
+            "inventory: has_internal_linkage's calibration has drifted from the pin -- "
+            f"anonymous namespace in {anon_count} file(s) (expected 49), file-scope static "
+            f"free function in {static_count} file(s) (expected 113); a regex edit changed "
+            "what proof path 3 matches -- see has_internal_linkage's docstring"
+        )
 
 
 TEMPLATE_DENSITY_RE = re.compile(r"\btemplate\s*<|\bconstexpr\b|\binline\b")
@@ -2233,12 +2281,20 @@ def seed_judgement_cells(
     the stated constant defaults.
 
     `template-heavy`'s rule names only "an in-scope header"; it never fires for an out-of-scope
-    row or for a .cpp/.mm row, both of which always seed "no". `proof path` and `fuzz target`
-    both read "the row's own" .cpp or header: for a header row that is its same-stem .cpp
-    sibling (if one is tracked); for a .cpp row that is itself for proof path, and its
-    same-stem header sibling (if one is tracked) for fuzz target; a row with no such sibling to
-    read skips that test (proof path falls through to the next of the three; fuzz target
-    becomes "n/a", since there is no header to read a signature from)."""
+    row or for a .cpp/.mm row, both of which always seed "no". `proof path`'s first test and
+    `fuzz target` both read "the row's own" .cpp or header: for a header row that is its
+    same-stem .cpp sibling (if one is tracked); for a .cpp row that is itself for proof path,
+    and its same-stem header sibling (if one is tracked) for fuzz target; a row with no such
+    sibling to read skips that test (proof path falls through to the next of the three; fuzz
+    target becomes "n/a", since there is no header to read a signature from). `proof path`'s
+    second test is read differently, and deliberately not paired: it reads the row's OWN
+    `pipeline stage or none` cell, not a sibling's, because the task states that test over "a
+    row whose pipeline stage column names a stage" rather than over a unit's .cpp the way the
+    first test is stated. 06-manifest-scope fills that cell per in-scope row, a header
+    independently of its same-stem .cpp, so a header and its same-stem .cpp can and do disagree
+    here (a .cpp with an in-scope stage but internal linkage still seeds path 3 for itself,
+    while its header -- read fresh -- can fall through to path 2). A task that cuts one task per
+    .cpp+header unit (15-task-cuts) has to pick one of the two when they disagree."""
     if not in_scope:
         return ["no", "", "", "", "", "n/a"]
 
@@ -2263,6 +2319,15 @@ def seed_judgement_cells(
     else:
         own_cpp_text = None
 
+    # R19's three proof-path mechanisms, and what a "1", "2" or "3" cell commits a later task
+    # (15-task-cuts, 19-porting-contract, 34-foundation-spike) to building:
+    #   1 = FFI to the library built from the pin (oracle/build-libslic3r's output) -- the
+    #       default when neither of the other two tests fires.
+    #   2 = the committed stage dumps -- reachable at all only because 06-manifest-scope fills
+    #       `pipeline stage or none` for every in-scope row; this branch is unreachable before
+    #       that task runs.
+    #   3 = a test translation unit that `#include`s the vendored .cpp directly -- seeded by
+    #       `has_internal_linkage`'s own test, above.
     if own_cpp_text is not None and has_internal_linkage(own_cpp_text):
         proof_path = "3"
     elif stage_cell and stage_cell != "none":
@@ -2301,13 +2366,17 @@ PORT_STATUS_WINDOW_LINES = 8
 
 def compute_mod_reachable_files(crates_root: Path) -> frozenset[Path]:
     """Return every .rs file under crates_root reachable from some crate's src/lib.rs by a
-    chain of `mod name;` declarations (file-per-module, or mod.rs per directory). This is
-    status's own "a mod declaration reaches it" half (R8, R14); 21-port-status-markers and
-    22-port-status-gates compute reachability the same way from the same tree. Empty when
-    crates_root does not exist yet -- the state at this task's own commit, since no crate has
-    been scaffolded -- which is why every row's status comes back not-started here: there is
-    no Rust tree yet for any row to be drafted or ported in, and this function is unexercised
-    at this commit rather than wrong."""
+    chain of `mod name;` declarations (file-per-module, or mod.rs per directory), read from
+    comment-stripped text -- the same comment policy `compute_status` applies to its
+    `todo!()`/`unimplemented!()` scan, so a comment mentioning either name in passing cannot
+    hide a real `mod` line or fake one. This is status's own "a mod declaration reaches it" half
+    (R8, R14); 21-port-status-markers and 22-port-status-gates compute reachability the same way
+    from the same tree. At this task's own commit this walks the real `crates/` tree and
+    resolves oracle-compare's 6 mod-reachable files (lib.rs plus format/gcode/json/levels/
+    tolerance.rs; main.rs is excluded, since only src/lib.rs is used as a root) -- every row's
+    status still comes back not-started, not because this function is unexercised, but because
+    no row's `target module` path exists under crates/slic3r-* yet. Empty only if crates_root
+    itself does not exist."""
     reachable: set[Path] = set()
     if not crates_root.is_dir():
         return frozenset()
@@ -2352,15 +2421,23 @@ def compute_status(relpath: str, target_module_cell: str, mod_reachable: frozens
     not-started. Never reads a status cell as input, and never shells out to cargo or parses
     Rust -- it evaluates only the text-visible half of the rule (trailer presence, mod
     reachability, todo!()/unimplemented!() presence); the proof half of "ported" (R19) is
-    22-port-status-gates' to check, not this script's."""
+    22-port-status-gates' to check, not this script's.
+
+    Comment policy, stated once here because the two halves of this rule would otherwise read
+    the file two different ways: the `todo!()`/`unimplemented!()` check runs on comment-stripped
+    text, exactly like `compute_mod_reachable_files`' own `mod`-declaration scan, so a comment
+    that merely mentions either macro (e.g. "the old draft used todo!() here") cannot pin a
+    fully-ported file at not-started forever. The `PORT STATUS` trailer, by contrast, is read
+    from the raw text, because the trailer itself lives inside a comment by design."""
     if not target_module_cell:
         return "not-started"
     target_path = REPO_ROOT / target_module_cell
     if not target_path.is_file():
         return "not-started"
     text = target_path.read_text(encoding="utf-8", errors="replace")
+    code = strip_comments(text)
     reached = target_path in mod_reachable
-    if reached and not TODO_OR_UNIMPLEMENTED_RE.search(text):
+    if reached and not TODO_OR_UNIMPLEMENTED_RE.search(code):
         return "ported"
     if has_port_status_trailer(text, relpath) and not reached:
         return "drafted"
@@ -2393,6 +2470,7 @@ def generate_in_memory() -> tuple[list[list[str]], list[list[str]]]:
         raise SystemExit(f"inventory: found no source files under {LIBSLIC3R_ROOT}")
 
     assert_no_case_collisions(relpaths)
+    assert_internal_linkage_calibration(relpaths)
 
     cmake_paths = parse_cmake_source_paths(CMAKELISTS)
     matched = cross_check_cmake_sources(cmake_paths, set(relpaths))
@@ -2528,10 +2606,11 @@ def run_check() -> None:
     """`just inventory-check`: regenerate into memory and diff the *derived* columns only
     (see DERIVED_INDEXES) against the committed port/manifest.tsv -- never the six judgement
     columns, never status. The regeneration's own chatter is captured to a log file rather than
-    printed, so a clean tree's check prints nothing at all; a row added or removed is itself
-    a difference, reported before any per-cell diff. port/cut.tsv is not compared here: it
-    carries no judgement column of its own, and 07-crate-cut owns its regeneration and its own
-    check story."""
+    printed, so a clean tree's check prints nothing at all; the committed header row itself is
+    checked first (a renamed, reordered or added/removed column is reported even though it is
+    neither a row nor a per-cell diff), then a row added or removed, then any per-cell diff.
+    port/cut.tsv is not compared here: it carries no judgement column of its own, and
+    07-crate-cut owns its regeneration and its own check story."""
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     log_path = SCRATCH_ROOT / "inventory-check.log"
     with log_path.open("w", encoding="utf-8") as log_file, contextlib.redirect_stdout(log_file):
@@ -2541,6 +2620,15 @@ def run_check() -> None:
     fresh = {row[0]: row for row in rows}
 
     diffs: list[str] = []
+
+    committed_lines = (
+        MANIFEST_PATH.read_text(encoding="utf-8").splitlines() if MANIFEST_PATH.is_file() else []
+    )
+    committed_header = committed_lines[0] if committed_lines else ""
+    expected_header = "\t".join(HEADER)
+    if committed_header != expected_header:
+        diffs.append(f"header row: committed {committed_header!r}, expected {expected_header!r}")
+
     added = sorted(set(fresh) - set(committed))
     removed = sorted(set(committed) - set(fresh))
     if added:
