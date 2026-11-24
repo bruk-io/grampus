@@ -78,6 +78,17 @@ audit-order:
 task-cuts phase *ARGS:
     ./port/cut-tasks {{phase}} {{ARGS}}
 
+# regenerate port/ownership.tsv's field list from the vendored headers (R30, task
+# 16-ownership-spike): one row per raw-pointer field, and per field that is a container of raw
+# pointers, declared in a header port/manifest.tsv marks in scope. Rewrites the committed file --
+# for a person regenerating deliberately.
+ownership:
+    ./port/ownership
+# the drift-detecting variant: regenerates into a scratch directory and fails, with a diff and
+# every invalid row, when port/ownership.tsv disagrees with the headers at the pin. Prints the
+# row count of port/ownership.tsv on success -- the plan's recorded proof line for R30.
+ownership-check:
+    ./port/ownership --check
 # the one command that rewrites every generated report (task 18-divergences-regeneration):
 # today, just audit-order; 23-perf-backlog adds the perf-backlog regeneration to this same seam
 regenerate:

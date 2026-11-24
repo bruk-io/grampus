@@ -1,0 +1,833 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Regenerate port/ownership.tsv's field list from the vendored headers (R30, task
+16-ownership-spike, plan step 12).
+
+``port/ownership.tsv`` has one row per raw-pointer field, and per field that is a container of
+raw pointers, declared in a header ``port/manifest.tsv`` marks in scope (``.h``/``.hpp`` rows
+whose "in scope or out with a reason" cell is ``in`` or starts with ``in:``). Its header row is
+exactly::
+
+    header path	line	declaring type	field	C++ type	class	evidence	rust type
+
+``header path``, ``line``, ``declaring type``, ``field`` and ``C++ type`` are recomputed fresh
+from the vendored tree on every run; ``class``, ``evidence`` and ``rust type`` are carried
+forward verbatim from whatever the committed file holds for the same
+(header path, line, declaring type, field) key, exactly as the manifest's own six judgement
+columns are (see ``port/inventory``'s "Judgement columns" section) -- a field this run sees for
+the first time gets a blank ``class``, which is accepted while step 12's classification tasks are
+still open.
+
+**The alias trap.** A field whose declared type is an alias of a pointer or of a container of
+pointers (``typedef std::vector<ModelObject*> ModelObjectPtrs;``, or the ``using`` spelling) shows
+no literal ``*`` at its own declaration site. This script finds every ``typedef``/``using`` alias
+declared anywhere in an in-scope header (including one nested inside a class, e.g.
+``Arachne/SkeletalTrapezoidation.hpp``'s class-nested ``NodeSet``), follows alias-of-alias chains
+to a fixed point, and then treats a field whose type names one of the resulting pointer-aliases as
+a container-of-raw-pointers row exactly like a field whose type spells its own ``*``.
+
+**How a header is read.** This is not a C++ parser; it is a brace-depth statement scanner over
+comment- and string-literal-blanked text (``scannable_text``), in the same spirit as
+``port/inventory``'s own regex-based class/method tables. It walks every ``{ ... }`` block: a
+``class``/``struct``/``union`` opener recurses into its body with that name as the new
+"declaring type" (so a field is only ever emitted while inside such a body -- a namespace-scope
+pointer variable is not a "field" and is never emitted); a ``namespace`` (named, anonymous or
+``extern "C"``) opener recurses with the *same* declaring type; anything else is a function body
+or a brace-initializer and is skipped (its content is still scanned for *balanced braces*, so it
+cannot desynchronise the scan, but no field or alias is read out of it). Between braces, each
+``;``-terminated statement is tried first as a ``typedef``/``using`` alias, then -- only inside a
+class/struct/union body -- as a field declaration; a statement containing ``(`` is never a field
+(it is a method declaration, a call-style initializer or a function-pointer type), which is this
+scanner's main, deliberate false-negative: a function-pointer *field* is not counted. None was
+found in the alias-trap list the task names, and this limitation is called out in the pull request
+rather than hidden.
+
+A declaration can name more than one declarator sharing a base type (``Type *a, *b;``); each
+becomes its own row. A field is included when its own declarator segment's text contains a literal
+``*``, or when its base type's identifier tokens include a pointer-alias name.
+
+**The one shape the `(` guard still has to see through.** A method/operator declaration and a
+call-style initializer both hold ``(`` and are never fields -- that part of the guard is
+deliberate and stays. A function-pointer *field* (``RET (*name)(ARGS);``) also holds ``(``, but it
+is a field, so it is read before the guard fires: this codebase's own bare-call-splitting (see
+``walk_statements``) already yields it as its own fragment ending in ``(*name)`` -- re-reading the
+original header text from that fragment's own start to its terminating ``;`` recovers the whole
+declarator, which is enough to tell it apart from the two things the guard is actually for.
+
+``just ownership`` rewrites the committed file (for a person regenerating deliberately).
+``just ownership-check`` (``--check`` here) regenerates into a scratch directory, writes the
+regenerated list there too (``ownership.tsv``, next to the always-empty stdout log), and compares
+it against the committed file as an ordered, duplicate-sensitive list -- not a byte diff, but not a
+set either, so neither a reordered nor a duplicated committed row passes. It additionally validates
+every row's own class/evidence rule (not caught by that comparison, since those three cells are
+carried forward and so would compare equal even when individually invalid): a ``class`` other than
+``unknown`` with no evidence fails, and an ``unknown`` row missing either its evidence ``path:line``
+or its Rust type fails. ``just ownership-check`` prints the committed file's own row count on
+success -- the plan's recorded proof line for R30.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import re
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LIBSLIC3R_ROOT = REPO_ROOT / "vendor/OrcaSlicer/src/libslic3r"
+MANIFEST_PATH = REPO_ROOT / "port/manifest.tsv"
+OWNERSHIP_PATH = REPO_ROOT / "port/ownership.tsv"
+SCRATCH_ROOT = REPO_ROOT / "port/.cache/ownership-check"
+
+HEADER = ["header path", "line", "declaring type", "field", "C++ type", "class", "evidence", "rust type"]
+
+HEADER_EXTENSIONS = (".h", ".hpp")
+
+VALID_CLASSES = {"", "owned", "shared", "borrowed", "back-reference", "ffi", "unknown"}
+
+
+#
+# --- Reading the manifest --------------------------------------------------------------------
+#
+
+
+def read_tsv(path: Path) -> tuple[list[str], list[list[str]]]:
+    """Return (header, rows) for a committed tab-separated file (plain split/join, no quoting --
+    these files never carry a literal tab or newline inside a cell)."""
+    if not path.is_file():
+        raise SystemExit(f"ownership: {path} does not exist")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        raise SystemExit(f"ownership: {path} is empty")
+    header = lines[0].split("\t")
+    rows = [line.split("\t") for line in lines[1:] if line]
+    return header, rows
+
+
+def write_tsv(path: Path, header: list[str], rows: list[list[str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out_lines = ["\t".join(header)]
+    out_lines.extend("\t".join(row) for row in rows)
+    path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+
+def in_scope_headers() -> list[str]:
+    """Return every in-scope header's manifest path (``.h``/``.hpp`` rows whose scope cell is
+    ``in`` or ``in: <reason>``), sorted -- the file set this script reads, and the only thing it
+    reads from ``port/manifest.tsv`` (never a judgement column, never status)."""
+    header, rows = read_tsv(MANIFEST_PATH)
+    path_i = header.index("path")
+    scope_i = header.index("in scope or out with a reason")
+    paths = []
+    for row in rows:
+        path = row[path_i]
+        if not path.endswith(HEADER_EXTENSIONS):
+            continue
+        cell = row[scope_i]
+        if cell == "in" or cell.startswith("in:"):
+            paths.append(path)
+    paths.sort()
+    return paths
+
+
+#
+# --- Comment/string blanking, preserving length and line numbers -----------------------------
+#
+
+
+def scannable_text(raw: str) -> str:
+    """Return raw with every ``//`` and ``/* ... */`` comment and every single/double-quoted
+    literal blanked to spaces: same length, same newlines, as raw. Every downstream scan
+    (brace matching, statement splitting, alias and field parsing) runs on this string, so a
+    match's character offset into it is also its offset -- and, via ``line_of`` -- its line
+    number, into the original file. Blanking a literal's content (not just comments) means a
+    stray ``{``/``}``/``;`` inside a string or char literal (there are none in a field or alias
+    declaration at the pin, but a scanned function body can contain one, e.g. a char comparison
+    ``c == '{'``) can never desynchronise the brace/statement scan."""
+    chars = list(raw)
+    n = len(raw)
+    i = 0
+    while i < n:
+        two = raw[i : i + 2]
+        if two == "//":
+            while i < n and raw[i] != "\n":
+                chars[i] = " "
+                i += 1
+            continue
+        if two == "/*":
+            chars[i] = " "
+            chars[i + 1] = " "
+            i += 2
+            while i < n and raw[i : i + 2] != "*/":
+                if raw[i] != "\n":
+                    chars[i] = " "
+                i += 1
+            if i < n:
+                chars[i] = " "
+                if i + 1 < n:
+                    chars[i + 1] = " "
+                i += 2
+            continue
+        c = raw[i]
+        if c in ('"', "'"):
+            chars[i] = " "
+            i += 1
+            while i < n and raw[i] != c:
+                if raw[i] == "\\" and i + 1 < n:
+                    chars[i] = " "
+                    chars[i + 1] = " "
+                    i += 2
+                    continue
+                if raw[i] != "\n":
+                    chars[i] = " "
+                i += 1
+            if i < n:
+                chars[i] = " "
+                i += 1
+            continue
+        i += 1
+    return "".join(chars)
+
+
+def line_of(text: str, pos: int) -> int:
+    """1-based line number of offset pos into text (text and the original file share the same
+    newlines -- see scannable_text)."""
+    return text.count("\n", 0, pos) + 1
+
+
+#
+# --- Brace/statement scanning ------------------------------------------------------------------
+#
+
+# Strips a (non-nested) `template <...>` parameter list, exactly like port/inventory's own
+# TEMPLATE_PARAMS_RE, so `template <class T> class Foo` reads as declaring `Foo`, and
+# `template<typename T>\nusing X = ...;` reads as the alias `X` rather than failing to match a
+# leading "using"/"typedef" token.
+TEMPLATE_PARAMS_RE = re.compile(r"template\s*<[^>]*>")
+
+# Requires an actual body (eventually a '{', with no ';', '{' or '}' first), so a forward
+# declaration ("class Foo;") is never read as an opener -- it terminates as a plain statement
+# instead and is filtered out by the ordinary field-inclusion test (see classify_declarator).
+#
+# Known limitation: a template *specialization* opener ("struct hash<Slic3r::Vec2d> {") does not
+# match (no bare name before '<'), so its whole body is read as a function body and skipped --
+# invisible to both field and alias collection. At the v2.5.2 pin there are 50 such blocks: ones
+# whose opener has the form `class|struct|union NAME<...>` and that the scan actually reaches and
+# skips. That is a count of skipped blocks, not of textual "NAME<" matches -- a plain class with a
+# *templated base* ("struct ImageColorscale:Image<unsigned char>", PNGReadWrite.hpp) carries a '<'
+# in its opener but is matched by the `:[^;{}]*` base-clause branch below and is not skipped at
+# all. Those 50 cost 0 pointer fields and 0 pointer aliases, measured by re-walking each skipped
+# block's body with this module's own walk_statements and parse_fields against the real
+# pointer-alias set -- not by eye. A future pin bump could change that silently, since
+# `ownership-check` regenerates with this same scanner.
+CLASS_OPENER_RE = re.compile(
+    r"\b(?:class|struct|union)\s+([A-Za-z_]\w*)\b(?:\s*final)?(?:\s*:[^;{}]*)?\s*$"
+)
+# A named, anonymous or `extern "C"` namespace opener (the quote content of `extern "C"` is
+# blanked by scannable_text, leaving bare "extern"); recursion keeps the *same* declaring type,
+# since neither introduces a class scope of its own. Not anchored at the start: header_text can
+# carry leading preprocessor-directive text (#include, #ifndef/#define guards) that never
+# terminates in ';' or '}', so the only anchor that is safe is the end ('$'), exactly as
+# CLASS_OPENER_RE already does -- matched with .search(), never .match().
+NAMESPACE_OPENER_RE = re.compile(r"\b(?:inline\s+)?namespace(?:\s+[A-Za-z_][\w:]*)?\s*$")
+EXTERN_OPENER_RE = re.compile(r"\bextern\s*$")
+# "enum class X {" / "enum struct X {" / "enum X {" would otherwise read as CLASS_OPENER_RE
+# matching "class X"/"struct X"; checked first, same end-anchored style.
+ENUM_OPENER_RE = re.compile(r"\benum\b(?:\s*class\b|\s*struct\b)?\s+[A-Za-z_]\w*(?:\s*:[^;{}]*)?\s*$")
+
+
+def find_matching_brace(text: str, open_pos: int) -> int:
+    """Return the index of the '{' at open_pos's matching '}', by depth counting over text
+    (already blanked by scannable_text, so no literal can hold an unbalanced brace). -1 if the
+    braces in text from open_pos on are not balanced (should not happen in a header that
+    compiles)."""
+    depth = 0
+    i = open_pos
+    n = len(text)
+    while i < n:
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def find_matching_paren(text: str, open_pos: int) -> int:
+    """Return the index of the '(' at open_pos's matching ')', by depth counting. -1 if
+    unbalanced from open_pos on."""
+    depth = 0
+    i = open_pos
+    n = len(text)
+    while i < n:
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
+def walk_statements(text: str, start: int, end: int, declaring_type: str | None):
+    """Yield (stmt_text, stmt_start, declaring_type) for every ';'-terminated statement directly
+    in this scope (text[start:end], already scannable), recursing into every nested
+    class/struct/union body (with its own name as declaring_type) and every namespace-like body
+    (with the same declaring_type); a brace that is neither is a function body or a
+    brace-initializer and its content is skipped (never yielded, never recursed into) once its
+    matching close is found.
+
+    stmt_start is the statement's own start offset into text, for line-number lookup by the
+    caller (not necessarily the field's own start -- a caller re-finds the exact token it cares
+    about within stmt_text for a tighter line number where it matters)."""
+    i = start
+    stmt_start = start
+    while i < end:
+        c = text[i]
+        if c == "{":
+            header_text = TEMPLATE_PARAMS_RE.sub(" ", text[stmt_start:i])
+            close = find_matching_brace(text, i)
+            if close == -1 or close >= end:
+                raise SystemExit(
+                    f"ownership: unbalanced braces at offset {i} (line {line_of(text, i)}); "
+                    "this scanner is not a real preprocessor and cannot read a file whose "
+                    "braces are not textually balanced"
+                )
+            if not ENUM_OPENER_RE.search(header_text) and CLASS_OPENER_RE.search(header_text):
+                class_name = CLASS_OPENER_RE.search(header_text).group(1)
+                yield from walk_statements(text, i + 1, close, class_name)
+                j = close + 1
+                while j < end and text[j] in " \t\r\n":
+                    j += 1
+                if j < end and text[j] == ";":
+                    j += 1
+                stmt_start = j
+                i = j
+                continue
+            if NAMESPACE_OPENER_RE.search(header_text) or EXTERN_OPENER_RE.search(header_text):
+                yield from walk_statements(text, i + 1, close, declaring_type)
+                stmt_start = close + 1
+                i = close + 1
+                continue
+            # Function body or brace-initializer. If a ';' directly follows the close, the
+            # whole span from stmt_start through that ';' is one statement (a field with a
+            # brace-member-initializer, e.g. "Type *ptr{nullptr};"); otherwise it is a function
+            # definition and nothing here is a field or an alias.
+            j = close + 1
+            while j < end and text[j] in " \t\r\n":
+                j += 1
+            if j < end and text[j] == ";":
+                yield text[stmt_start:j], stmt_start, declaring_type
+                stmt_start = j + 1
+                i = j + 1
+                continue
+            stmt_start = close + 1
+            i = close + 1
+            continue
+        if c == "(":
+            # A bare-identifier call ("MACRO(args)", nothing else since the last boundary) that
+            # is not immediately followed by ';' or '{' is a semicolon-less macro invocation used
+            # as a declaration -- this codebase's house style for e.g.
+            # OBJECTBASE_DERIVED_COPY_MOVE_CLONE(ModelObject) (Model.hpp:663), with no terminator
+            # of its own before the next real field. Left alone, the scan would carry on
+            # accumulating into the *next* field's own statement and then reject the
+            # glued-together result for holding '(' -- silently losing that field. Treating the
+            # invocation as a complete statement of its own (discarded by parse_fields, same as
+            # any other '(' -bearing text) resets stmt_start right after it, so the real
+            # declaration that follows is read on its own.
+            #
+            # Requiring the preceding text to be a BARE identifier (not merely "anything, then
+            # '('") is what keeps this from misreading a default member initializer's own
+            # function call, e.g. "... = 0.25 * sqr(scaled<double>(5.0)) * M_PI;" -- there, the
+            # text before "sqr(" is a whole expression ("... = 0.25 * sqr"), not a bare name, so
+            # this does not split there, and the field is read (and, correctly, excluded) as one
+            # whole statement once its real ';' is reached. Any other shape -- an ordinary
+            # function declaration/definition, a call-style initializer, or a sub-expression's
+            # own call -- has its span skipped over here (so nothing inside it, e.g. a nested
+            # '{' in a lambda default initializer, is mistaken for this scope's own ';'/'{'/':' ),
+            # and the surrounding statement is read by the existing ';'/'{' handling once reached.
+            close = find_matching_paren(text, i)
+            if close == -1 or close >= end:
+                i += 1
+                continue
+            preceding = text[stmt_start:i].strip()
+            j = close + 1
+            while j < end and text[j] in " \t\r\n":
+                j += 1
+            is_bare_call = bool(re.fullmatch(r"[A-Za-z_]\w*", preceding))
+            if is_bare_call and not (j < end and text[j] in ";{"):
+                yield text[stmt_start : close + 1], stmt_start, declaring_type
+                stmt_start = close + 1
+            i = close + 1
+            continue
+        if c == ";":
+            yield text[stmt_start:i], stmt_start, declaring_type
+            stmt_start = i + 1
+            i += 1
+            continue
+        if c == ":":
+            # An access specifier ("public:"/"private:"/"protected:") is a boundary of its own,
+            # not part of the next statement; any other ':' (a base-clause's own ':', "::", a
+            # ternary, a bitfield width) is left alone -- it becomes part of whatever statement
+            # it is really inside, which the '(' guard and the declarator regex below handle
+            # safely either way.
+            if text[stmt_start:i].strip() in ("public", "private", "protected"):
+                stmt_start = i + 1
+            i += 1
+            continue
+        i += 1
+
+
+#
+# --- Alias resolution (the trap) ---------------------------------------------------------------
+#
+
+USING_ALIAS_RE = re.compile(r"^using\s+([A-Za-z_]\w*)\s*=\s*(.*)$", re.DOTALL)
+TYPEDEF_RE = re.compile(r"^typedef\s+(.*?)\s*([A-Za-z_]\w*)\s*$", re.DOTALL)
+BRACED_SPAN_RE = re.compile(r"\{[^{}]*\}")
+PARENTHESIZED_SPAN_RE = re.compile(r"\([^()]*\)")
+
+
+def strip_braced_and_parenthesized(text: str) -> str:
+    """Remove every innermost {...} and (...) span, repeatedly: an anonymous-struct/union
+    typedef's own member text can never leak a stray '*' into the alias-pointer test for the
+    typedef's own name, and neither can a callable alias's own parameter-type list (``using
+    SlicingPipelineHookFn = std::function<void(Print&, const PrintObject*, ...)>;`` has a '*'
+    only inside that parameter list -- the alias itself is a callable wrapper, not a pointer or a
+    container of them, and stripping (...) spans is what keeps that '*' from being read as the
+    alias's own)."""
+    while True:
+        new = PARENTHESIZED_SPAN_RE.sub(" ", BRACED_SPAN_RE.sub(" ", text))
+        if new == text:
+            return new
+        text = new
+
+
+def try_parse_alias(stmt_text: str) -> tuple[str, str] | None:
+    """Return (alias name, right-hand-side text) if stmt_text is a typedef or a `using NAME =
+    RHS` alias (a leading template parameter list, if any, is stripped first), else None. A
+    `using Base::Member;` inheriting-constructor declaration has no '=' and so is never mistaken
+    for an alias here."""
+    text = re.sub(r"^\s*template\s*<[^>]*>\s*", "", stmt_text.strip(), count=1).strip()
+    if not text:
+        return None
+    m = USING_ALIAS_RE.match(text)
+    if m:
+        return m.group(1), m.group(2)
+    m = TYPEDEF_RE.match(text)
+    if m:
+        rhs, name = m.group(1), m.group(2)
+        return name, rhs
+    return None
+
+
+def collect_aliases(relpaths: list[str]) -> dict[str, str]:
+    """Return {alias name: right-hand-side text}, over every typedef/using statement anywhere
+    in relpaths' headers (any scope -- namespace or nested inside a class), last writer wins for
+    a name redefined identically in more than one header (Print.hpp and Layer.hpp both typedef
+    LayerPtrs to the same underlying type)."""
+    aliases: dict[str, str] = {}
+    for relpath in relpaths:
+        raw = (LIBSLIC3R_ROOT / relpath).read_bytes().decode("latin-1")
+        text = scannable_text(raw)
+        for stmt_text, _pos, _declaring_type in walk_statements(text, 0, len(text), None):
+            alias = try_parse_alias(stmt_text)
+            if alias is not None:
+                aliases[alias[0]] = alias[1]
+    return aliases
+
+
+def pointer_alias_names(alias_rhs: dict[str, str]) -> frozenset[str]:
+    """Return the names, out of alias_rhs, whose right-hand side is a pointer or a container of
+    pointers: directly (a literal '*' once any nested {...} body -- an anonymous struct/union
+    typedef's own members -- is stripped out), or transitively (its right-hand side names
+    another pointer-alias), to a fixed point."""
+    pointerish = {name for name, rhs in alias_rhs.items() if "*" in strip_braced_and_parenthesized(rhs)}
+    changed = True
+    while changed:
+        changed = False
+        for name, rhs in alias_rhs.items():
+            if name in pointerish:
+                continue
+            if names_pointer_alias(rhs, frozenset(pointerish)):
+                pointerish.add(name)
+                changed = True
+    return frozenset(pointerish)
+
+
+#
+# --- Field declarations -------------------------------------------------------------------------
+#
+
+# A trailing declarator: optional '*'/'&' (any count, any spacing), the field's own name, then
+# zero or more array suffixes ("[8]", "[N][M]"). Anchored to the end of the segment, so it finds
+# the *last* identifier-shaped token a segment can end on -- which, in a well-formed C++
+# declarator, is the one being declared.
+DECLARATOR_TAIL_RE = re.compile(r"([*&\s]*)([A-Za-z_]\w*)((?:\s*\[[^\]]*\])*)\s*$", re.DOTALL)
+
+FIELD_SKIP_PREFIXES = ("friend", "static_assert", "using namespace", "#")
+
+# walk_statements's bare-call split (see its own comment) breaks a function-pointer field's
+# declarator in two at the name's own closing ')', because a bare identifier immediately followed
+# by '(' cannot be told apart, fragment by fragment, from this codebase's semicolon-less macro
+# field style. The first fragment it yields ends in exactly this shape: a base type, then
+# "(*name)", nothing after. A real split macro-call leftover never ends this way (its own
+# fragment is either the bare "MACRO(args)" call itself or, for the statement that follows it, an
+# ordinary declaration with no stray "(*name)" tail), so this is a safe, narrow trigger to re-read
+# the full declarator for.
+FUNC_PTR_FRAGMENT_TAIL_RE = re.compile(r"\(\s*\*+\s*[A-Za-z_]\w*\s*\)\s*$")
+
+# The full declarator, reread from the fragment's own start to its terminating ';' in the header's
+# scannable text (recovering the parameter list the fragment above doesn't carry): a base type,
+# "(*name)", then the parameter list in its own parentheses, and nothing else.
+FUNC_PTR_FIELD_RE = re.compile(
+    r"^(?P<base>[^()]+?)\(\s*\*+\s*(?P<name>[A-Za-z_]\w*)\s*\)\s*\((?P<params>.*)\)\s*$",
+    re.DOTALL,
+)
+
+
+def try_parse_function_pointer_field(full_decl: str) -> tuple[str, str] | None:
+    """Return (field name, C++ type) if full_decl -- the complete declarator text from a
+    statement's own start through its terminating ';' in the header's scannable text, not just
+    the single fragment ``walk_statements`` yields for it -- is a function-pointer field
+    (``RET (*name)(ARGS)``); else None."""
+    m = FUNC_PTR_FIELD_RE.match(full_decl.strip())
+    if not m:
+        return None
+    base = re.sub(r"\s+", " ", m.group("base")).strip()
+    params = re.sub(r"\s+", " ", m.group("params")).strip()
+    return m.group("name"), f"{base} (*)({params})"
+
+
+def cut_initializer(text: str) -> str:
+    """Return text up to (not including) its first top-level '=' or '{' -- a default member
+    initializer or brace-initializer -- so it plays no part in finding the declarator(s). Depth
+    tracks '<', '(' and '[' together (template args, parens, array sizes): none of those should
+    let a nested '=' (impossible) or '{' (a nested brace-init, rare) terminate the cut early, and
+    '==' / '!=' / '<=' / '>=' are not mistaken for an initializer's '='."""
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c in "<([":
+            depth += 1
+        elif c in ">)]":
+            depth = max(0, depth - 1)
+        elif c == "{" and depth == 0:
+            return text[:i]
+        elif c == "=" and depth == 0:
+            prev = text[i - 1] if i > 0 else ""
+            nxt = text[i + 1] if i + 1 < n else ""
+            if nxt == "=" or prev in "=!<>":
+                i += 1
+                continue
+            return text[:i]
+        i += 1
+    return text
+
+
+def split_top_level_commas(text: str) -> list[str]:
+    """Split text on ',' that is not nested inside '<...>', '(...)' or '[...]'."""
+    parts = []
+    depth = 0
+    start = 0
+    for i, c in enumerate(text):
+        if c in "<([":
+            depth += 1
+        elif c in ">)]":
+            depth = max(0, depth - 1)
+        elif c == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return parts
+
+
+# A scope-qualified identifier chain ("SurfacesPtr", "Slic3r::LayerPtrs", "SurfacesPtr::const_iterator"),
+# matched as one token so alias-name matching can tell "the type IS this alias" (the alias is the
+# chain's last segment) from "the type is some OTHER member reached THROUGH this alias"
+# ("SurfacesPtr::const_iterator" -- an iterator *over* SurfacesPtr, not itself a pointer
+# container; its last segment is "const_iterator", not "SurfacesPtr").
+QUALIFIED_CHAIN_RE = re.compile(r"[A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)*")
+
+
+def names_pointer_alias(text: str, pointer_aliases: frozenset[str]) -> bool:
+    """True if some scope-qualified chain in text names a pointer-alias as its *last* segment."""
+    for m in QUALIFIED_CHAIN_RE.finditer(text):
+        parts = [p.strip() for p in m.group(0).split("::")]
+        if parts[-1] in pointer_aliases:
+            return True
+    return False
+
+
+def classify_declarator(
+    segment: str, shared_base: str, pointer_aliases: frozenset[str]
+) -> tuple[bool, str] | None:
+    """Return (is a raw-pointer-or-container-of-raw-pointers field, field name) for one
+    declarator segment, or None if it does not end in an identifier this scanner can read as a
+    field name. shared_base is the first declarator's own base-type text (shared across a
+    comma-separated declaration -- "Type *a, *b;" -- segments after the first carry no base type
+    of their own). Inclusion is a literal '*' anywhere in the segment (covers a direct pointer
+    field, "Model *m_model", and a template-argument pointer, "std::vector<Entity*> entities")
+    or in shared_base, OR the base type naming a known pointer-alias as its own type (the trap
+    this task names) -- not merely using one as a scope qualifier for some other member."""
+    m = DECLARATOR_TAIL_RE.search(segment)
+    if not m:
+        return None
+    name = m.group(2)
+    base_type_text = segment[: m.start()].strip() or shared_base
+    has_star = "*" in segment or "*" in shared_base
+    is_alias_pointer = names_pointer_alias(base_type_text or shared_base, pointer_aliases)
+    return (has_star or is_alias_pointer), name
+
+
+def field_type_cell(segment: str, shared_base: str) -> str:
+    """Reconstruct a readable C++ type cell for one declarator: its own base type (or the
+    comma-list's shared one) plus its own pointer/reference markers and array suffix, exactly as
+    written (whitespace collapsed)."""
+    m = DECLARATOR_TAIL_RE.search(segment)
+    if not m:
+        return segment.strip()
+    base = segment[: m.start()].strip() or shared_base.strip()
+    stars = m.group(1).strip()
+    array = re.sub(r"\s+", "", m.group(3))
+    pieces = [p for p in (base, stars) if p]
+    return (" ".join(pieces) + array).strip()
+
+
+def parse_fields(
+    stmt_text: str, declaring_type: str, pointer_aliases: frozenset[str]
+) -> list[tuple[str, str]]:
+    """Return [(field name, C++ type), ...] for every raw-pointer-or-container-of-raw-pointers
+    declarator stmt_text declares, or [] if stmt_text is not a simple field declaration (a
+    method, a nested type, a forward declaration, anything holding '(' -- a method signature, a
+    function-pointer field, or a call-style initializer; see the module docstring's "how a
+    header is read" section for why this is the one deliberate false negative)."""
+    text = stmt_text.strip()
+    if not text or "(" in text:
+        return []
+    if text.startswith(FIELD_SKIP_PREFIXES):
+        return []
+    decl_part = cut_initializer(text).strip()
+    if not decl_part or "{" in decl_part or "}" in decl_part:
+        return []
+    segments = split_top_level_commas(decl_part)
+    if not segments:
+        return []
+    first = classify_declarator(segments[0], "", pointer_aliases)
+    if first is None:
+        return []
+    shared_base = segments[0][: DECLARATOR_TAIL_RE.search(segments[0]).start()].strip()
+    out: list[tuple[str, str]] = []
+    for segment in segments:
+        result = classify_declarator(segment, shared_base, pointer_aliases)
+        if result is None:
+            continue
+        included, name = result
+        if not included:
+            continue
+        out.append((name, field_type_cell(segment, shared_base)))
+    return out
+
+
+def collect_fields(
+    relpaths: list[str], pointer_aliases: frozenset[str]
+) -> list[list[str]]:
+    """Return one [header path, line, declaring type, field, C++ type] row per raw-pointer or
+    container-of-raw-pointers field, over every relpath, in relpath order then declaration
+    order -- which is already line-ascending within a file, since the scan reads top to bottom."""
+    rows: list[list[str]] = []
+    for relpath in relpaths:
+        raw = (LIBSLIC3R_ROOT / relpath).read_bytes().decode("latin-1")
+        text = scannable_text(raw)
+        for stmt_text, pos, declaring_type in walk_statements(text, 0, len(text), None):
+            if declaring_type is None:
+                continue
+            if try_parse_alias(stmt_text) is not None:
+                continue
+            # pos is the statement's boundary (right after the previous ';'/'}'), which can sit
+            # several lines above the declaration's own first character once leading
+            # whitespace/blank lines/stripped comments are skipped (a trailing inline method
+            # body's own closing '}' on one line, the real field only starting two lines later).
+            # Skipping stmt_text's own leading whitespace before looking up the line is what
+            # makes the reported line the declaration's own, matching R30's worked examples
+            # (ExtrusionEntityCollection.hpp:39, Model.hpp:189) exactly rather than off by
+            # whatever the previous statement happened to leave behind.
+            leading_ws = len(stmt_text) - len(stmt_text.lstrip())
+            line = str(line_of(text, pos + leading_ws))
+
+            if FUNC_PTR_FRAGMENT_TAIL_RE.search(stmt_text.strip()):
+                semi = text.find(";", pos)
+                full_decl = text[pos:semi] if semi != -1 else stmt_text
+                func_field = try_parse_function_pointer_field(full_decl)
+                if func_field is not None:
+                    name, cpp_type = func_field
+                    rows.append([relpath, line, declaring_type, name, cpp_type])
+                    continue
+
+            for name, cpp_type in parse_fields(stmt_text, declaring_type, pointer_aliases):
+                rows.append([relpath, line, declaring_type, name, cpp_type])
+    return rows
+
+
+#
+# --- Carrying class/evidence/rust type forward, and validating them --------------------------
+#
+
+CARRIED_COLUMNS = ("class", "evidence", "rust type")
+
+
+def load_committed(path: Path) -> dict[tuple[str, str, str, str], list[str]]:
+    """Return {(header path, line, declaring type, field): full row} from the committed file, or
+    {} if it does not exist yet (the first run)."""
+    if not path.is_file():
+        return {}
+    header, rows = read_tsv(path)
+    if header != HEADER:
+        raise SystemExit(f"ownership: {path}'s header row is {header!r}, expected {HEADER!r}")
+    for i, row in enumerate(rows, start=2):
+        if len(row) != len(HEADER):
+            raise SystemExit(
+                f"ownership: {path}:{i} has {len(row)} cell(s), expected {len(HEADER)}: {row!r}"
+            )
+    key_i = tuple(header.index(name) for name in ("header path", "line", "declaring type", "field"))
+    return {tuple(row[i] for i in key_i): row for row in rows}
+
+
+def generate(pointer_aliases: frozenset[str] | None = None) -> list[list[str]]:
+    """Regenerate port/ownership.tsv's rows in memory: recompute the first five columns fresh
+    from the vendored tree, carry class/evidence/rust type forward from whatever the committed
+    file holds for the same key, blank for a field seen for the first time. Sorted by header
+    path then line (ties keep scan order, which is already deterministic)."""
+    relpaths = in_scope_headers()
+    if not relpaths:
+        raise SystemExit("ownership: port/manifest.tsv names no in-scope header")
+    if pointer_aliases is None:
+        alias_rhs = collect_aliases(relpaths)
+        pointer_aliases = pointer_alias_names(alias_rhs)
+    committed = load_committed(OWNERSHIP_PATH)
+
+    fresh_rows = collect_fields(relpaths, pointer_aliases)
+    rows: list[list[str]] = []
+    for header_path, line, declaring_type, field, cpp_type in fresh_rows:
+        key = (header_path, line, declaring_type, field)
+        old = committed.get(key)
+        carried = [old[HEADER.index(c)] for c in CARRIED_COLUMNS] if old else ["", "", ""]
+        rows.append([header_path, line, declaring_type, field, cpp_type, *carried])
+
+    rows.sort(key=lambda r: (r[0], int(r[1])))
+    return rows
+
+
+def validate_rows(rows: list[list[str]]) -> list[str]:
+    """Return every rule violation in rows (empty if none): an invalid class value, a non-blank,
+    non-unknown class with no evidence, or an unknown row missing its evidence path:line or its
+    Rust type. This is independent of (and not caught by) a diff against the committed file,
+    because class/evidence/rust type are carried forward verbatim -- a byte-identical
+    regeneration still carries a badly-filled-in cell unchanged."""
+    cls_i, ev_i, rust_i = HEADER.index("class"), HEADER.index("evidence"), HEADER.index("rust type")
+    problems = []
+    for row in rows:
+        header_path, line, declaring_type, field = row[0], row[1], row[2], row[3]
+        cls, evidence, rust_type = row[cls_i], row[ev_i], row[rust_i]
+        label = f"{header_path}:{line} {declaring_type}::{field}"
+        if cls not in VALID_CLASSES:
+            problems.append(f"{label}: class {cls!r} is not one of {sorted(VALID_CLASSES - {''})}")
+            continue
+        if cls == "unknown":
+            if not evidence:
+                problems.append(f"{label}: class is 'unknown' but evidence is empty")
+            if not rust_type:
+                problems.append(f"{label}: class is 'unknown' but rust type is empty")
+        elif cls != "" and not evidence:
+            problems.append(f"{label}: class is {cls!r} but evidence is empty")
+    return problems
+
+
+def run_check() -> None:
+    """``just ownership-check``: regenerate into a scratch directory, fail with a diff when the
+    committed file disagrees, and separately validate every row's own class/evidence rule."""
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    log_path = SCRATCH_ROOT / "ownership-check.log"
+    scratch_tsv_path = SCRATCH_ROOT / "ownership.tsv"
+    with log_path.open("w", encoding="utf-8") as log_file, contextlib.redirect_stdout(log_file):
+        rows = generate()
+    write_tsv(scratch_tsv_path, HEADER, rows)
+
+    if not OWNERSHIP_PATH.is_file():
+        raise SystemExit(f"ownership-check: {OWNERSHIP_PATH} does not exist")
+    committed_lines = OWNERSHIP_PATH.read_text(encoding="utf-8").splitlines()
+    fresh_lines = ["\t".join(HEADER)] + ["\t".join(row) for row in rows]
+
+    diffs: list[str] = []
+    if committed_lines[:1] != fresh_lines[:1]:
+        diffs.append(f"header row: committed {committed_lines[:1]!r}, expected {fresh_lines[:1]!r}")
+    # An ordered, duplicate-sensitive comparison of the body rows -- not a byte diff (carried-
+    # forward class/evidence/rust-type cells mean a regenerated row can differ from a hand's-eye
+    # read of the committed one in ways that are still correct), but not a set either: a set
+    # comparison would pass a committed file with its rows reordered or with one duplicated, and
+    # neither is a shape `just ownership` ever writes.
+    if committed_lines[1:] != fresh_lines[1:]:
+        committed_set = set(committed_lines[1:])
+        fresh_set = set(fresh_lines[1:])
+        added = sorted(fresh_set - committed_set)
+        removed = sorted(committed_set - fresh_set)
+        if added:
+            diffs.append(f"row(s) the committed file is missing: {added}")
+        if removed:
+            diffs.append(f"row(s) the committed file has that regeneration does not: {removed}")
+        if not added and not removed:
+            diffs.append(
+                "the committed file's rows are reordered or contain a duplicate relative to "
+                "regeneration, although the same rows are present as a set"
+            )
+
+    problems = validate_rows(rows)
+
+    if diffs or problems:
+        print(
+            "ownership-check: port/ownership.tsv has drifted from the vendored headers or holds "
+            f"an invalid row (the regenerated list is at {scratch_tsv_path}):"
+        )
+        for line in diffs:
+            print(f"  drift: {line}")
+        for line in problems:
+            print(f"  invalid: {line}")
+        raise SystemExit(1)
+
+    print(f"ownership-check: port/ownership.tsv holds {len(committed_lines) - 1} row(s)")
+
+
+@click.command()
+@click.option(
+    "--check",
+    "check",
+    is_flag=True,
+    help="just ownership-check: regenerate into a scratch directory and fail, with a diff and "
+    "every invalid row, when port/ownership.tsv disagrees with the headers at the pin. Never "
+    "writes port/ownership.tsv.",
+)
+def main(check: bool) -> None:
+    """Regenerate port/ownership.tsv's field list from the vendored libslic3r headers (R30)."""
+    if check:
+        run_check()
+        return
+
+    rows = generate()
+    write_tsv(OWNERSHIP_PATH, HEADER, rows)
+    print(f"ownership: wrote {len(rows)} row(s) to {OWNERSHIP_PATH}")
+
+
+if __name__ == "__main__":
+    main()
