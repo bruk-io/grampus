@@ -1,7 +1,8 @@
 # The per-file translation contract
 
-`just port-status` reads the six headings below to check that this document says what it must
-(R29); renaming one breaks that check. This document is committed before any unit is ported.
+`just port-status` reads the twelve headings below — the six `##` sections and the six `###`
+rules under `## Rules` — to check that this document says what it must (R29); renaming one
+breaks that check. This document is committed before any unit is ported.
 Every unit of Phase A and Phase B — `port/manifest.tsv`'s 409 in-scope files — is held to
 it, and a porter is given their task, this repository and nothing else: this document is written
 so a porter never has to guess and never has to ask. `docs/WORKFLOW.md` is the process this
@@ -21,7 +22,8 @@ awk -F'\t' 'NR==1{for(i=1;i<=NF;i++)c[$i]=i} NR>1 {print $c["target crate"]}' po
 
 (an empty-string line in that output counts the 198 out-of-scope rows, which carry no crate —
 expected, not an error) against the `crate` rows of `port/cut.tsv`
-(`awk -F'\t' '$1=="crate"{print $2, $5}' port/cut.tsv`).
+(`awk -F'\t' '$1=="crate"{print $2, $3, $4, $5}' port/cut.tsv`, which prints the table's four
+columns — crate, level, subsystems, in-scope files — in order).
 As this document is written, the two agree exactly: the same 126 crate names, and the same
 in-scope file count per crate, summing to the 409 in-scope rows `port/manifest.tsv` carries. Plan
 step 20's prose estimate of "roughly 43 crates" is stale against the committed cut; `port/cut.tsv`
@@ -216,12 +218,18 @@ the state the window before fan-out is in, not an error in the ownership manifes
 
 **Foundation types.** `Point`, the Eigen vector aliases at `src/libslic3r/Point.hpp:52-69`
 (`Vec2crd`, `Vec3crd`, `Vec2i32`, `Vec2i64`, `Vec3i32`, `Vec3i64`, `Vec4i32`, `Vec2f`, `Vec3f`,
-`Vec4f`, `Vec2d`, `Vec3d`, `Vec4d`), `Polygon`, `ExPolygon` and the configuration types are
-hand-designed once, before fan-out, by plan step 20 (cut as `34-foundation-spike` and the
-foundation tasks it batches) — not by this document. A porter does not invent a second spelling:
-they find the type's crate from the crate map above (`slic3r-point` for `Point` and the Eigen
-aliases, `slic3r-polygon` for `Polygon`, `slic3r-expolygon` for `ExPolygon`, `slic3r-config` and
-`slic3r-printconfig` for the configuration types) and use the spelling that crate's module exports.
+`Vec4f`, `Vec2d`, `Vec3d`, `Vec4d`), `Polygon`, `ExPolygon` and the configuration headers whose
+manifest row marks `template-heavy=yes` are hand-designed once, before fan-out, by plan step 20
+(cut as `34-foundation-spike` and the foundation tasks it batches, which also corrects the seeded
+`template-heavy` column where it is wrong) — not by this document. A porter does not invent a
+second spelling for one of these: they find the type's crate from the crate map above
+(`slic3r-point` for `Point` and the Eigen aliases, `slic3r-polygon` for `Polygon`,
+`slic3r-expolygon` for `ExPolygon`, `slic3r-config` for the `template-heavy=yes` configuration
+headers) and use the spelling that crate's module exports. A configuration header whose row is
+`template-heavy=no` — `PrintConfig.hpp` is one, at the pin — is not part of this hand-designed
+set: its crate (`slic3r-printconfig`) is an ordinary fan-out unit, so a porter who reaches it
+before its own unit is drafted reads that crate's module as it then stands, rather than expecting
+a pre-fan-out design to already be there.
 
 **Insertion-ordered containers.** `17-order-audits` found five hash-keyed container shapes whose
 iteration order may reach compared output: `std::unordered_map`, `std::unordered_set`,
@@ -263,7 +271,7 @@ differently changes every call site.
 | A `#define` numeric constant | A `const` item, carrying a `// PORT SRC: <vendored path>:<line>` marker beside it naming the macro's definition. |
 | `std::sort` | `slice::sort_unstable` (no ordering guarantee between equal elements, matching `std::sort`'s own lack of a stability guarantee). |
 | `std::stable_sort` | `slice::sort` (stable, matching `std::stable_sort`). |
-| `tbb::parallel_for`, `tbb::parallel_reduce` | See `### Linked libraries` below: TBB itself is not reimplemented. Where the original's reduction order is load-bearing (R18), the port sums in a fixed order and is serial, and the module carries a `// PERF(port):` marker and nothing else — that marker is the only place a deferred optimization may live (R15). Where the manifest's divergence audit (`port/reports/order-containers.md`, `port/reports/order-comparators.md`) finds no load-bearing order at a given site, the port may still parallelise, through the same linked TBB, provided the result is order-independent; it is not ported as a sequential Rust loop "to be safe" where the audit found no hazard, because that is an unrecorded, unaudited divergence of its own. |
+| `tbb::parallel_for`, `tbb::parallel_reduce` | See `### Linked libraries` below: TBB itself is not reimplemented. R18 states this without qualification: the port sums in a fixed order and is serial, and the module carries a `// PERF(port):` marker and nothing else — that marker is the only place a deferred optimization may live (R15). This is the unconditional default at every such site; parallelising a reduction requires a committed audit that establishes the site's order-independence, and no such audit exists today — `port/reports/order-containers.md` and `port/reports/order-comparators.md` audit container shapes and comparators, not parallel sites, so neither grants that licence — so no port task may parallelise a reduction yet. |
 | Iterator and pointer arithmetic | Slices and indices — a C++ `T*` walked with `++`/`--`/offset arithmetic over a contiguous buffer becomes a `&[T]`/`&mut [T]` walked by index or by a `std::slice` iterator; a raw pointer that is not walking a contiguous Rust-owned buffer is instead a `port/ownership.tsv` row (see the type map). |
 | `operator<<` (or other serialisation) | A `Display` or `Debug` impl where the output is for humans, or an explicit `write_...`/`format_...` function where the output is G-code or another emitted artifact whose exact bytes are compared — never `Display`/`{}` for G-code or other compared output, because `### Number formatting` below is specific about digit counts and padding that a derived or generic `Display` impl does not reproduce. |
 
@@ -288,10 +296,14 @@ What a porter stops at rather than ports:
 - **The GUI and the plate layer** (R10): nothing under `src/slic3r/GUI/PartPlate`, and no arranger —
   R24 fixes placement in the fixture instead.
 - **The preset layer and the project-format readers** (R11, and the manifest's deductions): preset
-  files, the `inherits` chain, preset-bundle resolution, and `Format/` readers other than `STL`.
-- **The SLA implementations**, except `SLA/IndexedMesh`, which **is** in scope because
-  Z-contouring calls it (R9). The SLA fields carried on the model type are ported as data only;
-  hollowing, pad and the concave-hull implementations are out.
+  files, the `inherits` chain, preset-bundle resolution, and the `Format/` readers
+  `port/manifest.tsv` deducts out — read the manifest's rows for which that is, rather than this
+  list.
+- **The SLA implementations**, except `SLA/IndexedMesh` and the handful of `SLA/` headers the
+  manifest marks in as carried data — `port/manifest.tsv` is the authority for which, and the
+  `## Crate map`'s `slic3r-sla` row gives the count. `SLA/IndexedMesh` is in scope because
+  Z-contouring calls it (R9); the carried headers hold fields the model type stores as data only.
+  Hollowing, pad and the concave-hull implementations are out.
 - **Arrange and orient** (C14's decision): the application does call this code, but R24 fixes
   placement in the fixture and R2 passes `--arrange 0`, so no arranger runs in any comparison.
 - **The two Objective-C++ (`.mm`) files in the file set**, each deducted in `port/manifest.tsv`
@@ -306,9 +318,9 @@ Each entry names what is banned and the check that catches it, where one exists.
 | Banned | Check |
 |---|---|
 | Rounding a scaling conversion (`scaled<coord_t>()`, the Eigen `scaled()` overload, or any truncating entry point) | None automated yet; `### Scaling conversions` below is the rule a reviewer holds a unit to. |
-| A hash-ordered map or set where iteration order reaches output, in place of the one insertion-ordered spelling this document fixes | `just audit-check` (`port/audit-order --check`), the regeneration pass's drift check on `port/reports/order-containers.md` — not a check a port task itself passes; see `docs/WORKFLOW.md`'s conflict discipline. |
-| A parallel reduction where the original's order is load-bearing | `just audit-check` over `port/reports/order-comparators.md` and `port/reports/divergences.md` (R18), the same regeneration-pass check. |
-| Replacing one of R17's six libraries (Clipper2, admesh, libnest2d, qhull, Boost.Polygon's Voronoi builder, NLopt) with a Rust crate | `just port-check`'s substitute check fails a crate manifest that depends on a named substitute. |
+| A hash-ordered map or set where iteration order reaches output, in place of the one insertion-ordered spelling this document fixes | None automated yet; `port/reports/order-containers.md` is the per-site authority a reviewer holds the unit to. `just audit-check` (`port/audit-order --check`) only verifies that report has not drifted from the vendored tree — it never reads a port module, so it cannot catch this substitution. |
+| A parallel reduction where the original's order is load-bearing | None automated yet; `port/reports/order-comparators.md` and `port/reports/divergences.md` (R18) are the per-site authority a reviewer holds the unit to. `just audit-check` only verifies those reports have not drifted from the vendored tree — it never reads a port module, so it cannot catch this substitution. |
+| Replacing one of R17's six libraries (Clipper2, admesh, libnest2d, qhull, Boost.Polygon's Voronoi builder, NLopt) with a Rust crate | `just port-check`'s substitute check (added by `24-port-check-ci`) fails a crate manifest that depends on a named substitute. |
 | Widening a `float` field to `f64`, or narrowing an `f64` field to `float`/`f32` | None automated yet; `### Float widths` below. |
 | Any fused multiply-add, including `f64::mul_add` | None automated yet; the normative oracle is built with `-ffp-contract=off` and never fuses, so a port that fuses diverges from it. |
 | Multiplying by the reciprocal of `SCALING_FACTOR` instead of dividing by it | None automated yet; `### Scaling conversions` below. |
@@ -366,12 +378,23 @@ Multiplying by `1.0 / SCALING_FACTOR` is a different floating-point operation fr
 **The global itself is not a constant.** `SCALING_FACTOR` is `extern double` (`libslic3r.h:80`),
 defined at `src/libslic3r/libslic3r.cpp:3` as `double SCALING_FACTOR = SCALING_FACTOR_INTERNAL;`,
 where `SCALING_FACTOR_INTERNAL` is `0.000001` (`libslic3r.h:65`). The only assignments anywhere in
-the vendored tree are `src/slic3r/GUI/Plater.cpp:15015` and `:15017`, which set the large-printer
-value `SCALING_FACTOR_INTERNAL_LARGE_PRINTER`, `0.00001` (`libslic3r.h:66`), above
+the vendored tree are both in `src/slic3r/GUI/Plater.cpp`, the two arms of one branch
+(`:15014-15017`): `:15015` restores the default `SCALING_FACTOR_INTERNAL`, and `:15017` sets the
+large-printer value `SCALING_FACTOR_INTERNAL_LARGE_PRINTER`, `0.00001` (`libslic3r.h:66`), above
 `LARGE_BED_THRESHOLD`, `2147` (`:67`) — code R10 puts out of scope (the GUI's `Plater`). So the
-port's surface sees exactly `0.000001`. The port fixes one spelling for this value — a module does
-not write the literal `0.000001` inline — and R7 already records `SCALING_FACTOR`'s value with
-every oracle output, so a comparison is never run against an oracle output whose scale disagrees.
+port's surface sees exactly `0.000001`.
+
+The port fixes one spelling for this value: `slic3r_libslic3r::SCALING_FACTOR`, a `pub const f64`
+carrying `// PORT SRC: src/libslic3r/libslic3r.h:65`, in the `slic3r-libslic3r` crate (crate map
+above, level 2). `libslic3r.h` is one of the headers whose manifest row is `template-heavy=yes`,
+so it is part of the set plan step 20 hand-designs before fan-out (see "Foundation types" above);
+`34-foundation-spike` defines this constant once, in that crate's module, and no fan-out module
+may declare a second spelling or write the literal `0.000001` inline. It is a `const`, not a
+`static` the port can reassign: the only mutator found above is `Plater.cpp`'s branch, and R10
+puts the whole GUI out of scope, so nothing in the port ever needs the large-printer value and the
+port's surface — everything this contract binds — sees only the one value. R7 already records
+`SCALING_FACTOR`'s value with every oracle output, so a comparison is never run against an oracle
+output whose scale disagrees.
 
 ### Float widths
 
@@ -390,22 +413,32 @@ everywhere.
 **Ties-away-from-zero sites, inside libslic3r, that reach the compared G-code:**
 
 - `std::round` is ties away from zero, which is exactly what Rust's `f64::round` does. The two
-  sites that reach the compared artifact are `int64_t(std::round(v * pow_10[digits]))` in
-  `GCodeFormatter::emit_axis` (`src/libslic3r/GCodeWriter.cpp:1696`) and in
-  `GCodeFormatter::quantize` (`src/libslic3r/GCodeWriter.hpp:341`). `GCodeWriter.cpp:782`'s
-  `std::round` is **not** cited here because it is flavour-gated to MakerWare and Sailfish output,
-  which is out of the port's scope; the `TextureDisplacement` and `SLA/` rounding sites are
-  likewise out of scope.
+  formatter sites that reach the compared artifact are `int64_t(std::round(v * pow_10[digits]))`
+  in `GCodeFormatter::emit_axis` (`src/libslic3r/GCodeWriter.cpp:1696`), and
+  `std::round(v * pow_10[ndigits]) * pow_10_inv[ndigits]` in `GCodeFormatter::quantize`
+  (`src/libslic3r/GCodeWriter.hpp:341`) — `quantize` returns a `double` and scales back by the
+  reciprocal table at `:338`, not by dividing, so its body is not `emit_axis`'s and its result is
+  never cast to `int64_t`. The `TextureDisplacement` and `SLA/` rounding sites are out of scope.
 - **`floor(x + 0.5)` is round-half-up, not round-half-away, and is not `f64::round`.** They differ
   at an exact negative half (`floor(-0.5 + 0.5)` is `0`, while `(-0.5f64).round()` is `-1.0`) and at
   `0.49999999999999994`. Transcribe it as `(x + 0.5).floor()`, never as `.round()`. Sites that reach
-  the emitted G-code: `src/libslic3r/GCode.cpp:9467`, `(unsigned int)floor(acceleration + 0.5)` (the
-  M204/M201 acceleration value); `src/libslic3r/GCode/CoolingBuffer.cpp:995`,
-  `int(floor(60. * line->feedrate + 0.5))` (a rewritten `F` word); `src/libslic3r/GCode/WipeTower.cpp:1616`,
-  `int(floor(f + 0.5f))` (another `F` word — note the `0.5f`: this one rounds in `f32`, not `f64`);
-  `src/libslic3r/Config.hpp:1023`, `int(floor(_value + 0.5))` in `ConfigOptionInt`; and
+  the emitted G-code include: `src/libslic3r/GCode.cpp:9467`, `(unsigned int)floor(acceleration + 0.5)`
+  (the M204/M201 acceleration value — the same idiom recurs in the same acceleration path at
+  `GCode.cpp:4612`, `:6881`, `:6919`, `:10547`, `:10560`, `:10563` and `:10566`);
+  `src/libslic3r/GCode/CoolingBuffer.cpp:995`, `int(floor(60. * line->feedrate + 0.5))` (a rewritten
+  `F` word); `src/libslic3r/GCode/WipeTower.cpp:1616`, `int(floor(f + 0.5f))` (another `F` word —
+  `f` is a `float` parameter of `set_format_F(float f)` at `:1614`, so the add and the floor are in
+  `f32`); `src/libslic3r/Config.hpp:1023`, `int(floor(_value + 0.5))` in `ConfigOptionInt`; and
   `src/libslic3r/Fill/FillLine.cpp:78`, `coord_t(floor(this->_min_spacing * INFILL_OVERLAP_OVER_SPACING + 0.5f))`
-  (also an `f32`-precision round, from the `0.5f` literal).
+  (`INFILL_OVERLAP_OVER_SPACING` is a `const float` at `:76`, and `_min_spacing` is a `coord_t` at
+  `src/libslic3r/Fill/FillLine.hpp:32`, so the `i64` converts to `f32` first and the multiply, add
+  and floor are all in `f32`). This list is the sites the rule was written from, not the whole set
+  the idiom occurs at across in-scope files — the rule applies at every occurrence, so a porter
+  greps their own unit for `floor(` and `0.5` rather than relying on this list alone.
+  `GCodeWriter.cpp:782`'s `floor(100.0 * num / tot + 0.5)` in `GCodeWriter::update_progress` is
+  excluded from this list: the function returns early unless the flavour is MakerWare or Sailfish
+  (`GCodeWriter.cpp:775-776`), which no compared configuration selects. The site is inside this
+  in-scope file (`slic3r-gcodewriter`); it is the comparison that excludes it, not the file's scope.
 - **`lround`/`llround` are ties away from zero**, like `std::round`, and appear where a cast would
   truncate: `src/libslic3r/BeltBrim.cpp:39-40` uses `std::llround` for exactly that reason.
 - **`fast_round_up<I>()` (`src/libslic3r/libslic3r.h:427-433`) is its own thing**, and its body is
@@ -461,7 +494,8 @@ does not carry) verbatim:
    the row below gives.
 4. Insert the decimal point at that digit count from the right.
 5. Strip trailing zero digits after the decimal point.
-6. Fix up: if stripping left an empty integer part, or a bare `-` with no digit after it, insert a
+6. If the strip left the decimal point as the last character, drop it (`GCodeWriter.cpp:1727-1728`).
+7. Fix up: if stripping left an empty integer part, or a bare `-` with no digit after it, insert a
    leading `0`.
 
 The digit counts (`src/libslic3r/GCodeWriter.hpp:334-336`): `xyz_digits` is 3, or 4 with high
@@ -470,12 +504,11 @@ precision; `e_digits` is 5, or 6 with high precision; `F_EXPORT_DIGITS` is 3.
 ### Linked libraries
 
 Never reimplement one of these in this intent (R17): Clipper2 (the vendored copy is patched, so no
-published crate matches it), admesh, libnest2d, qhull, Boost.Polygon's Voronoi builder (used at
-`src/libslic3r/Geometry/Voronoi.hpp` and `Arachne/SkeletalTrapezoidation.hpp`; bound against the
-Boost superbuild under `vendor/OrcaSlicer/deps/Boost/`, since it has no vendored source of its
-own), and NLopt only where the manifest marks an in-scope caller (at the pin, NLopt's only
-libslic3r includer is `SLA/SupportTreeBuildsteps.cpp`, which R9 puts out of scope, so it is absent
-from every in-scope caller today). They are called through `crates/slic3r-ffi`, exactly as they
-are at the pin; `just port-check` fails a crate manifest that depends on a named substitute for one
-of them. Replacing any of them with a Rust implementation is out of scope for this intent (C4's
-decision leaves that to a later one).
+published crate matches it), admesh, libnest2d, qhull, Boost.Polygon's Voronoi builder (bound
+against the Boost superbuild under `vendor/OrcaSlicer/deps/Boost/`, since it has no vendored
+source of its own), and NLopt only where `port/manifest.tsv` marks an in-scope caller — read the
+manifest, not this document, for whether one exists today. They are called through
+`crates/slic3r-ffi`, exactly as they are at the pin; `just port-check`'s substitute check (added
+by `24-port-check-ci`) fails a crate manifest that depends on a named substitute for one of them.
+Replacing any of them with a Rust implementation is out of scope for this intent (C4's decision
+leaves that to a later one).
