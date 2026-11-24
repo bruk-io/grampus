@@ -37,16 +37,16 @@ equals form, which every option type (including a `coBool` one) accepts as a val
 space-separated form's risk of being parsed as a stray positional file argument instead. A row
 naming no filament is rejected by `oracle/slice` itself, before the binary runs.
 
-`Fixtures` names a frozen basename under `fixtures/` (R25); `oracle/slice` resolves a bare stem
-with no path separator and no extension against that directory by appending `.stl` (added in
-`11-fixture-set`).
+`Fixtures` names a frozen basename under `fixtures/` (R25), exactly as `ls fixtures/` prints it;
+`oracle/slice` also accepts the bare stem with no path separator and no extension, resolved
+against that directory by appending `.stl` (added in `11-fixture-set`).
 
 | Configuration | Machine | Process | Filament(s) | Overrides | Fixtures |
 |---|---|---|---|---|---|
-| `base-fff` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | (none) | `frog_legs` |
-| `tree-support` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | `enable_support=1`; `support_type=tree(auto)` | `frog_legs` |
-| `wipe-tower-multi-filament` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json`; `filament/Bambu PLA Basic @BBL X1C.json` | `enable_prime_tower=1`; `outer_wall_filament_id=2` | `frog_legs` |
-| `fuzzy-skin` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | `fuzzy_skin=external` | `frog_legs` |
+| `base-fff` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | (none) | `frog_legs.stl` |
+| `tree-support` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | `enable_support=1`; `support_type=tree(auto)` | `frog_legs.stl` |
+| `wipe-tower-multi-filament` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json`; `filament/Bambu PLA Basic @BBL X1C.json` | `enable_prime_tower=1`; `outer_wall_filament_id=2` | `frog_legs.stl` |
+| `fuzzy-skin` | `machine/Bambu Lab X1 Carbon 0.4 nozzle.json` | `process/0.20mm Standard @BBL X1C.json` | `filament/Bambu PLA Basic @BBL X1C.json` | `fuzzy_skin=external` | `frog_legs.stl` |
 
 All four rows were attempted directly on the pinned 2.5.2 binary (C12) and all four slice through
 `just oracle-slice` with exit 0 and a non-empty `plate_1.gcode`; none is marked "not constructible
