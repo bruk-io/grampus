@@ -1,0 +1,111 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Print the key-set difference between a resolved-configuration golden and its G-code.
+
+``port/config-block-diff <golden.json> <gcode>`` compares the resolved configuration's key
+set (a golden under ``port/goldens/configs/``, minus the ``provenance`` key this task's own
+``port/merge-provenance`` adds -- that key is this task's bookkeeping, not part of libslic3r's
+resolved configuration, and was never a candidate for either set) against the key set of
+``<gcode>``'s ``; CONFIG_BLOCK_START`` / ``; CONFIG_BLOCK_END`` section (``GCode.cpp:4318-4330``,
+one ``; key = value`` line per key; ``wipe_tower_x``/``wipe_tower_y`` each get two such lines --
+``GCode.cpp:8397-8403``'s un-skipped fallthrough -- which does not change either key's
+membership in the set). It prints two lists, in this order:
+
+1. Keys the JSON carries that the config block does not -- the golden's own resolved config
+   holds keys ``append_full_config``'s own ban list (``GCode.cpp:8328-8385``) excludes from
+   every G-code it writes, among them the five string-valued ``printhost_*`` credential fields.
+2. Keys the config block carries that the JSON does not -- written by
+   ``GCode.cpp:4330-4332`` straight after ``append_full_config`` returns, not through
+   ``cfg.keys()`` and so never part of ``--export-settings``'s own dump: exactly
+   ``first_layer_bed_temperature`` and ``first_layer_temperature``, derived by the oracle (and,
+   in scope for the port, by the port itself) at G-code emission time.
+
+This script never runs the oracle binary, never invokes ``oracle/slice`` or
+``oracle/provenance``, and is not under ``port/goldens/`` -- `05-oracle-provenance`'s
+``--check`` covers everything there, and this script has no oracle and no fixture of its own to
+carry a provenance header for.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+
+import click
+
+CONFIG_BLOCK_RE = re.compile(r"; CONFIG_BLOCK_START\n(.*?); CONFIG_BLOCK_END", re.DOTALL)
+LINE_RE = re.compile(r"^;\s*([A-Za-z0-9_]+)\s*=\s*.*$")
+
+
+class ConfigBlockDiffError(Exception):
+    """Raised for a problem this script reports itself, never a Python traceback."""
+
+
+def golden_keys(golden_path: Path) -> set[str]:
+    """Return the resolved-configuration key set of a golden, excluding its "provenance" key."""
+    try:
+        data = json.loads(golden_path.read_text())
+    except OSError as exc:
+        raise ConfigBlockDiffError(f"{golden_path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ConfigBlockDiffError(f"{golden_path}: not valid JSON ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ConfigBlockDiffError(f"{golden_path}: not a JSON object")
+    return {key for key in data.keys() if key != "provenance"}
+
+
+def gcode_config_block_keys(gcode_path: Path) -> set[str]:
+    """Return the key set of `gcode_path`'s CONFIG_BLOCK_START/END section."""
+    try:
+        text = gcode_path.read_text(errors="replace")
+    except OSError as exc:
+        raise ConfigBlockDiffError(f"{gcode_path}: {exc}") from exc
+    match = CONFIG_BLOCK_RE.search(text)
+    if match is None:
+        raise ConfigBlockDiffError(
+            f"{gcode_path}: no '; CONFIG_BLOCK_START' ... '; CONFIG_BLOCK_END' section found"
+        )
+    keys: set[str] = set()
+    for line in match.group(1).splitlines():
+        line_match = LINE_RE.match(line.strip())
+        if line_match:
+            keys.add(line_match.group(1))
+    return keys
+
+
+@click.command()
+@click.argument("golden", type=click.Path(exists=True, dir_okay=False))
+@click.argument("gcode", type=click.Path(exists=True, dir_okay=False))
+def main(golden: str, gcode: str) -> None:
+    """Print the keys only GOLDEN's JSON carries, then the keys only GCODE's config block does."""
+    golden_path = Path(golden)
+    gcode_path = Path(gcode)
+
+    try:
+        json_keys = golden_keys(golden_path)
+        block_keys = gcode_config_block_keys(gcode_path)
+    except ConfigBlockDiffError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+    json_only = sorted(json_keys - block_keys)
+    gcode_only = sorted(block_keys - json_keys)
+
+    click.echo(f"json only ({len(json_only)}):")
+    for key in json_only:
+        click.echo(f"  {key}")
+    click.echo(f"gcode only ({len(gcode_only)}):")
+    for key in gcode_only:
+        click.echo(f"  {key}")
+
+
+if __name__ == "__main__":
+    main()
