@@ -54,10 +54,12 @@ FACET_SIZE = 50
 HEADER_SIZE = 80
 
 # How far an observed toolpath bounding box may lie outside the committed mesh's own bounding
-# box before this script calls it a disagreement. See the module docstring: perimeter offset,
-# arc bulge and a possible brim all push the toolpath slightly outside the raw mesh silhouette;
-# a real misplacement is off by tens of millimetres, far past this.
-PLACEMENT_TOLERANCE_MM = 10.0
+# box before this script calls it a disagreement. Measured across the three committed fixtures
+# (perimeter offset and arc bulge, no brim on any of the three -- no "; FEATURE: Skirt" line
+# appears in any of their base-fff runs), the largest deviation on any edge was 2.272 mm
+# (frog_legs's Y max). This is a bit over double that, to leave margin without coming close to
+# accepting a real misplacement, which is off by tens of millimetres.
+PLACEMENT_TOLERANCE_MM = 5.0
 
 SEPARATOR_RE = re.compile(r"^:?-+:?$")
 
