@@ -23,18 +23,20 @@ A **unit** is one libslic3r ``.cpp`` plus its same-stem header (``.h`` or ``.hpp
 manifest row each, one unit between them, grouped here by stripping the extension from
 ``path``. A unit's line sum adds every member row's ``lines`` cell; its "unit paths" lists
 every member row's own path. A header with no same-stem ``.cpp`` (most of
-``foundation``'s set) or a ``.cpp`` with no same-stem header (``LayerRegion.cpp``,
+``foundation``'s set) or a ``.cpp`` with no same-stem header (e.g. ``LayerRegion.cpp``,
 ``ContourZ.cpp``, ``BeltPurge.cpp``, per R8) is a one-row unit. Grouping only ever happens
 *within* a phase's own already-selected row set -- a row the phase does not select (out of
 scope, not ``template-heavy`` for ``foundation``, already ported for ``phase-a``) never pulls
 its sibling into the unit, so e.g. ``AABBMesh.hpp`` (``template-heavy=yes``) is foundation's own
 one-row unit and never drags in ``AABBMesh.cpp`` (``template-heavy=no``).
 
-``phase-a`` and ``phase-b``'s "already ported" skip is **not reimplemented here**: both call
-``port/inventory``'s own status function (imported as a module, since that file is the single
-place the rule lives) over a unit's member rows, and treat a unit as already handled only when
-every member row comes back ``ported``. A reviewer finds one implementation of the rule, in
-``port/inventory``, and this call into it.
+``phase-a``'s "already ported" skip is **not reimplemented here**: it calls ``port/inventory``'s
+own status function (imported as a module, since that file is the single place the rule lives)
+over a unit's member rows, and treats a unit as already handled only when every member row comes
+back ``ported``. A reviewer finds one implementation of the rule, in ``port/inventory``, and this
+call into it. ``phase-b`` applies no such skip -- the task names no "already ported" rule for it,
+and a crate must compile as a whole, so phase-b deliberately covers every in-scope unit of a
+crate regardless of status.
 
 Every phase's ordering is a total order (ties broken down to a unique unit stem or crate name),
 so a run's output is a pure function of the committed ``port/manifest.tsv`` and ``port/cut.tsv``
@@ -96,6 +98,10 @@ def load_port_inventory():
     ``port/inventory`` guards its own CLI behind ``if __name__ == "__main__":``, so executing
     its module body here (which this loader does, to populate its functions and constants) has
     no side effect beyond defining them.
+
+    This runs inside *this* script's own uv environment, not port/inventory's: port/inventory's
+    PEP 723 ``dependencies`` block must stay a subset of this file's, or an import inside
+    port/inventory's module body raises ``ModuleNotFoundError`` here instead of there.
     """
     loader = importlib.machinery.SourceFileLoader("port_inventory", str(INVENTORY_PATH))
     spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -262,7 +268,12 @@ def unit_paths_cell(batch: list[dict]) -> str:
 def generate_foundation(header: list[str], rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
     """foundation phase: the in-scope rows whose template-heavy column is yes, grouped into
     units, ordered by crate-level level ascending then path, batched to at most
-    FOUNDATION_MAX_UNITS units or FOUNDATION_MAX_LINES lines."""
+    FOUNDATION_MAX_UNITS units or FOUNDATION_MAX_LINES lines.
+
+    A single unit already over FOUNDATION_MAX_LINES (Config.hpp alone, 3,154 lines, is the one
+    case in the committed manifest) still becomes a batch of its own: there is no smaller row to
+    split it into, the same fallback phase-a's own rule states explicitly ("a unit of more than
+    2,500 lines is a task on its own")."""
     template_heavy_i = column_index(header, "template-heavy")
 
     def selector(row: list[str]) -> bool:
@@ -431,8 +442,16 @@ def generate_ownership(
         subsystem = inventory_mod.subsystem_of(row[header_path_i])
         by_subsystem.setdefault(subsystem, []).append(row)
 
+    leftover = set(by_subsystem) - set(subsystem_order)
+    if leftover:
+        raise SystemExit(
+            f"cut-tasks: {OWNERSHIP_PATH} names subsystem(s) {sorted(leftover)} with no "
+            "in-scope manifest row; refusing to drop their fields"
+        )
+
     out_header = ["task", "subsystem", "field count", "fields"]
     out_rows = []
+    emitted_fields = 0
     for subsystem in subsystem_order:
         subsystem_rows = by_subsystem.get(subsystem)
         if not subsystem_rows:
@@ -450,7 +469,17 @@ def generate_ownership(
                     ", ".join(fields),
                 ]
             )
+            emitted_fields += len(fields)
             batch_number += 1
+
+    # Belt and braces alongside the `leftover` check above: every row read from
+    # port/ownership.tsv must land in exactly one emitted field cell.
+    if emitted_fields != len(own_rows):
+        raise SystemExit(
+            f"cut-tasks: emitted {emitted_fields} field(s) across {OWNERSHIP_BATCHES_DEFAULT.name} "
+            f"but read {len(own_rows)} row(s) from {OWNERSHIP_PATH}; refusing to write a "
+            "short batch file"
+        )
     return out_header, out_rows
 
 
