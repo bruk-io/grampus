@@ -1,0 +1,140 @@
+name: oracle
+
+# The oracle build is the one job in this repository that costs tens of minutes of
+# macOS runner time, so it runs only when something it actually depends on changes:
+# the script itself, this workflow, or the vendored submodule's pin. Everything else
+# a pull request touches is `ci.yml`'s business. `workflow_dispatch` is here so the
+# build can be demanded on any ref without first touching one of those paths.
+#
+# The two path lists below are identical on purpose; GitHub Actions does not expand
+# YAML anchors, so there is no way to write the list once.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - oracle/build-libslic3r
+      - .github/workflows/oracle.yml
+      - .gitmodules
+      - vendor/OrcaSlicer
+  pull_request:
+    paths:
+      - oracle/build-libslic3r
+      - .github/workflows/oracle.yml
+      - .gitmodules
+      - vendor/OrcaSlicer
+
+permissions:
+  contents: read
+
+jobs:
+  oracle-build:
+    runs-on: macos-15
+    # Sized against a cold run on a hosted runner, where both stages build from
+    # nothing: stage one has measured 26m11s to 48m53s there (vendor/README.md
+    # tabulates those runs), and stage two is the longer half on a 3-core runner.
+    # A cached run is a small fraction of this. The ceiling exists so a hang ties up
+    # a runner for a bounded time rather than until GitHub's own 6-hour limit.
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      # Shallow: only the pinned commit is needed, matching vendor/README.md's own
+      # instructions for a fresh clone.
+      - name: Check out the OrcaSlicer submodule
+        run: git submodule update --init --depth 1 vendor/OrcaSlicer
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: extractions/setup-just@v3
+
+      # dep_MPFR (vendor/OrcaSlicer/deps/MPFR/MPFR.cmake, pulled in transitively by
+      # dep_OCCT) runs `autoreconf -f -i` as its configure step, which regenerates its
+      # Makefile to include doc targets that need `makeinfo` (texinfo); macos-15's hosted
+      # image carries Homebrew itself but not these formulae (confirmed empirically,
+      # iteratively: the first run of this job failed stage one's configure with
+      # `autoreconf: command not found` (exit 127); installing autoconf/automake/libtool
+      # got past that and failed stage one's build instead with `missing: line 85:
+      # makeinfo: command not found` (exit 2) — both missing on this runner despite a
+      # Homebrew-equipped dev machine already having them). Nothing under
+      # vendor/OrcaSlicer/ changes; this only makes the tools its own vendored
+      # configure/build steps call for available on the runner. These are build tools,
+      # which is why the hermetic ignore list in oracle/build-libslic3r does not displace
+      # them: it keeps Homebrew's headers and libraries out of the build, not its tools.
+      - name: Install autotools (dep_MPFR's configure/build steps need autoreconf, makeinfo)
+        run: brew install autoconf automake libtool texinfo
+
+      # Reads the gitlink entry directly, so it works before the submodule step above and
+      # changes whenever vendor/README.md's "Changing the pin" procedure moves the pin.
+      - name: Resolve the submodule pin for the cache key
+        id: submodule
+        run: echo "sha=$(git rev-parse HEAD:vendor/OrcaSlicer)" >> "$GITHUB_OUTPUT"
+
+      # Both caches are keyed on the submodule pin and on a hash of
+      # oracle/build-libslic3r, which is where every flag of both stages lives — the
+      # stage-one toolchain file is generated from that script's own HOST_PREFIXES, so
+      # hashing the script covers it too. Hashing the script rather than the flag values
+      # means a comment-only edit also invalidates them; that is an accepted
+      # over-approximation rather than a second place the flags have to be kept in sync.
+      # restore-keys falls back to the newest cache for this pin when the script changed,
+      # which still saves the cold CMake+Ninja reconfigure of these large trees.
+      #
+      # Restore and save are separate steps (not the combined `actions/cache`) so the
+      # save runs even when a later step fails: the combined action saves in a post step
+      # that only runs on job success, which is why the dependency superbuild was
+      # rebuilt from scratch on every earlier run of this job. `save-always: true` is the
+      # other way to get that and is deprecated, documented as not working as intended.
+      - name: Restore the dependency superbuild
+        id: deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            vendor/OrcaSlicer/deps/build/arm64
+            vendor/OrcaSlicer/deps/DL_CACHE
+          key: oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+          restore-keys: |
+            oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-
+
+      - name: Restore the main project's build tree
+        id: main-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/OrcaSlicer/build/arm64
+          key: oracle-build-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+          restore-keys: |
+            oracle-build-arm64-${{ steps.submodule.outputs.sha }}-
+
+      - name: Build the vendored libslic3r (just oracle-build)
+        run: just oracle-build
+
+      # `if: always()` is what makes a partial build worth keeping: a run that gets
+      # through stage one and then fails leaves the superbuild usable by the next run.
+      # Skipped on an exact-key hit, where the cache service would reject the upload as
+      # already present.
+      - name: Save the dependency superbuild
+        if: always() && steps.deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            vendor/OrcaSlicer/deps/build/arm64
+            vendor/OrcaSlicer/deps/DL_CACHE
+          key: oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+
+      - name: Save the main project's build tree
+        if: always() && steps.main-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: vendor/OrcaSlicer/build/arm64
+          key: oracle-build-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+
+      # The two stage logs are the only record of what each step ran, and a failed run
+      # is exactly when they are wanted.
+      - name: Upload the build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-build-logs
+          path: oracle/.cache/build/*.log
+          if-no-files-found: warn
