@@ -89,8 +89,8 @@ ownership:
 # row count of port/ownership.tsv on success -- the plan's recorded proof line for R30.
 ownership-check:
     ./port/ownership --check
-# the one command that rewrites every generated report: just audit-order, then the
-# perf-backlog half (task 18-divergences-regeneration; task 23-perf-backlog adds the latter)
+# the one command that rewrites every generated report (task 18-divergences-regeneration):
+# today, just audit-order; 23-perf-backlog adds the perf-backlog regeneration to this same seam
 regenerate:
     ./port/regenerate
 # the drift-detecting variant of audit-order: regenerates order-containers.md,

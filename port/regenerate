@@ -62,10 +62,21 @@ DIFF_LINE_LIMIT = 40
 def _load_port_status() -> ModuleType:
     """Import ``port/port-status`` the way ``port/cut-tasks`` imports ``port/inventory``: it has
     no file extension, so plain ``import`` cannot find it, and ``importlib`` loads it from its
-    path instead. Runs inside this script's own uv environment, not port-status's own."""
+    path instead. Runs inside this script's own uv environment, not port-status's own.
+
+    The module is registered in ``sys.modules`` before its body runs, matching what a normal
+    ``import`` always does. ``port/port-status`` uses ``from __future__ import annotations`` and
+    defines ``@dataclass`` classes, and on Python 3.14 (this script's own declared floor)
+    ``dataclasses._process_class`` resolves a string-annotated field's type via
+    ``sys.modules.get(cls.__module__).__dict__``; with the module missing from ``sys.modules``
+    that lookup returns ``None`` and the import crashes with
+    ``AttributeError: 'NoneType' object has no attribute '__dict__'``. Python 3.15 does not hit
+    this path (``_process_class`` no longer calls ``_is_type``), which is why the bug is invisible
+    on an interpreter newer than the declared floor."""
     loader = importlib.machinery.SourceFileLoader("port_port_status", str(PORT_STATUS_PATH))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
     loader.exec_module(module)
     return module
 

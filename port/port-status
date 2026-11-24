@@ -72,6 +72,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -995,9 +996,12 @@ def find_prefixed_markers(lines: list[LineInfo], prefix: str) -> list[int]:
 # Identical to port/audit-order's own FIDELITY_MARKER_RE: a raw per-line substring match, no
 # code/comment/string masking. `// FIDELITY(port):` presence is deliberately found this same way
 # (not through classify_comment_marker's masking-aware view, which `find_prefixed_markers` uses
-# for `// PERF(port):`) so this task's count of what is "still in the tree" can never disagree
-# with what audit-order would (re)generate into divergences.md -- well-formedness is still
-# checked against classify_lines' structural view of that same line, independently, below.
+# for `// PERF(port):`) so this task's count of what is "still in the tree" agrees with what
+# audit-order would (re)generate into divergences.md for every file both scripts can read --
+# scan_markers's own tolerance of an unreadable file (see its "except OSError" below) is the one
+# documented exception, deliberately different from audit-order's own SystemExit there --
+# well-formedness is still checked against classify_lines' structural view of that same line,
+# independently, below.
 FIDELITY_LINE_RE = re.compile(r"//\s*FIDELITY\(port\):")
 
 
@@ -1037,17 +1041,27 @@ def trailer_sources(lines: list[LineInfo]) -> list[str]:
 
 def extract_reason(lines: list[LineInfo], marker_idx: int) -> str:
     """The marker's reason text: everything after the first `:` in its own comment, plus every
-    contiguous pure-comment line directly below that is not itself blank, the trailer header, or
-    another candidate/recognised marker (so two markers, or a marker immediately followed by the
-    `PORT STATUS` trailer, never get merged into one reason) -- joined with a single space. This
-    is the shape task 23's own fixture (`port/tests/port-status/pass/.../circle.rs`'s two-line
-    `// PERF(port):` comment) needs: the marker text itself names no vendored path (R14's other
-    markers never required one either), so a reason may legitimately span more than one line."""
+    contiguous **bare** `//` comment line directly below that is not itself blank, the trailer
+    header, or another candidate/recognised marker (so two markers, or a marker immediately
+    followed by the `PORT STATUS` trailer, never get merged into one reason) -- joined with a
+    single space. This is the shape task 23's own fixture (`port/tests/port-status/pass/.../
+    circle.rs`'s two-line `// PERF(port):` comment) needs: the marker text itself names no
+    vendored path (R14's other markers never required one either), so a reason may legitimately
+    span more than one line.
+
+    Absorption stops at a `///` or `//!` doc comment (or any line whose raw text does not start
+    with a bare `//`): those are prose about the code, not the marker's own reason, and letting
+    them into a backlog row both misrepresents the reason and makes an untouched marker's derived
+    row go stale the moment a port task edits only the adjacent doc comment -- exactly the
+    fan-out stall this task's "keyed on content not line number" design exists to prevent."""
     first = marker_comment_text(lines, marker_idx) or ""
     after_colon = first.split(":", 1)[1].strip() if ":" in first else ""
     parts = [after_colon] if after_colon else []
     j = marker_idx + 1
     while j < len(lines) and lines[j].is_pure_comment:
+        raw_stripped = lines[j].raw.strip()
+        if raw_stripped.startswith("///") or raw_stripped.startswith("//!"):
+            break
         text = marker_comment_text(lines, j) or ""
         if not text or text == "PORT STATUS" or classify_comment_marker(text) is not None:
             break
@@ -1095,6 +1109,14 @@ def scan_markers(tree: Path) -> MarkerScanResult:
         try:
             text = rs_path.read_text(encoding="utf-8", errors="replace")
         except OSError:
+            # Unlike `port/audit-order`'s `fidelity_marker_rows`, which raises `SystemExit` for
+            # exactly this case, a file this per-marker assertion cannot read is silently
+            # skipped here: this function already runs on every port task's `--per-commit`, far
+            # more often than the regeneration pass runs `audit-order`, so turning an unreadable
+            # file into a hard stop for every concurrent port branch is a materially different
+            # failure mode this task did not choose to add. This is a known, deliberate
+            # divergence from audit-order's behaviour, not an oversight -- see the finding on
+            # this in the pull request body.
             continue
         module_relpath = rs_path.relative_to(tree).as_posix()
         lines = classify_lines(text)
@@ -1115,7 +1137,10 @@ def scan_markers(tree: Path) -> MarkerScanResult:
                     result.findings.append(Finding(
                         module_relpath, idx + 1, "perf-marker-no-source",
                         "'// PERF(port):' needs its module to end with a 'PORT STATUS' trailer "
-                        "naming at least one vendored 'source:' path, to be well formed (R15)",
+                        "naming at least one vendored 'source:' path, to be well formed (R15) -- "
+                        "a file with no trailer (e.g. under crates/*/tests/ or fuzz_targets/) "
+                        "can never satisfy this; move the marker into the ported module it "
+                        "describes",
                     ))
                     continue
                 reason = extract_reason(lines, idx)
@@ -1134,20 +1159,31 @@ def scan_markers(tree: Path) -> MarkerScanResult:
                 result.fidelity_counts.get(module_relpath, 0) + len(fidelity_idxs)
             )
             for idx in fidelity_idxs:
-                on_own_line = idx < len(lines) and lines[idx].is_pure_comment
-                if not on_own_line:
+                # `fidelity_marker_indices` is a raw per-line substring match (deliberately, so
+                # its *count* can never disagree with audit-order's own) and can match a line
+                # `classify_lines`' structural view does not consider a comment at all -- prose
+                # inside a `/* ... */` block, or text inside a string literal. Well-formedness is
+                # judged on that structural view instead, so such a line is neither on-its-own
+                # comment nor a trailing comment after code: it is not a real marker position at
+                # all, and is silently not a candidate for either finding (still counted above,
+                # for parity with what audit-order would turn into a divergences.md row).
+                info = lines[idx] if idx < len(lines) else None
+                if info is None:
+                    continue
+                if info.is_pure_comment:
+                    reason = extract_reason(lines, idx)
+                    if not reason:
+                        result.findings.append(Finding(
+                            module_relpath, idx + 1, "fidelity-marker-empty-reason",
+                            "'// FIDELITY(port):' has no reason text after the colon, to be "
+                            "well formed (R18)",
+                        ))
+                    continue
+                if info.comment:
                     result.findings.append(Finding(
                         module_relpath, idx + 1, "fidelity-marker-not-on-own-line",
                         "'// FIDELITY(port):' must be on its own comment line, not trailing "
                         "after code, to be well formed (R18)",
-                    ))
-                    continue
-                reason = extract_reason(lines, idx)
-                if not reason:
-                    result.findings.append(Finding(
-                        module_relpath, idx + 1, "fidelity-marker-empty-reason",
-                        "'// FIDELITY(port):' has no reason text after the colon, to be well "
-                        "formed (R18)",
                     ))
     return result
 
@@ -1268,10 +1304,13 @@ def check_perf_fidelity(tree: Path, result: ScanResult) -> None:
     `--per-commit` help text). Adds every malformed-marker finding `scan_markers` found, then
     fails:
 
-    - a `port/reports/perf-backlog.md` row whose `(module, source, reason)` no longer matches any
-      live `// PERF(port):` marker in that module -- deliberately *not* keyed on `line`, so a
-      port task that inserts code above an existing marker does not go red over a report it is
-      forbidden to touch (R15);
+    - a `port/reports/perf-backlog.md` row whose `(module, source, reason)` is named by more
+      committed rows than there are live `// PERF(port):` markers sharing that same
+      `(module, source, reason)` -- a multiset comparison (`collections.Counter`), not mere
+      presence, so two markers that happen to share one reason can still have one of them
+      deleted and be caught; deliberately *not* keyed on `line` either way, so a port task that
+      inserts code above an existing marker does not go red over a report it is forbidden to
+      touch (R15);
     - a file for which `port/reports/divergences.md` names more `fidelity-marker` rows than the
       file currently carries live `// FIDELITY(port):` markers -- keyed on the file, not on any
       one row's line, for the same reason; a file with at least as many live markers as rows
@@ -1282,9 +1321,14 @@ def check_perf_fidelity(tree: Path, result: ScanResult) -> None:
     scan = scan_markers(tree)
     result.findings.extend(scan.findings)
 
+    live_perf_key_counts: Counter[tuple[str, str, str]] = Counter(
+        (r.module, r.source, r.reason) for r in scan.perf_rows
+    )
+    seen_perf_key_counts: Counter[tuple[str, str, str]] = Counter()
     for row in read_committed_perf_rows(tree):
-        candidates = [r for r in scan.perf_rows if r.module == row.module]
-        if not any(r.source == row.source and r.reason == row.reason for r in candidates):
+        key = (row.module, row.source, row.reason)
+        seen_perf_key_counts[key] += 1
+        if seen_perf_key_counts[key] > live_perf_key_counts[key]:
             result.fail(
                 row.module,
                 row.line,
@@ -1423,9 +1467,12 @@ SELFTEST_FIXTURES: list[tuple[str, bool, str | None]] = [
     ("fidelity-marker-not-own-line", False, "fidelity-marker-not-on-own-line"),
     ("fidelity-marker-empty-reason", False, "fidelity-marker-empty-reason"),
     ("perf-report-row-stale", False, "perf-report-row-stale"),
+    ("perf-report-row-duplicate-reason", False, "perf-report-row-stale"),
     ("divergences-fidelity-row-stale", False, "divergences-fidelity-row-stale"),
     ("divergences-other-source-ignored", True, None),
     ("perf-report-row-line-moved", True, None),
+    ("perf-reason-excludes-doc-comment", True, None),
+    ("fidelity-marker-prose-not-flagged", True, None),
 ]
 
 
@@ -1482,6 +1529,24 @@ def _check_perf_row_shape() -> list[str]:
     return failures
 
 
+def _check_perf_reason_excludes_doc_comment() -> list[str]:
+    """`extract_reason` must stop absorbing lines at a `///` doc comment, not fold it into a
+    `// PERF(port):` marker's reason -- a direct, runnable proof (not merely the absence of
+    findings) that `port/tests/port-status/perf-reason-excludes-doc-comment`'s fixture row
+    carries only the marker's own bare-`//` text."""
+    rows = build_perf_backlog_rows(FIXTURES_ROOT / "perf-reason-excludes-doc-comment")
+    if len(rows) != 1:
+        return [
+            "expected exactly 1 PERF(port) row from the "
+            f"'perf-reason-excludes-doc-comment' fixture, got {rows!r}"
+        ]
+    reason = rows[0].reason
+    expected = "clones the whole vector; kept to mirror the oracle."
+    if reason != expected:
+        return [f"expected reason {expected!r} (doc comment excluded), got {reason!r}"]
+    return []
+
+
 def run_selftest() -> int:
     regex_failures = _check_candidate_marker_regex()
     for failure in regex_failures:
@@ -1491,7 +1556,11 @@ def run_selftest() -> int:
     for failure in perf_row_failures:
         click.echo(f"self-test: perf-backlog row shape check FAILED: {failure}")
 
-    ok = not regex_failures and not perf_row_failures
+    doc_comment_failures = _check_perf_reason_excludes_doc_comment()
+    for failure in doc_comment_failures:
+        click.echo(f"self-test: perf-backlog reason/doc-comment check FAILED: {failure}")
+
+    ok = not regex_failures and not perf_row_failures and not doc_comment_failures
     for name, expect_pass, must_contain in SELFTEST_FIXTURES:
         fixture_dir = FIXTURES_ROOT / name
         if not fixture_dir.is_dir():
