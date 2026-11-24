@@ -191,6 +191,18 @@ fn first_difference<'v>(
 /// (`vendor/OrcaSlicer/src/libslic3r/Print.cpp:3306-3310`). The allowance is off by default
 /// (`false`): a caller compares an armed run against an unarmed one by passing `true` only for
 /// that pair, never as a standing default.
+///
+/// **Disclosed residual — L1 here is the lenient reading, not "identical bytes after the
+/// allowance".** L1 is reported when the allowance actually excused a difference at
+/// `/slicing_pipeline_plugin` *and* the per-key walk finds no other structural difference. The
+/// walk compares parsed values, so a pair that differs at `slicing_pipeline_plugin` **and** in
+/// key order, indentation or float spelling is still reported as L1, even though substituting
+/// that one key would not make the two files byte-identical. A port whose JSON writer orders keys
+/// differently from nlohmann's insertion order would therefore gate L1 on a formatting
+/// difference. This is inert for the oracle-against-oracle comparisons of plan step 6, where the
+/// same C++ writer produces both sides;
+/// `settings_pair_differing_in_the_allowed_key_and_in_formatting_is_still_l1` in `tests/json.rs`
+/// pins the behaviour so the next reader does not have to re-derive it.
 pub fn compare_settings(a: &[u8], b: &[u8], allow_pipeline_plugin_diff: bool) -> JsonReport {
     if a == b {
         return JsonReport::l0();
@@ -229,6 +241,17 @@ pub fn compare_settings(a: &[u8], b: &[u8], allow_pipeline_plugin_diff: bool) ->
 /// (`vendor/OrcaSlicer/src/libslic3r/GCode/GCodeStatistics.cpp:177`) and which the port cannot
 /// reproduce without claiming to be OrcaSlicer. `version` and the `summary`, `units`, `layers`
 /// and `objects` objects are all compared like every other key — only `generator` is excused.
+///
+/// **Disclosed residual — L1 here is the lenient reading, not "identical bytes after the
+/// normalisation".** L1 is reported when `generator` actually differed *and* the per-key walk
+/// finds no other structural difference. The walk compares parsed values, so a pair that differs
+/// in `generator` **and** in key order, indentation or float spelling is still reported as L1,
+/// even though substituting `generator` would not make the two files byte-identical. A port whose
+/// JSON writer orders keys differently from nlohmann's insertion order would therefore gate L1 on
+/// a formatting difference. This is inert for the oracle-against-oracle comparisons of plan step
+/// 6, where the same C++ writer produces both sides;
+/// `statistics_pair_differing_in_generator_and_in_formatting_is_still_l1` in `tests/json.rs` pins
+/// the behaviour so the next reader does not have to re-derive it.
 pub fn compare_statistics(a: &[u8], b: &[u8]) -> JsonReport {
     if a == b {
         return JsonReport::l0();

@@ -189,6 +189,54 @@ fn settings_pair_with_allowance_on_but_pipeline_plugin_identical_and_only_whites
     assert!(!report.passed(Level::L1));
 }
 
+#[test]
+fn statistics_pair_differing_in_generator_and_in_formatting_is_still_l1() {
+    // Pins the disclosed residual of the lenient L1 reading (see `compare_statistics`'s doc
+    // comment), not a requirement anyone asked for: `generator` really differs here, and the
+    // per-key walk — which compares parsed values, not raw bytes — finds nothing else, so L1 is
+    // reported even though substituting `generator` would still leave the two files differing in
+    // indentation and whitespace. Documented rather than tightened: both sides of every pair this
+    // comparator is pointed at in plan step 6 come from the same C++ writer.
+    let a: &[u8] = br#"{"generator":"A","time":1.0}"#;
+    let b: &[u8] = b"{\n  \"generator\": \"B\",\n  \"time\": 1.0\n}";
+    let report = compare_statistics(a, b);
+    assert_eq!(report.outcome, JsonOutcome::Level(Level::L1));
+    assert!(!report.passed(Level::L0));
+    // The same leniency over key order, which is the case a Rust port would actually hit:
+    // serde_json writes a map's keys sorted, nlohmann writes them in insertion order.
+    let a: &[u8] = br#"{"generator":"A","time":1.0,"version":"1"}"#;
+    let b: &[u8] = br#"{"version":"1","generator":"B","time":1.0}"#;
+    let report = compare_statistics(a, b);
+    assert_eq!(report.outcome, JsonOutcome::Level(Level::L1));
+}
+
+#[test]
+fn settings_pair_differing_in_the_allowed_key_and_in_formatting_is_still_l1() {
+    // The settings side of the same disclosed residual (see `compare_settings`'s doc comment):
+    // with the allowance on, `slicing_pipeline_plugin` really differs and nothing else does
+    // structurally, so L1 is reported even though the raw bytes differ in indentation too.
+    let a: &[u8] = br#"{"slicing_pipeline_plugin":["posSlice"],"k":1}"#;
+    let b: &[u8] = b"{\n  \"slicing_pipeline_plugin\": [],\n  \"k\": 1\n}";
+    let report = compare_settings(a, b, true);
+    assert_eq!(report.outcome, JsonOutcome::Level(Level::L1));
+    assert!(!report.passed(Level::L0));
+    // With the allowance off, the same pair is `none` naming that key — the leniency is confined
+    // to the one declared allowance and does not widen when formatting also differs.
+    let report = compare_settings(a, b, false);
+    match &report.outcome {
+        // The two values are arrays here, so with the allowance off the walk descends into them
+        // and names the first differing element (`/slicing_pipeline_plugin/0`) rather than the key
+        // itself — either way the difference is reported under that key, not excused.
+        JsonOutcome::None(JsonDifference::Pointer { pointer, .. }) => {
+            assert!(
+                pointer.starts_with("/slicing_pipeline_plugin"),
+                "expected the pointer under the allowed key, got {pointer}"
+            );
+        }
+        other => panic!("expected a pointer outcome, got {other:?}"),
+    }
+}
+
 // --- The real pair (task 10's own obligation: `tests/data/real/`, from two actual
 // `just oracle-slice vendor/OrcaSlicer/tests/data/frog_legs.obj base-fff --export-settings
 // --export-statistics` runs). See `tests/levels.rs` for the same two runs' G-code excerpt.
