@@ -1,0 +1,573 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Print, and check, the provenance header every committed oracle output carries.
+
+Printing mode (default): ``oracle/provenance <fixture> <configuration> --oracle
+release|built --syntax gcode|json|markdown [--readme <path>]`` prints one header to
+stdout. The nine items it records are: the pinned vendored commit; which oracle produced
+the output and its build flags; the OS; the architecture; the compiler version; the value
+of ``SCALING_FACTOR``; the full preset set and the configuration's overrides, read from
+``docs/ORACLE.md``'s configuration table by ``<configuration>``'s name; the fixture's
+basename, which is ``<fixture>`` itself; and the fixture's resolved instance transform,
+read from its record in ``--readme`` (``vendor/README.md`` by default). A run missing
+``--oracle`` or ``--syntax`` exits non-zero naming the option, before anything else is
+read, and a run naming a fixture absent from the README's fixture table exits non-zero
+naming the fixture and prints no header.
+
+Checking mode: ``oracle/provenance --check <path>...`` walks and glob-expands every
+``<path>`` itself (a path that does not expand to anything on disk, whether a missing
+directory or a glob with nothing to match, contributes zero files rather than failing),
+classifies each resulting file, and exits non-zero naming any file that is one of the four
+excluded static-analysis reports or any covered file with a missing or stale header.
+Everything else is counted as skipped. The covered set — the only place it is named,
+besides this task's own task.md — is: everything under ``port/goldens/``; every file
+matching ``port/dumps/*/*.dump``; and the two reports an oracle run writes,
+``port/reports/determinism.md`` and ``port/reports/oracle-parity.md``. This script adds no
+``just`` recipe and no CI step of its own; wiring ``--check`` into ``just port-check``
+belongs to a later task.
+
+This script never runs the oracle binary and never invokes ``oracle/run`` — it only reads
+``docs/ORACLE.md``, a README and the vendored tree's own files.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path, PurePosixPath
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ORACLE_DOC = REPO_ROOT / "docs" / "ORACLE.md"
+LIBSLIC3R_H = REPO_ROOT / "vendor" / "OrcaSlicer" / "src" / "libslic3r" / "libslic3r.h"
+
+# The commit intent/libslic3r-rust-port/task.md and every "Done when" line pin. Asserted,
+# never derived from the live git state alone, so a detached or re-pointed submodule is
+# caught before a header is ever printed.
+PINNED_COMMIT = "f92a7c065c5718b8ef1baac1cd704df2911238f4"
+
+# The covered set (R7 / this task's "Done when"). Named here, in the task and nowhere else.
+GOLDENS_PREFIX = "port/goldens/"
+DUMPS_GLOB = "port/dumps/*/*.dump"
+COVERED_REPORTS = frozenset({"port/reports/determinism.md", "port/reports/oracle-parity.md"})
+EXCLUDED_REPORTS = frozenset(
+    {
+        "port/reports/order-containers.md",
+        "port/reports/order-comparators.md",
+        "port/reports/divergences.md",
+        "port/reports/perf-backlog.md",
+    }
+)
+
+SEPARATOR_RE = re.compile(r"^:?-+:?$")
+
+# The nine items' keys, in task.md's own order. Shared by all three syntaxes so a checker
+# looks for the same key regardless of which one it is reading.
+ITEM_KEYS = [
+    "oracle-commit",
+    "oracle",
+    "os",
+    "arch",
+    "compiler",
+    "scaling-factor",
+    "preset-set",
+    "fixture",
+    "transform",
+]
+
+
+class ProvenanceError(Exception):
+    """Raised for a problem this script reports itself, never a Python traceback."""
+
+
+# ---------------------------------------------------------------------------
+# Small markdown-table helpers (deliberately duplicated from oracle/run's table reader
+# rather than imported from it: these are standalone uv scripts, and this task touches no
+# other script's file).
+# ---------------------------------------------------------------------------
+
+
+def split_row(line: str) -> list[str]:
+    """Split one markdown table line into its trimmed cells."""
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def strip_cell(cell: str) -> str:
+    """Drop a cell's surrounding backticks and whitespace, and read placeholders as empty."""
+    cell = cell.strip()
+    if cell.startswith("`") and cell.endswith("`") and len(cell) >= 2:
+        cell = cell[1:-1].strip()
+    if cell.lower() in ("", "(none)", "-", "—"):
+        return ""
+    return cell
+
+
+def find_table(doc_text: str, first_column: str) -> list[dict[str, str]]:
+    """Return the rows of the first markdown table whose header's first column matches.
+
+    Both docs/ORACLE.md and --readme hold more than one table, so the table is found by
+    its header rather than by position or by a section heading's exact wording.
+    """
+    lines = doc_text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.startswith("|") and i + 1 < len(lines):
+            header = split_row(line)
+            sep_line = lines[i + 1].strip()
+            sep_cells = split_row(sep_line) if sep_line.startswith("|") else []
+            if header and header[0] == first_column and sep_cells and all(
+                SEPARATOR_RE.match(c) for c in sep_cells
+            ):
+                rows = []
+                j = i + 2
+                while j < len(lines) and lines[j].strip().startswith("|"):
+                    rows.append(dict(zip(header, split_row(lines[j]))))
+                    j += 1
+                return rows
+            i += 1
+        else:
+            i += 1
+    raise ProvenanceError(f"no table headed {first_column!r} found")
+
+
+# ---------------------------------------------------------------------------
+# Item gathering. Each function returns a string value for one of the nine items (except
+# the configuration/fixture lookups, which return whole rows); none of them prints or
+# exits — main() does that once every item is in hand, so a failure partway through never
+# leaves a partial header on stdout.
+# ---------------------------------------------------------------------------
+
+
+def read_vendored_commit() -> str:
+    """Read vendor/OrcaSlicer's checked-out commit. Raises on a git failure."""
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT / "vendor" / "OrcaSlicer"), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ProvenanceError(
+            f"git -C vendor/OrcaSlicer rev-parse HEAD failed: {result.stderr.strip()}"
+        )
+    return result.stdout.strip()
+
+
+def commit_matches(measured: str) -> bool:
+    """Pure predicate: does a measured commit agree with the pin.
+
+    Kept separate from any exit() call so it can be exercised directly (the mismatch path
+    cannot be proven by actually re-pointing the submodule, which this task must never do).
+    """
+    return measured == PINNED_COMMIT
+
+
+def read_os() -> str:
+    """Read the OS name and version from sw_vers."""
+    result = subprocess.run(["sw_vers"], capture_output=True, text=True, check=True)
+    fields = dict(
+        line.split(":", 1) for line in result.stdout.splitlines() if ":" in line
+    )
+    name = fields.get("ProductName", "").strip()
+    version = fields.get("ProductVersion", "").strip()
+    return f"{name} {version}".strip()
+
+
+def read_arch() -> str:
+    """Read the machine architecture from uname -m."""
+    result = subprocess.run(["uname", "-m"], capture_output=True, text=True, check=True)
+    return result.stdout.strip()
+
+
+def read_compiler() -> str:
+    """Read the compiler's own version line from clang --version."""
+    result = subprocess.run(["clang", "--version"], capture_output=True, text=True, check=True)
+    return result.stdout.splitlines()[0].strip()
+
+
+def read_scaling_factor() -> str:
+    """Read SCALING_FACTOR_INTERNAL's literal value out of the vendored libslic3r.h.
+
+    Not SCALING_FACTOR_INTERNAL_LARGE_PRINTER: the word-boundary anchor excludes it, since
+    an underscore is a word character and so leaves no boundary after plain INTERNAL in
+    that longer name. The CLI oracle never switches to the large-printer value — that
+    assignment (Plater.cpp) lives in the GUI, out of scope for every configuration this
+    repository runs — so one read of the vendored constant is the value for every run.
+    """
+    if not LIBSLIC3R_H.is_file():
+        raise ProvenanceError(f"{LIBSLIC3R_H} does not exist")
+    text = LIBSLIC3R_H.read_text()
+    match = re.search(r"\bSCALING_FACTOR_INTERNAL\b\s*=\s*([0-9.eE+-]+)\s*;", text)
+    if match is None:
+        raise ProvenanceError(f"no SCALING_FACTOR_INTERNAL definition found in {LIBSLIC3R_H}")
+    return match.group(1)
+
+
+def read_built_oracle_flags() -> str | None:
+    """Read the built-oracle flags section of docs/ORACLE.md, or None if absent.
+
+    Located by a heading matching "Built oracle flags" (any level, a space or hyphen
+    before "oracle"), case-insensitively, because the task that writes that section has
+    not landed and so cannot be read here for its exact heading text. Everything from the
+    line after the heading up to the next heading (or EOF) is read as the flags, blank
+    lines dropped and the rest joined with "; ". A reviewer of that later task's pull
+    request is the one place this locator is written down besides this docstring.
+    """
+    if not ORACLE_DOC.is_file():
+        raise ProvenanceError(f"{ORACLE_DOC} does not exist")
+    lines = ORACLE_DOC.read_text().splitlines()
+    heading_re = re.compile(r"^#{1,6}\s*Built[- ]oracle flags\s*$", re.IGNORECASE)
+    for i, line in enumerate(lines):
+        if heading_re.match(line.strip()):
+            body = []
+            for later in lines[i + 1 :]:
+                if later.strip().startswith("#"):
+                    break
+                stripped = later.strip()
+                if stripped:
+                    body.append(stripped)
+            if body:
+                return "; ".join(body)
+            return None
+    return None
+
+
+def read_configuration_row(configuration: str) -> dict[str, str]:
+    """Find and return docs/ORACLE.md's configuration row named `configuration`."""
+    if not ORACLE_DOC.is_file():
+        raise ProvenanceError(f"{ORACLE_DOC} does not exist")
+    rows = find_table(ORACLE_DOC.read_text(), "Configuration")
+    for row in rows:
+        if strip_cell(row.get("Configuration", "")) == configuration:
+            return row
+    known = ", ".join(strip_cell(r.get("Configuration", "")) for r in rows)
+    raise ProvenanceError(
+        f"no configuration row named {configuration!r} in {ORACLE_DOC} (known: {known})"
+    )
+
+
+def read_fixture_record(fixture: str, readme_path: Path) -> dict[str, str]:
+    """Find and return `readme_path`'s fixture row named `fixture` by its frozen basename.
+
+    The table is read by its header's first column, "Frozen basename" — R25's own wording
+    — the same way docs/ORACLE.md's configuration table is read by "Configuration"; this
+    task runs ahead of 11-fixture-set, which is the task that will commit this table for
+    real, so the exact column names below are this task's own choice, stated in its pull
+    request, not a spelling read from a merged document.
+    """
+    if not readme_path.is_file():
+        raise ProvenanceError(f"{readme_path} does not exist")
+    rows = find_table(readme_path.read_text(), "Frozen basename")
+    for row in rows:
+        if strip_cell(row.get("Frozen basename", "")) == fixture:
+            transform = strip_cell(row.get("Resolved instance transform", ""))
+            if not transform:
+                raise ProvenanceError(
+                    f"fixture {fixture!r}'s record in {readme_path} names no instance transform"
+                )
+            return row
+    known = ", ".join(strip_cell(r.get("Frozen basename", "")) for r in rows)
+    raise ProvenanceError(f"no fixture record named {fixture!r} in {readme_path} (known: {known})")
+
+
+def build_preset_set_item(row: dict[str, str]) -> str:
+    """Format item 7 (full preset set and overrides) from a configuration row."""
+    machine = strip_cell(row.get("Machine", "")) or "(none)"
+    process = strip_cell(row.get("Process", "")) or "(none)"
+    filaments = strip_cell(row.get("Filament(s)", "")) or "(none)"
+    overrides = strip_cell(row.get("Overrides", "")) or "(none)"
+    return f"machine={machine}; process={process}; filaments={filaments}; overrides={overrides}"
+
+
+# ---------------------------------------------------------------------------
+# Formatting: one function per --syntax, each taking the same ordered item dict.
+# ---------------------------------------------------------------------------
+
+
+def format_gcode(items: dict[str, str]) -> str:
+    """Format the header as a ; comment block, for G-code goldens and stage dumps."""
+    lines = ["; provenance"]
+    for key in ITEM_KEYS:
+        lines.append(f";   {key}: {items[key]}")
+    return "\n".join(lines) + "\n"
+
+
+def format_json(items: dict[str, str]) -> str:
+    """Format the header as a top-level "provenance" object, for JSON artifacts."""
+    return json.dumps({"provenance": {key: items[key] for key in ITEM_KEYS}}, indent=2) + "\n"
+
+
+def format_markdown(items: dict[str, str]) -> str:
+    """Format the header as a Markdown table, for the reports an oracle run writes."""
+    lines = ["| Item | Value |", "|---|---|"]
+    for key in ITEM_KEYS:
+        value = items[key].replace("|", "\\|")
+        lines.append(f"| {key} | {value} |")
+    return "\n".join(lines) + "\n"
+
+
+FORMATTERS = {"gcode": format_gcode, "json": format_json, "markdown": format_markdown}
+
+
+# ---------------------------------------------------------------------------
+# Checking mode.
+# ---------------------------------------------------------------------------
+
+
+def repo_relative(path: Path) -> str:
+    """Return `path`'s POSIX-style path relative to REPO_ROOT, for classification."""
+    try:
+        rel = path.resolve().relative_to(REPO_ROOT)
+    except ValueError:
+        rel = path
+    return PurePosixPath(rel).as_posix()
+
+
+def expand_arg(arg: str, invocation_cwd: Path) -> tuple[list[str], list[Path]]:
+    """Expand one --check argument, returning (excluded-by-name rel paths, existing files).
+
+    A literal (non-glob) argument is checked against the four excluded names *before*
+    looking at the filesystem at all: being "pointed at" one of them is what task.md fails
+    on, not finding a stale copy there, so a name that does not currently exist on disk is
+    still named as a failure rather than silently passed. Once that check is past: a glob
+    (any of * ? [) is expanded with Path.glob relative to invocation_cwd, matching nothing
+    if nothing matches; a directory is walked recursively; a file is returned as itself; a
+    plain path that is none of those — most commonly port/goldens/ itself before
+    12-config-goldens exists — contributes no files, which is not a failure, only an empty
+    "covered, matched nothing" later.
+    """
+    if any(ch in arg for ch in "*?["):
+        matches = sorted(invocation_cwd.glob(arg))
+        return [], [m for m in matches if m.is_file()]
+
+    literal_rel = repo_relative((invocation_cwd / arg).resolve())
+    if literal_rel in EXCLUDED_REPORTS:
+        return [literal_rel], []
+
+    path = (invocation_cwd / arg).resolve()
+    if path.is_dir():
+        return [], sorted(p for p in path.rglob("*") if p.is_file())
+    if path.is_file():
+        return [], [path]
+    return [], []
+
+
+def classify(rel: str) -> str:
+    """Classify one repo-relative path as "excluded", "covered" or "skip"."""
+    if rel in EXCLUDED_REPORTS:
+        return "excluded"
+    if rel.startswith(GOLDENS_PREFIX):
+        return "covered"
+    if PurePosixPath(rel).full_match(DUMPS_GLOB):
+        return "covered"
+    if rel in COVERED_REPORTS:
+        return "covered"
+    return "skip"
+
+
+def leading_comment_block(text: str) -> str:
+    """Return the file's leading run of blank or ``;``-prefixed lines, joined by newline.
+
+    Bounded so a hash or digit appearing anywhere later in a real G-code body is never
+    mistaken for a header field; the header this script itself prints is always this
+    leading block.
+    """
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith(";"):
+            lines.append(line)
+            continue
+        break
+    return "\n".join(lines)
+
+
+def header_commit(path: Path) -> str | None:
+    """Read the recorded oracle-commit out of one file, or None if it has no header.
+
+    Dispatches on the file's extension: .json as the "provenance" object, .md as the
+    Markdown table, anything else (stage dumps, G-code goldens, with no fixed extension of
+    their own) as the leading ; comment block. This mapping is this script's own choice,
+    documented in its pull request, since the "covered" set names paths, not syntaxes.
+    """
+    suffix = path.suffix.lower()
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    if suffix == ".json":
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+        provenance = data.get("provenance") if isinstance(data, dict) else None
+        if not isinstance(provenance, dict):
+            return None
+        value = provenance.get("oracle-commit")
+        return value if isinstance(value, str) else None
+    if suffix == ".md":
+        match = re.search(r"\|\s*oracle-commit\s*\|\s*`?([0-9a-fA-F]+)`?\s*\|", text)
+        return match.group(1) if match else None
+    match = re.search(r"^\s*;\s*oracle-commit:\s*(\S+)", leading_comment_block(text), re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def run_check(paths: tuple[str, ...]) -> None:
+    """Implement --check: classify every named file and verify each covered one's header."""
+    invocation_cwd = Path.cwd()
+    excluded: list[str] = []
+    covered: list[Path] = []
+    skipped = 0
+    seen: set[Path] = set()
+    for arg in paths:
+        arg_excluded, files = expand_arg(arg, invocation_cwd)
+        excluded.extend(arg_excluded)
+        for path in files:
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            rel = repo_relative(resolved)
+            kind = classify(rel)
+            if kind == "excluded":
+                excluded.append(rel)
+            elif kind == "covered":
+                covered.append(resolved)
+            else:
+                skipped += 1
+
+    if excluded:
+        for rel in excluded:
+            click.echo(
+                f"error: {rel} is a static-analysis report with no oracle and no fixture; "
+                "--check always fails on it by name",
+                err=True,
+            )
+        sys.exit(1)
+
+    failures = []
+    for path in covered:
+        rel = repo_relative(path)
+        recorded = header_commit(path)
+        if recorded is None:
+            failures.append(f"{rel}: no provenance header found")
+        elif recorded != PINNED_COMMIT:
+            failures.append(f"{rel}: header names commit {recorded}, expected {PINNED_COMMIT}")
+
+    if failures:
+        for message in failures:
+            click.echo(f"error: {message}", err=True)
+        sys.exit(1)
+
+    click.echo(f"checked: {len(covered)}")
+    click.echo(f"skipped: {skipped}")
+
+
+# ---------------------------------------------------------------------------
+# CLI.
+# ---------------------------------------------------------------------------
+
+
+@click.command()
+@click.argument("paths", nargs=-1)
+@click.option("--check", is_flag=True, help="Check mode: verify headers under the named paths.")
+@click.option(
+    "--oracle",
+    type=click.Choice(["release", "built"]),
+    default=None,
+    help="Which oracle produced the output (printing mode; required).",
+)
+@click.option(
+    "--syntax",
+    type=click.Choice(["gcode", "json", "markdown"]),
+    default=None,
+    help="Header syntax to print (printing mode; required).",
+)
+@click.option(
+    "--readme",
+    "readme_arg",
+    default="vendor/README.md",
+    show_default=True,
+    help="Path to the README holding fixture records (printing mode).",
+)
+def main(paths: tuple[str, ...], check: bool, oracle: str | None, syntax: str | None, readme_arg: str) -> None:
+    """Print (default) or check (--check) the provenance header oracle outputs carry."""
+    if check:
+        run_check(paths)
+        return
+
+    if oracle is None:
+        click.echo("error: --oracle is required (release|built)", err=True)
+        sys.exit(1)
+    if syntax is None:
+        click.echo("error: --syntax is required (gcode|json|markdown)", err=True)
+        sys.exit(1)
+    if len(paths) != 2:
+        click.echo(
+            f"error: printing mode takes exactly two arguments, <fixture> <configuration> "
+            f"(got {len(paths)})",
+            err=True,
+        )
+        sys.exit(1)
+    fixture, configuration = paths
+
+    invocation_cwd = Path.cwd()
+    readme_path = (invocation_cwd / readme_arg).resolve()
+
+    try:
+        measured_commit = read_vendored_commit()
+        if not commit_matches(measured_commit):
+            raise ProvenanceError(
+                f"vendor/OrcaSlicer is at {measured_commit}, expected pinned commit "
+                f"{PINNED_COMMIT}"
+            )
+
+        if oracle == "release":
+            oracle_field = "release (released build, no local flags)"
+        else:
+            flags = read_built_oracle_flags()
+            if flags is None:
+                click.echo(
+                    "warning: docs/ORACLE.md has no 'Built oracle flags' section yet "
+                    "(--oracle built has no caller until 13-build-libslic3r lands); "
+                    "recording flags as unrecorded",
+                    err=True,
+                )
+                flags = "unrecorded"
+            oracle_field = f"built ({flags})"
+
+        config_row = read_configuration_row(configuration)
+        preset_set_field = build_preset_set_item(config_row)
+
+        fixture_record = read_fixture_record(fixture, readme_path)
+        transform_field = strip_cell(fixture_record.get("Resolved instance transform", ""))
+
+        items = {
+            "oracle-commit": measured_commit,
+            "oracle": oracle_field,
+            "os": read_os(),
+            "arch": read_arch(),
+            "compiler": read_compiler(),
+            "scaling-factor": read_scaling_factor(),
+            "preset-set": preset_set_field,
+            "fixture": fixture,
+            "transform": transform_field,
+        }
+    except ProvenanceError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(FORMATTERS[syntax](items), nl=False)
+
+
+if __name__ == "__main__":
+    main()
