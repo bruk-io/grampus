@@ -8,3 +8,8 @@ check:
 # the guard: this branch changes only what its documents on main allow
 guard *branch:
     {{asdlc}} branch check {{branch}}
+
+# variadic (not two-parameter) because `just` rejects a surplus argument to a fixed-arity recipe,
+# and callers across steps 5, 6, 9, 10 and 25-27 each need their own extra flags
+compare a b *ARGS:
+    cargo run --quiet --release -p oracle-compare -- {{a}} {{b}} {{ARGS}}
