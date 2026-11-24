@@ -39,6 +39,11 @@ fixture-export *NAMES:
 assert-placement fixture run_dir:
     ./oracle/assert-placement {{fixture}} {{run_dir}}
 
+# regenerate port/manifest.tsv into memory (task 14-manifest-columns); never reads the six
+# judgement columns or status, never writes a file, and never compares port/cut.tsv
+# fail, with a diff, when a derived manifest column has drifted from the vendored tree
+inventory-check:
+    ./port/inventory --check
 # regenerate every resolved-configuration golden under port/goldens/configs/ (R11): one per row
 # of docs/ORACLE.md's configuration table, each sliced through oracle-slice and carrying its
 # provenance header via port/merge-provenance; a row added there must be added here too.

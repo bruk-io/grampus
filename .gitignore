@@ -4,3 +4,6 @@ oracle/.cache/
 
 # port/inventory (and any other uv-run script here) leaves this behind.
 __pycache__/
+
+# just inventory-check's own scratch directory (task 14-manifest-columns).
+port/.cache/
