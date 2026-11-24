@@ -7,16 +7,16 @@
 //! with exactly one *structural* exception named by R4 itself, never a value within some margin.
 //!
 //! A JSON artifact is reported only as [`crate::Level::L0`] (identical bytes), [`crate::Level::L1`]
-//! (identical after that artifact's own declared exception), or `none` (represented as
-//! [`JsonReport::level`] being `None`) — L2, L3 and L4 are G-code-only and are never produced
-//! here. `none` carries the first JSON Pointer (RFC 6901) at which the two parsed documents
-//! disagree and both values there, or, when a side cannot be parsed as JSON at all (or, in
-//! principle, when the raw bytes differ with no allowance in effect yet no structural difference
-//! can be found — whitespace or key-order only — which this oracle's deterministic writer has
-//! never been observed to produce), the first raw differing byte. A malformed, empty or
-//! unreadable *file* is this binary's named-error exit (handled in `main.rs`, before this module
-//! ever sees the bytes); a file that is readable but is not JSON is a measurement about the two
-//! artifacts and is reported here as `none`, not as an error.
+//! (identical bytes after that artifact's own declared normalisation actually excused a
+//! difference), or `none` (represented as [`JsonOutcome::None`]) — L2, L3 and L4 are G-code-only
+//! and are never produced here. `none` carries the first JSON Pointer (RFC 6901) at which the two
+//! parsed documents disagree and both values there, or, when a side cannot be parsed as JSON at
+//! all, or when the declared field was already identical on both sides and the raw bytes still
+//! differ with no structural difference to be found — whitespace or key order only, which this
+//! oracle's deterministic writer has never been observed to produce — the first raw differing
+//! byte. An *unreadable* file is this binary's named-error exit (handled in `main.rs`, before this
+//! module ever sees the bytes); a file that is readable but malformed, empty, or not JSON at all
+//! is a measurement about the two artifacts and is reported here as `none`, not as an error.
 
 use serde_json::Value;
 
@@ -35,10 +35,12 @@ pub enum JsonDifference {
         b: Option<Value>,
     },
     /// No JSON Pointer could be named: either a side is not parseable JSON at all, or the parsed
-    /// documents agree everywhere the artifact's own allowance does not already excuse, yet the
-    /// raw bytes still differ (whitespace or key order — this oracle's writer has never been
-    /// observed to do this, but the path still must not panic or invent a pointer). Either way,
-    /// this is the first byte at which the two raw inputs differ — the same computation
+    /// documents agree everywhere the artifact's own allowance does not already excuse — whether
+    /// because the excused field was itself identical on both sides (the allowance had nothing to
+    /// excuse) or because it genuinely differed — yet the raw bytes still differ (whitespace or
+    /// key order — this oracle's writer has never been observed to do this, but the path still
+    /// must not panic or invent a pointer). Either way, this is the first byte at which the two
+    /// raw inputs differ — the same computation
     /// [`crate::Level::L0`] uses — `None` only when the two byte strings are themselves
     /// identical, a case [`compare_settings`]/[`compare_statistics`] never reach this far for,
     /// since that is `Level::L0` and both return before parsing.
@@ -198,11 +200,22 @@ pub fn compare_settings(a: &[u8], b: &[u8], allow_pipeline_plugin_diff: bool) ->
     };
     let skip = |pointer: &str| allow_pipeline_plugin_diff && pointer == "/slicing_pipeline_plugin";
     match first_difference(&va, &vb, "", &skip) {
-        None if allow_pipeline_plugin_diff => JsonReport::l1(),
-        // The allowance is off, so there is no normalisation step declared for this artifact at
-        // all: a structurally-equal pair whose raw bytes still differ has no L1 to report and no
-        // pointer to name it by, so it falls back to the first raw differing byte, like
-        // unparseable input.
+        // L1 only when the allowance actually excused a real difference at
+        // `/slicing_pipeline_plugin` — not whenever the rest of the document happens to be
+        // structurally equal. Two documents that agree everywhere, including at
+        // `slicing_pipeline_plugin` itself, but whose raw bytes still differ (whitespace, key
+        // order, number spelling) have had no normalisation applied to them at all, so there is
+        // no L1 to report for that pair.
+        None if allow_pipeline_plugin_diff
+            && va.get("slicing_pipeline_plugin") != vb.get("slicing_pipeline_plugin") =>
+        {
+            JsonReport::l1()
+        }
+        // Either the allowance is off (no normalisation step is declared for this artifact at
+        // all), or it is on but `slicing_pipeline_plugin` did not actually differ: either way a
+        // structurally-equal pair whose raw bytes still differ has no L1 to report and no pointer
+        // to name it by, so it falls back to the first raw differing byte, like unparseable
+        // input.
         None => JsonReport::no_pointer(a, b),
         Some((pointer, found_a, found_b)) => {
             JsonReport::pointer(pointer, found_a.cloned(), found_b.cloned())
@@ -225,7 +238,14 @@ pub fn compare_statistics(a: &[u8], b: &[u8]) -> JsonReport {
     };
     let skip = |pointer: &str| pointer == "/generator";
     match first_difference(&va, &vb, "", &skip) {
-        None => JsonReport::l1(),
+        // L1 only when `generator` actually differed between the two documents — not whenever
+        // the rest of the document happens to be structurally equal. Two documents that agree
+        // everywhere, including at `generator` itself, but whose raw bytes still differ
+        // (whitespace, key order, number spelling) have had no normalisation applied to them at
+        // all, so there is no L1 to report for that pair; it falls back to the first raw
+        // differing byte, like unparseable input.
+        None if va.get("generator") != vb.get("generator") => JsonReport::l1(),
+        None => JsonReport::no_pointer(a, b),
         Some((pointer, found_a, found_b)) => {
             JsonReport::pointer(pointer, found_a.cloned(), found_b.cloned())
         }
@@ -261,11 +281,13 @@ pub fn render_text(report: &JsonReport) -> String {
         JsonOutcome::None(JsonDifference::NoPointer {
             first_differing_byte,
         }) => match first_differing_byte {
-            // Covers both of `JsonDifference::NoPointer`'s causes (see its doc comment): a side
-            // that is not parseable JSON at all, or — never yet observed from this oracle, but
-            // not assumed impossible — parsed-equal documents whose raw bytes still differ with
-            // no allowance to excuse it. Neither claim ("not JSON") would be true of the other,
-            // so this line states only what is true of both: no pointer could be named.
+            // Covers every one of `JsonDifference::NoPointer`'s causes (see its doc comment): a
+            // side that is not parseable JSON at all, the declared field being identical on both
+            // sides so the allowance excused nothing, or — never yet observed from this oracle,
+            // but not assumed impossible — parsed-equal documents whose raw bytes still differ
+            // with no difference for the allowance to excuse. None of those claims ("not JSON",
+            // "nothing to excuse") would be true of every other cause, so this line states only
+            // what is true of all of them: no pointer could be named.
             Some(off) => {
                 format!("none\n  no JSON pointer could be named; first differing byte: {off}\n")
             }
@@ -276,17 +298,27 @@ pub fn render_text(report: &JsonReport) -> String {
 
 /// The same report as one stable-keyed JSON object, for the scripts of steps 6, 10, 25-27 that
 /// parse this binary's output rather than its prose (see `format.rs`'s own doc comment, which
-/// states the same rule for the G-code report).
+/// states the same rule for the G-code report). At `"kind":"pointer"`, `a`/`b` alone cannot
+/// distinguish "this pointer is absent on this side" from "this pointer holds a literal JSON
+/// `null`" — both render as `null` — so `a_present`/`b_present` carry that distinction
+/// explicitly, mirroring the `<absent>` the text renderer uses for the same case.
+///
+/// This schema is `{"level":…,"difference":…}`, not `format.rs`'s G-code schema
+/// (`{"levels":…,"strongest_level":…,…}`): a JSON artifact has one outcome, not five independent
+/// levels, so there is no `strongest_level` to name here — a script reading this binary's output
+/// needs to know which of the two shapes it is parsing, by which flag it passed.
 pub fn render_json(report: &JsonReport) -> String {
     let (level, difference) = match &report.outcome {
         JsonOutcome::Level(level) => (format!("\"{level}\""), "null".to_string()),
         JsonOutcome::None(JsonDifference::Pointer { pointer, a, b }) => (
             "null".to_string(),
             format!(
-                "{{\"kind\":\"pointer\",\"pointer\":{},\"a\":{},\"b\":{}}}",
+                "{{\"kind\":\"pointer\",\"pointer\":{},\"a\":{},\"a_present\":{},\"b\":{},\"b_present\":{}}}",
                 serde_json::to_string(pointer).unwrap_or_else(|_| "\"\"".to_string()),
                 value_json(a),
-                value_json(b)
+                a.is_some(),
+                value_json(b),
+                b.is_some(),
             ),
         ),
         JsonOutcome::None(JsonDifference::NoPointer {

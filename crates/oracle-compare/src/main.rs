@@ -83,10 +83,16 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
     while i < raw.len() {
         match raw[i].as_str() {
             "--settings" => {
+                if !matches!(artifact, ArtifactArgs::Gcode) {
+                    return Err("--settings and --statistics are mutually exclusive".to_string());
+                }
                 artifact = ArtifactArgs::Settings;
                 i += 1;
             }
             "--statistics" => {
+                if !matches!(artifact, ArtifactArgs::Gcode) {
+                    return Err("--settings and --statistics are mutually exclusive".to_string());
+                }
                 artifact = ArtifactArgs::Statistics;
                 i += 1;
             }

@@ -146,6 +146,49 @@ fn no_level_ever_reports_l2_l3_or_l4_for_a_json_artifact() {
     }
 }
 
+#[test]
+fn statistics_pair_with_identical_generator_and_only_whitespace_difference_is_not_l1() {
+    // Guards the fix for the reported level-widening bug: these two documents are structurally
+    // equal (same `generator`, same `k`) but their raw bytes differ only in whitespace, so L1 —
+    // "identical bytes after that artifact's declared normalisation" (task.md, R4) — must not be
+    // reported, because the normalisation never excused anything: `generator` was never
+    // different to begin with.
+    let a: &[u8] = br#"{"generator":"X","k":1}"#;
+    let b: &[u8] = b"{\n  \"generator\": \"X\",\n  \"k\": 1\n}";
+    let report = compare_statistics(a, b);
+    match &report.outcome {
+        JsonOutcome::None(JsonDifference::NoPointer {
+            first_differing_byte,
+        }) => {
+            assert!(first_differing_byte.is_some());
+        }
+        other => panic!("expected a no-pointer outcome, got {other:?}"),
+    }
+    assert!(!report.passed(Level::L0));
+    assert!(!report.passed(Level::L1));
+}
+
+#[test]
+fn settings_pair_with_allowance_on_but_pipeline_plugin_identical_and_only_whitespace_difference_is_not_l1(
+) {
+    // Same guard, for the settings side's allowance-on arm: `slicing_pipeline_plugin` is
+    // identical on both sides, so turning the allowance on excuses nothing, and a whitespace-only
+    // byte difference elsewhere must not be reported as L1.
+    let a: &[u8] = br#"{"slicing_pipeline_plugin":["posSlice"],"k":1}"#;
+    let b: &[u8] = b"{\n  \"slicing_pipeline_plugin\": [\"posSlice\"],\n  \"k\": 1\n}";
+    let report = compare_settings(a, b, true);
+    match &report.outcome {
+        JsonOutcome::None(JsonDifference::NoPointer {
+            first_differing_byte,
+        }) => {
+            assert!(first_differing_byte.is_some());
+        }
+        other => panic!("expected a no-pointer outcome, got {other:?}"),
+    }
+    assert!(!report.passed(Level::L0));
+    assert!(!report.passed(Level::L1));
+}
+
 // --- The real pair (task 10's own obligation: `tests/data/real/`, from two actual
 // `just oracle-slice vendor/OrcaSlicer/tests/data/frog_legs.obj base-fff --export-settings
 // --export-statistics` runs). See `tests/levels.rs` for the same two runs' G-code excerpt.
