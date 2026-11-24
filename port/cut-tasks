@@ -1,0 +1,508 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Batch a plan step's units into its own cut file (R8, R9; task 15-task-cuts, step 11 part 5).
+
+``port/cut-tasks <phase>`` reads the committed ``port/manifest.tsv`` and ``port/cut.tsv`` --
+never ``port/inventory``'s own in-memory regeneration, which is a separate concern this script
+does not touch -- and writes one batched cut file per phase:
+
+- ``ownership``  -> ``port/ownership-batches.tsv`` (also reads ``port/ownership.tsv``, which
+  `16-ownership-spike` writes; absent, this phase exits non-zero naming it rather than writing
+  an empty file).
+- ``foundation`` -> ``port/foundation.tsv``.
+- ``phase-a``    -> ``port/taskcuts/phase-a.tsv``.
+- ``phase-b``    -> ``port/taskcuts/phase-b.tsv``.
+
+A **unit** is one libslic3r ``.cpp`` plus its same-stem header (``.h`` or ``.hpp``) -- one
+manifest row each, one unit between them, grouped here by stripping the extension from
+``path``. A unit's line sum adds every member row's ``lines`` cell; its "unit paths" lists
+every member row's own path. A header with no same-stem ``.cpp`` (most of
+``foundation``'s set) or a ``.cpp`` with no same-stem header (``LayerRegion.cpp``,
+``ContourZ.cpp``, ``BeltPurge.cpp``, per R8) is a one-row unit. Grouping only ever happens
+*within* a phase's own already-selected row set -- a row the phase does not select (out of
+scope, not ``template-heavy`` for ``foundation``, already ported for ``phase-a``) never pulls
+its sibling into the unit, so e.g. ``AABBMesh.hpp`` (``template-heavy=yes``) is foundation's own
+one-row unit and never drags in ``AABBMesh.cpp`` (``template-heavy=no``).
+
+``phase-a`` and ``phase-b``'s "already ported" skip is **not reimplemented here**: both call
+``port/inventory``'s own status function (imported as a module, since that file is the single
+place the rule lives) over a unit's member rows, and treat a unit as already handled only when
+every member row comes back ``ported``. A reviewer finds one implementation of the rule, in
+``port/inventory``, and this call into it.
+
+Every phase's ordering is a total order (ties broken down to a unique unit stem or crate name),
+so a run's output is a pure function of the committed ``port/manifest.tsv`` and ``port/cut.tsv``
+-- two runs against the same inputs produce byte-identical files. ``--out DIR`` redirects a run's
+output under ``DIR`` instead of the committed ``port/`` tree (``DIR/foundation.tsv``,
+``DIR/taskcuts/phase-a.tsv``, etc.), which is how that determinism is checked without committing
+anything; the parent directory (``DIR/taskcuts/`` for the two phase files) is created if it is
+not already there, exactly as the committed tree's own ``port/taskcuts/`` would need to be on a
+fresh clone, since git tracks no empty directory.
+
+This script commits no cut file itself -- each phase's first real run is committed by the first
+task of the step it feeds (``16-ownership-spike``, `34-foundation-spike``, `37-phase-a-spike``,
+``38-phase-b-spike``), not by this one.
+"""
+
+from __future__ import annotations
+
+import importlib.machinery
+import importlib.util
+import os
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MANIFEST_PATH = REPO_ROOT / "port/manifest.tsv"
+CUT_PATH = REPO_ROOT / "port/cut.tsv"
+OWNERSHIP_PATH = REPO_ROOT / "port/ownership.tsv"
+INVENTORY_PATH = REPO_ROOT / "port/inventory"
+
+FOUNDATION_DEFAULT = REPO_ROOT / "port/foundation.tsv"
+PHASE_A_DEFAULT = REPO_ROOT / "port/taskcuts/phase-a.tsv"
+PHASE_B_DEFAULT = REPO_ROOT / "port/taskcuts/phase-b.tsv"
+OWNERSHIP_BATCHES_DEFAULT = REPO_ROOT / "port/ownership-batches.tsv"
+
+# foundation: a smaller batch than phase-a/phase-b's, because each unit there is hand-designed
+# (task "What to build").
+FOUNDATION_MAX_UNITS = 4
+FOUNDATION_MAX_LINES = 2500
+
+# phase-a and the split half of phase-b share this cap ("the same batch as phase-a because the
+# work per unit here is strictly harder" -- task "What to build", phase-b).
+PHASE_MAX_UNITS = 6
+PHASE_MAX_LINES = 2500
+
+# phase-a: a unit over this many lines is marked as needing its own plan, in addition to being
+# a task on its own (which every unit over PHASE_MAX_LINES already is).
+PHASE_A_OWN_PLAN_THRESHOLD = 5000
+
+# ownership: batch a subsystem's fields into rows of at most this many fields each.
+OWNERSHIP_MAX_FIELDS = 120
+
+PHASES = ("ownership", "foundation", "phase-a", "phase-b")
+
+
+def load_port_inventory():
+    """Import port/inventory, an extensionless script with no .py suffix, as a module.
+
+    ``port/inventory`` guards its own CLI behind ``if __name__ == "__main__":``, so executing
+    its module body here (which this loader does, to populate its functions and constants) has
+    no side effect beyond defining them.
+    """
+    loader = importlib.machinery.SourceFileLoader("port_inventory", str(INVENTORY_PATH))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def read_tsv(path: Path) -> tuple[list[str], list[list[str]]]:
+    """Return (header, rows) for a committed tab-separated file: header is HEADER split on
+    tabs, rows is every later non-empty line split the same way. Mirrors the plain split/join
+    port/inventory itself uses (no csv module, no quoting) -- these files never carry a literal
+    tab or newline inside a cell."""
+    if not path.is_file():
+        raise SystemExit(f"cut-tasks: {path} does not exist")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        raise SystemExit(f"cut-tasks: {path} is empty")
+    header = lines[0].split("\t")
+    rows = [line.split("\t") for line in lines[1:] if line]
+    return header, rows
+
+
+def write_tsv(path: Path, header: list[str], rows: list[list[str]]) -> None:
+    """Write header and rows to path, creating path's parent directory if it is absent."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out_lines = ["\t".join(header)]
+    out_lines.extend("\t".join(row) for row in rows)
+    path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+
+def column_index(header: list[str], name: str) -> int:
+    """Return name's column index in header, by name rather than a hard-coded position -- a
+    column task 14-manifest-columns or a later one adds is picked up by name, not lost to an
+    index frozen at today's column count."""
+    try:
+        return header.index(name)
+    except ValueError:
+        raise SystemExit(f"cut-tasks: column {name!r} not found in header {header!r}") from None
+
+
+def is_in_scope(header: list[str], row: list[str]) -> bool:
+    """True if row's manifest scope cell is 'in' or 'in: <reason>' (SLA/Hollowing.hpp and
+    SLA/JobController.hpp are carried in with a reason, not a bare 'in') -- never 'out: ...'."""
+    cell = row[column_index(header, "in scope or out with a reason")]
+    return cell == "in" or cell.startswith("in:")
+
+
+def group_units(
+    header: list[str], rows: list[list[str]], selector
+) -> list[dict]:
+    """Group rows selector(row) accepts into units sharing a path stem (path with its
+    extension stripped). Every row a unit is built from must be in scope: a row the caller's
+    selector drops never pulls its same-stem sibling into the unit it would otherwise share --
+    the caller decides what is selected, this only groups what was.
+
+    Returns one dict per unit: stem, paths (sorted), lines (sum across member rows), crate
+    (the member rows' shared target crate), crate_level (their shared crate-level level, as
+    int), file_level (the minimum of the member rows' file-level include-DAG levels -- the
+    position a unit is encountered at, walking rows ascending by that level, is its earliest
+    member's), and rows (the member rows themselves, for a caller that still needs a per-row
+    fact such as status).
+    """
+    path_i = column_index(header, "path")
+    lines_i = column_index(header, "lines")
+    file_level_i = column_index(header, "file-level include-DAG level")
+    crate_level_i = column_index(header, "crate-level level")
+    crate_i = column_index(header, "target crate")
+
+    by_stem: dict[str, list[list[str]]] = {}
+    for row in rows:
+        if not selector(row):
+            continue
+        if not is_in_scope(header, row):
+            raise SystemExit(
+                f"cut-tasks: {row[path_i]!r} was selected but is not in scope; every phase's "
+                "unit set must be a subset of the in-scope rows"
+            )
+        stem, _ext = os.path.splitext(row[path_i])
+        by_stem.setdefault(stem, []).append(row)
+
+    units: list[dict] = []
+    for stem, member_rows in by_stem.items():
+        member_rows = sorted(member_rows, key=lambda r: r[path_i])
+        crate_levels = {member[crate_level_i] for member in member_rows}
+        crates = {member[crate_i] for member in member_rows}
+        if len(crate_levels) != 1 or len(crates) != 1:
+            raise SystemExit(
+                f"cut-tasks: unit {stem!r}'s member rows disagree on crate or crate-level "
+                f"level: {member_rows!r}"
+            )
+        units.append(
+            {
+                "stem": stem,
+                "paths": [member[path_i] for member in member_rows],
+                "lines": sum(int(member[lines_i]) for member in member_rows),
+                "crate": crates.pop(),
+                "crate_level": int(crate_levels.pop()),
+                "file_level": min(int(member[file_level_i]) for member in member_rows),
+                "rows": member_rows,
+            }
+        )
+    return units
+
+
+def unit_already_ported(
+    inventory_mod, mod_reachable: frozenset, header: list[str], unit: dict
+) -> bool:
+    """True when every one of unit's member rows is 'ported' per port/inventory's own
+    compute_status -- the status rule this script reuses rather than re-implements (see the
+    module docstring)."""
+    path_i = column_index(header, "path")
+    target_i = column_index(header, "target module")
+    return all(
+        inventory_mod.compute_status(member[path_i], member[target_i], mod_reachable) == "ported"
+        for member in unit["rows"]
+    )
+
+
+def batch_units(
+    units: list[dict],
+    max_units: int,
+    max_lines: int,
+    *,
+    restart_on_crate_change: bool = False,
+) -> list[list[dict]]:
+    """Greedily batch units (already in their caller's final order) into consecutive groups of
+    at most max_units units or max_lines summed source lines, whichever comes first. A unit
+    that alone exceeds max_lines (or max_units, which never happens for a single unit) still
+    becomes a batch of its own: it is added to an empty batch, and the next unit then finds the
+    batch already over max_lines and starts a new one.
+
+    restart_on_crate_change (phase-a) also starts a new batch whenever a unit's target crate
+    differs from the batch-in-progress's, even when size would allow more -- so a batch never
+    mixes two target crates, independent of whatever tie the sort order left between them.
+    """
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    current_lines = 0
+    current_crate: str | None = None
+    for unit in units:
+        starts_new = bool(current) and (
+            (restart_on_crate_change and unit["crate"] != current_crate)
+            or len(current) + 1 > max_units
+            or current_lines + unit["lines"] > max_lines
+        )
+        if starts_new:
+            batches.append(current)
+            current, current_lines = [], 0
+        current.append(unit)
+        current_lines += unit["lines"]
+        current_crate = unit["crate"]
+    if current:
+        batches.append(current)
+    return batches
+
+
+def unit_paths_cell(batch: list[dict]) -> str:
+    """Flatten a batch's units' own paths into one cell: every member file's path, in unit
+    order, comma-separated."""
+    return ", ".join(path for unit in batch for path in unit["paths"])
+
+
+def generate_foundation(header: list[str], rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    """foundation phase: the in-scope rows whose template-heavy column is yes, grouped into
+    units, ordered by crate-level level ascending then path, batched to at most
+    FOUNDATION_MAX_UNITS units or FOUNDATION_MAX_LINES lines."""
+    template_heavy_i = column_index(header, "template-heavy")
+
+    def selector(row: list[str]) -> bool:
+        return is_in_scope(header, row) and row[template_heavy_i] == "yes"
+
+    units = group_units(header, rows, selector)
+    units.sort(key=lambda unit: (unit["crate_level"], unit["stem"]))
+    batches = batch_units(units, FOUNDATION_MAX_UNITS, FOUNDATION_MAX_LINES)
+
+    out_header = ["task", "unit count", "line sum", "unit paths"]
+    out_rows = [
+        [
+            f"foundation-{i:02d}",
+            str(len(batch)),
+            str(sum(unit["lines"] for unit in batch)),
+            unit_paths_cell(batch),
+        ]
+        for i, batch in enumerate(batches, start=1)
+    ]
+    return out_header, out_rows
+
+
+def generate_phase_a(
+    header: list[str], rows: list[list[str]], inventory_mod, mod_reachable: frozenset
+) -> tuple[list[str], list[list[str]]]:
+    """phase-a phase: the in-scope rows that are not already ported, grouped into units,
+    ordered by crate-level level ascending, then file-level include-DAG level ascending, then
+    path, batched to at most PHASE_MAX_UNITS units or PHASE_MAX_LINES lines without ever mixing
+    two target crates in one row; a unit over PHASE_A_OWN_PLAN_THRESHOLD lines is marked as
+    needing its own plan."""
+    units = group_units(header, rows, lambda row: is_in_scope(header, row))
+    units = [unit for unit in units if not unit_already_ported(inventory_mod, mod_reachable, header, unit)]
+    units.sort(key=lambda unit: (unit["crate_level"], unit["file_level"], unit["stem"]))
+    batches = batch_units(units, PHASE_MAX_UNITS, PHASE_MAX_LINES, restart_on_crate_change=True)
+
+    out_header = [
+        "task",
+        "target crate",
+        "crate-level level",
+        "unit count",
+        "line sum",
+        "unit paths",
+        "needs own plan",
+    ]
+    out_rows = []
+    for i, batch in enumerate(batches, start=1):
+        needs_own_plan = any(unit["lines"] > PHASE_A_OWN_PLAN_THRESHOLD for unit in batch)
+        out_rows.append(
+            [
+                f"phase-a-{i:03d}",
+                batch[0]["crate"],
+                str(batch[0]["crate_level"]),
+                str(len(batch)),
+                str(sum(unit["lines"] for unit in batch)),
+                unit_paths_cell(batch),
+                "yes" if needs_own_plan else "no",
+            ]
+        )
+    return out_header, out_rows
+
+
+def crate_dependencies(cut_header: list[str], cut_rows: list[list[str]]) -> dict[str, list[str]]:
+    """Return {crate: [crates it depends on]} from port/cut.tsv's own dep rows (source depends
+    on target) -- never its edge rows, which are the cut's own cut edges and not the crate
+    dependency graph."""
+    kind_i = column_index(cut_header, "kind")
+    source_i = column_index(cut_header, "source")
+    target_i = column_index(cut_header, "target")
+    deps: dict[str, list[str]] = {}
+    for row in cut_rows:
+        if row[kind_i] != "dep":
+            continue
+        deps.setdefault(row[source_i], []).append(row[target_i])
+    return deps
+
+
+def generate_phase_b(
+    header: list[str],
+    rows: list[list[str]],
+    cut_header: list[str],
+    cut_rows: list[list[str]],
+) -> tuple[list[str], list[list[str]]]:
+    """phase-b phase: crates ordered by crate-level level ascending, units within a crate
+    ordered by file-level include-DAG level ascending then path. One row per crate, except a
+    crate whose in-scope line sum exceeds PHASE_MAX_LINES is split, along that same order, into
+    batches of at most PHASE_MAX_UNITS units or PHASE_MAX_LINES lines. Batch N of a crate
+    depends on batch N-1 of the same crate plus every crate port/cut.tsv's dep rows name for it."""
+    units = group_units(header, rows, lambda row: is_in_scope(header, row))
+
+    by_crate: dict[str, list[dict]] = {}
+    for unit in units:
+        by_crate.setdefault(unit["crate"], []).append(unit)
+
+    deps_by_crate = crate_dependencies(cut_header, cut_rows)
+
+    crate_level_of = {crate: crate_units[0]["crate_level"] for crate, crate_units in by_crate.items()}
+    crate_order = sorted(by_crate, key=lambda crate: (crate_level_of[crate], crate))
+
+    out_header = ["task", "crate", "batch index", "unit count", "line sum", "unit paths", "depends on"]
+    out_rows = []
+    for crate in crate_order:
+        crate_units = sorted(by_crate[crate], key=lambda unit: (unit["file_level"], unit["stem"]))
+        total_lines = sum(unit["lines"] for unit in crate_units)
+        if total_lines <= PHASE_MAX_LINES:
+            batches = [crate_units]
+        else:
+            batches = batch_units(crate_units, PHASE_MAX_UNITS, PHASE_MAX_LINES)
+
+        other_crate_deps = sorted(set(deps_by_crate.get(crate, [])))
+        previous_task_name: str | None = None
+        for batch_index, batch in enumerate(batches, start=1):
+            task_name = f"phase-b-{crate}-{batch_index}"
+            depends_on = list(other_crate_deps)
+            if previous_task_name is not None:
+                depends_on = [previous_task_name] + depends_on
+            out_rows.append(
+                [
+                    task_name,
+                    crate,
+                    str(batch_index),
+                    str(len(batch)),
+                    str(sum(unit["lines"] for unit in batch)),
+                    unit_paths_cell(batch),
+                    ", ".join(depends_on),
+                ]
+            )
+            previous_task_name = task_name
+    return out_header, out_rows
+
+
+def generate_ownership(
+    inventory_mod, manifest_header: list[str], manifest_rows: list[list[str]]
+) -> tuple[list[str], list[list[str]]]:
+    """ownership phase: port/ownership.tsv's rows, batched by subsystem into rows of at most
+    OWNERSHIP_MAX_FIELDS fields each, subsystems ordered by the manifest's crate-level order
+    (the order a subsystem's first in-scope row, sorted by crate-level level ascending then
+    path, is encountered)."""
+    if not OWNERSHIP_PATH.is_file():
+        raise SystemExit(
+            f"cut-tasks: {OWNERSHIP_PATH} does not exist yet (16-ownership-spike writes it); "
+            "the ownership phase cannot batch a field list that is not there"
+        )
+
+    crate_level_i = column_index(manifest_header, "crate-level level")
+    path_i = column_index(manifest_header, "path")
+    subsystem_i = column_index(manifest_header, "subsystem")
+    in_scope_sorted = sorted(
+        (row for row in manifest_rows if is_in_scope(manifest_header, row)),
+        key=lambda row: (int(row[crate_level_i]), row[path_i]),
+    )
+    subsystem_order: list[str] = []
+    seen_subsystems: set[str] = set()
+    for row in in_scope_sorted:
+        subsystem = row[subsystem_i]
+        if subsystem not in seen_subsystems:
+            seen_subsystems.add(subsystem)
+            subsystem_order.append(subsystem)
+
+    own_header, own_rows = read_tsv(OWNERSHIP_PATH)
+    header_path_i = column_index(own_header, "header path")
+    line_i = column_index(own_header, "line")
+    field_i = column_index(own_header, "field")
+
+    by_subsystem: dict[str, list[list[str]]] = {}
+    for row in own_rows:
+        subsystem = inventory_mod.subsystem_of(row[header_path_i])
+        by_subsystem.setdefault(subsystem, []).append(row)
+
+    out_header = ["task", "subsystem", "field count", "fields"]
+    out_rows = []
+    for subsystem in subsystem_order:
+        subsystem_rows = by_subsystem.get(subsystem)
+        if not subsystem_rows:
+            continue
+        subsystem_rows.sort(key=lambda row: (row[header_path_i], int(row[line_i])))
+        batch_number = 1
+        for start in range(0, len(subsystem_rows), OWNERSHIP_MAX_FIELDS):
+            chunk = subsystem_rows[start : start + OWNERSHIP_MAX_FIELDS]
+            fields = [row[field_i] for row in chunk]
+            out_rows.append(
+                [
+                    f"ownership-{subsystem.lower()}-{batch_number:02d}",
+                    subsystem,
+                    str(len(fields)),
+                    ", ".join(fields),
+                ]
+            )
+            batch_number += 1
+    return out_header, out_rows
+
+
+@click.command()
+@click.argument("phase", type=click.Choice(PHASES))
+@click.option(
+    "--out",
+    "out_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write this phase's output under DIR instead of the committed port/ tree: "
+    "DIR/foundation.tsv, DIR/taskcuts/phase-a.tsv, DIR/taskcuts/phase-b.tsv or "
+    "DIR/ownership-batches.tsv. Lets a run be proved deterministic without committing anything.",
+)
+def main(phase: str, out_dir: Path | None) -> None:
+    """port/cut-tasks PHASE: batch port/manifest.tsv and port/cut.tsv's rows into PHASE's own
+    cut file (R8, R9). PHASE is one of ownership, foundation, phase-a, phase-b."""
+    if out_dir is None:
+        foundation_path = FOUNDATION_DEFAULT
+        phase_a_path = PHASE_A_DEFAULT
+        phase_b_path = PHASE_B_DEFAULT
+        ownership_batches_path = OWNERSHIP_BATCHES_DEFAULT
+    else:
+        foundation_path = out_dir / "foundation.tsv"
+        phase_a_path = out_dir / "taskcuts" / "phase-a.tsv"
+        phase_b_path = out_dir / "taskcuts" / "phase-b.tsv"
+        ownership_batches_path = out_dir / "ownership-batches.tsv"
+
+    manifest_header, manifest_rows = read_tsv(MANIFEST_PATH)
+
+    if phase == "ownership":
+        inventory_mod = load_port_inventory()
+        out_header, out_rows = generate_ownership(inventory_mod, manifest_header, manifest_rows)
+        write_tsv(ownership_batches_path, out_header, out_rows)
+        print(f"cut-tasks: wrote {len(out_rows)} row(s) to {ownership_batches_path}")
+    elif phase == "foundation":
+        out_header, out_rows = generate_foundation(manifest_header, manifest_rows)
+        write_tsv(foundation_path, out_header, out_rows)
+        print(f"cut-tasks: wrote {len(out_rows)} row(s) to {foundation_path}")
+    elif phase == "phase-a":
+        inventory_mod = load_port_inventory()
+        mod_reachable = inventory_mod.compute_mod_reachable_files(inventory_mod.CRATES_ROOT)
+        out_header, out_rows = generate_phase_a(manifest_header, manifest_rows, inventory_mod, mod_reachable)
+        write_tsv(phase_a_path, out_header, out_rows)
+        print(f"cut-tasks: wrote {len(out_rows)} row(s) to {phase_a_path}")
+    else:
+        assert phase == "phase-b"
+        cut_header, cut_rows = read_tsv(CUT_PATH)
+        out_header, out_rows = generate_phase_b(manifest_header, manifest_rows, cut_header, cut_rows)
+        write_tsv(phase_b_path, out_header, out_rows)
+        print(f"cut-tasks: wrote {len(out_rows)} row(s) to {phase_b_path}")
+
+
+if __name__ == "__main__":
+    main()
