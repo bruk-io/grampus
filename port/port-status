@@ -632,7 +632,7 @@ def check_safety(path: str, lines: list[LineInfo], result: ScanResult) -> None:
     for i, info in enumerate(lines):
         if info.is_pure_comment:
             continue
-        if not UNSAFE_WORD_RE.search(info.code):
+        if not UNSAFE_WORD_RE.search(mask_strings(info.code)):
             continue
         covering = contiguous_comment_block_above(lines, i) + ([i] if info.comment else [])
         has_safety = False
