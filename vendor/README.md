@@ -464,16 +464,33 @@ job on every pull request, and what `24-port-check-ci` should size its decision 
 `dep_OpenSSL`-first phase costs 54.3s there against 11.2s here — three runner cores against 28.
 
 **What the caches are worth, measured rather than assumed.** That run saved 1.24 GiB for the
-superbuild and 409 MiB for the main build tree. The next run,
-[45488950281](https://github.com/bruk-io/grampus/actions/runs/45488950281), restored both and took
-**stage one from 41m36s to 1m08s** — but stage two still rebuilt in full (33m53s) despite its own
-tree being restored, and 53.9s of that stage one was the `dep_OpenSSL`-first phase re-installing
-OpenSSL into the prefix. Re-installing rewrites the prefix's `openssl` headers with fresh mtimes,
-which is enough to make ninja rebuild everything downstream of them. `oracle/build-libslic3r` now
-skips that phase when the prefix already holds OpenSSL (`include/openssl/opensslv.h`), since the
-phase exists only to get OpenSSL there before anything else configures and a warm prefix cannot
-resolve a host copy instead. Both saves are also correctly skipped on an exact-key hit, so a
-re-run does not re-upload 1.6 GiB.
+superbuild and 409 MiB for the main build tree, and the two runs after it restored both:
+
+| Run | Stage one | Stage two |
+|---|---|---|
+| [45474202531](https://github.com/bruk-io/grampus/actions/runs/45474202531), no cache | 41m36s | 32m52s |
+| [45488950281](https://github.com/bruk-io/grampus/actions/runs/45488950281), both restored | 1m08s | 33m53s |
+| [45497164247](https://github.com/bruk-io/grampus/actions/runs/45497164247), both restored | 2m05s | 44m24s |
+
+**The superbuild cache earns its keep; the main build tree's does not, and the reason is
+structural.** Stage one drops from 42 minutes to one or two, which is the whole point of caching
+it. Stage two rebuilds in full every time regardless, because ninja decides staleness by mtime and
+the sources are checked out fresh on every run: every file under `vendor/OrcaSlicer/src` is newer
+than every restored object file, so the restored tree is worth nothing to it. The superbuild escapes
+this only because its "sources" are extracted tarballs that live inside the cached tree. Making
+stage two's cache pay off would mean caching the submodule checkout alongside it, or a
+content-addressed compiler cache (`CMAKE_CXX_COMPILER_LAUNCHER` is forwarded, so ccache is
+reachable) — neither is in this task, and `24-port-check-ci` owns the CI-cost decision. The cache
+block is kept because task.md assigns it here and it costs a restore; it is recorded as not yet
+paying for itself.
+
+One avoidable part of a warm stage one was removed: 53.9s of run 45488950281's stage one was the
+`dep_OpenSSL`-first phase re-installing OpenSSL into a prefix that already had it. That phase
+exists only to get OpenSSL into the prefix before anything else configures, and a warm prefix
+cannot resolve a host copy instead, so it is now skipped when `include/openssl/opensslv.h` exists —
+`dep_OpenSSL alone 0.0s` on the run after. What is left of a warm stage one (about two minutes) is
+the upstream CPython relink described under "Idempotence" above. Both saves are correctly skipped
+on an exact-key hit, so a re-run does not re-upload 1.6 GiB.
 
 Both fixes hold on a host that is not this one: `Boost.Iostreams: ZLIB ON, BZip2 OFF, LZMA OFF,
 Zstd OFF` in the log, and the stage-one summary lists the same **two** dep_OpenCV entries and
