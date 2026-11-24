@@ -12,3 +12,13 @@ guard *branch:
 # fetch and verify the pinned oracle release binary (R1)
 oracle-fetch:
     ./oracle/fetch-release
+# build the vendored OrcaSlicer tree on this platform
+oracle-build:
+    ./oracle/build-libslic3r
+# regenerate port/manifest.tsv's file set and per-file derived columns from the vendored tree
+inventory:
+    ./port/inventory
+# variadic (not two-parameter) because `just` rejects a surplus argument to a fixed-arity recipe,
+# and callers across steps 5, 6, 9, 10 and 25-27 each need their own extra flags
+compare a b *ARGS:
+    cargo run --quiet --release -p oracle-compare -- {{a}} {{b}} {{ARGS}}
