@@ -134,7 +134,12 @@ the `coBool` `printhost_ssl_ignore_revoke` exports its default `"0"` and the `co
 `port/config-block-diff`, a standalone script beside `port/inventory` (not under `port/goldens/`,
 which `oracle/provenance --check` covers in full and which has no oracle or fixture of its own to
 carry a header for), against `port/goldens/configs/base-fff.json` and the `plate_1.gcode` from the
-same `just oracle-slice frog_legs.stl base-fff --export-settings` run:
+same `just oracle-slice frog_legs.stl base-fff --export-settings` run. `plate_1.gcode` is not
+committed — it is git-ignored scratch output, like every `oracle/slice` run's — so reproduce it
+with `./port/merge-provenance frog_legs.stl base-fff /tmp/base-fff.json --out <a directory>`,
+which prints that directory's `plate_1.gcode` path alongside the golden it writes (`just
+config-goldens` prints the same "run output: ..." line for all four rows, from a fresh directory
+each time):
 
 ```
 $ just config-block-diff port/goldens/configs/base-fff.json <that run's plate_1.gcode>
