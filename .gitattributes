@@ -1,0 +1,3 @@
+# Recipes and ignore lines are appended by many task branches at once; keep both sides.
+justfile merge=union
+.gitignore merge=union

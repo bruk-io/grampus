@@ -1,0 +1,13 @@
+[package]
+name = "oracle-compare"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "oracle-compare"
+path = "src/main.rs"
+
+[lib]
+name = "oracle_compare"
+path = "src/lib.rs"

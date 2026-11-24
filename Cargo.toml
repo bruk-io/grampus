@@ -1,0 +1,5 @@
+[workspace]
+members = ["crates/*"]
+# Not a member list (the Done-when line only constrains that): every member is edition 2021,
+# which implies resolver v2, and cargo warns on every invocation without this line.
+resolver = "2"
