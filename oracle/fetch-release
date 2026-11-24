@@ -11,10 +11,12 @@
 Downloads the OrcaSlicer v2.5.2 release asset, verifies its sha256 against the value
 recorded in vendor/README.md, mounts the disk image read-only, copies the app bundle
 into a scratch directory, detaches the image, verifies the bundle reports version 2.5.2,
-and only then atomically promotes it into oracle/.cache/app/. A populated cache is
-re-verified and reused rather than re-fetched; the cache is rebuilt from the download
-onward when either check disagrees. An interrupted run never leaves oracle/.cache/app/
-holding a bundle this script has not itself verified.
+and only then atomically promotes it into oracle/.cache/app/ and records the asset's
+sha256 in oracle/.cache/app/.verified. A populated cache is reused only when that marker
+holds the recorded sha256 and the bundle still reports 2.5.2 with an executable binary;
+otherwise it is rebuilt from the download onward. Because the marker is removed before
+the swap and written only after it, an interrupted run leaves oracle/.cache/app/ either
+untouched or plainly uncertified, never a half-built tree this script would then certify.
 """
 
 from __future__ import annotations
@@ -58,6 +60,22 @@ def read_recorded_sha256(readme_path: Path) -> str:
         print(f"error: no recorded sha256 found in {readme_path}", file=sys.stderr)
         sys.exit(1)
     return match.group(1)
+
+
+def remove_path(path: Path) -> None:
+    """Remove a directory, file or symlink, ignoring one that is not there."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def read_marker(marker_path: Path) -> str:
+    """Read the sha256 recorded when this script last verified the cached bundle, or ''."""
+    try:
+        return marker_path.read_text().strip()
+    except OSError:
+        return ""
 
 
 def read_bundle_version(app_bundle: Path) -> str:
@@ -157,8 +175,7 @@ def copy_bundle(mount_point: Path, incoming_dir: Path, bundle_name: str) -> Path
         print(f"error: {bundle_name} not found on {mount_point}", file=sys.stderr)
         sys.exit(1)
     print(f"action: copy {bundle_name}", flush=True)
-    if incoming_dir.exists():
-        shutil.rmtree(incoming_dir)
+    remove_path(incoming_dir)
     incoming_dir.mkdir(parents=True)
     dest = incoming_dir / bundle_name
     shutil.copytree(source, dest, symlinks=True)
@@ -166,13 +183,26 @@ def copy_bundle(mount_point: Path, incoming_dir: Path, bundle_name: str) -> Path
 
 
 def promote_bundle(
-    incoming_bundle: Path, incoming_dir: Path, app_dir: Path, app_bundle: Path
+    incoming_bundle: Path, app_bundle: Path, marker: Path, asset_sha256: str
 ) -> None:
-    """Atomically replace the live cached bundle with a verified incoming one."""
+    """Replace the live cached bundle with a verified incoming one, then certify it.
+
+    The marker is deleted before anything moves and written only once the new bundle is in
+    place, and the outgoing bundle is moved aside with os.replace rather than deleted where it
+    stands. An interrupt at any point therefore leaves oracle/.cache/app/ either untouched or
+    uncertified, never a partially removed tree that still looks like a healthy bundle.
+    """
+    app_dir = app_bundle.parent
+    incoming_dir = incoming_bundle.parent
+    aside = app_dir.parent / "app.old"
     app_dir.mkdir(parents=True, exist_ok=True)
-    if app_bundle.exists():
-        shutil.rmtree(app_bundle)
+    marker.unlink(missing_ok=True)
+    if app_bundle.exists() or app_bundle.is_symlink():
+        remove_path(aside)
+        os.replace(app_bundle, aside)
     os.replace(incoming_bundle, app_bundle)
+    marker.write_text(f"{asset_sha256}\n")
+    remove_path(aside)
     try:
         incoming_dir.rmdir()
     except OSError:
@@ -191,12 +221,15 @@ def main() -> None:
     app_bundle = app_dir / "OrcaSlicer.app"
     binary = app_bundle / "Contents" / "MacOS" / "OrcaSlicer"
     incoming_dir = cache_dir / "app.incoming"
+    marker = app_dir / ".verified"
 
     expected_sha = read_recorded_sha256(readme_path)
 
     cached_download_valid = download_path.is_file() and sha256_of(download_path) == expected_sha
     cached_bundle_valid = (
-        os.access(binary, os.X_OK) and read_bundle_version(app_bundle) == EXPECTED_VERSION
+        read_marker(marker) == expected_sha
+        and os.access(binary, os.X_OK)
+        and read_bundle_version(app_bundle) == EXPECTED_VERSION
     )
 
     if cached_download_valid and cached_bundle_valid:
@@ -225,7 +258,7 @@ def main() -> None:
             shutil.rmtree(incoming_dir, ignore_errors=True)
             sys.exit(1)
 
-        promote_bundle(incoming_bundle, incoming_dir, app_dir, app_bundle)
+        promote_bundle(incoming_bundle, app_bundle, marker, expected_sha)
 
     print(f"sha256: {expected_sha}")
     print(f"version: {EXPECTED_VERSION}")
