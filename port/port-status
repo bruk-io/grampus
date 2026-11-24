@@ -765,13 +765,18 @@ def scan_tree(tree: Path) -> ScanResult:
                 continue
             # A "ported module" (R14) is one that holds a PORT STATUS trailer -- a cheap
             # substring pre-filter, not yet the exact-form check `check_trailer` makes. A
-            # crates/*/src/**/*.rs file that never mentions it (e.g. a hand-written tool crate
-            # such as oracle-compare, built by an earlier, unrelated task) is not a module this
-            # script has anything to say about and is left alone entirely: zero findings, not
-            # counted as scanned. A file that mentions "PORT STATUS" without the exact header
-            # line (the missing-trailer fixture) is still selected, so the check still catches
-            # a module that started a trailer and never finished it.
-            if TRAILER_HEADER.removeprefix("// ") not in text:
+            # crates/*/src/**/*.rs file with neither the literal "PORT STATUS" anywhere nor any
+            # of the six whitelisted markers (e.g. a hand-written tool crate such as
+            # oracle-compare, built by an earlier, unrelated task -- confirmed to carry none of
+            # the six) is not a module this script has anything to say about and is left alone
+            # entirely: zero findings, not counted as scanned. A file that mentions
+            # "PORT STATUS" without the exact header line, or that carries a marker such as
+            # "// SAFETY:" or "// PORT SRC:" but never got as far as a trailer (the
+            # missing-trailer fixture), is still selected, so the check still catches a module
+            # that started a port and never finished its trailer.
+            if TRAILER_HEADER.removeprefix("// ") not in text and not any(
+                f"{prefix}:" in text for prefix in MARKER_WHITELIST
+            ):
                 continue
             module_relpath = module_path.relative_to(tree).as_posix()
             check_module(module_relpath, manifest_by_path, result, text=text)
