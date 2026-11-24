@@ -106,9 +106,9 @@ produced by the repository instead, and writing it by hand is what the rule forb
 A task's branch changes nothing under `intent/`, and therefore passes `just guard` as it stands.
 
 The `mod` line in `lib.rs` is the one shared file a port task does write. It is a one-line append
-that git merges: the crate's `mod` lines are kept in one block, sorted by module name, and a new
-`mod <module>;` line is inserted at its sorted position in that block, so two branches appending
-to the same `lib.rs` conflict textually rather than reordering silently.
+that git merges: the crate's `mod` lines are kept in one block, in alphabetical order by module
+name, and a new `mod <module>;` line is inserted at its alphabetical position in that block, so
+two branches appending to the same `lib.rs` conflict textually rather than reordering silently.
 
 A task passes `just port-check`, which includes `just port-status --per-commit` and its
 per-marker assertion: every `// PERF(port):` and `// FIDELITY(port):` marker the branch adds is
