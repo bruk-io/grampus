@@ -15,6 +15,7 @@ is laid out, and how to change the pin.
 
 | Path | Contents |
 |---|---|
+| `crates/` | The Rust workspace: ported crates and `oracle-compare`, the L0-L4 comparator. |
 | `vendor/OrcaSlicer/` | Upstream OrcaSlicer, unmodified, pinned. |
 | `vendor/README.md` | Documentation for the vendored source. |
 | `LICENSE` | AGPL-3.0 text. |
