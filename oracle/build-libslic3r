@@ -188,6 +188,10 @@ TOOL_ENTRY_RE = re.compile(r"_(?:EXECUTABLE|PROGRAM|COMMAND|COMPILER)$")
 EXPORTED_CONFIG_GLOB = "lib/cmake/*/*-config.cmake"
 FIND_DEPENDENCY_RE = re.compile(r"^\s*find_dependency\(\s*([A-Za-z0-9_]+)", re.MULTILINE)
 
+# Present once dep_OpenSSL has installed into the prefix. Checked rather than assumed
+# because the OpenSSL-first phase below is only needed while the prefix is still cold.
+OPENSSL_INSTALLED_MARKER = INSTALL_PREFIX / "include" / "openssl" / "opensslv.h"
+
 # --- Stage two: the main project ---------------------------------------------
 
 MAIN_SOURCE = Path("vendor/OrcaSlicer")
@@ -414,7 +418,21 @@ def run_stage_one(env: dict[str, str]) -> tuple[float, float, float, float]:
             sys.exit(rc)
 
         build_start = time.monotonic()
-        rc = run_logged(openssl_first_cmd, env, log)
+        # Skipped once the prefix already holds OpenSSL, because the phase exists only
+        # to get it there before anything else configures — and re-running it is not
+        # free on a restored tree. Measured on CI run 45488950281, whose build trees both
+        # came from the cache: this phase re-installed OpenSSL in 53.9s, which rewrote
+        # the prefix's openssl headers with fresh mtimes, and stage two then rebuilt from
+        # scratch (33m53s) instead of reusing the main build tree it had just restored.
+        if OPENSSL_INSTALLED_MARKER.is_file():
+            click.echo(
+                f"+ (skipping the dep_OpenSSL-first phase: {OPENSSL_INSTALLED_MARKER} "
+                "already installed, so nothing can resolve a host OpenSSL instead)"
+            )
+            log.write(f"+ (skipping the dep_OpenSSL-first phase: {OPENSSL_INSTALLED_MARKER} exists)\n")
+            rc = 0
+        else:
+            rc = run_logged(openssl_first_cmd, env, log)
         # Reported separately in the summary, because this phase is the whole cost of
         # the ordering fix above: it is the one part of stage one that cannot overlap
         # with anything else.

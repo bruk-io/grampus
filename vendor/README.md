@@ -460,10 +460,20 @@ nothing — both caches deleted first, so neither tree was restored:
 
 About 80 minutes of build inside a ~85-minute job, against 5m47s for the same two stages on a
 28-core dev machine — **roughly 14x**, which is why this workflow has a paths filter instead of a
-job on every pull request, and what `24-port-check-ci` should size its decision on. Both caches
-saved (1.24 GiB for the superbuild, 409 MiB for the main build tree), so a later run on the same
-pin and script skips both builds. The `dep_OpenSSL`-first phase costs 54.3s there against 11.2s
-here — three runner cores against 28.
+job on every pull request, and what `24-port-check-ci` should size its decision on. The
+`dep_OpenSSL`-first phase costs 54.3s there against 11.2s here — three runner cores against 28.
+
+**What the caches are worth, measured rather than assumed.** That run saved 1.24 GiB for the
+superbuild and 409 MiB for the main build tree. The next run,
+[45488950281](https://github.com/bruk-io/grampus/actions/runs/45488950281), restored both and took
+**stage one from 41m36s to 1m08s** — but stage two still rebuilt in full (33m53s) despite its own
+tree being restored, and 53.9s of that stage one was the `dep_OpenSSL`-first phase re-installing
+OpenSSL into the prefix. Re-installing rewrites the prefix's `openssl` headers with fresh mtimes,
+which is enough to make ninja rebuild everything downstream of them. `oracle/build-libslic3r` now
+skips that phase when the prefix already holds OpenSSL (`include/openssl/opensslv.h`), since the
+phase exists only to get OpenSSL there before anything else configures and a warm prefix cannot
+resolve a host copy instead. Both saves are also correctly skipped on an exact-key hit, so a
+re-run does not re-upload 1.6 GiB.
 
 Both fixes hold on a host that is not this one: `Boost.Iostreams: ZLIB ON, BZip2 OFF, LZMA OFF,
 Zstd OFF` in the log, and the stage-one summary lists the same **two** dep_OpenCV entries and
