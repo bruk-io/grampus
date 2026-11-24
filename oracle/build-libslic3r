@@ -137,7 +137,9 @@ STAGE2_LOG_PATH = Path("oracle/.cache/build/libslic3r-arm64.log")
 # multiply-add expressions that Rust never fuses, including the
 # two-dimensional cross product that decides orientation branches.
 # `29-ffi-bridge-core` checks that this spelling and `crates/slic3r-ffi/build.rs`
-# carry the same flag, so it stays exactly as written here.
+# carry the same flag, so it stays exactly as written here and is passed
+# through CMAKE_CXX_FLAGS (see configure_cmd() below: "-DCMAKE_CXX_FLAGS={CXX_FLAGS}"),
+# where that check can find it.
 CXX_FLAGS = "-ffp-contract=off"
 
 # Named individually, never `all`: `tests/slic3rutils/CMakeLists.txt` links
@@ -155,7 +157,9 @@ def du_sh(path: Path) -> str:
         return "(not created)"
     result = subprocess.run(["du", "-sh", str(path)], capture_output=True, text=True)
     if result.returncode != 0:
-        return "(size unavailable: " + result.stderr.strip().splitlines()[-1] + ")"
+        stderr_lines = result.stderr.strip().splitlines()
+        detail = stderr_lines[-1] if stderr_lines else f"exit {result.returncode}, no stderr"
+        return f"(size unavailable: {detail})"
     return result.stdout.split("\t")[0].strip()
 
 
@@ -357,11 +361,22 @@ def run_stage_two(env: dict[str, str]) -> dict[str, object]:
             "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0",
             f"-DCMAKE_IGNORE_PREFIX_PATH={CMAKE_IGNORE_PREFIX_PATH}",
             f"-DCMAKE_POLICY_VERSION_MINIMUM={CMAKE_POLICY_VERSION_MINIMUM}",
+            # SLIC3R_GUI=OFF is this task's whole point (a headless oracle); SLIC3R_CAD
+            # stays ON rather than flipping it to OFF to dodge a configure problem,
+            # because OFF is a second axis no upstream build exercises either (the one
+            # upstream script that runs GUI-off at all keeps CAD on) and task.md forbids
+            # turning it off to make the configure succeed.
             "-DSLIC3R_GUI=OFF",
             "-DSLIC3R_CAD=ON",
             "-DBUILD_TESTS=ON",
             "-DSLIC3R_STATIC=1",
             f"-DCMAKE_CXX_FLAGS={CXX_FLAGS}",
+            # task.md names only CMAKE_CXX_FLAGS; it is silent on C. mcut's
+            # deps_src/mcut/source/shewchuk.c carries the exact orientation/incircle
+            # predicates -ffp-contract=off exists to protect, and mcut links into both
+            # libslic3r (src/libslic3r/CMakeLists.txt:784) and libslic3r_cgal (:667), so
+            # the faithful reading is to pass it there too.
+            f"-DCMAKE_C_FLAGS={CXX_FLAGS}",
         ]
 
     build_cmd = [
@@ -426,6 +441,11 @@ def run_stage_two(env: dict[str, str]) -> dict[str, object]:
                 label="stage two build",
             )
     build_elapsed_total = time.monotonic() - start
+    # Measured here, right after the build and before either ctest run, so the
+    # figure vendor/README.md records (and 24-port-check-ci reads for CI-cache
+    # sizing) is the build tree's own cost and never silently grows with test
+    # artifacts the two suites below may write under it.
+    build_dir_size = du_sh(MAIN_BUILD)
 
     click.echo("\n--- stage two: libslic3r + test suites built ---")
     click.echo(
@@ -449,6 +469,9 @@ def run_stage_two(env: dict[str, str]) -> dict[str, object]:
                 "ctest",
                 "--test-dir",
                 str(test_dir),
+                # Not optional with a multi-config generator: ctest has to be told
+                # which of the generator's configurations to run, the same way the
+                # build above is told with cmake --build's own --config Release.
                 "-C",
                 "Release",
                 "--output-on-failure",
@@ -475,6 +498,7 @@ def run_stage_two(env: dict[str, str]) -> dict[str, object]:
         "occt_libs_pass1": occt_libs_pass1,
         "occt_libs_pass2": occt_libs_pass2,
         "suite_results": suite_results,
+        "build_dir_size": build_dir_size,
     }
 
 
@@ -524,7 +548,9 @@ def main() -> None:
         f"  [configure#1 {stage2['configure1_elapsed']:.1f}s"
         f" + configure#2 {stage2['configure2_elapsed']:.1f}s"
         f" + build {stage2['build_only_elapsed']:.1f}s]",
-        f"Build directory ({MAIN_BUILD}): {du_sh(MAIN_BUILD)}",
+        # Taken right after the build, before either ctest run below, so this
+        # figure is the build tree's own cost, not inflated by test artifacts.
+        f"Build directory ({MAIN_BUILD}): {stage2['build_dir_size']}",
         "Test suites (evidence, not a gate):",
         *suite_lines,
     ]

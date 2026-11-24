@@ -151,10 +151,21 @@ C7 anticipated.
 
 Measured in [PR #7](https://github.com/bruk-io/grampus/pull/7) (`02-deps-superbuild`), from an
 empty `deps/build/arm64` with `deps/DL_CACHE` also empty, with no compiler cache. Transcribed
-here, not re-measured: this task does not rebuild stage one from an empty prefix.
+here, not re-measured: this task does not rebuild stage one from an empty prefix on purpose.
+It was, however, necessarily built once for real in this task's own worktree (that worktree had
+no prefix yet), measured at 226.9s; PR #7's 227.3s is kept as the recorded figure per task.md's
+"transcribed, not re-measured" instruction, with this run noted here so the two records do not
+read as contradicting each other.
 
-**Stage two (the main project): does not configure on this platform. Reported, not worked
-around, per C7's decision.**
+The install prefix's on-disk size drifts with the exact set of dependency versions resolved at
+build time: PR #7 measured 625M; a `du -sh` of the same prefix path in this task's own build
+measures 637M. Both are real measurements of the same prefix at different times, not a
+transcription error; 625M stays the recorded figure (PR #7's, per the same instruction), with
+637M noted here so a reader sizing a CI cache from this table sees the spread.
+
+**Stage two (the main project): does not configure against this host's stage-one prefix
+(see below for why that is not the same as "this platform"). Reported, not worked around, per
+C7's decision.**
 
 The exact command from `intent/libslic3r-rust-port/tasks/13-build-libslic3r/task.md`, run from
 a clean `vendor/OrcaSlicer/build/arm64`, fails at its first configure:
@@ -172,38 +183,84 @@ Call Stack (most recent call first):
   CMakeLists.txt:778 (find_package)
 ```
 
-**Root cause, confirmed by inspection, not guessed.** Stage one's own superbuild detected
-Homebrew's `xz` (`liblzma`) at *its own* build time (via `pkg-config`, unconstrained by the flag
-below) and compiled lzma support into `libboost_iostreams.a`. Its exported CMake package config,
-`boost_iostreams-config.cmake`, therefore calls `find_dependency(LibLZMA)` unconditionally on
-every consumer configure — not something stage two's command line can skip or make optional,
-because it reflects how the already-built, frozen stage-one artifact was compiled. `lzma.h`
-exists on this machine only under `/opt/homebrew/include` (`xz` 5.8.4) and under a `miniconda3`
-prefix; it is not in stage one's own install prefix, not in `vendor/OrcaSlicer/deps_src/`, and
-not in the Xcode SDK (the SDK has only `liblzma.tbd`, a linkable stub with no header — which is
-why CMake finds the *library* via the SDK but still reports the *header* missing). Stage two's
-command line mandates `-DCMAKE_IGNORE_PREFIX_PATH="/opt/local;/usr/local;/opt/homebrew"`, so the
-one place the header exists is the one place this build is required not to look.
+**Root cause, confirmed by inspection — and corrected from an earlier reading of the same
+evidence.** `liblzma` is not detected via `pkg-config`: stage one's Boost is built through its
+own CMake build (not `b2`), and the `FindLibLZMA.cmake` module its dependency discovery calls
+does a plain `find_path(LIBLZMA_INCLUDE_DIR lzma.h)` — no `pkg-config` hint anywhere in that
+module. What actually lets `/opt/homebrew/include` through is a bug in the *forwarding* of
+`CMAKE_IGNORE_PREFIX_PATH`, not its absence. Stage one's top-level configure
+(`oracle/build-libslic3r`'s own `run_stage_one`) correctly passes
+`-DCMAKE_IGNORE_PREFIX_PATH=/opt/local;/usr/local;/opt/homebrew` to `vendor/OrcaSlicer/deps`'s
+superbuild. That superbuild then forwards the value to every dependency sub-build, unquoted, at
+`deps/CMakeLists.txt:231` and `:285`: `-DCMAKE_IGNORE_PREFIX_PATH:STRING=${CMAKE_IGNORE_PREFIX_PATH}`.
+Because `CMAKE_IGNORE_PREFIX_PATH` is itself a `;`-separated CMake list and this substitution is
+unquoted, CMake flattens it into three separate list elements before `ExternalProject_Add` ever
+sees one argument — confirmed directly in the generated
+`vendor/OrcaSlicer/deps/build/arm64/build.ninja`, where dep_Boost's own configure command carries
+`-DCMAKE_IGNORE_PREFIX_PATH:STRING=/opt/local /usr/local /opt/homebrew` as three bare words, not
+one quoted value. The result lands in
+`dep_Boost-prefix/src/dep_Boost-build/CMakeCache.txt:336`: `CMAKE_IGNORE_PREFIX_PATH:STRING=/opt/local`
+— only the first element survived. `/usr/local` and `/opt/homebrew` are silently *not* ignored by
+that sub-build, so `FindLibLZMA` finds Homebrew's header
+(`CMakeCache.txt:631`, `LIBLZMA_INCLUDE_DIR:PATH=/opt/homebrew/include`) and library
+(`:637`, the Xcode SDK's headerless `.tbd` stub), and `BOOST_IOSTREAMS_ENABLE_LZMA:BOOL=ON`
+(`:92`) gets compiled into `libboost_iostreams.a`. Its exported package config,
+`boost_iostreams-config.cmake:57`, then calls `find_dependency(LibLZMA)` unconditionally on every
+consumer configure, which is what stage two's configure trips over. This bug lives entirely in
+`vendor/OrcaSlicer/deps/CMakeLists.txt`, which this task (and `02-deps-superbuild` before it) is
+forbidden from changing.
 
-I confirmed this diagnosis by configuring once, off the record, with
+Upstream's own `deps/Boost/Boost.cmake` turns bzip2 and zstd off explicitly for Boost.Iostreams
+(`-DBOOST_IOSTREAMS_ENABLE_BZIP2:BOOL=OFF`, `...ZSTD:BOOL=OFF`) but leaves lzma to plain feature
+detection, with no corresponding off-switch. So whether this particular sub-build ends up linking
+lzma is **host-contingent**, not a fixed property of this platform: it depends on whether
+`/usr/local` or `/opt/homebrew` (the two prefixes the forwarding bug fails to exclude) happen to
+hold an `lzma.h` on the machine running stage one. On this machine they do, via Homebrew's `xz`.
+A clean host without it would not trip this — stage one's Boost would then export no
+`find_dependency(LibLZMA)` at all, and stage two's configure would not hit this error here. So
+**"does not configure on this platform" overstates what was shown**: the accurate statement is
+that stage two does not configure against *the stage-one prefix as built on this host*, because
+that prefix's Boost embeds this host's Homebrew lzma — a contamination bug in how
+`CMAKE_IGNORE_PREFIX_PATH` is forwarded, not a platform limitation. The one environment that would
+settle whether a clean host avoids it is a hosted CI runner with no Homebrew `xz`; see "Its own CI
+line" below for whether that run has actually exercised this.
+
+I confirmed the diagnosis is otherwise complete — nothing else past LibLZMA is broken by this
+configuration — by configuring once, off the record, with
 `-DLIBLZMA_INCLUDE_DIR=/opt/homebrew/opt/xz/include -DLIBLZMA_LIBRARY=/opt/homebrew/opt/xz/lib/liblzma.dylib`
 added to the command: configure then completes in full (`-- Generating done`, exit 0) with no
-other error. That confirms LibLZMA is the only blocker reached so far, and that nothing else past
-it is broken by this configuration — but I did not keep that flag, and `oracle/build-libslic3r`
-does not carry it. Pointing explicitly at Homebrew to satisfy a dependency `CMAKE_IGNORE_PREFIX_PATH`
-is specifically there to keep out is the same class of workaround C7's decision and
-`02-deps-superbuild`'s own PR (which found and reported, rather than suppressed, a Homebrew link
-in the bundled CPython's `_lzma` module) both declined. The three things task.md explicitly
-forbids — patching vendored source, hand-editing `CMakeCache.txt`, and turning `SLIC3R_CAD` off —
-were also considered and are not what this is; none would reach a real fix either, since the
-missing header is upstream of all three.
+other error, both on the first pass and on a second, identical pass. I did not keep that flag,
+and `oracle/build-libslic3r` does not carry it: pointing explicitly at Homebrew to satisfy a
+dependency `CMAKE_IGNORE_PREFIX_PATH` is specifically there to keep out is the same class of
+workaround C7's decision and `02-deps-superbuild`'s own PR (which found and reported, rather than
+suppressed, a Homebrew link in the bundled CPython's `_lzma` module) both declined. The three
+things task.md explicitly forbids — patching vendored source, hand-editing `CMakeCache.txt`, and
+turning `SLIC3R_CAD` off — were also considered and are not what this is; none would reach a real
+fix either, since the forwarding bug is upstream of all three. The real next step, left to
+whoever picks this back up (not attempted here, since it touches stage one and task.md forbids
+changing stage one's flags in this task): get the full ignore list to survive the forwarding at
+`deps/CMakeLists.txt:231`/`:285` — unverified what that takes, since the bug is in vendored source
+this task cannot edit to test a fix against.
 
-**What this means for the OCCT_LIBS double-configure question.** Unanswered: configure fails
-inside the top-level `CMakeLists.txt`'s dependency discovery, before `add_subdirectory(src)` ever
-reaches `src/libslic3r/CMakeLists.txt:746`, so neither configure pass gets far enough to write or
-read `OCCT_LIBS`. `vendor/OrcaSlicer/build/arm64/CMakeCache.txt` after the failed first pass has
-no `OCCT_LIBS` entry at all. The second configure is kept in `oracle/build-libslic3r` regardless,
-exactly as task.md specifies, since removing it would not get past this failure either.
+**What this means for the OCCT_LIBS double-configure question.** Against the shipped command, this
+is unanswered: configure fails inside the top-level `CMakeLists.txt`'s dependency discovery,
+before `add_subdirectory(src)` ever reaches `src/libslic3r/CMakeLists.txt:746`, so neither
+configure pass gets far enough to write or read `OCCT_LIBS`, and
+`vendor/OrcaSlicer/build/arm64/CMakeCache.txt` after the failed first pass has no `OCCT_LIBS`
+entry at all. But task.md asks for this to be answered "where the first macOS configure turns out
+to link correctly", and the off-the-record diagnostic above does reach that point, so the answer
+is in hand from that probe, not from the shipped command: in a scratch build directory, with the
+identical stage-two flags plus the two `LIBLZMA_*` paths,
+`OCCT_LIBS` after the first configure pass and after the second are byte-identical —
+`TKFillet;TKOffset;TKBool;TKDESTEP;TKDE;TKXCAF;TKXSBase;TKVCAF;TKCAF;TKLCAF;TKCDF;TKV3d;TKService;TKMesh;TKBO;TKPrim;TKHLR;TKShHealing;TKTopAlgo;TKGeomAlgo;TKBRep;TKGeomBase;TKG3d;TKG2d;TKMath;TKernel`
+— 26 toolkits, with the three CAD-only entries (`TKDESTEP`, `TKDE`, `TKXCAF`'s group) correctly
+prepended per `src/libslic3r/CMakeLists.txt:735`. `ninja -t targets` in that scratch tree also
+shows the three named phony targets (`libslic3r`, `libslic3r_tests`, `fff_print_tests`) exist, as
+Done-when line 2 expects of the names, though nothing was built there. Measured via that
+diagnostic configure with LibLZMA supplied, not via the shipped command, and not re-run against
+the real `vendor/OrcaSlicer/build/arm64` tree — the second configure stays in
+`oracle/build-libslic3r` regardless, exactly as task.md specifies, since on the real tree removing
+it would not get past the LibLZMA failure either way.
 
 **Stage two's measured cost:** none to report. It fails at configure, consistently, in a few
 seconds, before anything is compiled; there is no build wall-clock or disk-size figure for a
@@ -211,10 +268,28 @@ build that never starts. No libslic3r, libslic3r_tests or fff_print_tests target
 neither upstream test suite ran.
 
 **Status:** `just oracle-build` exits non-zero. Stage one still resolves correctly to no work on
-a repeat run (confirmed: 0.5s, configure 0.4s + build 0.1s, on a checkout whose prefix was already
+a repeat run (confirmed: 0.6s, configure 0.5s + build 0.1s, on a checkout whose prefix was already
 installed). Stage two is blocked. Per C7's decision, this is reported rather than worked around;
 `25-stage-dumper`, `28-oracle-parity`, `31-proof-harness` and every port unit depend on this
 working and are blocked by this finding.
+
+**A stale `NLopt_DIR`.** `oracle/build-libslic3r` does not implement task.md's documented
+`cmake -U NLopt_DIR -U NLopt_LIBS .` clear, because it was never needed against a fresh build
+tree. The one place it would first matter is the CI job's cached `vendor/OrcaSlicer/build/arm64`
+(see "Its own CI line" below): a restored tree carries a previous run's `CMakeCache.txt`, so a
+future change that moves `NLopt`'s install location could hit the stale-cache failure the clear
+exists for. Left out for now and named here rather than added speculatively to a path that has
+never executed.
+
+**Its own CI line.** The macOS arm64 job added to `.github/workflows/ci.yml` initially requested
+`runs-on: macos-14`, which turned out to be a retired hosted-runner image (GitHub's
+`actions/runner-images` releases show no `macos-14`/`macos-14-arm64` build since 2026-08-31,
+while `macos-15` and `macos-26` keep shipping). Both of this PR's first two CI runs on that label
+came back `cancelled` with zero steps executed, confirmed via the Actions API
+(`"status":"cancelled"`, 0 billable minutes, no steps) — not a build failure, a runner that could
+never be scheduled. Changed to `runs-on: macos-15` (still arm64 by default) so the job actually
+executes; see the PR for whether that run reaches the same LibLZMA failure as this host, which
+would confirm the "host-contingent" framing above, or configures cleanly, which would prove it.
 
 ### Licensing
 

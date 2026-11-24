@@ -30,14 +30,18 @@ under `oracle/.cache/`, never an app already installed on the machine running th
 
 `just oracle-build` (`oracle/build-libslic3r`) builds `src/libslic3r` itself from the vendored
 submodule, as a second, from-source oracle alongside the release-binary one above. Stage two,
-the main project, is configured (twice — see `vendor/README.md`) with:
+the main project, is configured with generator `-G "Ninja Multi-Config"` (twice — see
+`vendor/README.md`), built with `--config Release`, and tested with `ctest -C Release`, using:
 
 ```
+-DCMAKE_PREFIX_PATH="<stage one's install prefix>"
+-DCMAKE_BUILD_TYPE=Release
 -DSLIC3R_GUI=OFF
 -DSLIC3R_CAD=ON
 -DBUILD_TESTS=ON
 -DSLIC3R_STATIC=1
 -DCMAKE_CXX_FLAGS="-ffp-contract=off"
+-DCMAKE_C_FLAGS="-ffp-contract=off"
 -DCMAKE_OSX_ARCHITECTURES=arm64
 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
 -DCMAKE_IGNORE_PREFIX_PATH="/opt/local;/usr/local;/opt/homebrew"
@@ -48,14 +52,19 @@ against the prefix stage one (the dependency superbuild) installs, building the 
 `libslic3r`, `libslic3r_tests` and `fff_print_tests` (never the aggregate `all` target, which
 pulls in a GUI library that does not exist with `SLIC3R_GUI=OFF`). `-ffp-contract=off` is
 normative, not incidental: without it the compiler fuses multiply-add expressions Rust never
-fuses, and `29-ffi-bridge-core` checks that this spelling and `crates/slic3r-ffi/build.rs` carry
-the same flag.
+fuses, and `29-ffi-bridge-core` checks that the `CMAKE_CXX_FLAGS` spelling and
+`crates/slic3r-ffi/build.rs` carry the same flag. `CMAKE_C_FLAGS` carries the identical flag too —
+task.md names only the C++ spelling, but the orientation/incircle predicates it exists to protect
+(Shewchuk's routines in `deps_src/mcut/source/shewchuk.c`, linked into both `libslic3r` and
+`libslic3r_cgal`) are C, not C++, so the faithful reading passes it to both languages.
 
-**This configuration does not currently build on macOS arm64.** Stage two's first configure fails
-— see `vendor/README.md`'s "Building libslic3r locally" section for the exact error, the
-confirmed root cause (a transitive `LibLZMA` dependency baked into stage one's own Boost build,
-satisfiable only from Homebrew, which `CMAKE_IGNORE_PREFIX_PATH` excludes), and what was tried.
-No upstream workflow runs this combination on macOS; the one upstream script that runs it at all
-(`scripts/CAD/run-kernel-tests.sh:145-158`) does so only on Linux. The flags above are what this
-oracle is specified to use once this is resolved, not evidence that it currently produces a
-working binary.
+**This configuration does not currently build against this host's stage-one prefix.** Stage two's
+first configure fails — see `vendor/README.md`'s "Building libslic3r locally" section for the
+exact error, the confirmed root cause (stage one's own `CMAKE_IGNORE_PREFIX_PATH` is truncated by
+an argument-forwarding bug in vendored `deps/CMakeLists.txt`, so Homebrew's `xz` leaks into stage
+one's Boost build on any host that has it), and what was tried. This is host-contingent, not a
+fixed property of macOS arm64: a host with no Homebrew `xz` would not trip it. No upstream
+workflow runs `SLIC3R_GUI=OFF`/`SLIC3R_CAD=ON` on macOS at all; the one upstream script that runs
+it at all (`scripts/CAD/run-kernel-tests.sh:145-158`) does so only on Linux. The flags above are
+what this oracle is specified to use once this is resolved, not evidence that it currently
+produces a working binary.

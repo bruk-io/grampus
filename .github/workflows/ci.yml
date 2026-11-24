@@ -37,8 +37,19 @@ jobs:
   # half of this job, added when it lands. Until then this job runs on every pull request,
   # uncached for the dependency superbuild, and rebuilds that superbuild from scratch each
   # run.
+  # macos-14 was dropped from GitHub's hosted-runner images (last image build
+  # 2026-08-31, per actions/runner-images' releases, while macos-15 and
+  # macos-26 keep shipping weekly) and requesting it here made every run of
+  # this job cancel instantly with zero steps — confirmed via
+  # `gh api .../actions/runs/<id>/jobs` showing `"status":"cancelled"`,
+  # 0 billable ms, no steps at all, on two separate runs. macos-15 is arm64 by
+  # default, same as macos-14 was, and is a currently served image.
   oracle-build:
-    runs-on: macos-14
+    runs-on: macos-15
+    # An uncached 21-dependency superbuild (24-port-check-ci adds that cache,
+    # not this task) plus stage two's own configure/build could otherwise tie
+    # up a runner for hours on a hang rather than a hard failure.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,7 +77,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/OrcaSlicer/build/arm64
+          # Hashing the script, not the flag values, is the key: the stage-two CMake
+          # flags live only in oracle/build-libslic3r (see its CXX_FLAGS and
+          # configure_cmd()), so a change there is exactly what should invalidate
+          # this cache, and a comment-only edit invalidating it too is an accepted
+          # over-approximation rather than a second place those flags have to be kept
+          # in sync. restore-keys falls back to the newest cache for this pin when the
+          # script changed, which still saves the (much slower) cold CMake+Ninja
+          # reconfigure of this huge tree even on a flag change.
           key: oracle-build-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+          restore-keys: |
+            oracle-build-arm64-${{ steps.submodule.outputs.sha }}-
 
       - name: Build the vendored libslic3r (just oracle-build)
         run: just oracle-build
