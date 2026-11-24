@@ -28,9 +28,8 @@ live; this document states the process around them, not the rules themselves.
 
 **Phase A** drafts every in-scope unit and **is not required to compile**. A draft is written at
 its final path, `crates/<crate>/src/<module>.rs`, and **no `mod` declaration names it**. That is
-what keeps `main` building: `cargo build` never reads a file no `mod` line reaches, so CI stays
-green with hundreds of non-compiling drafts in the tree, and `cargo fmt --check` never sees one
-either, since it too only walks files the crate graph reaches.
+what keeps `main` building: `cargo build` never reads it, so CI stays green with hundreds of
+non-compiling drafts in the tree, and `cargo fmt --check` never sees one either.
 
 **Phase B** makes the drafts compile, bottom-up by the crate-level level the cut defines, with
 compiler errors as the work queue. Phase B's work on a module is to make it compile, add its `mod`
@@ -108,8 +107,7 @@ A task's branch changes nothing under `intent/`, and therefore passes `just guar
 
 The `mod` line in `lib.rs` is the one shared file a port task does write. It is a one-line append
 that git merges, and it goes in the crate's documented alphabetical position, so two branches
-appending to the same `lib.rs` conflict textually rather than reordering silently. This document is
-where that alphabetical-position rule is stated; no other document states it.
+appending to the same `lib.rs` conflict textually rather than reordering silently.
 
 A task passes `just port-check`, which includes `just port-status --per-commit` and its
 per-marker assertion: every `// PERF(port):` and `// FIDELITY(port):` marker the branch adds is
