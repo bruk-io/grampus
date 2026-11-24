@@ -187,7 +187,7 @@ ProjectTask.hpp	311	BBLProfile	project_	BBLProject *
 ProjectTask.hpp	312	BBLProfile	slice_info	std::map<std::string, BBLSliceInfo*>			
 ProjectTask.hpp	340	BBLProject	profiles	std::vector<BBLProfile*>			
 SLA/IndexedMesh.hpp	40	IndexedMesh	m_tm	const indexed_triangle_set *	borrowed	SLA/IndexedMesh.cpp:106, SLA/IndexedMesh.cpp:95, SLA/IndexedMesh.cpp:101	&'a indexed_triangle_set
-SLA/IndexedMesh.hpp	82	hit_result	m_mesh	const IndexedMesh *	borrowed	SLA/IndexedMesh.hpp:90	&'a IndexedMesh
+SLA/IndexedMesh.hpp	82	hit_result	m_mesh	const IndexedMesh *	borrowed	SLA/IndexedMesh.hpp:90, SLA/IndexedMesh.cpp:176, SLA/IndexedMesh.cpp:185	&'a IndexedMesh
 SVG.hpp	95	SVG	f	FILE *			
 Support/SupportMaterial.hpp	91	PrintObjectSupportMaterial	m_print_config	const PrintConfig *			
 Support/SupportMaterial.hpp	92	PrintObjectSupportMaterial	m_object_config	const PrintObjectConfig *			
