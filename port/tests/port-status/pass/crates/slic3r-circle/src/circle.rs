@@ -53,7 +53,14 @@ unsafe fn drop_raw(ptr: *mut f64) {
     drop(Box::from_raw(ptr));
 }
 
+/* Block comment, the other closed exempt position alongside a line comment: mentions the
+ * unsafe raw-pointer trick above and transcribes 0.0125 again here, neither needing a marker
+ * because both the word and the literal are inside this kind of comment.
+ */
+fn block_comment_marker() {}
+
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     #[test]
     fn resolution_is_small() {

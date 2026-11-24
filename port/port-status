@@ -16,7 +16,13 @@ section checks; `23-perf-backlog` adds the perf-backlog report and its per-marke
 Both later tasks call back into this module rather than duplicating its scan.
 
 A **ported module** is any ``.rs`` file found under ``<tree>/crates/*/src/**/*.rs`` (never
-``crates/*/tests/``, which the glob does not reach). Every such file is checked for:
+``crates/*/tests/``, which the glob does not reach) whose path appears in ``port/manifest.tsv``'s
+``target module`` column, unioned with any such file that already carries a ``PORT STATUS``
+trailer or one of the six whitelisted markers (so a module that started a port before its
+manifest row existed, or a fixture tree with no manifest at all, is still caught). This excludes
+an unrelated hand-written tool crate such as ``crates/oracle-compare/`` for a principled reason
+-- it is named by no manifest row and carries none of the six markers -- rather than by a text
+sniff of its comments. Every selected file is checked for:
 
 1. A ``PORT STATUS`` trailer: the last run of line comments in the file, naming its vendored
    source path(s), a confidence, an equality tier and an oracle, and agreeing with its row in
@@ -26,8 +32,9 @@ A **ported module** is any ``.rs`` file found under ``<tree>/crates/*/src/**/*.r
    vendored line actually holding the transcribed literal (the placeholder-constant check,
    R16).
 4. A closed whitelist of port markers: every line comment that looks like a marker (starts
-   with a capitalised word, optionally ``(port)``, then a colon) must spell one of the six
-   recognised markers exactly.
+   with an all-capitals word, optionally ``(port)``, then a colon -- or, case-insensitively,
+   with the exact spelling of one of the six) must spell one of the six recognised markers
+   exactly.
 
 Every check is text-based: the script reads files as lines and never parses Rust, because it
 has to run cleanly over Phase A drafts that are not valid Rust and that ``cargo fmt`` never
@@ -91,20 +98,61 @@ MARKER_WHITELIST = {
 CONFIDENCE_VALUES = {"high", "medium", "low"}
 ORACLE_VALUES = {"release", "built"}
 
-# A candidate marker: a line comment whose text begins with a capitalised word (one or more,
-# separated by a space or a hyphen), optionally followed by "(port)", then a colon. Broader
-# than "all-capitals" on purpose, so a near miss such as "Todo(port):" is still caught as a
-# candidate and then rejected by the whitelist membership test below, rather than silently
-# passed through because it does not look enough like a marker to be examined at all.
-CANDIDATE_MARKER_RE = re.compile(
-    r"^(?P<prefix>[A-Z][A-Za-z0-9_]*(?:[ -][A-Za-z][A-Za-z0-9_]*)*)(?P<port>\(port\))?:"
+# A candidate marker, exactly as task 21-port-status-markers states it: a line comment whose
+# text begins with an all-capitals word (one or more, separated by a space or a hyphen),
+# optionally followed by "(port)", then a colon. This is deliberately narrower than "starts with
+# a capital letter" -- an ordinary prose comment such as "// Returns: the squared distance..."
+# or "// A GFM table separator row:" has a lower-case tail and is not a candidate at all, so it
+# is never examined by the whitelist and never a finding.
+STRICT_CANDIDATE_MARKER_RE = re.compile(
+    r"^(?P<prefix>[A-Z][A-Z0-9_]*(?:[ -][A-Z][A-Z0-9_]*)*)(?P<port>\(port\))?:"
 )
+
+# A near miss of one of the six markers that the strict, all-capitals regex above does not
+# catch because its case differs (e.g. "Todo(port):") or its separator differs (e.g.
+# "PORT-SRC:" -- though that one is already caught by the strict regex since a hyphen is an
+# accepted separator between all-caps words). Matched case-insensitively against the same
+# shape, then normalised (upper-cased, hyphen folded to space) and compared against the six
+# marker spellings: a match here that the strict regex missed is a finding; a miss here is
+# ordinary prose and never flagged, so this does not reintroduce the prose false positives the
+# old broadened regex caused.
+GENERIC_CANDIDATE_RE = re.compile(
+    r"^(?P<prefix>[A-Za-z][A-Za-z0-9_]*(?:[ -][A-Za-z][A-Za-z0-9_]*)*)(?P<port>\(port\))?:",
+    re.IGNORECASE,
+)
+
+MARKER_WHITELIST_UPPER = {name.upper() for name in MARKER_WHITELIST}
+
+
+def classify_comment_marker(text: str) -> tuple[str, str] | None:
+    """Classify `text` (a comment's content with the leading `//` stripped and whitespace
+    trimmed) as a port marker. Returns (status, prefix) where status is "recognized" (one of
+    the six, counted) or "unrecognized" (a candidate or a near miss of one of the six, a
+    finding); returns None for ordinary prose that is neither.
+
+    The two passes are tried in order, never both, so a single comment is never reported twice:
+    the strict all-capitals shape task.md states, then -- only when that shape does not match at
+    all -- a case-insensitive near-miss test against the six exact spellings only."""
+    strict_m = STRICT_CANDIDATE_MARKER_RE.match(text)
+    if strict_m:
+        prefix = strict_m.group("prefix") + ("(port)" if strict_m.group("port") else "")
+        return ("recognized" if prefix in MARKER_WHITELIST else "unrecognized", prefix)
+    generic_m = GENERIC_CANDIDATE_RE.match(text)
+    if generic_m:
+        prefix_raw = generic_m.group("prefix")
+        port_raw = generic_m.group("port") or ""
+        normalized = prefix_raw.upper().replace("-", " ") + ("(PORT)" if port_raw else "")
+        if normalized in MARKER_WHITELIST_UPPER:
+            return ("unrecognized", prefix_raw + port_raw)
+    return None
 
 # PORT SRC: <vendored path>:<line>
 PORT_SRC_RE = re.compile(r"PORT SRC:\s*(?P<path>\S+):(?P<line>\d+)")
 
 TRAILER_HEADER = "// PORT STATUS"
 TRAILER_KEY_RE = re.compile(r"^//\s*(?P<key>source|confidence|tier|oracle):\s*(?P<value>.*)$")
+# The order the trailer's non-'source:' keys must appear in, after any 'source:' lines.
+TRAILER_KEY_ORDER = ("confidence", "tier", "oracle")
 
 UNSAFE_WORD_RE = re.compile(r"\bunsafe\b")
 SAFETY_MARKER_RE = re.compile(r"^SAFETY:")
@@ -122,7 +170,7 @@ NUMERIC_LITERAL_RE = re.compile(
     r"0[xX][0-9a-fA-F_]+"
     r"|0[oO][0-7_]+"
     r"|0[bB][01_]+"
-    r"|\d[\d_]*\.\d[\d_]*(?:[eE][+-]?\d[\d_]*)?"
+    r"|\d[\d_]*\.(?:\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?"
     r"|\d[\d_]*[eE][+-]?\d[\d_]*"
     r"|\d[\d_]*"
     r")"
@@ -173,12 +221,24 @@ def resolve_vendored(written_path: str) -> tuple[Path, str | None]:
     key `written_path` corresponds to, or None if `written_path` does not carry the required
     `src/libslic3r/` prefix -- in which case it can never match a manifest row.
 
+    A written path that climbs out of `vendor/OrcaSlicer/` (e.g. via a `..` segment, or an
+    absolute path) is never a legitimate vendored source: it resolves to a sentinel path that
+    cannot exist, so the caller's ordinary `is_file()` / read failure reports it as
+    `source-path-absent` like any other path that is not on the pinned tree, rather than opening
+    a real file outside the repository.
+
     This is the one function used by the trailer check and the `// PORT SRC:` check alike, so
     the two cannot resolve the same spelling two different ways."""
     abs_path = VENDOR_ROOT / written_path
     manifest_key = (
         written_path[len(VENDOR_SRC_PREFIX) :] if written_path.startswith(VENDOR_SRC_PREFIX) else None
     )
+    try:
+        escapes = not abs_path.resolve().is_relative_to(VENDOR_ROOT.resolve())
+    except OSError:
+        escapes = True
+    if escapes:
+        return VENDOR_ROOT / "__escapes_vendor_root__", manifest_key
     return abs_path, manifest_key
 
 
@@ -211,6 +271,14 @@ def load_manifest(path: Path) -> list[dict[str, str]]:
 def index_manifest(rows: list[dict[str, str]]) -> dict[str, dict[str, str]]:
     """Index manifest rows by their `path` column."""
     return {row.get("path", ""): row for row in rows if row.get("path")}
+
+
+def index_target_modules(rows: list[dict[str, str]]) -> set[str]:
+    """Index manifest rows by their `target module` column (task.md's second index, "by their
+    target crate and module"): the set of every ported-module path a manifest row names. This
+    is what selects a real ported module for scanning even when it carries no trailer or marker
+    yet -- see `scan_tree`."""
+    return {row["target module"] for row in rows if row.get("target module")}
 
 
 # --------------------------------------------------------------------------------------------
@@ -269,6 +337,83 @@ def split_code_comment(line: str) -> tuple[str, str]:
     return line, ""
 
 
+def strip_block_comments(text: str) -> str:
+    """Replace the interior of every `/* ... */` block comment in `text` with spaces, one of
+    the two closed exempt positions `--help` states for the numeric-literal rule (the other,
+    line comments, is already handled by `split_code_comment`). Tracks state across the whole
+    file, not line by line, since a block comment spans lines; preserves every newline and the
+    length of every other line exactly, so line numbers and in-line character offsets (used by
+    the negative-sign lookback elsewhere) do not shift. A `/*` found while already inside a `//`
+    line comment or a string/char literal does not start a block (a line comment itself ends at
+    the next newline, which also closes that state)."""
+    out = list(text)
+    in_string = False
+    in_char = False
+    in_line_comment = False
+    in_block = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            in_line_comment = False
+            i += 1
+            continue
+        if in_line_comment:
+            i += 1
+            continue
+        if in_block:
+            if c == "*" and i + 1 < n and text[i + 1] == "/":
+                out[i] = " "
+                out[i + 1] = " "
+                in_block = False
+                i += 2
+                continue
+            out[i] = " "
+            i += 1
+            continue
+        if in_string:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if in_char:
+            if c == "\\":
+                i += 2
+                continue
+            if c == "'":
+                in_char = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+            i += 1
+            continue
+        if c == "'":
+            closes = text.find("'", i + 1, i + 5)
+            if closes != -1 and "\n" not in text[i + 1 : closes]:
+                in_char = True
+                i += 1
+                continue
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            in_line_comment = True
+            i += 2
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            out[i] = " "
+            out[i + 1] = " "
+            in_block = True
+            i += 2
+            continue
+        i += 1
+    return "".join(out)
+
+
 @dataclass
 class LineInfo:
     raw: str
@@ -280,23 +425,35 @@ class LineInfo:
 
 def classify_lines(text: str) -> list[LineInfo]:
     raw_lines = text.splitlines()
+    # Block-comment interiors are blanked out before the code/comment split, so a numeric
+    # literal or the word "unsafe" written inside a `/* ... */` is invisible to both checks --
+    # the same way a string literal's contents already are (`mask_strings`, applied later).
+    # The genuine `//` line comments that remain (including one on the same line right after a
+    # block comment closes) are untouched, since only block-comment bytes are replaced.
+    masked_lines = strip_block_comments(text).splitlines()
     infos: list[LineInfo] = []
     in_cfg_test = False
     cfg_test_depth = 0
-    for raw in raw_lines:
-        code, comment = split_code_comment(raw)
+    cfg_test_seen_open = False
+    for raw, masked in zip(raw_lines, masked_lines):
+        code, comment = split_code_comment(masked)
         stripped = raw.strip()
         is_pure_comment = stripped.startswith("//")
         exempt = False
         if in_cfg_test:
             exempt = True
-            cfg_test_depth += code.count("{") - code.count("}")
-            if cfg_test_depth <= 0:
+            opens = code.count("{")
+            closes = code.count("}")
+            if opens:
+                cfg_test_seen_open = True
+            cfg_test_depth += opens - closes
+            if cfg_test_seen_open and cfg_test_depth <= 0:
                 in_cfg_test = False
         elif CFG_TEST_RE.match(stripped):
             exempt = True
             in_cfg_test = True
             cfg_test_depth = 0
+            cfg_test_seen_open = False
         elif stripped.startswith("#"):
             exempt = True
         infos.append(LineInfo(raw, code, comment, is_pure_comment, exempt))
@@ -325,24 +482,14 @@ def normalize_literal(match: re.Match[str]) -> str:
     return match.group("num").replace("_", "")
 
 
-def literal_is_exempt(code: str, match: re.Match[str]) -> bool:
-    """True for the closed exempt set: the integers 0, 1 and 2 and their negatives --
-    structural indices, arities and strides, never a transcribed constant. A float is never
-    exempt, which `normalize_literal` already ensures (its text would carry a `.` or an `e`)."""
-    value = normalize_literal(match)
-    if value not in EXEMPT_LITERAL_VALUES:
-        return False
-    j = match.start() - 1
-    while j >= 0 and code[j] == " ":
-        j -= 1
-    if j >= 0 and code[j] == "-":
-        k = j - 1
-        while k >= 0 and code[k] == " ":
-            k -= 1
-        prev = code[k] if k >= 0 else ""
-        if prev == "" or not (prev.isalnum() or prev in ")]"):
-            value = "-" + value
-    return value in EXEMPT_LITERAL_VALUES or value.lstrip("-") in EXEMPT_LITERAL_VALUES
+def literal_is_exempt(match: re.Match[str]) -> bool:
+    """True for the closed exempt set: the integers 0, 1 and 2 -- structural indices, arities
+    and strides, never a transcribed constant. The sign, if any, is a separate character before
+    the match and never part of it (the regex carries no `-`), and does not change membership in
+    a three-element set closed under negation in spirit (-0, -1, -2 are exempt for the same
+    reason their unsigned forms are); a float is never exempt, which `normalize_literal` already
+    ensures (its text would carry a `.` or an `e`)."""
+    return normalize_literal(match) in EXEMPT_LITERAL_VALUES
 
 
 def mask_strings(code: str) -> str:
@@ -415,29 +562,17 @@ def find_literals(code: str) -> list[re.Match[str]]:
 # --------------------------------------------------------------------------------------------
 
 
-def candidate_marker_prefix(comment: str) -> str | None:
-    """If `comment` (the `//`-prefixed comment part of a line) begins with a candidate marker,
-    return its full prefix (e.g. "TODO(port)", "PORT-SRC", "Todo"), else None. Matches whether
-    or not the prefix is one of the six recognised markers -- that test is the caller's."""
-    text = comment.lstrip("/").strip()
-    m = CANDIDATE_MARKER_RE.match(text)
-    if not m:
-        return None
-    prefix = m.group("prefix")
-    if m.group("port"):
-        prefix += "(port)"
-    return prefix
-
-
 def check_marker_whitelist(path: str, lines: list[LineInfo], result: ScanResult) -> None:
     for i, info in enumerate(lines):
         for comment_text in ([info.comment] if info.comment else []) + (
             [info.raw.strip()] if info.is_pure_comment and not info.comment else []
         ):
-            prefix = candidate_marker_prefix(comment_text)
-            if prefix is None:
+            text = comment_text.lstrip("/").strip()
+            classified = classify_comment_marker(text)
+            if classified is None:
                 continue
-            if prefix in MARKER_WHITELIST:
+            status, prefix = classified
+            if status == "recognized":
                 result.marker_counts[prefix] += 1
             else:
                 result.fail(
@@ -501,8 +636,11 @@ def check_trailer(
     confidence: str | None = None
     tier: str | None = None
     oracle: str | None = None
-    order = ["source", "confidence", "tier", "oracle"]
+    confidence_line: int | None = None
+    tier_line: int | None = None
+    oracle_line: int | None = None
     seen_non_source = False
+    order_idx = 0
     for i in range(header_idx + 1, last + 1):
         m = TRAILER_KEY_RE.match(lines[i].raw.strip())
         if not m:
@@ -520,24 +658,29 @@ def check_trailer(
                 result.fail(path, i + 1, "trailer-not-last", "'source:' out of order")
                 return
             sources.append(value)
-        else:
-            seen_non_source = True
-            if key == "confidence":
-                if confidence is not None:
-                    result.fail(path, i + 1, "trailer-not-last", "duplicate 'confidence:'")
-                    return
-                confidence = value
-            elif key == "tier":
-                if tier is not None:
-                    result.fail(path, i + 1, "trailer-not-last", "duplicate 'tier:'")
-                    return
-                tier = value
-            elif key == "oracle":
-                if oracle is not None:
-                    result.fail(path, i + 1, "trailer-not-last", "duplicate 'oracle:'")
-                    return
-                oracle = value
-    del order
+            continue
+        seen_non_source = True
+        # The trailer's keys, after any 'source:' lines, must appear in this exact order
+        # (TRAILER_KEY_ORDER): a key out of sequence -- including a repeat of one already seen,
+        # which always lands on the wrong next slot -- is a finding rather than silently
+        # accepted, matching what --help and this rule's own failure message state.
+        expected_key = TRAILER_KEY_ORDER[order_idx] if order_idx < len(TRAILER_KEY_ORDER) else None
+        if key != expected_key:
+            result.fail(
+                path,
+                i + 1,
+                "trailer-not-last",
+                f"'{key}:' is out of order; after 'source:' the trailer's keys must appear as "
+                "exactly 'confidence:', 'tier:', 'oracle:' in that order",
+            )
+            return
+        order_idx += 1
+        if key == "confidence":
+            confidence, confidence_line = value, i + 1
+        elif key == "tier":
+            tier, tier_line = value, i + 1
+        elif key == "oracle":
+            oracle, oracle_line = value, i + 1
 
     trailer_line = last + 1
 
@@ -548,14 +691,14 @@ def check_trailer(
     if confidence is None or confidence not in CONFIDENCE_VALUES:
         result.fail(
             path,
-            trailer_line,
+            confidence_line or trailer_line,
             "bad-confidence",
             f"'confidence: {confidence}' is not one of {sorted(CONFIDENCE_VALUES)}",
         )
     if oracle is None or oracle not in ORACLE_VALUES:
         result.fail(
             path,
-            trailer_line,
+            oracle_line or trailer_line,
             "bad-oracle",
             f"'oracle: {oracle}' is not one of {sorted(ORACLE_VALUES)}",
         )
@@ -616,7 +759,7 @@ def check_trailer(
             if tier != expected_tier:
                 result.fail(
                     path,
-                    trailer_line,
+                    tier_line or trailer_line,
                     "tier-mismatch",
                     f"'tier: {tier}' does not match the manifest row's equality tier "
                     f"'{expected_tier}'",
@@ -666,11 +809,19 @@ def _vendored_line_text(abs_path: Path, line_no: int) -> str | None:
     return text_lines[line_no - 1]
 
 
+def _vendored_line_holds(normalized: str, vendored_text: str) -> bool:
+    """True if `vendored_text` (a cited vendored line) actually writes the normalised literal
+    `normalized`, not merely contains its digits as a substring of some other number -- e.g.
+    "12" must not match inside "0.0125", the placeholder-constant case R16 exists to catch.
+    Requires a non-digit, non-'.' boundary on both sides of the match."""
+    return re.search(r"(?<![\d.])" + re.escape(normalized) + r"(?![\d.])", vendored_text) is not None
+
+
 def check_numeric_constants(path: str, lines: list[LineInfo], result: ScanResult) -> None:
     for i, info in enumerate(lines):
         if info.is_pure_comment or info.exempt:
             continue
-        literal_matches = [m for m in find_literals(info.code) if not literal_is_exempt(info.code, m)]
+        literal_matches = [m for m in find_literals(info.code) if not literal_is_exempt(m)]
         if not literal_matches:
             continue
 
@@ -708,10 +859,16 @@ def check_numeric_constants(path: str, lines: list[LineInfo], result: ScanResult
             resolved.append((j, f"{marker_path}:{marker_line}", text))
 
         # Per-literal direction: every non-exempt literal needs at least one covering marker
-        # whose vendored line contains its normalised text.
+        # whose vendored line contains its normalised text. A plain substring search would
+        # match "0.0125" inside a cited line that actually writes some unrelated "12" the way it
+        # would match a genuine transcription, so require a non-digit, non-dot boundary on both
+        # sides -- the placeholder-constant case R16 exists to catch.
         for lm in literal_matches:
             normalized = normalize_literal(lm)
-            if not any(text is not None and normalized in text for _, _, text in resolved):
+            if not any(
+                text is not None and _vendored_line_holds(normalized, text)
+                for _, _, text in resolved
+            ):
                 result.fail(
                     path,
                     i + 1,
@@ -724,7 +881,7 @@ def check_numeric_constants(path: str, lines: list[LineInfo], result: ScanResult
         for j, label, text in resolved:
             if text is None:
                 continue
-            if not any(normalize_literal(lm) in text for lm in literal_matches):
+            if not any(_vendored_line_holds(normalize_literal(lm), text) for lm in literal_matches):
                 result.fail(
                     path,
                     j + 1,
@@ -755,7 +912,9 @@ def check_module(
 def scan_tree(tree: Path) -> ScanResult:
     result = ScanResult()
     manifest_path = tree / "port" / "manifest.tsv"
-    manifest_by_path = index_manifest(load_manifest(manifest_path))
+    manifest_rows = load_manifest(manifest_path)
+    manifest_by_path = index_manifest(manifest_rows)
+    target_modules = index_target_modules(manifest_rows)
     crates_root = tree / "crates"
     if crates_root.is_dir():
         for module_path in sorted(crates_root.glob("*/src/**/*.rs")):
@@ -763,22 +922,22 @@ def scan_tree(tree: Path) -> ScanResult:
                 text = module_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            # A "ported module" (R14) is one that holds a PORT STATUS trailer -- a cheap
-            # substring pre-filter, not yet the exact-form check `check_trailer` makes. A
-            # crates/*/src/**/*.rs file with neither the literal "PORT STATUS" anywhere nor any
-            # of the six whitelisted markers (e.g. a hand-written tool crate such as
-            # oracle-compare, built by an earlier, unrelated task -- confirmed to carry none of
-            # the six) is not a module this script has anything to say about and is left alone
-            # entirely: zero findings, not counted as scanned. A file that mentions
-            # "PORT STATUS" without the exact header line, or that carries a marker such as
-            # "// SAFETY:" or "// PORT SRC:" but never got as far as a trailer (the
-            # missing-trailer fixture), is still selected, so the check still catches a module
-            # that started a port and never finished its trailer.
-            if TRAILER_HEADER.removeprefix("// ") not in text and not any(
-                f"{prefix}:" in text for prefix in MARKER_WHITELIST
-            ):
-                continue
             module_relpath = module_path.relative_to(tree).as_posix()
+            # A "ported module" (R14) is one named by a manifest row's "target module" column
+            # -- spec.md's population, "every Rust module that ports a libslic3r file" -- union
+            # a trailer-or-marker sniff, so a module that started a port before its manifest row
+            # existed (or a fixture tree with no manifest of its own) is still caught. This
+            # excludes an unrelated hand-written tool crate such as oracle-compare for a
+            # principled reason (named by no manifest row, and confirmed to carry none of the
+            # six markers) rather than by a text sniff alone, and -- unlike a marker-or-trailer
+            # sniff on its own -- a real ported module cannot opt out of being scanned by having
+            # its trailer and every marker deleted, since its manifest row still names it.
+            is_ported_module = module_relpath in target_modules or (
+                TRAILER_HEADER.removeprefix("// ") in text
+                or any(f"{prefix}:" in text for prefix in MARKER_WHITELIST)
+            )
+            if not is_ported_module:
+                continue
             check_module(module_relpath, manifest_by_path, result, text=text)
     return result
 
@@ -849,8 +1008,8 @@ def _check_candidate_marker_regex() -> list[str]:
     ]
     failures = []
     for text, expect_accept in cases:
-        prefix = candidate_marker_prefix("// " + text)
-        accepted = prefix is not None and prefix in MARKER_WHITELIST
+        classified = classify_comment_marker(text)
+        accepted = classified is not None and classified[0] == "recognized"
         if accepted != expect_accept:
             failures.append(f"'// {text}' expected accept={expect_accept}, got accept={accepted}")
     return failures
@@ -872,9 +1031,17 @@ def run_selftest() -> int:
         passed = not result.findings
         status = "pass" if passed else f"{len(result.findings)} finding(s)"
         if passed == expect_pass:
-            matched = must_contain is None or any(must_contain in f.rule for f in result.findings)
+            matched_finding = next(
+                (f for f in result.findings if must_contain is None or must_contain in f.rule),
+                None,
+            )
+            matched = must_contain is None or matched_finding is not None
             if matched:
-                click.echo(f"self-test: {name}: OK (expected exit {'0' if expect_pass else '!=0'}, got {status})")
+                detail = f", matched: {matched_finding.render()}" if matched_finding else ""
+                click.echo(
+                    f"self-test: {name}: OK (expected exit {'0' if expect_pass else '!=0'}, "
+                    f"got {status}{detail})"
+                )
             else:
                 ok = False
                 click.echo(
@@ -938,9 +1105,10 @@ is answered by a pull request against port/port-status, never by the module.
 MARKER_WHITELIST_HELP = """\
 \b
 Marker whitelist (closed): every port marker is one of TODO(port):, PERF(port):, PORT NOTE:,
-SAFETY:, PORT SRC: or FIDELITY(port):. A line comment that looks like a marker (a capitalised
-word, optionally "(port)", then a colon) but spells none of these six is a finding -- e.g.
-"// TODO:", "// Todo(port):" or "// PORT-SRC:".
+SAFETY:, PORT SRC: or FIDELITY(port):. A line comment that looks like a marker (an all-capitals
+word, optionally "(port)", then a colon -- or, case-insensitively, the exact spelling of one of
+the six) but spells none of these six exactly is a finding -- e.g. "// TODO:", "// Todo(port):"
+or "// PORT-SRC:". Ordinary prose such as "// Returns:" is never a candidate and never flagged.
 """
 
 FULL_HELP = (
