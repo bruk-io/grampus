@@ -63,11 +63,22 @@ def read_recorded_sha256(readme_path: Path) -> str:
 
 
 def remove_path(path: Path) -> None:
-    """Remove a directory, file or symlink, ignoring one that is not there."""
+    """Remove a directory, file or symlink if it is there; ignore any failure.
+
+    For cleanup that must not turn an otherwise good run into a failure.
+    """
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path, ignore_errors=True)
     else:
         path.unlink(missing_ok=True)
+
+
+def clear_path(path: Path) -> None:
+    """Remove a path the next step needs gone, or exit non-zero with a named reason."""
+    remove_path(path)
+    if path.exists() or path.is_symlink():
+        print(f"error: cannot clear {path}", file=sys.stderr)
+        sys.exit(1)
 
 
 def read_marker(marker_path: Path) -> str:
@@ -175,7 +186,7 @@ def copy_bundle(mount_point: Path, incoming_dir: Path, bundle_name: str) -> Path
         print(f"error: {bundle_name} not found on {mount_point}", file=sys.stderr)
         sys.exit(1)
     print(f"action: copy {bundle_name}", flush=True)
-    remove_path(incoming_dir)
+    clear_path(incoming_dir)
     incoming_dir.mkdir(parents=True)
     dest = incoming_dir / bundle_name
     shutil.copytree(source, dest, symlinks=True)
@@ -198,7 +209,7 @@ def promote_bundle(
     app_dir.mkdir(parents=True, exist_ok=True)
     marker.unlink(missing_ok=True)
     if app_bundle.exists() or app_bundle.is_symlink():
-        remove_path(aside)
+        clear_path(aside)
         os.replace(app_bundle, aside)
     os.replace(incoming_bundle, app_bundle)
     marker.write_text(f"{asset_sha256}\n")
