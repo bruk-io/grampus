@@ -1,17 +1,17 @@
 header path	line	declaring type	field	C++ type	class	evidence	rust type
 AABBMesh.hpp	34	AABBMesh	m_tm	const indexed_triangle_set *			
 AABBMesh.hpp	73	hit_result	m_mesh	const AABBMesh *			
-Arachne/SkeletalTrapezoidation.hpp	145	TransitionMidRef	edge	edge_t *			
-Arachne/SkeletalTrapezoidation.hpp	172	SkeletalTrapezoidation	vd_edge_to_he_edge	ankerl::unordered_dense::map<const VD::edge_type *, edge_t *>			
-Arachne/SkeletalTrapezoidation.hpp	173	SkeletalTrapezoidation	vd_node_to_he_node	ankerl::unordered_dense::map<const VD::vertex_type *, node_t *>			
-Arachne/SkeletalTrapezoidation.hpp	179	SkeletalTrapezoidation	p_generated_toolpaths	std::vector<VariableWidthLines> *			
-Arachne/utils/HalfEdge.hpp	24	HalfEdge	twin	edge_t *			
-Arachne/utils/HalfEdge.hpp	25	HalfEdge	next	edge_t *			
-Arachne/utils/HalfEdge.hpp	26	HalfEdge	prev	edge_t *			
-Arachne/utils/HalfEdge.hpp	27	HalfEdge	from	node_t *			
-Arachne/utils/HalfEdge.hpp	28	HalfEdge	to	node_t *			
-Arachne/utils/HalfEdgeNode.hpp	25	HalfEdgeNode	incident_edge	edge_t *			
-Arachne/utils/PolygonsPointIndex.hpp	32	PathsPointIndex	polygons	const Paths *			
+Arachne/SkeletalTrapezoidation.hpp	145	TransitionMidRef	edge	edge_t *	back-reference	Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/utils/HalfEdgeGraph.hpp:27, Arachne/SkeletalTrapezoidationGraph.hpp:78, Arachne/SkeletalTrapezoidation.hpp:123	usize
+Arachne/SkeletalTrapezoidation.hpp	172	SkeletalTrapezoidation	vd_edge_to_he_edge	ankerl::unordered_dense::map<const VD::edge_type *, edge_t *>	ffi	Arachne/SkeletalTrapezoidation.cpp:387, Arachne/SkeletalTrapezoidation.hpp:123, Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/utils/HalfEdgeGraph.hpp:27	HashMap<*const VoronoiEdge, usize>
+Arachne/SkeletalTrapezoidation.hpp	173	SkeletalTrapezoidation	vd_node_to_he_node	ankerl::unordered_dense::map<const VD::vertex_type *, node_t *>	ffi	Arachne/SkeletalTrapezoidation.cpp:387, Arachne/SkeletalTrapezoidation.hpp:123, Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/utils/HalfEdgeGraph.hpp:27	HashMap<*const VoronoiVertex, usize>
+Arachne/SkeletalTrapezoidation.hpp	179	SkeletalTrapezoidation	p_generated_toolpaths	std::vector<VariableWidthLines> *	borrowed	Arachne/SkeletalTrapezoidation.cpp:517, Arachne/SkeletalTrapezoidation.hpp:133	&'a mut Vec<VariableWidthLines>
+Arachne/utils/HalfEdge.hpp	24	HalfEdge	twin	edge_t *	back-reference	Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/utils/HalfEdgeGraph.hpp:27, Arachne/SkeletalTrapezoidationGraph.hpp:78, Arachne/SkeletalTrapezoidation.hpp:123	usize
+Arachne/utils/HalfEdge.hpp	25	HalfEdge	next	edge_t *	back-reference	Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/utils/HalfEdgeGraph.hpp:27, Arachne/SkeletalTrapezoidationGraph.hpp:78, Arachne/SkeletalTrapezoidation.hpp:123	usize
+Arachne/utils/HalfEdge.hpp	26	HalfEdge	prev	edge_t *	back-reference	Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/utils/HalfEdgeGraph.hpp:27, Arachne/SkeletalTrapezoidationGraph.hpp:78, Arachne/SkeletalTrapezoidation.hpp:123	usize
+Arachne/utils/HalfEdge.hpp	27	HalfEdge	from	node_t *	back-reference	Arachne/utils/HalfEdgeGraph.hpp:27, Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/SkeletalTrapezoidationGraph.hpp:78, Arachne/SkeletalTrapezoidation.hpp:123	usize
+Arachne/utils/HalfEdge.hpp	28	HalfEdge	to	node_t *	back-reference	Arachne/utils/HalfEdgeGraph.hpp:27, Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/SkeletalTrapezoidationGraph.hpp:78, Arachne/SkeletalTrapezoidation.hpp:123	usize
+Arachne/utils/HalfEdgeNode.hpp	25	HalfEdgeNode	incident_edge	edge_t *	back-reference	Arachne/utils/HalfEdgeGraph.hpp:26, Arachne/utils/HalfEdgeGraph.hpp:27, Arachne/SkeletalTrapezoidationGraph.hpp:78, Arachne/SkeletalTrapezoidation.hpp:123	usize
+Arachne/utils/PolygonsPointIndex.hpp	32	PathsPointIndex	polygons	const Paths *	borrowed	Arachne/WallToolPaths.cpp:280, Arachne/utils/PolygonsPointIndex.hpp:32	&'a Paths
 ClipperUtils.hpp	99	iterator	m_ptr	const Points *			
 ClipperUtils.hpp	315	SurfacesPtrProvider	m_surfaces	const SurfacesPtr &			
 Config.hpp	264	ConfigSubstitution	opt_def	const ConfigOptionDef *			
