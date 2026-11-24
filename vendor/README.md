@@ -144,10 +144,11 @@ the first time it has been attempted on macOS arm64, as `intent/libslic3r-rust-p
 C7 anticipated.
 
 **Both stages build, and both upstream test suites pass in full.** The measured figures are below.
-One thing had to be fixed to get there, and it is worth reading before changing either stage's
-flags.
+Two things had to be fixed to get there, both of them in stage one and both about the same thing —
+a dependency resolving a library from the host that stage two then cannot see. Read them before
+changing either stage's flags.
 
-#### What was needed to make it work: stage one has to be hermetic
+#### The first thing needed: stage one has to be hermetic
 
 Stage two used to fail at its first configure, every time, on both hosts tried:
 
@@ -211,7 +212,8 @@ third are the kind of workaround C7's decision declines.
 #### The second thing needed: OpenSSL has to reach the prefix before Boost configures
 
 An ignore list cannot close every route to the host, because `pkg-config` does not read one. Found
-by the diagnostic above, on the second of two cold runs of the fixed script: dep_Boost had resolved
+by the host-prefix scan stage one now prints with its summary (see the next section), on the second
+of two cold runs of the fixed script: dep_Boost had resolved
 **Homebrew's** OpenSSL —
 `OPENSSL_INCLUDE_DIR:PATH=/opt/homebrew/Cellar/openssl@4/4.1.0/include` and four more entries,
 including the `pkgcfg_lib__OPENSSL_*` pair that names the route — while on the first cold run it had
