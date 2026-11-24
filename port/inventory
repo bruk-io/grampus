@@ -1165,7 +1165,7 @@ CALL_ON_RECEIVER_RE = re.compile(
 # Three call sites at the pin that step 2 must resolve, each a different receiver form, so a
 # resolution that silently stops resolving anything fails loudly instead of quietly handing
 # every row back to the hub file's stage (which is exactly how this column read wrong before):
-#   posInfill:      m_layers[layer_idx]->make_fills(...)        PrintObject.cpp:826
+#   posInfill:      m_layers[layer_idx]->make_fills(...)        PrintObject.cpp:827
 #                   -> LayerPtrs (Print.hpp:681) -> Layer -> Layer::make_fills, Fill/Fill.cpp
 #   posContouring:  m_layers[layer_idx]->make_contour_z(imesh)  PrintObject.cpp:903
 #                   -> Layer::make_contour_z, ContourZ.cpp (which passes 1 and 2 cannot even
@@ -1349,7 +1349,7 @@ def compute_pipeline_stages(
     Step 2: resolve the functions that block calls (see `resolve_block_call_targets`) and add
     the in-scope files that define them to `home`. This is what gives each per-object step the
     file that actually does its work rather than only the shared hub it is written in —
-    posInfill's block calls `m_layers[layer_idx]->make_fills(...)` (PrintObject.cpp:826), which
+    posInfill's block calls `m_layers[layer_idx]->make_fills(...)` (PrintObject.cpp:827), which
     types `m_layers` through `LayerPtrs` (Print.hpp:681) to `Layer` and resolves to
     `Layer::make_fills` at Fill/Fill.cpp:1353.
 
