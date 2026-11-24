@@ -6,21 +6,41 @@
 # ]
 # ///
 
-"""Regenerate port/manifest.tsv from the vendored libslic3r tree.
+"""Regenerate port/manifest.tsv and port/cut.tsv from the vendored libslic3r tree.
 
 Walk every ``.h``, ``.hpp``, ``.cpp`` and ``.mm`` file under
-``vendor/OrcaSlicer/src/libslic3r`` and write one manifest row per file, filling only the
-four columns this task owns: path, subsystem, lines and the file-level include-DAG level.
-The remaining eleven columns are later parts of plan step 11's work and are left empty here.
+``vendor/OrcaSlicer/src/libslic3r`` and write one manifest row per file: path, subsystem,
+lines, the file-level include-DAG level (task 03-manifest-file-set); in scope or out with a
+reason, and pipeline stage or none (task 06-manifest-scope); crate-level level, target crate
+and target module (task 07-crate-cut); the six judgement columns -- template-heavy, equality
+tier, tolerance, comparison function, proof path, fuzz target (task 14-manifest-columns, this
+task; see "Judgement columns" below); and status, derived fresh from the Rust tree on every run
+(see ``compute_status``).
 
 The row set always comes from the filesystem walk, never from
 ``src/libslic3r/CMakeLists.txt``. That build file is parsed only to cross-check that every
 file it names also has a row, because the build file itself omits files that are produced by
 other means (an orphan pass, dead code still compiled in, Apple-only sources).
+
+``port/cut.tsv`` is the named feedback-arc cut of the module graph (not the file graph, which
+is already acyclic): see the "Crate cut" section below for the module derivation, the cut
+algorithm, and the file's own schema (``CUT_HEADER``).
+
+**A port task never edits port/manifest.tsv.** Every column but the six judgement columns is
+recomputed from the vendored tree on every run and overwrites whatever is committed; the six
+judgement columns are seeded once (the first time a row's six cells are all still empty) and
+then carried forward verbatim forever after, by hand in review or by 35-trial-run, never by
+this script; and ``status`` is derived fresh from the Rust tree on every run and is never read
+as an input -- a row's status advances because a task added a Rust file, not because anybody
+wrote a cell, which is what lets a hundred task branches run at once without colliding on one
+line of one file. ``just inventory-check`` (``--check`` below) enforces exactly this: it diffs
+the derived columns only, ignores the six judgement columns and ``status`` entirely, and fails
+only when a derived column has drifted from the vendored tree.
 """
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import posixpath
 import re
@@ -60,7 +80,8 @@ HEADER = [
     "file-level include-DAG level",
     "crate-level level",
     "in scope or out with a reason",
-    "target crate and module",
+    "target crate",
+    "target module",
     "pipeline stage or none",
     "template-heavy",
     "equality tier",
@@ -77,6 +98,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 LIBSLIC3R_ROOT = REPO_ROOT / "vendor/OrcaSlicer/src/libslic3r"
 CMAKELISTS = LIBSLIC3R_ROOT / "CMakeLists.txt"
 MANIFEST_PATH = REPO_ROOT / "port/manifest.tsv"
+CUT_PATH = REPO_ROOT / "port/cut.tsv"
+CRATES_ROOT = REPO_ROOT / "crates"
+# --check's own scratch directory (git-ignored, its own .gitignore block): the regeneration's
+# ordinary chatter is captured here instead of stdout, so a clean tree's check prints nothing.
+SCRATCH_ROOT = REPO_ROOT / "port/.cache/inventory-check"
 
 INCLUDE_RE = re.compile(r'#include\s*(?:"([^"]+)"|<([^>]+)>)')
 
@@ -1478,6 +1504,946 @@ def compute_pipeline_stages(
     return cells
 
 
+#
+# --- Crate cut (R8/R9, task 07-crate-cut) ---------------------------------------------------
+#
+# Crate boundaries are drawn over MODULES, not files and not the `subsystem` column (see
+# `compute_module_of_map`'s own docstring for why `subsystem` cannot serve this). A module is
+# either:
+#
+#   - a file directly under src/libslic3r: its module is its own same-stem unit (the `.cpp`
+#     and its same-stem `.hpp`/`.h`, or a lone header), named by that bare stem; or
+#   - a file under a subdirectory of src/libslic3r: its module is that subdirectory at its
+#     full nested path, suffixed here with a trailing "/" — "GCode/", "Fill/Lightning/",
+#     "Arachne/utils/" — so a directory module's name can never collide, as a *dict key*,
+#     with a same-named root same-stem unit (`Geometry.{cpp,hpp}` at the root and the
+#     `Geometry/` directory are two different modules at the pin; `GCode`/`GCode/` is the
+#     same split, and the one place that pair is a *merge* group rather than a naming
+#     accident — see MERGE_INTO below and the pull request body for how `Geometry/`'s crate
+#     name is disambiguated instead).
+
+# The two mutual clusters the cut cannot break cheaply (C10's decision): maps a directory
+# module onto the root same-stem unit it is merged into, before any ordering or cutting. Keyed
+# and valued by the module names `compute_module_of_map` produces (see its docstring for the
+# trailing "/" convention). If either name on either side of this mapping is not a module that
+# actually occurs in the whole-library module set, `assert_merge_modules_exist` below exits
+# non-zero naming it — which only fires if the module derivation above is changed.
+MERGE_INTO = {
+    "GCode/": "GCode",
+    "Format/": "Model",
+}
+
+
+def compute_module_of_map(relpaths: list[str]) -> dict[str, str]:
+    """Return relpath -> module, per the rule this task derives (not the `subsystem` column:
+    `subsystem` is the file's top-level subdirectory, pinned to one of fifteen names plus
+    `root`, which collapses `Print.cpp` and `GCode.cpp` into one vertex, never makes `Model`
+    a module, and cannot hold a 39-module strongly connected component — see this task's own
+    prose for the full argument).
+
+    A file under a subdirectory of src/libslic3r belongs to the module named by that
+    subdirectory at its full nested path, with a trailing "/" so this string can never be
+    confused, as a dict key, with a root same-stem unit of the same spelling. A file directly
+    under src/libslic3r belongs to its own same-stem unit, named by its bare stem (no
+    extension): the `.cpp` and its same-stem `.hpp`/`.h` share this name.
+
+    That pairing is resolved case-insensitively, via `same_stem_cpp`'s own casefold index —
+    exactly the convention pass 2 of scope already uses, and for the same reason: at the pin,
+    `utils.cpp` and `Utils.hpp` are two tracked files whose stems differ only by case, and
+    `same_stem_cpp`'s own docstring is explicit that they are "the same translation unit's
+    pair on this filesystem regardless of case". A header resolved to a `.cpp` sibling this
+    way takes the sibling's own stem (its canonical spelling) as the module name, so `Utils.hpp`
+    is in the same module as `utils.cpp`, not a one-file module of its own — the one case where
+    getting this wrong would silently crown a 165th root module from a single existing pair.
+    A lone header (no sibling, case-insensitively) takes its own stem.
+    """
+    tracked = set(relpaths)
+    casefold_index = build_casefold_index(tracked)
+    modules: dict[str, str] = {}
+    for relpath in relpaths:
+        if "/" in relpath:
+            modules[relpath] = posixpath.dirname(relpath) + "/"
+            continue
+        if relpath.endswith((".h", ".hpp")):
+            sib = same_stem_cpp(relpath, casefold_index)
+            if sib is not None:
+                stem, _, _ = sib.rpartition(".")
+                modules[relpath] = stem
+                continue
+        stem, _, _ = relpath.rpartition(".")
+        modules[relpath] = stem
+    return modules
+
+
+def assert_merge_modules_exist(all_modules: set[str]) -> None:
+    """Exit non-zero naming any MERGE_INTO module absent from the whole-library module set."""
+    named = set(MERGE_INTO) | set(MERGE_INTO.values())
+    missing = named - all_modules
+    if missing:
+        raise SystemExit(
+            f"inventory: the merge group names {sorted(missing)} are not modules the "
+            "derivation above produces; MERGE_INTO must name real modules"
+        )
+
+
+def canonical_module(module: str) -> str:
+    """Return module's canonical (post-merge) vertex name: itself, unless MERGE_INTO folds
+    it into another module's vertex."""
+    return MERGE_INTO.get(module, module)
+
+
+# Splits a camel/Pascal-case identifier into snake_case, treating a run of capitals followed
+# by a lowercase tail as one "word" boundary (`AABBTreeIndirect` -> `aabb_tree_indirect`,
+# `GCodeProcessor` -> `g_code_processor`). This is the one place this task states its own
+# snake_case rule, since neither the spec nor the task names one; printed examples of it
+# appear in this run's own output and in the pull request body.
+_SNAKE_CASE_WORD_RE = re.compile(r"(.)([A-Z][a-z]+)")
+_SNAKE_CASE_BOUNDARY_RE = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def to_snake_case(name: str) -> str:
+    """Return name (a file stem or directory name, with no extension) in snake_case.
+
+    Prefixed with "_" when the result would otherwise start with a digit (no in-scope stem
+    does this at the pin — Format/3mf.cpp, Format/3mf.hpp and Format/bbs_3mf.cpp are all out of
+    scope — but a bare digit-led result such as "3mf" is not a valid Rust module path, and a
+    later scope change must not be able to commit one silently)."""
+    step1 = _SNAKE_CASE_WORD_RE.sub(r"\1_\2", name)
+    step2 = _SNAKE_CASE_BOUNDARY_RE.sub(r"\1_\2", step1)
+    result = re.sub(r"[^A-Za-z0-9]+", "_", step2).lower().strip("_")
+    if result[:1].isdigit():
+        result = "_" + result
+    return result
+
+
+_CRATE_NAME_COLLAPSE_RE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def generic_crate_name(module: str) -> str:
+    """Apply R8's target-crate rule to a bare module name: `slic3r-<module, lowercased with
+    every run of non-alphanumeric characters replaced by a hyphen>`. The module's own trailing
+    "/" (a directory module) is stripped first, since the rule's "module" is the name a reader
+    writes, not this script's internal dict key."""
+    bare = module.rstrip("/")
+    return "slic3r-" + _CRATE_NAME_COLLAPSE_RE.sub("-", bare).lower()
+
+
+def assign_crate_names(vertices: set[str]) -> tuple[dict[str, str], list[str]]:
+    """Return (vertex -> crate name, printable collision report) for the merged, in-scope
+    module vertices in `vertices`.
+
+    The two merge-group vertices get C10's stated override names directly. Every other vertex
+    gets the generic rule's name, *unless* two or more non-merge-group vertices' generic names
+    collide — which happens once at the pin: the root same-stem unit `Geometry` and the
+    directory module `Geometry/` both produce `slic3r-geometry`. The task states a
+    disambiguation rule for a *target module* path collision inside one crate, but not for this
+    — a crate NAME collision between two otherwise-unrelated modules — so this is this script's
+    own, analogous, deterministic choice: the root same-stem unit keeps the plain name, and each
+    colliding directory module's name takes a `-dir` suffix (de-duplicated with a numeral if more
+    than one directory module collides with the same name). It is reported here, not asserted
+    silently, because it is exactly this task's own prose about `port/cut.tsv`'s five downstream
+    consumers: a reader of this pull request must be able to see every crate name's origin."""
+    crate_name_of: dict[str, str] = {}
+    report: list[str] = []
+    for v in sorted(vertices):
+        if v == "GCode":
+            crate_name_of[v] = "slic3r-gcode"
+        elif v == "Model":
+            crate_name_of[v] = "slic3r-model"
+
+    ordinary = sorted(v for v in vertices if v not in crate_name_of)
+    by_generic: dict[str, list[str]] = {}
+    for v in ordinary:
+        by_generic.setdefault(generic_crate_name(v), []).append(v)
+
+    for generic, members in sorted(by_generic.items()):
+        if len(members) == 1:
+            crate_name_of[members[0]] = generic
+            continue
+        # Deterministic: a root same-stem unit (no trailing "/") keeps the plain name; each
+        # directory module (trailing "/") takes a "-dir" suffix, de-duplicated if needed.
+        ordered = sorted(members, key=lambda m: (m.endswith("/"), m))
+        taken: set[str] = set(crate_name_of.values())
+        for i, member in enumerate(ordered):
+            if i == 0 and not member.endswith("/"):
+                crate_name_of[member] = generic
+                taken.add(generic)
+                continue
+            candidate = generic + "-dir"
+            n = 2
+            while candidate in taken:
+                candidate = f"{generic}-dir{n}"
+                n += 1
+            crate_name_of[member] = candidate
+            taken.add(candidate)
+        report.append(
+            f"crate name collision: {ordered} all normalize to {generic!r} by the generic "
+            f"rule; disambiguated to {[crate_name_of[m] for m in ordered]}"
+        )
+
+    values = list(crate_name_of.values())
+    if len(values) != len(set(values)):
+        raise SystemExit(
+            f"inventory: two module vertices still share one crate name after "
+            f"disambiguation: {crate_name_of}"
+        )
+    return crate_name_of, report
+
+
+def build_module_reference_edges(
+    file_set: list[str],
+    graph: dict[str, set[str]],
+    module_of_file: dict[str, str],
+    *,
+    canonicalize: bool = False,
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Roll the file-level include graph up to module level, restricted to `file_set` (both
+    endpoints of an edge must be in it), weighting each module edge with the include
+    references (file, header) pairs it carries. Self-edges — a file including another file of
+    its own module — are dropped, per this task's own rule.
+
+    `canonicalize` applies `canonical_module` to each endpoint before the self-edge check, so a
+    merged group's internal includes drop out here too; every call site below passes the
+    default `False` and folds the two merge groups itself afterward instead (the inline fold in
+    `compute_crate_cut`), so this parameter is currently unexercised. It stays because its
+    behaviour is simple, correct and already proven by `canonical_module`'s own use elsewhere,
+    and because collapsing both folding paths into one is a larger change than this task's
+    review should carry; a later caller that wants module edges pre-folded can pass it directly
+    rather than re-deriving the inline fold."""
+    allowed = set(file_set)
+    edges: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for file in file_set:
+        src = module_of_file[file]
+        if canonicalize:
+            src = canonical_module(src)
+        for header in graph.get(file, ()):
+            if header not in allowed:
+                continue
+            dst = module_of_file[header]
+            if canonicalize:
+                dst = canonical_module(dst)
+            if src == dst:
+                continue
+            edges.setdefault((src, dst), []).append((file, header))
+    return edges
+
+
+def greedy_fas_order(vertices: list[str], weight: dict[tuple[str, str], int]) -> list[str]:
+    """Return a deterministic linear order over vertices by the weighted Eades-Lin-Smyth
+    greedy feedback-arc-set heuristic: repeatedly strip every current sink to the end of the
+    order and every current source to its start, and when neither remains, move the vertex
+    maximizing (weighted out-degree - weighted in-degree) to the start. Every tie — which
+    sinks or sources to remove in one pass, which vertex maximizes the degree difference — is
+    broken by vertex name ascending, so the whole order is a total, reproducible function of
+    `vertices` and `weight` alone."""
+    out_w: dict[str, dict[str, int]] = {v: {} for v in vertices}
+    in_w: dict[str, dict[str, int]] = {v: {} for v in vertices}
+    for (u, v), w in weight.items():
+        out_w[u][v] = out_w[u].get(v, 0) + w
+        in_w[v][u] = in_w[v].get(u, 0) + w
+
+    remaining = set(vertices)
+    prefix: list[str] = []
+    suffix: list[str] = []
+
+    def out_degree(v: str) -> int:
+        return sum(w for t, w in out_w[v].items() if t in remaining)
+
+    def in_degree(v: str) -> int:
+        return sum(w for t, w in in_w[v].items() if t in remaining)
+
+    while remaining:
+        shrank = True
+        while shrank:
+            shrank = False
+            for v in sorted(x for x in remaining if out_degree(x) == 0):
+                suffix.insert(0, v)
+                remaining.discard(v)
+                shrank = True
+            if not remaining:
+                break
+            for v in sorted(x for x in remaining if in_degree(x) == 0):
+                prefix.append(v)
+                remaining.discard(v)
+                shrank = True
+        if not remaining:
+            break
+        best = min(remaining, key=lambda v: (-(out_degree(v) - in_degree(v)), v))
+        prefix.append(best)
+        remaining.discard(best)
+
+    return prefix + suffix
+
+
+def compute_crate_levels(vertices: set[str], retained: dict[tuple[str, str], int]) -> dict[str, int]:
+    """Return each vertex's crate-level level: 0 if it has no retained (uncut) outgoing
+    dependency edge, else 1 + the greatest level among the crates it depends on. `retained`
+    must already be acyclic (asserted by the caller before this runs)."""
+    deps: dict[str, set[str]] = {v: set() for v in vertices}
+    for (src, dst) in retained:
+        deps[src].add(dst)
+    levels: dict[str, int] = {}
+
+    def level_of(v: str) -> int:
+        if v in levels:
+            return levels[v]
+        levels[v] = 0  # placeholder; retained is proven acyclic before this runs
+        value = 1 + max((level_of(d) for d in deps[v]), default=-1)
+        levels[v] = value
+        return value
+
+    for v in vertices:
+        level_of(v)
+    return levels
+
+
+def compute_crate_cut(
+    relpaths: list[str],
+    graph: dict[str, set[str]],
+    in_scope_map: dict[str, bool],
+    lines_by_path: dict[str, int],
+) -> tuple[dict[str, str], dict[str, str], dict[str, str], list[list[str]]]:
+    """Compute the crate cut (R8/R9, task 07-crate-cut): each in-scope row's `crate-level
+    level`, `target crate` and `target module` manifest cells, and every row of `port/cut.tsv`.
+
+    Returns (crate_level_cells, target_crate_cells, target_module_cells, cut_rows), each cell
+    dict keyed by relpath and populated only for in-scope rows (an out-of-scope row's three
+    cells are left for the caller to default to empty)."""
+    module_of_file = compute_module_of_map(relpaths)
+    all_modules = set(module_of_file.values())
+    assert_merge_modules_exist(all_modules)
+
+    # --- Measure before cutting anything: the whole-library module graph, unmerged, every
+    # row — reported beside the spec's 43 modules, 5 components, 39-module/321,722-line
+    # component and 2,696 references, never asserted against them (this task's derivation is
+    # coarser by construction; see the task's own prose for why).
+    whole_edges = build_module_reference_edges(relpaths, graph, module_of_file, canonicalize=False)
+    whole_adjacency: dict[str, set[str]] = {m: set() for m in all_modules}
+    for (src, dst) in whole_edges:
+        whole_adjacency[src].add(dst)
+    whole_components = tarjan_scc(whole_adjacency)
+    module_lines: dict[str, int] = {m: 0 for m in all_modules}
+    for p in relpaths:
+        module_lines[module_of_file[p]] += lines_by_path[p]
+    largest = max(whole_components, key=len)
+    largest_lines = sum(module_lines[m] for m in largest)
+    whole_refs = sum(len(v) for v in whole_edges.values())
+    print(
+        f"inventory: whole-library module graph (measured, not asserted): {len(all_modules)} "
+        f"modules, {len(whole_components)} strongly connected components, the largest holding "
+        f"{len(largest)} modules and {largest_lines} lines, {len(whole_edges)} module edges "
+        f"carrying {whole_refs} include references"
+    )
+
+    # --- The cut: in-scope rows only, the two merge groups applied before any ordering.
+    in_scope_relpaths = [p for p in relpaths if in_scope_map.get(p, False)]
+    raw_edges = build_module_reference_edges(
+        in_scope_relpaths, graph, module_of_file, canonicalize=False
+    )
+    merged_edges: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for (src, dst), refs in raw_edges.items():
+        csrc, cdst = canonical_module(src), canonical_module(dst)
+        if csrc == cdst:
+            continue
+        merged_edges.setdefault((csrc, cdst), []).extend(refs)
+    vertices = {canonical_module(module_of_file[p]) for p in in_scope_relpaths}
+    weight = {k: len(v) for k, v in merged_edges.items()}
+
+    order = greedy_fas_order(sorted(vertices), weight)
+    position = {v: i for i, v in enumerate(order)}
+    retained = {k: w for k, w in weight.items() if position[k[0]] < position[k[1]]}
+    cut = {k: v for k, v in merged_edges.items() if position[k[0]] > position[k[1]]}
+    # retained and cut partition merged_edges by position[src] < position[dst] vs >; since the
+    # order is a total order over distinct vertices, position[src] == position[dst] is
+    # impossible, so this sum is a cross-check that no module edge fell through both filters
+    # (or neither).
+    if len(retained) + len(cut) != len(merged_edges):
+        raise SystemExit(
+            f"inventory: {len(retained)} retained + {len(cut)} cut = "
+            f"{len(retained) + len(cut)}, not {len(merged_edges)} total in-scope module "
+            "edges; the order must have a duplicated or missing vertex"
+        )
+    print(
+        f"inventory: in-scope crate cut: {len(vertices)} crates, {len(merged_edges)} in-scope "
+        f"module edges, {len(retained)} retained dependency edges, {len(cut)} cut edges "
+        f"carrying {sum(len(v) for v in cut.values())} of "
+        f"{sum(len(v) for v in merged_edges.values())} "
+        "in-scope include references"
+    )
+
+    retained_adjacency: dict[str, set[str]] = {v: set() for v in vertices}
+    for (src, dst) in retained:
+        retained_adjacency[src].add(dst)
+    bad = non_trivial_components(retained_adjacency)
+    if bad:
+        raise SystemExit(
+            f"inventory: the crate graph still has a non-trivial strongly connected component "
+            f"after the cut: {bad[0]}; the greedy feedback-arc-set ordering did not make it "
+            "acyclic"
+        )
+    print(
+        "inventory: no non-trivial strongly connected component exists over the crate "
+        "dependency graph after the cut (the module graph is acyclic at crate granularity)"
+    )
+
+    # Each merge group lies wholly inside one crate: a merged-away directory name ("GCode/",
+    # "Format/", or whatever MERGE_INTO names) must never itself survive as a vertex of the cut
+    # or retained graph — every edge that once touched it was re-keyed onto its group's
+    # canonical name (the inline fold above, keyed by `canonical_module`) before ordering or
+    # cutting ever ran, so no edge — cut or retained — can have an endpoint naming a MERGE_INTO
+    # key, and therefore none can run inside either group. This is structural (true by
+    # construction, not an independent check): `stray` below is always empty, and the print is
+    # there so a reader sees the property stated rather than silently assumed. Derived from
+    # `MERGE_INTO` itself, not hardcoded, so a third merge group this task's own prose offers as
+    # the coarsening mechanism stays covered.
+    merged_away = set(MERGE_INTO)
+    stray = merged_away & (vertices | {s for e in (retained, cut) for pair in e for s in pair})
+    if stray:
+        raise SystemExit(
+            f"inventory: {sorted(stray)} survived the merge as its own vertex; the merge "
+            "did not keep its group inside one crate"
+        )
+    print(
+        "inventory: both merge groups ({'GCode', 'GCode/'} and {'Model', 'Format/'}) lie "
+        "wholly inside one crate each — neither 'GCode/' nor 'Format/' survives the merge as "
+        "a vertex of the cut or retained graph, so no edge can run inside either group"
+    )
+
+    crate_name_of, collision_report = assign_crate_names(vertices)
+    for line in collision_report:
+        print(f"inventory: {line}")
+    if not collision_report:
+        print("inventory: no crate name collision needed disambiguation")
+
+    levels = compute_crate_levels(vertices, retained)
+
+    modules_held: dict[str, set[str]] = {c: set() for c in crate_name_of.values()}
+    files_held: dict[str, list[str]] = {c: [] for c in crate_name_of.values()}
+    for p in in_scope_relpaths:
+        crate = crate_name_of[canonical_module(module_of_file[p])]
+        modules_held[crate].add(module_of_file[p])
+        files_held[crate].append(p)
+
+    # --- target module: the unit (a .cpp plus its same-stem in-scope .hpp/.h, or a lone
+    # in-scope header) shares one Rust module path. Two in-scope files whose stems collide
+    # inside one crate would otherwise share one path; disambiguated by prefixing the
+    # colliding unit's own parent directory, snake_cased, and printed either way.
+    tracked = set(relpaths)
+    casefold_index = build_casefold_index(tracked)
+    headers = {p for p in relpaths if p.endswith((".h", ".hpp"))}
+
+    def unit_identity(relpath: str) -> str:
+        if relpath in headers:
+            sib = same_stem_cpp(relpath, casefold_index)
+            if sib is not None and in_scope_map.get(sib, False):
+                relpath = sib
+        stem, _, _ = relpath.rpartition(".")
+        return stem
+
+    groups: dict[tuple[str, str], set[str]] = {}
+    for p in in_scope_relpaths:
+        crate = crate_name_of[canonical_module(module_of_file[p])]
+        identity = unit_identity(p)
+        stem = posixpath.basename(identity)
+        path_key = f"crates/{crate}/src/{to_snake_case(stem)}.rs"
+        groups.setdefault((crate, path_key), set()).add(identity)
+
+    target_module_of_identity: dict[str, str] = {}
+    disambiguated: list[str] = []
+    for (crate, path_key), identities in groups.items():
+        if len(identities) == 1:
+            target_module_of_identity[next(iter(identities))] = path_key
+            continue
+        # A root same-stem unit (no "/" in its identity) sorts first and keeps the plain path,
+        # matching the convention `assign_crate_names` already applies for crate-name collisions
+        # ("a root same-stem unit keeps the plain name"); every directory-qualified identity
+        # takes a parent-directory prefix. (Unexercised at the pin: this branch only runs when a
+        # root unit and a directory-qualified unit share both a crate — via MERGE_INTO — and a
+        # stem, which no current merge group plus file set produces; see the "no target module
+        # path needed disambiguation" print.)
+        ordered = sorted(identities, key=lambda i: ("/" in i, i))
+        for i, identity in enumerate(ordered):
+            parent = posixpath.dirname(identity)
+            stem = posixpath.basename(identity)
+            if i == 0 and parent == "":
+                target_module_of_identity[identity] = path_key
+                continue
+            prefix = to_snake_case(parent) if parent else "root"
+            target_module_of_identity[identity] = (
+                f"crates/{crate}/src/{prefix}_{to_snake_case(stem)}.rs"
+            )
+        disambiguated.append(
+            f"{sorted(identities)} all map to {path_key!r}; disambiguated to "
+            f"{[target_module_of_identity[i] for i in ordered]}"
+        )
+
+    for line in disambiguated:
+        print(f"inventory: target module collision: {line}")
+    if not disambiguated:
+        print("inventory: no target module path needed disambiguation")
+
+    crate_level_cells: dict[str, str] = {}
+    target_crate_cells: dict[str, str] = {}
+    target_module_cells: dict[str, str] = {}
+    for p in in_scope_relpaths:
+        crate = crate_name_of[canonical_module(module_of_file[p])]
+        crate_level_cells[p] = str(levels[canonical_module(module_of_file[p])])
+        target_crate_cells[p] = crate
+        target_module_cells[p] = target_module_of_identity[unit_identity(p)]
+
+    # --- port/cut.tsv rows, sorted so re-running is byte-identical.
+    cut_rows: list[list[str]] = []
+    for crate in crate_name_of.values():
+        vertex = next(v for v, c in crate_name_of.items() if c == crate)
+        cut_rows.append(
+            [
+                "crate",
+                crate,
+                str(levels[vertex]),
+                ", ".join(sorted(modules_held[crate])),
+                str(len(files_held[crate])),
+                str(sum(lines_by_path[p] for p in files_held[crate])),
+                "", "", "", "", "",
+            ]
+        )
+    for (src, dst), w in retained.items():
+        cut_rows.append(
+            ["dep", "", "", "", "", "", crate_name_of[src], crate_name_of[dst], str(w), "", ""]
+        )
+    for (src, dst), refs in cut.items():
+        file, header = min(refs)
+        cut_rows.append(
+            ["edge", "", "", "", "", "", src, dst, str(len(refs)), file, header]
+        )
+
+    def crate_sort_key(row: list[str]) -> tuple:
+        return (int(row[2]), row[1])
+
+    def dep_sort_key(row: list[str]) -> tuple:
+        return (row[6], row[7])
+
+    def edge_sort_key(row: list[str]) -> tuple:
+        return (row[6], row[7], row[9])
+
+    crate_rows = sorted((r for r in cut_rows if r[0] == "crate"), key=crate_sort_key)
+    dep_rows = sorted((r for r in cut_rows if r[0] == "dep"), key=dep_sort_key)
+    edge_rows = sorted((r for r in cut_rows if r[0] == "edge"), key=edge_sort_key)
+    cut_rows = crate_rows + dep_rows + edge_rows
+
+    return crate_level_cells, target_crate_cells, target_module_cells, cut_rows
+
+
+# port/cut.tsv's schema: one sparse, 11-column table shared by three row `kind`s, documented
+# here because later steps (15-task-cuts, 19-porting-contract, 34-foundation-spike) read this
+# file and nowhere else states its shape.
+#   - `crate` rows use: crate, level, modules (its constituent modules, `, `-joined; more than
+#     one only for the two merged crates), in_scope_files, in_scope_lines. source/target/
+#     references/path/header are empty.
+#   - `dep` rows (one per retained crate-to-crate edge) use: source (the depending crate),
+#     target (the crate it depends on), references (the include references the edge carries).
+#     Every other column is empty.
+#   - `edge` rows (one per cut module edge) use: source (the cutting module), target (the
+#     module it used to include), references, path (a representative cutting file), header (the
+#     header it includes). Every other column is empty.
+CUT_HEADER = [
+    "kind",
+    "crate",
+    "level",
+    "modules",
+    "in_scope_files",
+    "in_scope_lines",
+    "source",
+    "target",
+    "references",
+    "path",
+    "header",
+]
+
+
+#
+# --- Judgement columns (R8, task 14-manifest-columns, this task) ---------------------------
+#
+# Six columns -- template-heavy, equality tier, tolerance, comparison function, proof path,
+# fuzz target -- are judgements a script can only guess at: they are seeded once, the first
+# time a row's six cells are all still empty, and then carried forward verbatim on every later
+# run, exactly as the committed file holds them, never recomputed. The unit of "already seeded"
+# is the CELL, not the row: 03-manifest-file-set and 07-crate-cut commit every row with these
+# six cells empty, so without this distinction the very run that is supposed to seed the file
+# would instead read "the row exists, carry it forward" and ship the file unseeded forever.
+# Every seeded row -- in scope or out -- always gets a non-empty template-heavy and fuzz-target
+# cell (see the defaults below), so "all six cells empty" reliably means "never seeded", not
+# "a legitimately blank row".
+
+JUDGEMENT_COLUMNS = (
+    "template-heavy",
+    "equality tier",
+    "tolerance",
+    "comparison function",
+    "proof path",
+    "fuzz target",
+)
+JUDGEMENT_INDEXES = tuple(HEADER.index(name) for name in JUDGEMENT_COLUMNS)
+
+# The derived columns `just inventory-check` diffs: every column but `path` (the join key, not
+# diffed on its own account), the six judgement columns and `status`. Derived from HEADER by
+# name, not a hard-coded range, so a column a later task adds to HEADER (15-task-cuts is part 5
+# of this same step) is diffed by default instead of silently escaping the drift check the way
+# an index range frozen at today's column count would.
+DERIVED_INDEXES = tuple(
+    i
+    for i, name in enumerate(HEADER)
+    if name not in JUDGEMENT_COLUMNS and name not in ("path", "status")
+)
+
+TEMPLATE_HEAVY_THRESHOLD = 0.25
+
+
+def load_committed_rows(path: Path) -> dict[str, list[str]]:
+    """Return relpath -> full row (padded/truncated to len(HEADER) cells) from the manifest
+    currently committed at path, or {} if it does not exist. Padding a short row (rather than
+    raising) is what lets this same function read the file as 03-manifest-file-set and
+    07-crate-cut leave it -- a strictly narrower set of columns than HEADER names today."""
+    if not path.is_file():
+        return {}
+    rows: dict[str, list[str]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines()[1:]:
+        if not line:
+            continue
+        cells = line.split("\t")
+        cells += [""] * (len(HEADER) - len(cells))
+        rows[cells[0]] = cells[: len(HEADER)]
+    return rows
+
+
+def is_already_seeded(old_row: list[str] | None) -> bool:
+    """True if old_row has been seeded before: any of its six judgement cells is non-empty.
+    See the section comment above for why "all six empty" reliably means "never seeded"."""
+    return old_row is not None and any(old_row[i] for i in JUDGEMENT_INDEXES)
+
+
+def same_stem_header(cpp_relpath: str, casefold_index: dict[str, str]) -> str | None:
+    """Return cpp_relpath's same-stem header sibling (.hpp tried before .h), resolved
+    case-insensitively against casefold_index -- the mirror of `same_stem_cpp`, for reading a
+    .cpp row's own declared surface."""
+    stem, _, _ = cpp_relpath.rpartition(".")
+    for ext in (".hpp", ".h"):
+        candidate = casefold_index.get((stem + ext).casefold())
+        if candidate is not None:
+            return candidate
+    return None
+
+
+# Anonymous namespace: a `namespace {` with no name between the keyword and the brace (a named
+# namespace's own `{` never matches, since `NAMESPACE_DECL_RE` elsewhere in this file requires
+# a name and this pattern requires the opposite -- nothing between keyword and brace but
+# whitespace).
+ANON_NAMESPACE_RE = re.compile(r"^\s*namespace\s*\{", re.MULTILINE)
+# A file-scope `static` free function's own column-0 definition (this codebase's house style
+# for every top-level definition, same convention as METHOD_DEFINITION_RE). The column-0
+# anchor alone already excludes a static member function's own definition: this codebase always
+# indents one (Tesselate.cpp's tessBeginCB, Geometry/MedialAxis.cpp's parabola_y,
+# Geometry/ConvexHull.cpp's cmpy -- all under a class, all indented), so no further guard
+# against `::` is needed there, and a guard that rejects `::` anywhere in the line was wrong:
+# it also rejected an ordinary free function whose own return type happens to be qualified
+# (`static std::string f(...)`, `static Slic3r::Vec3f f(...)`), which is the common case in
+# this codebase and not the case this guard was meant to stop. The real false positive is a
+# file-scope `static` *variable* initialized by a call (`static bool x = f();`,
+# `static const Slic3r::Vec3f DEFAULT_EXTRUDER_OFFSET = Slic3r::Vec3f::Zero();`); excluding `=`
+# between `static` and the name instead rejects exactly that shape. At the pin this guard
+# changes no file's has_internal_linkage verdict (every file holding one of these initializers
+# also holds a genuine static free function elsewhere), so it is not load-bearing today -- it
+# is here so the next file that has only the initializer shape is read right the first time.
+STATIC_FREE_FUNCTION_RE = re.compile(r"^static\b[^\n;{}=]*?\b[A-Za-z_]\w*\s*\(", re.MULTILINE)
+
+
+def has_internal_linkage(text: str) -> bool:
+    """True if text (comments stripped) declares an anonymous namespace or a file-scope static
+    free function -- R19's "no external linkage to call" test for proof path 3. Measured, not
+    tuned to a target, against the vendored tree at the pin: scanning every vendored .cpp/.mm
+    this way finds an anonymous namespace in exactly 49 files (R19 states 49) and a file-scope
+    static free function in 113 (R19 states 112; see the regex's own comment above for what
+    changed from an earlier, narrower version of this scan and why).
+
+    Over-claiming path 3 is the safe direction for this rule, not under-claiming it: R19 gives
+    path 3 precisely because that code has no external linkage to call, so a row wrongly seeded
+    path 1 (FFI to a symbol that cannot actually be reached) is unprovable, while a row wrongly
+    seeded path 3 (a test translation unit that #includes the .cpp directly) always works
+    regardless of linkage."""
+    code = strip_comments(text)
+    return bool(ANON_NAMESPACE_RE.search(code)) or bool(STATIC_FREE_FUNCTION_RE.search(code))
+
+
+def assert_internal_linkage_calibration(relpaths: list[str]) -> None:
+    """Assert has_internal_linkage's two component scans still match their calibrated counts at
+    the pin -- an anonymous namespace in exactly 49 .cpp/.mm files, a file-scope static free
+    function in exactly 113 (see has_internal_linkage's own docstring for what these numbers
+    anchor and why). Run on every regeneration, in the style of this script's other anchor
+    assertions (the vendored enums, the CMakeLists cross-check, the row-count re-walk), so a
+    later edit to either regex fails loudly here instead of silently reshuffling which rows seed
+    proof path 3."""
+    anon_count = 0
+    static_count = 0
+    for relpath in relpaths:
+        if not relpath.endswith((".cpp", ".mm")):
+            continue
+        code = strip_comments((LIBSLIC3R_ROOT / relpath).read_bytes().decode("latin-1"))
+        if ANON_NAMESPACE_RE.search(code):
+            anon_count += 1
+        if STATIC_FREE_FUNCTION_RE.search(code):
+            static_count += 1
+    if anon_count != 49 or static_count != 113:
+        raise SystemExit(
+            "inventory: has_internal_linkage's calibration has drifted from the pin -- "
+            f"anonymous namespace in {anon_count} file(s) (expected 49), file-scope static "
+            f"free function in {static_count} file(s) (expected 113); a regex edit changed "
+            "what proof path 3 matches -- see has_internal_linkage's docstring"
+        )
+
+
+TEMPLATE_DENSITY_RE = re.compile(r"\btemplate\s*<|\bconstexpr\b|\binline\b")
+
+
+def template_definition_span_end(code: str, start: int) -> int:
+    """Return the offset just past the definition a template-density keyword match ends at: a
+    brace-matched body's closing `}` if one starts before any `;`, else the next top-level `;`
+    (a bare declaration with no body)."""
+    n = len(code)
+    i = start
+    while i < n and code[i] not in "{;":
+        i += 1
+    if i >= n or code[i] == ";":
+        return min(i + 1, n)
+    depth = 0
+    while i < n:
+        if code[i] == "{":
+            depth += 1
+        elif code[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
+def template_heavy_density(text: str) -> float:
+    """Return the fraction of text's non-comment lines covered by a `template<`, `constexpr`
+    or `inline` DEFINITION's own span (brace-matched, overlapping spans merged first) -- not
+    merely the lines the keyword itself appears on. A header such as Point.hpp is wall-to-wall
+    small one-line `inline` bodies; counting only the keyword's own line undercounts "make up
+    more than a quarter of its non-comment lines" by close to an order of magnitude against
+    what the task means by it."""
+    code = strip_comments(text)
+    lines = code.split("\n")
+    noncomment_lines = {i for i, line in enumerate(lines) if line.strip()}
+    if not noncomment_lines:
+        return 0.0
+    spans = sorted(
+        (match.start(), template_definition_span_end(code, match.end()))
+        for match in TEMPLATE_DENSITY_RE.finditer(code)
+    )
+    merged: list[tuple[int, int]] = []
+    for s, e in spans:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+    covered: set[int] = set()
+    for s, e in merged:
+        covered.update(range(code.count("\n", 0, s), code.count("\n", 0, e) + 1))
+    return len(covered & noncomment_lines) / len(noncomment_lines)
+
+
+# R19's fixed-point "takes polygons or points" surface, read from a header's own parameter
+# lists (a `(...)`, not nested -- this codebase's declarations do not nest parens inside a
+# parameter list at the pin).
+SURFACE_TYPE_RE = re.compile(r"\b(?:Point|Points|Polygon|Polygons|ExPolygon|ExPolygons)\b")
+PARAMS_RE = re.compile(r"\(([^()]*)\)")
+
+
+def header_takes_surface_types(text: str) -> bool:
+    """True if some parameter list in text (comments stripped) names one of R19's fixed-point
+    surface types -- the signature-reading half of the fuzz-target rule."""
+    code = strip_comments(text)
+    return any(SURFACE_TYPE_RE.search(params) for params in PARAMS_RE.findall(code))
+
+
+def seed_judgement_cells(
+    relpath: str,
+    in_scope: bool,
+    stage_cell: str,
+    headers: set[str],
+    sources: set[str],
+    casefold_index: dict[str, str],
+    text_of,
+) -> list[str]:
+    """Return the six seeded judgement cells for relpath, a row port/inventory has not seen
+    before (see `is_already_seeded`) -- the task's two seed rules, transcribed as written, and
+    the stated constant defaults.
+
+    `template-heavy`'s rule names only "an in-scope header"; it never fires for an out-of-scope
+    row or for a .cpp/.mm row, both of which always seed "no". `proof path`'s first test and
+    `fuzz target` both read "the row's own" .cpp or header: for a header row that is its
+    same-stem .cpp sibling (if one is tracked); for a .cpp row that is itself for proof path,
+    and its same-stem header sibling (if one is tracked) for fuzz target; a row with no such
+    sibling to read skips that test (proof path falls through to the next of the three; fuzz
+    target becomes "n/a", since there is no header to read a signature from). `proof path`'s
+    second test is read differently, and deliberately not paired: it reads the row's OWN
+    `pipeline stage or none` cell, not a sibling's, because the task states that test over "a
+    row whose pipeline stage column names a stage" rather than over a unit's .cpp the way the
+    first test is stated. 06-manifest-scope fills that cell per in-scope row, a header
+    independently of its same-stem .cpp, so a header and its same-stem .cpp can and do disagree
+    here (a .cpp with an in-scope stage but internal linkage still seeds path 3 for itself,
+    while its header -- read fresh -- can fall through to path 2). A task that cuts one task per
+    .cpp+header unit (15-task-cuts) has to pick one of the two when they disagree."""
+    if not in_scope:
+        return ["no", "", "", "", "", "n/a"]
+
+    if relpath in headers:
+        sib = same_stem_cpp(relpath, casefold_index)
+        no_cpp_sibling = sib is None or sib not in sources
+        template_heavy = "yes" if (
+            no_cpp_sibling or template_heavy_density(text_of(relpath)) > TEMPLATE_HEAVY_THRESHOLD
+        ) else "no"
+    else:
+        template_heavy = "no"
+
+    equality_tier = "exact"
+    tolerance = ""
+    comparison_function = ""
+
+    if relpath in sources:
+        own_cpp_text = text_of(relpath)
+    elif relpath in headers:
+        sib = same_stem_cpp(relpath, casefold_index)
+        own_cpp_text = text_of(sib) if sib is not None and sib in sources else None
+    else:
+        own_cpp_text = None
+
+    # R19's three proof-path mechanisms, and what a "1", "2" or "3" cell commits a later task
+    # (15-task-cuts, 19-porting-contract, 34-foundation-spike) to building:
+    #   1 = FFI to the library built from the pin (oracle/build-libslic3r's output) -- the
+    #       default when neither of the other two tests fires.
+    #   2 = the committed stage dumps -- reachable at all only because 06-manifest-scope fills
+    #       `pipeline stage or none` for every in-scope row; this branch is unreachable before
+    #       that task runs.
+    #   3 = a test translation unit that `#include`s the vendored .cpp directly -- seeded by
+    #       `has_internal_linkage`'s own test, above.
+    if own_cpp_text is not None and has_internal_linkage(own_cpp_text):
+        proof_path = "3"
+    elif stage_cell and stage_cell != "none":
+        proof_path = "2"
+    else:
+        proof_path = "1"
+
+    if relpath in headers:
+        own_header_text = text_of(relpath)
+    elif relpath in sources:
+        sib = same_stem_header(relpath, casefold_index)
+        own_header_text = text_of(sib) if sib is not None and sib in headers else None
+    else:
+        own_header_text = None
+
+    fuzz_target = (
+        "required"
+        if equality_tier == "exact"
+        and own_header_text is not None
+        and header_takes_surface_types(own_header_text)
+        else "n/a"
+    )
+
+    return [template_heavy, equality_tier, tolerance, comparison_function, proof_path, fuzz_target]
+
+
+#
+# --- Status (R8/R14, derived from the Rust tree, never carried forward or read as a fact) ---
+#
+
+MOD_DECL_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;", re.MULTILINE)
+TODO_OR_UNIMPLEMENTED_RE = re.compile(r"\btodo!\s*\(|\bunimplemented!\s*\(")
+PORT_STATUS_MARKER = "PORT STATUS"
+PORT_STATUS_WINDOW_LINES = 8
+
+
+def compute_mod_reachable_files(crates_root: Path) -> frozenset[Path]:
+    """Return every .rs file under crates_root reachable from some crate's src/lib.rs by a
+    chain of `mod name;` declarations (file-per-module, or mod.rs per directory), read from
+    comment-stripped text -- the same comment policy `compute_status` applies to its
+    `todo!()`/`unimplemented!()` scan, so a comment mentioning either name in passing cannot
+    hide a real `mod` line or fake one. This is status's own "a mod declaration reaches it" half
+    (R8, R14); 21-port-status-markers and 22-port-status-gates compute reachability the same way
+    from the same tree. At this task's own commit this walks the real `crates/` tree and
+    resolves oracle-compare's 6 mod-reachable files (lib.rs plus format/gcode/json/levels/
+    tolerance.rs; main.rs is excluded, since only src/lib.rs is used as a root) -- every row's
+    status still comes back not-started, not because this function is unexercised, but because
+    no row's `target module` path exists under crates/slic3r-* yet. Empty only if crates_root
+    itself does not exist."""
+    reachable: set[Path] = set()
+    if not crates_root.is_dir():
+        return frozenset()
+    for crate_dir in sorted(p for p in crates_root.iterdir() if p.is_dir()):
+        lib_rs = crate_dir / "src" / "lib.rs"
+        if not lib_rs.is_file():
+            continue
+        stack = [lib_rs]
+        seen = {lib_rs}
+        while stack:
+            f = stack.pop()
+            reachable.add(f)
+            try:
+                text = f.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            resolve_dir = f.parent if f.name in ("lib.rs", "mod.rs") else f.parent / f.stem
+            for name in MOD_DECL_RE.findall(strip_comments(text)):
+                for candidate in (resolve_dir / f"{name}.rs", resolve_dir / name / "mod.rs"):
+                    if candidate.is_file() and candidate not in seen:
+                        seen.add(candidate)
+                        stack.append(candidate)
+    return frozenset(reachable)
+
+
+def has_port_status_trailer(text: str, relpath: str) -> bool:
+    """True if text carries a PORT STATUS trailer naming relpath: a line containing the
+    literal "PORT STATUS" with relpath itself within a few lines of it. 21-port-status-markers
+    fixes the trailer's exact grammar; this reads only the two facts R14 states up front -- the
+    marker, and the vendored source path it names."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if PORT_STATUS_MARKER in line and relpath in "\n".join(
+            lines[i : i + PORT_STATUS_WINDOW_LINES]
+        ):
+            return True
+    return False
+
+
+def compute_status(relpath: str, target_module_cell: str, mod_reachable: frozenset[Path]) -> str:
+    """Derive relpath's status from the Rust tree alone (R8, R14): drafted, ported or
+    not-started. Never reads a status cell as input, and never shells out to cargo or parses
+    Rust -- it evaluates only the text-visible half of the rule (trailer presence, mod
+    reachability, todo!()/unimplemented!() presence); the proof half of "ported" (R19) is
+    22-port-status-gates' to check, not this script's.
+
+    Comment policy, stated once here because the two halves of this rule would otherwise read
+    the file two different ways: the `todo!()`/`unimplemented!()` check runs on comment-stripped
+    text, exactly like `compute_mod_reachable_files`' own `mod`-declaration scan, so a comment
+    that merely mentions either macro (e.g. "the old draft used todo!() here") cannot pin a
+    fully-ported file at not-started forever. The `PORT STATUS` trailer, by contrast, is read
+    from the raw text, because the trailer itself lives inside a comment by design."""
+    if not target_module_cell:
+        return "not-started"
+    target_path = REPO_ROOT / target_module_cell
+    if not target_path.is_file():
+        return "not-started"
+    text = target_path.read_text(encoding="utf-8", errors="replace")
+    code = strip_comments(text)
+    reached = target_path in mod_reachable
+    if reached and not TODO_OR_UNIMPLEMENTED_RE.search(code):
+        return "ported"
+    if has_port_status_trailer(text, relpath) and not reached:
+        return "drafted"
+    return "not-started"
+
+
 def run_selftest() -> None:
     """Prove the SCC pass's negative case on a synthetic three-node cycle, untouched tree.
 
@@ -1495,37 +2461,16 @@ def run_selftest() -> None:
     sys.exit(1)
 
 
-@click.command()
-@click.option(
-    "--selftest",
-    is_flag=True,
-    help="Prove the SCC pass's failure path on a synthetic three-node cycle, then exit non-zero.",
-)
-@click.option(
-    "--prove-orphan-pass",
-    is_flag=True,
-    help="Prove the orphan pass is load-bearing by re-running scope with it disabled, then "
-    "exit non-zero.",
-)
-def main(selftest: bool, prove_orphan_pass: bool) -> None:
-    """Regenerate port/manifest.tsv from the vendored libslic3r tree."""
-    if selftest:
-        run_selftest()
-        return
-
+def generate_in_memory() -> tuple[list[list[str]], list[list[str]]]:
+    """Run the full regeneration pipeline and return (manifest_rows, cut_rows) without writing
+    port/manifest.tsv or port/cut.tsv. Shared by the normal run (`main`, which then writes
+    them) and `--check` (`run_check`, which diffs them against the committed files instead)."""
     relpaths = walk_file_set(LIBSLIC3R_ROOT)
-
-    if prove_orphan_pass:
-        if not relpaths:
-            raise SystemExit(f"inventory: found no source files under {LIBSLIC3R_ROOT}")
-        graph = build_include_graph(relpaths)
-        prove_orphan_pass_load_bearing(relpaths, graph)
-        return
-
     if not relpaths:
         raise SystemExit(f"inventory: found no source files under {LIBSLIC3R_ROOT}")
 
     assert_no_case_collisions(relpaths)
+    assert_internal_linkage_calibration(relpaths)
 
     cmake_paths = parse_cmake_source_paths(CMAKELISTS)
     matched = cross_check_cmake_sources(cmake_paths, set(relpaths))
@@ -1570,19 +2515,80 @@ def main(selftest: bool, prove_orphan_pass: bool) -> None:
 
     stage_cells = compute_pipeline_stages(relpaths, graph, in_scope_map)
 
+    lines_by_path = {p: count_lines(LIBSLIC3R_ROOT / p) for p in relpaths}
+
+    crate_level_cells, target_crate_cells, target_module_cells, cut_rows = compute_crate_cut(
+        relpaths, graph, in_scope_map, lines_by_path
+    )
+    crate_count = sum(1 for r in cut_rows if r[0] == "crate")
+    print(
+        f"inventory: the cut produced {crate_count} crates; beside the spec's 43 modules, 5 "
+        "components and one 39-module/321,722-line component, see the whole-library module "
+        "measurement line above, and this task's own prose for why this derivation's module "
+        "count differs"
+    )
+
+    # Judgement columns (task 14-manifest-columns): seeded once per row, from the committed
+    # file, then carried forward verbatim; see the section comment above `seed_judgement_cells`.
+    committed = load_committed_rows(MANIFEST_PATH)
+    tracked = set(relpaths)
+    headers_set = {p for p in relpaths if p.endswith((".h", ".hpp"))}
+    sources_set = {p for p in relpaths if p.endswith((".cpp", ".mm"))}
+    casefold_index = build_casefold_index(tracked)
+    text_cache: dict[str, str] = {}
+
+    def text_of(relpath: str) -> str:
+        if relpath not in text_cache:
+            text_cache[relpath] = (LIBSLIC3R_ROOT / relpath).read_bytes().decode("latin-1")
+        return text_cache[relpath]
+
+    mod_reachable = compute_mod_reachable_files(CRATES_ROOT)
+
+    seeded_count = 0
+    carried_count = 0
+    proof_path_counts = {"1": 0, "2": 0, "3": 0}
+
     rows = []
-    total_lines = 0
     for relpath in relpaths:
         subsystem = subsystem_of(relpath)
-        lines = count_lines(LIBSLIC3R_ROOT / relpath)
-        total_lines += lines
+        lines = lines_by_path[relpath]
         level = levels[relpath]
-        row = [relpath, subsystem, str(lines), str(level), ""]
+        row = [relpath, subsystem, str(lines), str(level)]
+        row.append(crate_level_cells.get(relpath, ""))
         row.append(scope_cells[relpath])
-        row.append("")
+        row.append(target_crate_cells.get(relpath, ""))
+        row.append(target_module_cells.get(relpath, ""))
         row.append(stage_cells[relpath])
-        row.extend([""] * (len(HEADER) - len(row)))
+
+        old_row = committed.get(relpath)
+        if is_already_seeded(old_row):
+            carried_count += 1
+            row.extend(old_row[i] for i in JUDGEMENT_INDEXES)
+        else:
+            seeded_count += 1
+            row.extend(
+                seed_judgement_cells(
+                    relpath,
+                    in_scope_map.get(relpath, False),
+                    stage_cells[relpath],
+                    headers_set,
+                    sources_set,
+                    casefold_index,
+                    text_of,
+                )
+            )
+        proof_path_cell = row[HEADER.index("proof path")]
+        if proof_path_cell in proof_path_counts:
+            proof_path_counts[proof_path_cell] += 1
+
+        row.append(compute_status(relpath, row[HEADER.index("target module")], mod_reachable))
         rows.append(row)
+
+    print(
+        f"inventory: judgement columns: seeded {seeded_count} row(s) not seen before, carried "
+        f"{carried_count} row(s) forward verbatim; proof path 1={proof_path_counts['1']} "
+        f"2={proof_path_counts['2']} 3={proof_path_counts['3']}"
+    )
 
     # The row set is the filesystem walk by construction, but this asserts it rather than
     # leaving that implicit: a second, independent walk must still agree with the one the
@@ -1593,11 +2599,112 @@ def main(selftest: bool, prove_orphan_pass: bool) -> None:
             "finds a different count; the tree changed mid-run"
         )
 
+    return rows, cut_rows
+
+
+def run_check() -> None:
+    """`just inventory-check`: regenerate into memory and diff the *derived* columns only
+    (see DERIVED_INDEXES) against the committed port/manifest.tsv -- never the six judgement
+    columns, never status. The regeneration's own chatter is captured to a log file rather than
+    printed, so a clean tree's check prints nothing at all; the committed header row itself is
+    checked first (a renamed, reordered or added/removed column is reported even though it is
+    neither a row nor a per-cell diff), then a row added or removed, then any per-cell diff.
+    port/cut.tsv is not compared here: it carries no judgement column of its own, and
+    07-crate-cut owns its regeneration and its own check story."""
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    log_path = SCRATCH_ROOT / "inventory-check.log"
+    with log_path.open("w", encoding="utf-8") as log_file, contextlib.redirect_stdout(log_file):
+        rows, _cut_rows = generate_in_memory()
+
+    committed = load_committed_rows(MANIFEST_PATH)
+    fresh = {row[0]: row for row in rows}
+
+    diffs: list[str] = []
+
+    committed_lines = (
+        MANIFEST_PATH.read_text(encoding="utf-8").splitlines() if MANIFEST_PATH.is_file() else []
+    )
+    committed_header = committed_lines[0] if committed_lines else ""
+    expected_header = "\t".join(HEADER)
+    if committed_header != expected_header:
+        diffs.append(f"header row: committed {committed_header!r}, expected {expected_header!r}")
+
+    added = sorted(set(fresh) - set(committed))
+    removed = sorted(set(committed) - set(fresh))
+    if added:
+        diffs.append(f"rows added since the committed manifest: {added}")
+    if removed:
+        diffs.append(f"rows removed since the committed manifest: {removed}")
+    for relpath in sorted(set(fresh) & set(committed)):
+        fresh_row, old_row = fresh[relpath], committed[relpath]
+        for idx in DERIVED_INDEXES:
+            if fresh_row[idx] != old_row[idx]:
+                diffs.append(
+                    f"{relpath}: {HEADER[idx]!r} committed {old_row[idx]!r}, regenerated "
+                    f"{fresh_row[idx]!r}"
+                )
+
+    if diffs:
+        print(
+            "inventory-check: port/manifest.tsv has drifted from the vendored tree "
+            f"(regeneration's own output is at {log_path}):"
+        )
+        for line in diffs:
+            print(f"  {line}")
+        raise SystemExit(1)
+
+
+@click.command()
+@click.option(
+    "--selftest",
+    is_flag=True,
+    help="Prove the SCC pass's failure path on a synthetic three-node cycle, then exit non-zero.",
+)
+@click.option(
+    "--prove-orphan-pass",
+    is_flag=True,
+    help="Prove the orphan pass is load-bearing by re-running scope with it disabled, then "
+    "exit non-zero.",
+)
+@click.option(
+    "--check",
+    "check",
+    is_flag=True,
+    help="just inventory-check: regenerate into a scratch directory and fail, with a diff, "
+    "when a derived column has drifted from the vendored tree. Never writes "
+    "port/manifest.tsv or port/cut.tsv.",
+)
+def main(selftest: bool, prove_orphan_pass: bool, check: bool) -> None:
+    """Regenerate port/manifest.tsv and port/cut.tsv from the vendored libslic3r tree."""
+    if selftest:
+        run_selftest()
+        return
+
+    if prove_orphan_pass:
+        relpaths = walk_file_set(LIBSLIC3R_ROOT)
+        if not relpaths:
+            raise SystemExit(f"inventory: found no source files under {LIBSLIC3R_ROOT}")
+        graph = build_include_graph(relpaths)
+        prove_orphan_pass_load_bearing(relpaths, graph)
+        return
+
+    if check:
+        run_check()
+        return
+
+    rows, cut_rows = generate_in_memory()
+
     out_lines = ["\t".join(HEADER)]
     out_lines.extend("\t".join(row) for row in rows)
     MANIFEST_PATH.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
 
+    cut_out_lines = ["\t".join(CUT_HEADER)]
+    cut_out_lines.extend("\t".join(row) for row in cut_rows)
+    CUT_PATH.write_text("\n".join(cut_out_lines) + "\n", encoding="utf-8")
+
+    total_lines = sum(int(r[2]) for r in rows)
     print(f"inventory: wrote {len(rows)} rows, {total_lines} total lines, to {MANIFEST_PATH}")
+    print(f"inventory: wrote {len(cut_rows)} rows to {CUT_PATH}")
 
 
 if __name__ == "__main__":

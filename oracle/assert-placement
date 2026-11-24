@@ -1,0 +1,317 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Check an oracle run's reported object placement against its fixture's committed record.
+
+Reads one row of vendor/README.md's Fixtures table (R25) -- frozen basename, vendored path,
+resolved instance transform, license -- and the bounding box a run actually produced in
+<run-dir>, and exits non-zero when they disagree. just compare-benchy and just
+compare-fixtures call this so an unexpected placement fails the comparison instead of silently
+comparing two runs that were never at the same position (R24).
+
+Nothing the pinned CLI writes out of a normal `just oracle-slice` run -- not
+plate_1.statistics.json, not settings.json -- reports an object's bounding box directly; both
+were checked and neither carries one. The one place a run's actual XY placement shows up at all
+is plate_1.gcode's own toolpath: each layer brackets the fixture's extrusion moves between
+"; printing object <basename> id:<n> copy <c>" and "; stop printing object <basename> id:<n>
+copy <c>" comments (the same basename R25 requires with no absolute path in it). This script
+collects every G0/G1/G2/G3 move's X/Y inside those brackets, across every layer, and takes their
+bounding box as "the bounding box the oracle reports for the run". That box differs from the
+committed STL's own bounding box on both sides, not just outward: perimeters trace the surface at
+a half line-width offset (can go either way depending on the edge), and the X1C machine preset's
+own `extruder_offset` shifts every toolpath coordinate a constant amount in Y relative to the mesh
+(see PLACEMENT_TOLERANCE_MM's comment below). So the comparison allows PLACEMENT_TOLERANCE_MM of
+slack on every side, outward or inward, rather than demanding exact equality; a genuine
+misplacement (the wrong fixture, a skipped translation, a transform that is not the identity R25
+records, a part printed at the wrong scale) is tens of millimetres off on at least one edge, far
+outside that tolerance either way.
+
+Every fixture holds exactly one object, so every record names exactly one transform (a
+multi-filament configuration assigns more than one filament to that single object rather than
+adding a second one), and today every recorded transform is "identity": the committed STL
+already sits at its final plate position, so the expected bounding box is simply that STL's own.
+This script does not know how to check a non-identity transform and says so if it ever meets
+one, rather than guessing.
+"""
+
+from __future__ import annotations
+
+import re
+import struct
+import sys
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+README_PATH = REPO_ROOT / "vendor" / "README.md"
+FIXTURES_DIR = REPO_ROOT / "fixtures"
+
+FACET_SIZE = 50
+HEADER_SIZE = 80
+
+# How far an observed toolpath bounding box may lie outside OR inside the committed mesh's own
+# bounding box before this script calls it a disagreement. Measured across the three committed
+# fixtures' own base-fff runs (per edge, min_x/min_y/max_x/max_y, positive = observed outside the
+# mesh's box): 20mm_cube [-0.210, 1.790, -0.210, -2.210]; frog_legs [-0.234, 1.747, -0.312,
+# -2.272]; 3DBenchy [-0.210, 1.789, -0.211, -2.210].
+#
+# The X deviation (~0.21-0.31 mm) is perimeter offset: the toolpath traces the surface at a half
+# line-width inset, slightly more on frog_legs because its mesh is concave there. The dominant
+# term, though, is the ~-2 mm constant shift in Y on every fixture: the X1C machine preset's
+# `extruder_offset` is `["0x2"]`, and `GCode::point_to_gcode` (GCode.cpp:11662-11666) returns
+# `unscale(point) + m_origin - extruder_offset`, so every toolpath coordinate this run emits is 2
+# mm lower in Y than the mesh that produced it, by construction, on every run of this machine
+# preset, not a fault of the slice. (The 3DBenchy run does print a brim -- "; FEATURE: Brim" does
+# appear in its plate_1.gcode -- but at a line before the fixture's own "; printing object"
+# marker, so it falls outside toolpath_bbox_xy's bracket and does not affect this measurement; an
+# earlier version of this comment grepped only for "; FEATURE: Skirt" and concluded wrongly that
+# none of the three prints a brim.)
+#
+# This script does not know which machine preset produced <run-dir> (it takes only <fixture> and
+# <run-dir>, and the three real runs above were not sliced with --export-settings, so there is no
+# settings.json here to read extruder_offset back out of) and so does not subtract it before
+# comparing; it compares the raw toolpath box against the raw mesh box, both ways, within this one
+# tolerance. A later task that wants finer sensitivity has to subtract the known, constant
+# extruder_offset first -- the residual after that would be well under 1 mm -- but cannot simply
+# shrink this constant: the real deviation is asymmetric (rows disagree by about 2 mm in one Y
+# direction and about 7 mm or more in the other, folding in the offset), and the largest observed
+# edge above, with no offset subtracted, is 2.272 mm. This is a bit over double that, to leave
+# margin on both sides without coming close to accepting a real misplacement, which is off by tens
+# of millimetres on at least one edge.
+PLACEMENT_TOLERANCE_MM = 5.0
+
+SEPARATOR_RE = re.compile(r"^:?-+:?$")
+
+
+class RecordError(Exception):
+    """Raised for a problem reading or resolving a vendor/README.md fixture record."""
+
+
+def split_row(line: str) -> list[str]:
+    """Split one markdown table line into its trimmed cells."""
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def strip_cell(cell: str) -> str:
+    """Drop a cell's surrounding backticks and whitespace."""
+    cell = cell.strip()
+    if cell.startswith("`") and cell.endswith("`") and len(cell) >= 2:
+        cell = cell[1:-1].strip()
+    return cell
+
+
+def find_fixtures_table(doc_text: str) -> list[dict[str, str]]:
+    """Return the rows of the markdown table whose first column is "Frozen basename".
+
+    vendor/README.md holds more than one table; only the one headed "Frozen basename" (in the
+    "### Fixtures" section) is this script's row source.
+    """
+    lines = doc_text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.startswith("|") and i + 1 < len(lines):
+            header = split_row(line)
+            sep_cells = split_row(lines[i + 1].strip()) if lines[i + 1].strip().startswith("|") else []
+            if header and header[0] == "Frozen basename" and sep_cells and all(
+                SEPARATOR_RE.match(c) for c in sep_cells
+            ):
+                rows = []
+                j = i + 2
+                while j < len(lines) and lines[j].strip().startswith("|"):
+                    cells = split_row(lines[j])
+                    rows.append(dict(zip(header, cells)))
+                    j += 1
+                return rows
+            i += 1
+        else:
+            i += 1
+    raise RecordError(f"no table headed 'Frozen basename' found in {README_PATH}")
+
+
+def load_records() -> list[dict[str, str]]:
+    """Read and parse every fixture record from vendor/README.md."""
+    if not README_PATH.is_file():
+        raise RecordError(f"{README_PATH} does not exist")
+    rows = find_fixtures_table(README_PATH.read_text())
+    records = []
+    for row in rows:
+        records.append(
+            {
+                "basename": strip_cell(row.get("Frozen basename", "")),
+                "vendored_path": strip_cell(row.get("Vendored path", "")),
+                "transform": strip_cell(row.get("Resolved instance transform", "")),
+                "license": strip_cell(row.get("License", "")),
+            }
+        )
+    return records
+
+
+def normalize_name(name: str) -> str:
+    """Accept either a frozen basename ("3DBenchy.stl") or a bare stem ("3DBenchy")."""
+    return name if name.endswith(".stl") else f"{name}.stl"
+
+
+def find_record(records: list[dict[str, str]], name: str) -> dict[str, str]:
+    """Find the record named `name`, or raise RecordError."""
+    wanted = normalize_name(name)
+    for record in records:
+        if record["basename"] == wanted:
+            return record
+    known = ", ".join(r["basename"] for r in records)
+    raise RecordError(f"no fixture record named {wanted!r} in {README_PATH} (known: {known})")
+
+
+def mesh_bbox_xy(path: Path) -> tuple[float, float, float, float]:
+    """Return (min_x, min_y, max_x, max_y) over every vertex of a binary STL."""
+    data = path.read_bytes()
+    if len(data) < HEADER_SIZE + 4:
+        raise RecordError(f"{path} is too small to be a binary STL")
+    (count,) = struct.unpack_from("<I", data, HEADER_SIZE)
+    expected = HEADER_SIZE + 4 + count * FACET_SIZE
+    if len(data) != expected:
+        raise RecordError(f"{path} has {len(data)} bytes, expected {expected} for {count} facets")
+    xs: list[float] = []
+    ys: list[float] = []
+    facets = data[HEADER_SIZE + 4:]
+    for i in range(count):
+        offset = i * FACET_SIZE
+        for vstart in (12, 24, 36):
+            x, y, _z = struct.unpack_from("<3f", facets, offset + vstart)
+            xs.append(x)
+            ys.append(y)
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+MOVE_RE = re.compile(r"^(G[0123])(?:\s|$)")
+X_RE = re.compile(r"X(-?[0-9.]+)")
+Y_RE = re.compile(r"Y(-?[0-9.]+)")
+
+
+def toolpath_bbox_xy(gcode_path: Path, basename: str) -> tuple[float, float, float, float]:
+    """Return the XY bounding box of every G0/G1/G2/G3 move inside this basename's
+    "; printing object ... / ; stop printing object ..." brackets, across every layer."""
+    in_block = False
+    x = y = None
+    xs: list[float] = []
+    ys: list[float] = []
+    start_marker = f"; printing object {basename} id:"
+    stop_marker = f"; stop printing object {basename} id:"
+    with gcode_path.open("r", errors="replace") as handle:
+        for line in handle:
+            line = line.rstrip("\n")
+            if line.startswith(start_marker):
+                in_block = True
+                continue
+            if line.startswith(stop_marker):
+                in_block = False
+                continue
+            if not in_block:
+                continue
+            if not MOVE_RE.match(line):
+                continue
+            xm = X_RE.search(line)
+            ym = Y_RE.search(line)
+            if xm:
+                x = float(xm.group(1))
+            if ym:
+                y = float(ym.group(1))
+            if x is not None and y is not None:
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        raise RecordError(
+            f"no {start_marker!r} ... {stop_marker!r} block found in {gcode_path} "
+            f"(the run never printed an object with this fixture's frozen basename)"
+        )
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def check_placement(fixture: str, run_dir: Path) -> None:
+    """Check <run-dir>'s reported placement for <fixture> against its vendor/README.md record."""
+    records = load_records()
+    record = find_record(records, fixture)
+    basename = record["basename"]
+
+    if record["transform"] != "identity":
+        raise RecordError(
+            f"{basename}: recorded transform {record['transform']!r} is not 'identity'; "
+            "this script only knows how to check the identity case"
+        )
+
+    stl_path = FIXTURES_DIR / basename
+    if not stl_path.is_file():
+        raise RecordError(f"{basename}: no committed fixture at {stl_path}")
+    expected = mesh_bbox_xy(stl_path)
+
+    gcode_path = run_dir / "plate_1.gcode"
+    if not gcode_path.is_file():
+        raise RecordError(f"{basename}: no plate_1.gcode in {run_dir}")
+    observed = toolpath_bbox_xy(gcode_path, basename)
+
+    e_minx, e_miny, e_maxx, e_maxy = expected
+    o_minx, o_miny, o_maxx, o_maxy = observed
+    tol = PLACEMENT_TOLERANCE_MM
+    # Symmetric per edge: a box more than tol outside OR more than tol inside the record is a
+    # disagreement. Outward-only would accept a toolpath bounding box of (almost) any smaller
+    # size at the same centre -- a non-identity scale, a truncated run, a stale run directory
+    # checked against a regenerated, larger fixture -- as long as it never crossed the outer edge.
+    disagrees = any(
+        abs(o - e) > tol
+        for o, e in zip((o_minx, o_miny, o_maxx, o_maxy), (e_minx, e_miny, e_maxx, e_maxy))
+    )
+    if disagrees:
+        raise RecordError(
+            f"{basename}: run {run_dir} reports an XY bounding box "
+            f"({o_minx:.3f}, {o_miny:.3f})-({o_maxx:.3f}, {o_maxy:.3f}) that disagrees with "
+            f"the fixture's own ({e_minx:.3f}, {e_miny:.3f})-({e_maxx:.3f}, {e_maxy:.3f}) "
+            f"by more than {tol} mm"
+        )
+    click.echo(
+        f"{basename}: OK -- run reports ({o_minx:.3f}, {o_miny:.3f})-({o_maxx:.3f}, {o_maxy:.3f}), "
+        f"fixture is ({e_minx:.3f}, {e_miny:.3f})-({e_maxx:.3f}, {e_maxy:.3f}), "
+        f"within {tol} mm"
+    )
+
+
+@click.command()
+@click.argument("fixture", required=False)
+@click.argument("run_dir", required=False, type=click.Path(file_okay=False))
+@click.option("--list", "list_mode", is_flag=True, help="Print one line per committed fixture record and exit.")
+def main(fixture: str | None, run_dir: str | None, list_mode: bool) -> None:
+    """Check FIXTURE's placement in RUN_DIR against its vendor/README.md record."""
+    if list_mode:
+        if fixture is not None or run_dir is not None:
+            click.echo("error: --list takes no arguments", err=True)
+            sys.exit(1)
+        try:
+            records = load_records()
+        except RecordError as exc:
+            click.echo(f"error: {exc}", err=True)
+            sys.exit(1)
+        for record in records:
+            click.echo(
+                f"{record['basename']}\t{record['vendored_path']}\t"
+                f"{record['transform']}\t{record['license']}"
+            )
+        return
+
+    if fixture is None or run_dir is None:
+        click.echo("error: FIXTURE and RUN_DIR are required (or pass --list)", err=True)
+        sys.exit(1)
+
+    try:
+        check_placement(fixture, Path(run_dir).resolve())
+    except RecordError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

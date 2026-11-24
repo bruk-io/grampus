@@ -1,0 +1,462 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Turn a vendored model into a committed, plate-positioned STL fixture (R24, R25).
+
+The pinned CLI has no XY placement option at all, so this is two moves.
+
+Move one, the oracle's own export, with $BIN the binary oracle/fetch-release stages at
+oracle/.cache/app/OrcaSlicer.app/Contents/MacOS/OrcaSlicer:
+
+    "$BIN" --datadir "$SCRATCH/datadir" --arrange 0 --export-stls "$SCRATCH/stl" <vendored model>
+
+--export-stls takes a directory (PrintConfig.cpp:12764, coString; handler at
+OrcaSlicer.cpp:6420-6425) and writes one file per object through CLI::output_filepath, which
+names it obj_<index>_<object name> with .stl appended (OrcaSlicer.cpp:8461-8516). There is no
+option that sets the output name, so this script renames the single file written there to the
+frozen basename -- and because output_filepath writes one file per object while every fixture
+holds exactly one, this script asserts that exactly one .stl landed in $SCRATCH/stl and exits
+non-zero naming the count otherwise, rather than renaming an arbitrary one. The exported mesh
+carries whatever instance transform the load applied: store_stl(path, object, true) serialises
+ModelObject::mesh() (Format/STL.cpp:53-57), and for a mesh input that is the default instance
+plus the Z-only ModelObject::ensure_on_bed the CLI applies at OrcaSlicer.cpp:2003 -- so Z lands
+on the bed and X/Y are the model's own. The `true` makes it a binary STL: an 80-byte header of
+zeroes (the label is empty), a uint32 triangle count, then 50 bytes per facet
+(its_write_stl_binary, TriangleMesh.cpp:1793-1811).
+
+Move two, this script's own XY translation, applied to the exported STL. It is this script's
+work and not the oracle's because the CLI's `align_xy` and `center` transform options do not
+exist at the pin: both `def = this->add(...)` calls sit inside a commented-out block in
+CLITransformConfigDef (PrintConfig.cpp:12903-12933). Their *handlers* are still live code in
+OrcaSlicer.cpp -- align_xy at :5065-5071 -- which is why that is written down here: a reader who
+finds the handler will think the flag works. IT DOES NOT EXIST AT THIS PIN. This script never
+passes --align-xy, --align_xy or --center to $BIN.
+
+The translation puts the mesh's XY bounding-box centre at the centre of the machine's printable
+area, moving X and Y only -- Z is never touched, because move one already applied ensure_on_bed
+and a Z nudge would make the recorded identity transform false. The two bed polygons come from
+two different preset files (the trap this task writes down): `printable_area` is inherited from
+resources/profiles/BBL/machine/fdm_bbl_3dp_001_common.json, and `bed_exclude_area` is overridden
+in resources/profiles/BBL/machine/Bambu Lab X1 Carbon 0.4 nozzle.json. This script reads both,
+computes its offset from the mesh's own bounding box, and asserts afterwards that the translated
+bounding box lies inside the printable area and does not meet the exclusion area -- the only
+thing that covers the benchy's extent, which is written down nowhere because its vendored form
+is Draco-compressed.
+
+The three fixtures, with frozen basenames (the model's basename, not its path, is embedded in
+both the G-code and the statistics JSON):
+
+    fixtures/3DBenchy.stl   <- vendor/OrcaSlicer/resources/handy_models/3DBenchy.drc
+    fixtures/20mm_cube.stl  <- vendor/OrcaSlicer/tests/data/20mm_cube.obj
+    fixtures/frog_legs.stl  <- vendor/OrcaSlicer/tests/data/frog_legs.obj
+
+Re-running this script over an already-committed fixture must leave that file byte-identical:
+normal and attribute bytes are copied through a facet verbatim, Z is round-tripped through the
+same float32 unpack/pack with no arithmetic applied to it, and only X/Y get `+= dx` / `+= dy` in
+double precision before being packed back to float32 -- the same deterministic computation every
+run, over the same deterministic oracle export (verified empirically: two separate
+--export-stls runs of the Draco-compressed benchy are byte-identical).
+
+A fixture is committed to vendor/README.md by hand, alongside its STL: this script computes and
+prints the four items that row needs (frozen basename, vendored path, resolved transform,
+license-bearing fact), but committing the row is the recorded act, not something this script
+does on its own.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import struct
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+BINARY = REPO_ROOT / "oracle" / ".cache" / "app" / "OrcaSlicer.app" / "Contents" / "MacOS" / "OrcaSlicer"
+FIXTURES_DIR = REPO_ROOT / "fixtures"
+SCRATCH_ROOT = REPO_ROOT / "oracle" / ".cache" / "fixture-export"
+README_PATH = REPO_ROOT / "vendor" / "README.md"
+
+PRINTABLE_AREA_FILE = (
+    REPO_ROOT / "vendor" / "OrcaSlicer" / "resources" / "profiles" / "BBL" / "machine"
+    / "fdm_bbl_3dp_001_common.json"
+)
+EXCLUSION_AREA_FILE = (
+    REPO_ROOT / "vendor" / "OrcaSlicer" / "resources" / "profiles" / "BBL" / "machine"
+    / "Bambu Lab X1 Carbon 0.4 nozzle.json"
+)
+
+# Frozen basename -> vendored source path, relative to the repo root. This is the only place the
+# mapping is hardcoded; vendor/README.md's committed row is what makes a fixture official for
+# every other reader (oracle/assert-placement --list, 42-compare-fixtures).
+# check_fixture_defs_match_readme(), run at the top of main(), keeps this dict and that table from
+# silently drifting apart.
+FIXTURE_DEFS: dict[str, str] = {
+    "3DBenchy.stl": "vendor/OrcaSlicer/resources/handy_models/3DBenchy.drc",
+    "20mm_cube.stl": "vendor/OrcaSlicer/tests/data/20mm_cube.obj",
+    "frog_legs.stl": "vendor/OrcaSlicer/tests/data/frog_legs.obj",
+}
+
+FACET_SIZE = 50
+HEADER_SIZE = 80
+
+
+class PlacementError(Exception):
+    """Raised when a translated fixture fails the printable-area / exclusion-area assertion."""
+
+
+SEPARATOR_RE = re.compile(r"^:?-+:?$")
+
+
+def split_row(line: str) -> list[str]:
+    """Split one markdown table line into its trimmed cells."""
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def strip_cell(cell: str) -> str:
+    """Drop a cell's surrounding backticks and whitespace."""
+    cell = cell.strip()
+    if cell.startswith("`") and cell.endswith("`") and len(cell) >= 2:
+        cell = cell[1:-1].strip()
+    return cell
+
+
+def read_readme_fixture_defs() -> dict[str, str]:
+    """Read {frozen basename: vendored path} from vendor/README.md's Fixtures table.
+
+    Mirrors oracle/assert-placement's own header-matched parser (not a general Markdown parser,
+    the house pattern) rather than importing that script, since the two are independent
+    executables with their own PEP 723 dependencies.
+    """
+    if not README_PATH.is_file():
+        return {}
+    lines = README_PATH.read_text().splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if line.startswith("|") and i + 1 < len(lines):
+            header = split_row(line)
+            sep_cells = split_row(lines[i + 1].strip()) if lines[i + 1].strip().startswith("|") else []
+            if header and header[0] == "Frozen basename" and sep_cells and all(
+                SEPARATOR_RE.match(c) for c in sep_cells
+            ):
+                defs = {}
+                j = i + 2
+                while j < len(lines) and lines[j].strip().startswith("|"):
+                    cells = dict(zip(header, split_row(lines[j])))
+                    basename = strip_cell(cells.get("Frozen basename", ""))
+                    vendored = strip_cell(cells.get("Vendored path", ""))
+                    if basename:
+                        defs[basename] = vendored
+                    j += 1
+                return defs
+            i += 1
+        else:
+            i += 1
+    return {}
+
+
+def check_fixture_defs_match_readme() -> None:
+    """Exit non-zero, naming the diverging fixture, if FIXTURE_DEFS and vendor/README.md's
+    Fixtures table disagree on the committed set or any vendored path.
+
+    FIXTURE_DEFS is the only place this mapping is hardcoded (see its own comment); this check
+    is what keeps that hardcoding from silently drifting from the table that R25 makes the
+    authority on what a fixture is.
+    """
+    readme_defs = read_readme_fixture_defs()
+    if not readme_defs:
+        # No row yet (e.g. a fresh checkout before any fixture is committed) -- nothing to
+        # cross-check against yet.
+        return
+    only_in_code = sorted(set(FIXTURE_DEFS) - set(readme_defs))
+    only_in_readme = sorted(set(readme_defs) - set(FIXTURE_DEFS))
+    mismatched = sorted(
+        name
+        for name in set(FIXTURE_DEFS) & set(readme_defs)
+        if FIXTURE_DEFS[name] != readme_defs[name]
+    )
+    if only_in_code or only_in_readme or mismatched:
+        click.echo(
+            "error: FIXTURE_DEFS (oracle/export-fixture) and vendor/README.md's Fixtures table "
+            "disagree:",
+            err=True,
+        )
+        for name in only_in_code:
+            click.echo(f"  {name}: in FIXTURE_DEFS, no vendor/README.md row", err=True)
+        for name in only_in_readme:
+            click.echo(f"  {name}: a vendor/README.md row, not in FIXTURE_DEFS", err=True)
+        for name in mismatched:
+            click.echo(
+                f"  {name}: vendored path differs "
+                f"(FIXTURE_DEFS {FIXTURE_DEFS[name]!r} vs vendor/README.md {readme_defs[name]!r})",
+                err=True,
+            )
+        sys.exit(1)
+
+
+def normalize_name(name: str) -> str:
+    """Accept either a frozen basename ("3DBenchy.stl") or a bare stem ("3DBenchy")."""
+    return name if name.endswith(".stl") else f"{name}.stl"
+
+
+def parse_point(cell: str) -> tuple[float, float]:
+    """Parse one "AxB" preset-JSON polygon point into a (x, y) float pair."""
+    x_str, _, y_str = cell.partition("x")
+    return float(x_str), float(y_str)
+
+
+def polygon_bbox(points: list[str]) -> tuple[float, float, float, float]:
+    """Return (min_x, min_y, max_x, max_y) of a preset JSON polygon cell list."""
+    parsed = [parse_point(p) for p in points]
+    xs = [p[0] for p in parsed]
+    ys = [p[1] for p in parsed]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def read_bed_areas() -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+    """Read (printable_area, bed_exclude_area) bounding boxes from their two separate preset files.
+
+    printable_area is not in the X1C machine preset at all; it is inherited from the common
+    machine file. bed_exclude_area IS overridden in the X1C nozzle file, replacing the common
+    file's polygon. Reading only one of the two files gets either the wrong exclusion area or no
+    printable area, so this function always reads both, by name, never by inheritance resolution.
+    """
+    common = json.loads(PRINTABLE_AREA_FILE.read_text())
+    x1c = json.loads(EXCLUSION_AREA_FILE.read_text())
+    printable = polygon_bbox(common["printable_area"])
+    exclusion = polygon_bbox(x1c["bed_exclude_area"])
+    return printable, exclusion
+
+
+def run_export(vendored_path: Path, scratch: Path) -> Path:
+    """Run move one and return the single exported STL's path in scratch/stl."""
+    datadir = scratch / "datadir"
+    stl_dir = scratch / "stl"
+    datadir.mkdir(parents=True)
+    # --arrange 0 (never --align-xy / --align_xy / --center: those transform options do not
+    # exist at this pin -- see the module docstring's "move two" section).
+    cmd = [str(BINARY), "--datadir", str(datadir), "--arrange", "0", "--export-stls", str(stl_dir), str(vendored_path)]
+    click.echo(f"+ {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=scratch)
+    if result.returncode != 0:
+        click.echo(f"error: oracle export exited {result.returncode} for {vendored_path}", err=True)
+        sys.exit(1)
+    exported = sorted(stl_dir.glob("*.stl")) if stl_dir.is_dir() else []
+    if len(exported) != 1:
+        click.echo(
+            f"error: expected exactly one .stl in {stl_dir}, found {len(exported)}: "
+            f"{[p.name for p in exported]}",
+            err=True,
+        )
+        sys.exit(1)
+    return exported[0]
+
+
+def read_facets(path: Path) -> tuple[bytes, int]:
+    """Read a binary STL, returning (the facet bytes blob, triangle count)."""
+    data = path.read_bytes()
+    if len(data) < HEADER_SIZE + 4:
+        click.echo(f"error: {path} is too small to be a binary STL", err=True)
+        sys.exit(1)
+    (count,) = struct.unpack_from("<I", data, HEADER_SIZE)
+    expected = HEADER_SIZE + 4 + count * FACET_SIZE
+    if len(data) != expected:
+        click.echo(
+            f"error: {path} has {len(data)} bytes, expected {expected} for {count} facets "
+            "(not a flat binary STL this script understands)",
+            err=True,
+        )
+        sys.exit(1)
+    return data[HEADER_SIZE + 4:], count
+
+
+def facet_vertices(facets: bytes, count: int):
+    """Yield each facet's three (x, y, z) float32 vertex tuples, in file order."""
+    for i in range(count):
+        offset = i * FACET_SIZE
+        facet = facets[offset:offset + FACET_SIZE]
+        v1 = struct.unpack_from("<3f", facet, 12)
+        v2 = struct.unpack_from("<3f", facet, 24)
+        v3 = struct.unpack_from("<3f", facet, 36)
+        yield v1, v2, v3
+
+
+def mesh_bbox(facets: bytes, count: int) -> tuple[float, float, float, float, float, float]:
+    """Return (min_x, min_y, min_z, max_x, max_y, max_z) over every vertex in the mesh."""
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    for v1, v2, v3 in facet_vertices(facets, count):
+        for x, y, z in (v1, v2, v3):
+            xs.append(x)
+            ys.append(y)
+            zs.append(z)
+    return min(xs), min(ys), min(zs), max(xs), max(ys), max(zs)
+
+
+def translate_facets(facets: bytes, count: int, dx: float, dy: float) -> bytes:
+    """Return a new facet blob translated by (dx, dy) in X/Y only; Z, normals and the attribute
+    byte count are copied through byte-for-byte unmodified."""
+    out = bytearray(len(facets))
+    for i in range(count):
+        offset = i * FACET_SIZE
+        facet = facets[offset:offset + FACET_SIZE]
+        out[offset:offset + 12] = facet[0:12]  # normal, verbatim
+        for vstart in (12, 24, 36):
+            x, y, z = struct.unpack_from("<3f", facet, vstart)
+            out[offset + vstart:offset + vstart + 12] = struct.pack("<3f", x + dx, y + dy, z)
+        out[offset + 48:offset + 50] = facet[48:50]  # attribute byte count, verbatim
+    return bytes(out)
+
+
+def write_binary_stl(path: Path, facets: bytes, count: int) -> None:
+    """Write a binary STL with an all-zero 80-byte header, matching its_write_stl_binary's
+    layout for an empty label."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as handle:
+        handle.write(b"\x00" * HEADER_SIZE)
+        handle.write(struct.pack("<I", count))
+        handle.write(facets)
+
+
+def assert_placed(
+    bbox_xy: tuple[float, float, float, float],
+    printable: tuple[float, float, float, float],
+    exclusion: tuple[float, float, float, float],
+) -> None:
+    """Raise PlacementError if bbox_xy is not inside printable, or meets exclusion.
+
+    bbox_xy, printable and exclusion are each (min_x, min_y, max_x, max_y).
+    """
+    minx, miny, maxx, maxy = bbox_xy
+    p_minx, p_miny, p_maxx, p_maxy = printable
+    if not (minx >= p_minx and maxx <= p_maxx and miny >= p_miny and maxy <= p_maxy):
+        raise PlacementError(
+            f"translated bounding box ({minx:.3f}, {miny:.3f})-({maxx:.3f}, {maxy:.3f}) "
+            f"is not inside printable_area ({p_minx:.3f}, {p_miny:.3f})-({p_maxx:.3f}, {p_maxy:.3f})"
+        )
+    e_minx, e_miny, e_maxx, e_maxy = exclusion
+    # Standard AABB overlap test, inverted; the strict </> comparisons mean a box that only
+    # touches the exclusion area's edge (e.g. minx == e_maxx exactly) does NOT count as meeting
+    # it -- a shared edge with no interior overlap is clear.
+    meets_exclusion = not (maxx <= e_minx or minx >= e_maxx or maxy <= e_miny or miny >= e_maxy)
+    if meets_exclusion:
+        raise PlacementError(
+            f"translated bounding box ({minx:.3f}, {miny:.3f})-({maxx:.3f}, {maxy:.3f}) "
+            f"meets bed_exclude_area ({e_minx:.3f}, {e_miny:.3f})-({e_maxx:.3f}, {e_maxy:.3f})"
+        )
+
+
+def export_one(basename: str, vendored_rel: str) -> None:
+    """Run both moves for one fixture and write/refresh fixtures/<basename>."""
+    vendored_path = REPO_ROOT / vendored_rel
+    if not vendored_path.is_file():
+        click.echo(f"error: no such vendored model: {vendored_path}", err=True)
+        sys.exit(1)
+    if not BINARY.is_file():
+        click.echo(f"error: oracle binary not found: {BINARY}", err=True)
+        click.echo("run `just oracle-fetch` first.", err=True)
+        sys.exit(1)
+
+    SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
+    import time
+    import uuid
+
+    scratch = SCRATCH_ROOT / f"{time.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
+    scratch.mkdir(parents=True)
+
+    exported_path = run_export(vendored_path, scratch)
+    facets, count = read_facets(exported_path)
+    min_x, min_y, min_z, max_x, max_y, max_z = mesh_bbox(facets, count)
+    cx, cy = (min_x + max_x) / 2.0, (min_y + max_y) / 2.0
+
+    printable, exclusion = read_bed_areas()
+    p_minx, p_miny, p_maxx, p_maxy = printable
+    target_cx, target_cy = (p_minx + p_maxx) / 2.0, (p_miny + p_maxy) / 2.0
+    dx, dy = target_cx - cx, target_cy - cy
+
+    translated = translate_facets(facets, count, dx, dy)
+    t_min_x, t_min_y, t_min_z, t_max_x, t_max_y, t_max_z = mesh_bbox(translated, count)
+
+    try:
+        assert_placed((t_min_x, t_min_y, t_max_x, t_max_y), printable, exclusion)
+    except PlacementError as exc:
+        click.echo(f"error: {basename}: {exc}", err=True)
+        sys.exit(1)
+
+    if (t_min_z, t_max_z) != (min_z, max_z):
+        click.echo(
+            f"error: {basename}: translation moved Z (before {min_z}..{max_z}, "
+            f"after {t_min_z}..{t_max_z}); this script only translates X and Y",
+            err=True,
+        )
+        sys.exit(1)
+
+    new_bytes = HEADER_SIZE * b"\x00" + struct.pack("<I", count) + translated
+    target = FIXTURES_DIR / basename
+    if target.is_file() and target.read_bytes() == new_bytes:
+        click.echo(f"{basename}: unchanged ({count} facets)")
+    else:
+        write_binary_stl(target, translated, count)
+        click.echo(f"{basename}: wrote {target} ({count} facets)")
+
+    # The in-memory comparison above (t_min_z/t_max_z against min_z/max_z) only proves
+    # translate_facets() didn't touch the z bytes it was handed -- true by construction, since it
+    # never arithmetic on z, so it can't actually fail. Re-read the Z extent back out of the file
+    # this script just wrote (or confirmed unchanged) on disk, through the same binary-STL parser
+    # oracle/assert-placement and a human re-running `just fixture-export` would use, so a bug in
+    # the header size, the facet layout or write_binary_stl's own byte order would be caught here
+    # too, not just a bug in translate_facets.
+    disk_facets, disk_count = read_facets(target)
+    _, _, disk_min_z, _, _, disk_max_z = mesh_bbox(disk_facets, disk_count)
+    if (disk_min_z, disk_max_z) != (min_z, max_z):
+        click.echo(
+            f"error: {basename}: committed file's Z extent ({disk_min_z}..{disk_max_z}) does not "
+            f"match move one's export ({min_z}..{max_z})",
+            err=True,
+        )
+        sys.exit(1)
+
+    click.echo(
+        f"{basename}: translated by dx={dx:.6f} dy={dy:.6f}; "
+        f"xy bbox ({t_min_x:.3f}, {t_min_y:.3f})-({t_max_x:.3f}, {t_max_y:.3f}); "
+        f"inside printable_area, clear of bed_exclude_area; "
+        f"z {t_min_z:.3f}..{t_max_z:.3f} unchanged; resolved instance transform: identity"
+    )
+
+
+@click.command()
+@click.argument("names", nargs=-1)
+def main(names: tuple[str, ...]) -> None:
+    """Export, place and freeze the committed fixtures named in FIXTURE_DEFS.
+
+    With no NAMES, exports all three. Each NAME is a frozen basename ("3DBenchy.stl") or bare
+    stem ("3DBenchy").
+    """
+    check_fixture_defs_match_readme()
+
+    if names:
+        requested = [normalize_name(n) for n in names]
+        unknown = [n for n in requested if n not in FIXTURE_DEFS]
+        if unknown:
+            click.echo(f"error: not a defined fixture: {', '.join(unknown)}", err=True)
+            click.echo(f"defined fixtures: {', '.join(FIXTURE_DEFS)}", err=True)
+            sys.exit(1)
+    else:
+        requested = list(FIXTURE_DEFS)
+
+    for basename in requested:
+        export_one(basename, FIXTURE_DEFS[basename])
+
+
+if __name__ == "__main__":
+    main()

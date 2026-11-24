@@ -27,6 +27,14 @@ on:
 permissions:
   contents: read
 
+# A cold run of this job is about an hour and a half of macOS runner time, so a superseded
+# commit must not keep building: pushing twice to the same branch cancels the first run
+# rather than running two 21-dependency superbuilds side by side. Grouped per ref, so a
+# pull request and `main` never cancel each other.
+concurrency:
+  group: oracle-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   oracle-build:
     runs-on: macos-15
