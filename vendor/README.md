@@ -448,28 +448,33 @@ for the Makefile that regenerates: `macos-15`'s image carries Homebrew but neith
 `brew install autoconf automake libtool texinfo` step covers both.
 
 **What a cold run of the whole recipe costs on a hosted runner, measured.** Run
-[45457280332](https://github.com/bruk-io/grampus/actions/runs/45457280332), on `macos-15`, from
-nothing — no cache for either tree — with the hermetic stage one:
+[45474202531](https://github.com/bruk-io/grampus/actions/runs/45474202531), on `macos-15`, from
+nothing — both caches deleted first, so neither tree was restored:
 
 | | Wall-clock | Build directory | Install prefix |
 |---|---|---|---|
-| Stage one | 46m12s (2772.1s), configure 2.8s + build 2769.3s | 3.3G | 622M |
-| Stage two | 35m08s (2108.9s), configure 7.6s + 1.0s + build 2100.3s | 1.0G | — |
-| `tests/fff_print` | 277.6s | 657 of 657 passed | — |
-| `tests/libslic3r` | 114.2s | 1718 of 1718 passed | — |
+| Stage one | 41m36s (2496.3s), configure 3.2s + build 2493.1s, of which `dep_OpenSSL` alone 54.3s | 3.3G | 622M |
+| Stage two | 32m52s (1972.9s), configure 6.6s + 0.9s + build 1965.5s | 1.0G | — |
+| `tests/fff_print` | 255.5s | 657 of 657 passed | — |
+| `tests/libslic3r` | 111.3s | 1718 of 1718 passed | — |
 
-About 89 minutes of runner time end to end, against 5m47s for the same two stages on a 28-core dev
-machine — **roughly 15x**, which is why this workflow has a paths filter instead of being a job on
-every pull request, and what `24-port-check-ci` should size its decision on. Both caches saved
-(1.24 GiB for the superbuild, 409 MiB for the main build tree), so a later run on the same pin and
-script skips both builds.
+About 80 minutes of build inside a ~85-minute job, against 5m47s for the same two stages on a
+28-core dev machine — **roughly 14x**, which is why this workflow has a paths filter instead of a
+job on every pull request, and what `24-port-check-ci` should size its decision on. Both caches
+saved (1.24 GiB for the superbuild, 409 MiB for the main build tree), so a later run on the same
+pin and script skips both builds. The `dep_OpenSSL`-first phase costs 54.3s there against 11.2s
+here — three runner cores against 28.
 
-That run also found fix 2 above on a second host, independently: its stage-one summary listed
-**seven** host-resolved entries, the two dep_OpenCV Python ones and dep_Boost's five Homebrew
-OpenSSL ones, because it predates the `dep_OpenSSL`-first ordering. The LibLZMA half was already
-fixed there — `Boost.Iostreams: ZLIB ON, BZip2 OFF, LZMA OFF, Zstd OFF` in its log — so the
-toolchain file works on a runner as it does here. Neither suite hit the deadlock on that run, and
-nothing timed out.
+Both fixes hold on a host that is not this one: `Boost.Iostreams: ZLIB ON, BZip2 OFF, LZMA OFF,
+Zstd OFF` in the log, and the stage-one summary lists the same **two** dep_OpenCV entries and
+nothing else. Neither suite hit the deadlock, and nothing timed out.
+
+The run before it,
+[45457280332](https://github.com/bruk-io/grampus/actions/runs/45457280332), is where fix 2 was
+confirmed on a second host: same green outcome (stage one 46m12s, stage two 35m08s, both suites
+passing in full), but its stage-one summary listed **seven** host-resolved entries — the two
+dep_OpenCV ones plus dep_Boost's five Homebrew OpenSSL ones — because it predates the
+`dep_OpenSSL`-first ordering. The race is not a quirk of this dev machine.
 
 Before stage two worked, the job ran repeatedly against the pre-hermetic script and completed
 **stage one in full** on every from-scratch run that got past
