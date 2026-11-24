@@ -1,0 +1,465 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Regenerate port/manifest.tsv from the vendored libslic3r tree.
+
+Walk every ``.h``, ``.hpp``, ``.cpp`` and ``.mm`` file under
+``vendor/OrcaSlicer/src/libslic3r`` and write one manifest row per file, filling only the
+four columns this task owns: path, subsystem, lines and the file-level include-DAG level.
+The remaining eleven columns are later parts of plan step 11's work and are left empty here.
+
+The row set always comes from the filesystem walk, never from
+``src/libslic3r/CMakeLists.txt``. That build file is parsed only to cross-check that every
+file it names also has a row, because the build file itself omits files that are produced by
+other means (an orphan pass, dead code still compiled in, Apple-only sources).
+"""
+
+from __future__ import annotations
+
+import posixpath
+import re
+import sys
+from pathlib import Path
+
+import click
+
+# The fifteen accepted subsystem names, exactly as vendor/README.md records them, plus the
+# "root" value this script assigns to a file directly under src/libslic3r. This is a set of
+# names, not a count: nothing asserts len(SUBSYSTEMS).
+SUBSYSTEMS = {
+    "Algorithm",
+    "Arachne",
+    "CAD",
+    "CSGMesh",
+    "Execution",
+    "Feature",
+    "Fill",
+    "Format",
+    "GCode",
+    "Geometry",
+    "Optimize",
+    "SLA",
+    "Support",
+    "TextureBake",
+    "TextureToColor",
+}
+
+# The manifest's full header, in plan step 11's order. This task fills the first four columns
+# of every row and leaves the rest empty so later tasks can fill them without reshaping the
+# file.
+HEADER = [
+    "path",
+    "subsystem",
+    "lines",
+    "file-level include-DAG level",
+    "crate-level level",
+    "in scope or out with a reason",
+    "target crate and module",
+    "pipeline stage or none",
+    "template-heavy",
+    "equality tier",
+    "tolerance",
+    "comparison function",
+    "proof path",
+    "fuzz target",
+    "status",
+]
+
+SOURCE_EXTENSIONS = {".h", ".hpp", ".cpp", ".mm"}
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+LIBSLIC3R_ROOT = REPO_ROOT / "vendor/OrcaSlicer/src/libslic3r"
+CMAKELISTS = LIBSLIC3R_ROOT / "CMakeLists.txt"
+MANIFEST_PATH = REPO_ROOT / "port/manifest.tsv"
+
+INCLUDE_RE = re.compile(r'#include\s*(?:"([^"]+)"|<([^>]+)>)')
+
+# The cmake blocks that name source files, keyed by a literal prefix that the block's
+# opening line starts with (after stripping leading whitespace). Every entry in
+# CMakeLists.txt's `lisbslic3r_sources` variable (the upstream misspelling: see
+# src/libslic3r/CMakeLists.txt:29) and in the `libslic3r_cgal` static library's source list
+# is read for the cross-check below. These are anchored to the lines that actually open a
+# source list, not to a bare substring: `add_library(libslic3r STATIC ${lisbslic3r_sources}`
+# (CMakeLists.txt:612) contains the substring `lisbslic3r_sources` too, but it only
+# *references* the variable and opens no source list of its own, so it must not match here.
+CMAKE_BLOCK_MARKERS = (
+    "set(lisbslic3r_sources",
+    "list(APPEND lisbslic3r_sources",
+    "add_library(libslic3r_cgal STATIC",
+)
+
+TOKEN_RE = re.compile(r"[\w./-]+\.(?:h|hpp|cpp|mm)$")
+
+
+def subsystem_of(relpath: str) -> str:
+    """Return relpath's top-level subdirectory under src/libslic3r, or "root"."""
+    if "/" not in relpath:
+        return "root"
+    top = relpath.split("/", 1)[0]
+    if top not in SUBSYSTEMS:
+        raise SystemExit(
+            f"inventory: {relpath!r} is under subdirectory {top!r}, which is not one of the "
+            f"fifteen accepted subsystem names {sorted(SUBSYSTEMS)}"
+        )
+    return top
+
+
+def walk_file_set(root: Path) -> list[str]:
+    """Return every tracked file's path relative to root, sorted.
+
+    This is the filesystem walk the manifest's rows come from. It never reads
+    CMakeLists.txt: the generated libslic3r_version.h is excluded here simply because it does
+    not exist in the tree (only libslic3r_version.h.in does).
+    """
+    paths = []
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix in SOURCE_EXTENSIONS:
+            paths.append(p.relative_to(root).as_posix())
+    paths.sort()
+    return paths
+
+
+def assert_no_case_collisions(relpaths: list[str]) -> None:
+    """Fail if any two rows' paths differ only by case."""
+    seen: dict[str, str] = {}
+    for p in relpaths:
+        key = p.casefold()
+        if key in seen and seen[key] != p:
+            raise SystemExit(
+                f"inventory: {p!r} and {seen[key]!r} differ only by case; includes resolve "
+                "case-sensitively and the manifest cannot have both"
+            )
+        seen[key] = p
+
+
+def count_lines(path: Path) -> int:
+    """Count path's lines the way the spec counts the library: like `cat | wc -l`."""
+    return path.read_bytes().count(b"\n")
+
+
+def parse_cmake_source_paths(cmakelists: Path) -> list[str]:
+    """Return every file path cmake lists in lisbslic3r_sources or libslic3r_cgal's sources.
+
+    Reads src/libslic3r/CMakeLists.txt as plain text rather than as cmake, because the file
+    uses only flat, one-path-per-line (or whitespace-paired) lists with no nested parens for
+    every block this needs. A block starts on a line whose stripped text *starts with* one of
+    CMAKE_BLOCK_MARKERS (not merely contains it — see the marker tuple's own comment) and ends
+    at the first line that is a bare ")"; every token on an interior line that looks like a
+    source path (and is not a ${...} variable reference) is collected, so a marker line's own
+    non-path tokens (`STATIC`, the variable name itself) are naturally skipped. Each block must
+    collect at least one path, or the parser has lost a list and the run fails loudly instead
+    of silently shrinking the cross-check.
+    """
+    lines = cmakelists.read_text(encoding="utf-8").splitlines()
+    found: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if any(stripped.startswith(marker) for marker in CMAKE_BLOCK_MARKERS):
+            opener_line_no = i + 1
+            block_start = len(found)
+            i += 1
+            while i < len(lines) and lines[i].strip() != ")":
+                for token in lines[i].split():
+                    token = token.strip()
+                    if "${" in token:
+                        continue
+                    if TOKEN_RE.match(token):
+                        found.append(token)
+                i += 1
+            if len(found) == block_start:
+                raise SystemExit(
+                    "inventory: the source block opened at "
+                    f"src/libslic3r/CMakeLists.txt:{opener_line_no} ({stripped!r}) collected "
+                    "no paths; the parser may have lost the list"
+                )
+        i += 1
+    return found
+
+
+def cross_check_cmake_sources(cmake_paths: list[str], tracked: set[str]) -> int:
+    """Fail naming any cmake-listed path that has no manifest row. Return the matched count."""
+    missing = [p for p in cmake_paths if p not in tracked]
+    if missing:
+        raise SystemExit(
+            "inventory: these paths are named in src/libslic3r/CMakeLists.txt's "
+            f"lisbslic3r_sources or libslic3r_cgal source lists but have no manifest row: "
+            f"{missing}"
+        )
+    matched = sum(1 for p in cmake_paths if p in tracked)
+    return matched
+
+
+def resolve_include(including_relpath: str, include_text: str, tracked: set[str]) -> str | None:
+    """Resolve a quoted or angle-bracket #include to a tracked relpath, or None if it leaves
+    this file set.
+
+    `src/libslic3r/CMakeLists.txt:682` puts `${CMAKE_CURRENT_SOURCE_DIR}` itself (this library's
+    root) on the compiler's private include path alongside the usual "directory of the
+    including file" rule, so an include is tried against both roots, plus the
+    `libslic3r/`-prefixed spelling some files use (this is also how an angle-bracket include
+    such as `<libslic3r/AABBTreeIndirect.hpp>` resolves: as root-relative with that prefix
+    stripped). The same line also adds `${CMAKE_CURRENT_SOURCE_DIR}/TextureToColor` as a second
+    private include root; that one is not tried here because, at the pin, nothing unresolved
+    would resolve through it — every `TextureToColor/` file is already reached by its
+    `libslic3r`-relative path. Resolution is exact and case-sensitive against `tracked`: it
+    never asks the filesystem whether a path "exists", because this filesystem resolves names
+    case-insensitively, which is exactly the trap `Support/SupportMaterial.cpp:68`'s
+    `#include "utils.hpp"` sets for a resolver that is not careful (the tracked file is
+    `Utils.hpp`, so that include, and `Support/SupportCommon.cpp`'s equivalent, correctly
+    resolve to nothing).
+    """
+    including_dir = posixpath.dirname(including_relpath)
+    candidates = [
+        posixpath.normpath(posixpath.join(including_dir, include_text)),
+        posixpath.normpath(include_text),
+    ]
+    if include_text.startswith("libslic3r/"):
+        candidates.append(posixpath.normpath(include_text[len("libslic3r/") :]))
+    for candidate in candidates:
+        if candidate in tracked:
+            return candidate
+    return None
+
+
+def strip_comments(text: str) -> str:
+    """Return text with `//` and `/* ... */` comments blanked out.
+
+    Tracks string and char literals so a comment-like sequence inside one (there are none in
+    an #include directive itself, but this is still a real scanner rather than a line-prefix
+    check) is never mistaken for a comment start, and a block comment spanning multiple lines
+    is handled: `vendor/OrcaSlicer/src/libslic3r/GCode/FanMover.cpp:18-37` is exactly such a
+    block, wrapping four #include lines that must not become graph edges.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        two = text[i : i + 2]
+        if two == "//":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if two == "/*":
+            i += 2
+            while i < n and text[i : i + 2] != "*/":
+                i += 1
+            i += 2
+            continue
+        c = text[i]
+        if c in ('"', "'"):
+            quote = c
+            out.append(c)
+            i += 1
+            while i < n and text[i] != quote:
+                if text[i] == "\\" and i + 1 < n:
+                    out.append(text[i])
+                    out.append(text[i + 1])
+                    i += 2
+                    continue
+                out.append(text[i])
+                i += 1
+            if i < n:
+                out.append(text[i])
+                i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def iter_active_includes(text: str):
+    """Yield each live #include target (quoted or angle-bracket) in text.
+
+    Comments are stripped first (see strip_comments), so a directive inside a `//` or a
+    `/* ... */` block never yields, while one on an otherwise-live line
+    (`#include "X.hpp" // why`) still does. `#if`/`#ifdef`-guarded includes are not skipped:
+    no preprocessing is done, so a guarded include such as
+    `Support/SupportMaterial.cpp:68`'s `#include "utils.hpp"` is scanned like any other line
+    (it then fails to resolve under exact, case-sensitive matching — see resolve_include).
+    """
+    stripped = strip_comments(text)
+    for match in INCLUDE_RE.finditer(stripped):
+        yield match.group(1) or match.group(2)
+
+
+def build_include_graph(relpaths: list[str]) -> dict[str, set[str]]:
+    """Return the intra-library #include graph: relpath -> set of relpaths it includes."""
+    tracked = set(relpaths)
+    graph: dict[str, set[str]] = {p: set() for p in relpaths}
+    for relpath in relpaths:
+        text = (LIBSLIC3R_ROOT / relpath).read_bytes().decode("latin-1")
+        for include_text in iter_active_includes(text):
+            target = resolve_include(relpath, include_text, tracked)
+            if target is not None and target != relpath:
+                graph[relpath].add(target)
+    return graph
+
+
+def tarjan_scc(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Return graph's strongly connected components.
+
+    A pure function over an adjacency mapping {node: set(of successor nodes)}, so it can be
+    exercised by --selftest on a synthetic graph without a cycle ever being injected into the
+    vendored tree.
+    """
+    index_counter = [0]
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    indices: dict[str, int] = {}
+    lowlink: dict[str, int] = {}
+    components: list[list[str]] = []
+
+    sys.setrecursionlimit(max(sys.getrecursionlimit(), 10_000))
+
+    def strongconnect(node: str) -> None:
+        indices[node] = index_counter[0]
+        lowlink[node] = index_counter[0]
+        index_counter[0] += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for successor in graph.get(node, ()):
+            if successor not in indices:
+                strongconnect(successor)
+                lowlink[node] = min(lowlink[node], lowlink[successor])
+            elif successor in on_stack:
+                lowlink[node] = min(lowlink[node], indices[successor])
+
+        if lowlink[node] == indices[node]:
+            component = []
+            while True:
+                w = stack.pop()
+                on_stack.discard(w)
+                component.append(w)
+                if w == node:
+                    break
+            components.append(component)
+
+    for node in graph:
+        if node not in indices:
+            strongconnect(node)
+
+    return components
+
+
+def non_trivial_components(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Return each SCC that is a real cycle: size > 1, or a single node with a self-loop."""
+    result = []
+    for component in tarjan_scc(graph):
+        if len(component) > 1:
+            result.append(component)
+        elif len(component) == 1 and component[0] in graph.get(component[0], ()):
+            result.append(component)
+    return result
+
+
+def compute_levels(graph: dict[str, set[str]]) -> dict[str, int]:
+    """Return each node's longest-path level: 0 if it includes no tracked file, else
+    1 + the greatest level among the files it includes."""
+    levels: dict[str, int] = {}
+
+    def level_of(node: str) -> int:
+        if node in levels:
+            return levels[node]
+        levels[node] = 0  # placeholder; the graph is proven acyclic before this runs
+        successors = graph.get(node, ())
+        value = 1 + max((level_of(s) for s in successors), default=-1)
+        levels[node] = value
+        return value
+
+    for node in graph:
+        level_of(node)
+    return levels
+
+
+def run_selftest() -> None:
+    """Prove the SCC pass's negative case on a synthetic three-node cycle, untouched tree.
+
+    Exits non-zero either way (a selftest is never a passing run), but with distinct
+    statuses: 1 when the cycle was correctly detected (the expected, healthy outcome), and 2
+    when detection itself is broken — so a caller that only checks the exit code, not the
+    printed text, can still tell the two apart.
+    """
+    cyclic_graph = {"a": {"b"}, "b": {"c"}, "c": {"a"}}
+    components = non_trivial_components(cyclic_graph)
+    if not components:
+        print("inventory --selftest: FAILED to detect the synthetic three-node cycle")
+        sys.exit(2)
+    print(f"inventory --selftest: detected the synthetic cycle {components[0]}")
+    sys.exit(1)
+
+
+@click.command()
+@click.option(
+    "--selftest",
+    is_flag=True,
+    help="Prove the SCC pass's failure path on a synthetic three-node cycle, then exit non-zero.",
+)
+def main(selftest: bool) -> None:
+    """Regenerate port/manifest.tsv from the vendored libslic3r tree."""
+    if selftest:
+        run_selftest()
+        return
+
+    relpaths = walk_file_set(LIBSLIC3R_ROOT)
+    if not relpaths:
+        raise SystemExit(f"inventory: found no source files under {LIBSLIC3R_ROOT}")
+
+    assert_no_case_collisions(relpaths)
+
+    cmake_paths = parse_cmake_source_paths(CMAKELISTS)
+    matched = cross_check_cmake_sources(cmake_paths, set(relpaths))
+    print(
+        f"inventory: cross-check matched {matched} of {len(cmake_paths)} build-file paths "
+        "against manifest rows"
+    )
+
+    graph = build_include_graph(relpaths)
+    bad_components = non_trivial_components(graph)
+    if bad_components:
+        raise SystemExit(
+            "inventory: the intra-library #include graph is not acyclic at file granularity; "
+            f"found a non-trivial strongly connected component: {bad_components[0]}"
+        )
+    print(
+        "inventory: no non-trivial strongly connected component exists over the vendored "
+        "file set (the include graph is acyclic at file granularity)"
+    )
+
+    levels = compute_levels(graph)
+
+    rows = []
+    total_lines = 0
+    for relpath in relpaths:
+        subsystem = subsystem_of(relpath)
+        lines = count_lines(LIBSLIC3R_ROOT / relpath)
+        total_lines += lines
+        level = levels[relpath]
+        row = [relpath, subsystem, str(lines), str(level)] + [""] * (len(HEADER) - 4)
+        rows.append(row)
+
+    # The row set is the filesystem walk by construction, but this asserts it rather than
+    # leaving that implicit: a second, independent walk must still agree with the one the
+    # rows were built from, so the two can never silently drift apart.
+    if len(rows) != len(walk_file_set(LIBSLIC3R_ROOT)):
+        raise SystemExit(
+            f"inventory: wrote {len(rows)} rows but a fresh walk of {LIBSLIC3R_ROOT} now "
+            "finds a different count; the tree changed mid-run"
+        )
+
+    out_lines = ["\t".join(HEADER)]
+    out_lines.extend("\t".join(row) for row in rows)
+    MANIFEST_PATH.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+    print(f"inventory: wrote {len(rows)} rows, {total_lines} total lines, to {MANIFEST_PATH}")
+
+
+if __name__ == "__main__":
+    main()
