@@ -37,6 +37,14 @@ comparison rather than failing. A filament path that is named but absent from di
 to the binary's own CLI_CONFIG_FILE_ERROR.
 
 This script writes no provenance header of its own and does not call oracle/provenance.
+
+`<fixture>`'s bare-stem resolution rule (R24, R25; added in 11-fixture-set): an argument with no
+path separator and no extension is resolved against `fixtures/` by appending `.stl` -- so
+`3DBenchy` means `fixtures/3DBenchy.stl` -- and exits non-zero naming the argument when that
+resolves to no committed file. An argument with a separator (e.g. `fixtures/3DBenchy.stl`, or any
+other path) is a path and is not resolved; neither is a bare name that already carries an
+extension (e.g. a bare `3DBenchy.stl` typed on the command line falls through to the existing
+cwd-relative path handling below, not to this rule).
 """
 
 from __future__ import annotations
@@ -55,6 +63,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ORACLE_DOC = REPO_ROOT / "docs" / "ORACLE.md"
 BINARY = REPO_ROOT / "oracle" / ".cache" / "app" / "OrcaSlicer.app" / "Contents" / "MacOS" / "OrcaSlicer"
 PROFILES_DIR = REPO_ROOT / "vendor" / "OrcaSlicer" / "resources" / "profiles" / "BBL"
+FIXTURES_DIR = REPO_ROOT / "fixtures"
 SCRATCH_ROOT = REPO_ROOT / "oracle" / ".cache" / "slice"
 
 # Transcribed from vendor/OrcaSlicer/src/libslic3r/Utils.hpp:42-94. Exactly these nine entries;
@@ -166,6 +175,28 @@ def parse_filaments(cell: str) -> list[str]:
     return filaments
 
 
+def resolve_fixture_arg(fixture: str, invocation_cwd: Path) -> Path:
+    """Resolve the <fixture> argument to a file path.
+
+    No path separator and no extension: a bare fixture stem, resolved against fixtures/ by
+    appending .stl (e.g. "3DBenchy" -> fixtures/3DBenchy.stl). Anything else -- a path with a
+    separator, or a bare name that already has an extension -- is treated as a path and resolved
+    against the invocation's own cwd, unchanged from before this rule existed.
+    """
+    has_separator = os.sep in fixture or (os.altsep is not None and os.altsep in fixture)
+    has_extension = Path(fixture).suffix != ""
+    if not has_separator and not has_extension:
+        resolved = FIXTURES_DIR / f"{fixture}.stl"
+        if not resolved.is_file():
+            click.echo(
+                f"error: no committed fixture named {fixture!r} ({resolved} does not exist)",
+                err=True,
+            )
+            sys.exit(1)
+        return resolved
+    return (invocation_cwd / fixture).resolve()
+
+
 def fresh_scratch_dir() -> Path:
     """Make and return a fresh scratch directory under oracle/.cache/slice/."""
     run_id = f"{time.strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
@@ -194,7 +225,7 @@ def main(
     """Run the pinned oracle on <fixture> with the named <configuration> row."""
     invocation_cwd = Path.cwd()
 
-    fixture_path = (invocation_cwd / fixture).resolve()
+    fixture_path = resolve_fixture_arg(fixture, invocation_cwd)
     if not fixture_path.is_file():
         click.echo(f"error: no such fixture file: {fixture_path}", err=True)
         sys.exit(1)
