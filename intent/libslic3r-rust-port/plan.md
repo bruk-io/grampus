@@ -307,12 +307,16 @@ will think the flag works.
 
 The translation puts each mesh's XY bounding-box centre at `(128, 128)`, the centre of the X1C's
 printable area (`printable_area` `0x0 256x0 256x256 0x256`, inherited from
-`resources/profiles/BBL/machine/fdm_bbl_3dp_001_common.json:123`), which is clear of that
-machine's `bed_exclude_area` of `0x0 18x0 18x28 0x28`. It matters: `tests/data/20mm_cube.obj`
-spans 0 to 20 in both X and Y at the pin, so its own coordinates sit inside that exclusion area,
-and with `--arrange 0` nothing would move it out. After the translation the fixture's resolved
-instance transform is the identity and `ensure_on_bed` is a no-op, which is the one transform the
-`vendor/README.md` row records.
+`resources/profiles/BBL/machine/fdm_bbl_3dp_001_common.json:123`), away from that machine's
+`bed_exclude_area` of `0x0 18x0 18x28 0x28` in the corner. The script computes the offset from the
+mesh's own bounding box rather than from a figure written down here, and asserts afterwards that
+the result is inside the printable area and does not meet the exclusion area — the benchy's extent
+is not measured in this plan, because its vendored form is Draco-compressed and the assertion is
+what covers it. It matters that something does this: `tests/data/20mm_cube.obj` spans 0 to 20 in
+both X and Y at the pin, so its own coordinates lie inside that exclusion area, and with
+`--arrange 0` nothing in the oracle would move it out. After the translation the fixture's
+resolved instance transform is the identity and `ensure_on_bed` is a no-op, which is the one
+transform the `vendor/README.md` row records.
 
 The basenames are frozen because the model's basename —
 not its path — is embedded in both the G-code (`; printing object <basename> id:0 copy 0`) and
@@ -597,9 +601,10 @@ Add `port/inventory`, `just inventory` and `just inventory-check`, which regener
 `port/manifest.tsv` and `port/cut.tsv`. This step reads only the vendored source and starts on day
 one alongside Steps 1 and 7. It also adds `port/cut-tasks` and `just task-cuts <phase>`, the
 script Steps 12, 20, 22 and 23 each run in their first task to commit their own cut file. It lives
-here because the manifest and the cut are what it batches, and no later step creates it; the one
-phase that reads anything else is `ownership`, which also reads `port/ownership.tsv` for its field
-list.
+here because the manifest and the cut are what it batches, and no later step creates it. One of
+its phases reads a second file: `just task-cuts ownership` also reads `port/ownership.tsv` for its
+field list, so that phase is runnable only once Step 12's spike has written that file, and the
+script says so and exits non-zero rather than batching nothing.
 
 `port/manifest.tsv` has one row per libslic3r source file at the pin, with columns: path,
 subsystem, lines, file-level include-DAG level, crate-level level, in scope or out with a reason,
@@ -1063,7 +1068,8 @@ that recipe, by a rule it writes down rather than leaving to judgement: a file u
 declares or names an identifier matching `mock`, `stub`, `fake` or `dummy` in any case, and there
 is no allowlist, because the proof paths above make a stand-in unnecessary.
 
-Add `crates/slic3r-ffi/fuzz/`, a `cargo-fuzz` crate, with the differential fuzz target **shape**
+Add `crates/slic3r-ffi/fuzz/`, a `cargo-fuzz` crate, and the `just fuzz <target>` recipe that runs
+one of its targets, with the differential fuzz target **shape**
 that fixed-point units taking polygons or points use against the C++ through FFI: one target per
 qualifying unit, at `fuzz/fuzz_targets/<crate>_<module>.rs`, generating arbitrary `Point`,
 `Polygon` and `ExPolygon` inputs and asserting exact equality of integer-coordinate output between
@@ -1267,9 +1273,13 @@ That serialisation is what makes a partial crate compile at all, and it works be
 graph is cyclic: the cycle that forced the crate cut is at *module* granularity — 39 modules and
 321,722 lines in one component — while the include graph **at file granularity is acyclic**,
 verified by Tarjan over the library's sources (R8). So ordering a crate's batches by file-level
-include-DAG level means every unit in batch N includes only units in batches 1 to N-1 of its own
-crate, or units in crates below it, and the crate compiles after each batch instead of only after
-the last.
+include-DAG level means every unit in batch N **includes** only units in batches 1 to N-1 of its
+own crate, or units in crates below it, which is why the ordering is chosen. It is not a
+guarantee: Rust's `use` graph is not the `#include` graph, and a C++ file at a lower include level
+can be called by a higher one through a declaration it does not itself include. A batch that
+therefore does not `cargo check` is evidence that the crate cut or the batch boundary is wrong,
+and the answer is to re-cut it — `just task-cuts phase-b` after the cut is corrected — never to
+stub the missing module out.
 
 **A Phase B task's "Done when"**, in two forms, because a non-final batch of a split crate cannot
 be asked to compile the crate:
@@ -1321,11 +1331,14 @@ end-to-end comparison the acceptance gate; a step that only exists once the whol
 would deliver R20's words and none of its signal. So the two halves are ordered separately, and
 the "waits on" line applies to each:
 
-- **The command.** `just compare-stages` waits on Steps 5, 8, 18, 19 and 20, and on the first
-  Phase B batch that completes a pipeline stage — the earliest point at which it has anything to
-  compare. It does not wait on Step 23 as a whole. From then on it is run by hand and in the
-  regeneration pass as each stage completes, and the stages not yet ported print as `not ported`
-  rather than as failures.
+- **The command.** `just compare-stages` waits on Steps 5, 8 and 19 and on nothing else: Step 8's
+  committed dumps and Step 19's surface are everything it reads, so it can be written and
+  committed before any stage is complete. Those three are what a task cutter puts in its
+  `depends`; no row of `port/taskcuts/phase-b.tsv` is labelled as completing a stage, so "the
+  first stage to complete" is not a task anything can depend on. How many stages it prints a level
+  for is a run-time property of the tree it runs against: a stage whose rows are not all `ported`
+  prints `not ported`, not a failure, so the command is useful from the day it lands and gets
+  stronger with every Phase B batch that merges.
 - **The CI line.** `just compare-stages` joins the macOS job of `.github/workflows/ci.yml` after
   Step 23, like every other gate: it cannot pass while stages are missing, and Step 16's rule is
   that a gate joins the job in the step that makes it pass and not before.
