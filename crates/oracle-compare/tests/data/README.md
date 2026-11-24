@@ -1,9 +1,11 @@
 # Comparator test fragments
 
-These G-code fragments are hand-written, not captured from a real oracle run: this task (part 1
-of plan step 5) must build and pass its tests on a machine with no oracle binary and no libslic3r
-build, so it never invokes the oracle and commits no file a run of it produced. Task
-`09-comparator-gcode-levels` (part 2 of step 5) holds to the same rule for its own fixtures below.
+Tasks 08's and 09's fragments below (G-code) are hand-written, not captured from a real oracle
+run: those tasks (parts 1 and 2 of plan step 5) had to build and pass their tests on a machine
+with no oracle binary and no libslic3r build, so neither invoked the oracle or committed a file a
+run of it produced. Task `10-comparator-json` (part 3, below) depends on `04-oracle-slice` and so
+has the oracle available; its JSON fragments are likewise hand-written, but `tests/data/real/` is
+the one directory in this tree that *is* captured from real runs, by design — see that section.
 
 The plan's "pair taken from two real runs of Step 2" has arrived: it is `tests/data/real/`,
 committed by task **`10-comparator-json`**, the last part of step 5, which depends on

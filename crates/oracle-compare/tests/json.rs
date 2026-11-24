@@ -38,19 +38,18 @@ fn identical_settings_reach_l0() {
 fn settings_differing_only_in_pipeline_plugin_need_the_allowance_on() {
     let (a, b) = read_json_pair("json_settings_pipeline_plugin");
 
-    // Off by default: the caller that does not ask for the allowance gets `none`, naming a
-    // pointer under the `slicing_pipeline_plugin` key as the first (and only) difference — the
-    // fixture's two arrays differ in length (`[]` vs `["posSlice"]`, the real armed/unarmed
-    // shape), so the walk's most specific pointer is an array index under that key, not the bare
-    // key itself; either way it must be *that* key and no other.
+    // Off by default: the caller that does not ask for the allowance gets `none`. The fixture's
+    // two arrays differ in length (`[]` vs `["posSlice"]`, the real armed/unarmed shape), so the
+    // walk's first difference is at index 0 (present in `b`, absent in `a`) — a pointer *under*
+    // `slicing_pipeline_plugin`, not the bare key itself, because the walk reports the most
+    // specific location, measured here and pinned exactly (not loosened to "some pointer under
+    // this key") so a regression in that granularity still fails this test.
     let off = compare_settings(&a, &b, false);
     match &off.outcome {
-        JsonOutcome::None(JsonDifference::Pointer { pointer, .. }) => {
-            assert!(
-                pointer == "/slicing_pipeline_plugin"
-                    || pointer.starts_with("/slicing_pipeline_plugin/"),
-                "expected a pointer under /slicing_pipeline_plugin, got {pointer}"
-            );
+        JsonOutcome::None(JsonDifference::Pointer { pointer, a, b }) => {
+            assert_eq!(pointer, "/slicing_pipeline_plugin/0");
+            assert_eq!(*a, None);
+            assert_eq!(b.as_ref().unwrap(), "posSlice");
         }
         other => panic!("expected a pointer difference with the allowance off, got {other:?}"),
     }

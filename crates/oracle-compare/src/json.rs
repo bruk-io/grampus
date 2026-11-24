@@ -261,8 +261,15 @@ pub fn render_text(report: &JsonReport) -> String {
         JsonOutcome::None(JsonDifference::NoPointer {
             first_differing_byte,
         }) => match first_differing_byte {
-            Some(off) => format!("none\n  not parseable as JSON; first differing byte: {off}\n"),
-            None => "none\n  not parseable as JSON\n".to_string(),
+            // Covers both of `JsonDifference::NoPointer`'s causes (see its doc comment): a side
+            // that is not parseable JSON at all, or — never yet observed from this oracle, but
+            // not assumed impossible — parsed-equal documents whose raw bytes still differ with
+            // no allowance to excuse it. Neither claim ("not JSON") would be true of the other,
+            // so this line states only what is true of both: no pointer could be named.
+            Some(off) => {
+                format!("none\n  no JSON pointer could be named; first differing byte: {off}\n")
+            }
+            None => "none\n  no JSON pointer could be named\n".to_string(),
         },
     }
 }
