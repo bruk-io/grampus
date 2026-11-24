@@ -29,3 +29,44 @@ jobs:
       - name: Guard the branch
         if: github.event_name == 'pull_request'
         run: just guard "$GITHUB_HEAD_REF"
+
+  # Created here holding only this task's step (`just oracle-build`) and its cache, per
+  # task 13-build-libslic3r. No path filter, no `just oracle-fetch`, no
+  # `cargo test --workspace`, and no cache of the dependency superbuild's install prefix
+  # (`vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep`): those are task 24-port-check-ci's
+  # half of this job, added when it lands. Until then this job runs on every pull request,
+  # uncached for the dependency superbuild, and rebuilds that superbuild from scratch each
+  # run.
+  oracle-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      # Shallow: only the pinned commit is needed, matching vendor/README.md's own
+      # instructions for a fresh clone.
+      - name: Check out the OrcaSlicer submodule
+        run: git submodule update --init --depth 1 vendor/OrcaSlicer
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: extractions/setup-just@v3
+
+      # Reads the gitlink entry directly, so it works before the submodule step above and
+      # changes whenever vendor/README.md's "Changing the pin" procedure moves the pin.
+      - name: Resolve the submodule pin for the cache key
+        id: submodule
+        run: echo "sha=$(git rev-parse HEAD:vendor/OrcaSlicer)" >> "$GITHUB_OUTPUT"
+
+      # Keyed on the submodule pin and this script, which is where the stage-two CMake
+      # flags (SLIC3R_GUI=OFF, SLIC3R_CAD=ON, -ffp-contract=off, ...) live, so either
+      # changing invalidates the cache.
+      - name: Cache the main project's build tree
+        uses: actions/cache@v4
+        with:
+          path: vendor/OrcaSlicer/build/arm64
+          key: oracle-build-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+
+      - name: Build the vendored libslic3r (just oracle-build)
+        run: just oracle-build
