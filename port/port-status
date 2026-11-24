@@ -438,6 +438,10 @@ def classify_lines(text: str) -> list[LineInfo]:
     for raw, masked in zip(raw_lines, masked_lines):
         code, comment = split_code_comment(masked)
         stripped = raw.strip()
+        # Deliberately computed from the unmasked `raw`, not `masked`: a line that merely
+        # starts with `//` inside a `/* ... */` region (a comment commenting out a comment) is
+        # a documented limit of this text-based scan, the same shape of limit as the raw-string
+        # one `split_code_comment` already states, and is not expected in a ported module.
         is_pure_comment = stripped.startswith("//")
         exempt = False
         if in_cfg_test:
