@@ -62,8 +62,20 @@ fn generated_by_pair_fails_l0_only_and_names_l4_strongest() {
         );
     }
     assert_eq!(report.strongest_evaluated_pass, Some(Level::L4));
-    // L3 passed, so there is no stricter failure to show immediately beneath L4.
-    assert_eq!(report.stricter_failure, None);
+    // `stricter_failure` is anchored at the strictest *passing* level (L1 here, since L0 is the
+    // only failure), not at `strongest_evaluated_pass` (L4): L0's byte-offset failure sits
+    // immediately beneath L1, and that is what a reader needs to see, not nothing just because
+    // L3 (immediately beneath L4) happened to pass too. See `Report`'s doc comment.
+    assert_eq!(
+        report.stricter_failure,
+        Some((
+            Level::L0,
+            FailLocation::ByteOffset(match report.outcome(Level::L0) {
+                LevelOutcome::Fail(FailLocation::ByteOffset(off)) => *off,
+                _ => unreachable!(),
+            })
+        ))
+    );
 }
 
 #[test]
@@ -450,4 +462,190 @@ fn bambu_and_compatible_tag_spellings_parse_to_the_same_model_shape() {
     assert!(parsed_compatible.tag_spellings.layer_compatible);
     assert!(parsed_compatible.tag_spellings.z_compatible);
     assert!(parsed_compatible.tag_spellings.role_compatible);
+}
+
+// ---------------------------------------------------------------------------------------------
+// L4's six quantities, pinned against the hand computation in levels.rs's module doc comment
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn reordered_moves_l4_aggregates_match_the_hand_computed_values() {
+    // The numbers below are computed by hand in `levels.rs`'s module doc comment, walking
+    // `a.gcode`'s two moves (`M83` relative mode, `G1 X10 Y0 E1` then `G1 X-10 Y0 E1`) from the
+    // implicit origin. A mutation that swaps `extruded_length` and `travel_distance` in
+    // `fold_group`, or that subtracts a retraction from `e_delta`, must make this test fail —
+    // confirmed by running that mutation against this test before committing it.
+    let (a, b) = read_pair("reordered_moves");
+    let report = compare(&a, &b);
+    let whole_a = &report.l4_aggregates_a.whole;
+    let whole_b = &report.l4_aggregates_b.whole;
+
+    for (label, agg) in [("a", whole_a), ("b", whole_b)] {
+        assert_eq!(agg.move_count, 2, "{label}: move count");
+        assert!(
+            (agg.extruded_length - 30.0).abs() < 1e-9,
+            "{label}: extruded length, got {}",
+            agg.extruded_length
+        );
+        assert!(
+            (agg.travel_distance - 0.0).abs() < 1e-9,
+            "{label}: travel distance, got {}",
+            agg.travel_distance
+        );
+        assert!(
+            (agg.e_delta - 2.0).abs() < 1e-9,
+            "{label}: E delta, got {}",
+            agg.e_delta
+        );
+        assert_eq!(
+            agg.bbox,
+            Some((-10.0, 10.0, 0.0, 0.0)),
+            "{label}: bounding box"
+        );
+        assert_eq!(agg.layer_count(), 1, "{label}: layer count");
+    }
+}
+
+#[test]
+fn a_retraction_does_not_subtract_from_e_delta() {
+    // `G1 E1` advances (positive delta +1), `G1 E-1` retracts (negative delta, must contribute
+    // nothing — not subtract 1, which would read E delta as 0). Absolute E mode (the default),
+    // so the literal E values are the running position, not a delta: 0 -> 1 is +1, 1 -> 0 is -1.
+    let gcode = b"G1 X1 E1\nG1 X2 E0\n";
+    let parsed = oracle_compare::gcode::parse(gcode);
+    let agg = oracle_compare::compare(gcode, gcode).l4_aggregates_a.whole;
+    assert_eq!(
+        parsed.moves[1].e_delta,
+        Some(-1.0),
+        "the retraction's own delta"
+    );
+    assert!(
+        (agg.e_delta - 1.0).abs() < 1e-9,
+        "only the +1 advance should count, got {}",
+        agg.e_delta
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The whole-file layer count the report prints must be the number L4 actually judged
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn whole_file_layer_count_printed_matches_the_outcome_l4_judged() {
+    // `layer_count_mismatch/b.gcode` has a trailing `; CHANGE_LAYER` with no move after it, so
+    // the parser's raw boundary count (2) disagrees with the moves-derived count (1, since no
+    // move ever touches the second layer). `render_text`/`render_json` must print the boundary
+    // count for the whole-file group — the number the `L4: fail` line actually names — not the
+    // moves-derived one, or the same report would state two different "layer count"s for the
+    // same group.
+    let (a, b) = read_pair("layer_count_mismatch");
+    let report = compare(&a, &b);
+    assert_eq!(report.layer_boundaries_a, 1);
+    assert_eq!(report.layer_boundaries_b, 2);
+    // The moves-derived count is 1 on both sides (confirming the discrepancy exists to catch).
+    assert_eq!(report.l4_aggregates_a.whole.layer_count(), 1);
+    assert_eq!(report.l4_aggregates_b.whole.layer_count(), 1);
+
+    let text = oracle_compare::format::render_text(&report);
+    assert!(
+        text.contains("layer count: a=1 b=2\n"),
+        "whole-file layer count in text output should be the boundary count: {text}"
+    );
+
+    let json = oracle_compare::format::render_json(&report);
+    assert!(
+        json.contains("\"whole_file\":{\"a\":{") && json.contains("\"layer_count\":1"),
+        "{json}"
+    );
+    // The JSON L4 outcome (count_a=1, count_b=2) and the whole-file aggregate's own
+    // `layer_count` must agree, which they would not if the aggregate printed its
+    // moves-derived count (1) instead of the boundary count (2) for side b.
+    assert!(json.contains("\"L4\":{\"outcome\":\"fail\""), "{json}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// A pair with no G0-G3 moves on either side: documented vacuous pass (levels.rs's doc comment)
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn moves_free_pair_passes_l3_and_l4_vacuously() {
+    // Two unrelated, non-G-code texts with no move command at all: L0-L2 all fail outright, but
+    // L3 and L4 compare two empty move lists and pass. This is the documented decision in
+    // `levels.rs`'s doc comment on `evaluate_l3`, pinned here so it reads as an intended outcome
+    // rather than something a later task discovers by surprise.
+    let a = b"totally unrelated text\nwith no g-code in it at all\n";
+    let b = b"a different unrelated text\nalso with nothing that parses as a move\n";
+    let report = compare(a, b);
+    assert!(!report.passed(Level::L0));
+    assert!(!report.passed(Level::L1));
+    assert!(!report.passed(Level::L2));
+    assert_eq!(
+        *report.outcome(Level::L3),
+        LevelOutcome::Pass,
+        "two empty move lists are vacuously equal"
+    );
+    assert_eq!(
+        *report.outcome(Level::L4),
+        LevelOutcome::Pass,
+        "two empty aggregates are vacuously equal"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// CRLF vs LF: an undeclared-but-decided normalisation above L1 (gcode.rs's doc comment)
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn crlf_and_lf_pair_agree_from_l2_up() {
+    let lf: &[u8] = b"; CHANGE_LAYER\n; FEATURE: Perimeter\nG1 X10 Y0 E1\nG1 X20 Y0 E1\n";
+    let crlf: Vec<u8> = lf
+        .split(|&b| b == b'\n')
+        .filter(|l| !l.is_empty())
+        .flat_map(|l| l.iter().copied().chain([b'\r', b'\n']))
+        .collect();
+    let report = compare(lf, &crlf);
+    // L0 and L1 keep `\r` (R4 normalises nothing else), so they still disagree.
+    assert!(!report.passed(Level::L0), "bytes differ by every \\r");
+    assert!(
+        !report.passed(Level::L1),
+        "R4's declared normalisation does not touch \\r"
+    );
+    assert_eq!(*report.outcome(Level::L2), LevelOutcome::Pass);
+    assert_eq!(*report.outcome(Level::L3), LevelOutcome::Pass);
+    assert_eq!(*report.outcome(Level::L4), LevelOutcome::Pass);
+}
+
+// ---------------------------------------------------------------------------------------------
+// evaluate_within: the public API for "the level reached within one layer, role or object"
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn evaluate_within_carries_forward_the_real_previous_position_across_the_scope_boundary() {
+    // Two layers; the move being scoped to (layer 1) is not the first move in the file. If the
+    // scope's aggregate were computed by filtering the move slice first and only then measuring
+    // consecutive deltas (the recipe an earlier version of `gcode.rs`'s doc comment described),
+    // this move's length would be measured from the origin (distance ≈ 20.6) instead of from
+    // where layer 0's move actually left off (distance = 5).
+    let gcode =
+        b"; CHANGE_LAYER\n; FEATURE: Perimeter\nG1 X20 Y0 E1\n; CHANGE_LAYER\nG1 X20 Y5 E2\n";
+    let parsed = oracle_compare::gcode::parse(gcode);
+    assert_eq!(parsed.moves.len(), 2);
+    assert_eq!(parsed.moves[1].localisation.layer, Some(1));
+
+    let (l3, l4, agg_a, agg_b) = oracle_compare::levels::evaluate_within(
+        &parsed.moves,
+        &parsed.moves,
+        &oracle_compare::levels::Scope::Layer(1),
+        0.0,
+    );
+    assert_eq!(l3, LevelOutcome::Pass);
+    assert_eq!(l4, LevelOutcome::Pass);
+    assert_eq!(agg_a.move_count, 1);
+    assert!(
+        (agg_a.extruded_length - 5.0).abs() < 1e-9,
+        "expected the real carried-forward length 5, got {} (20.6 would mean it was \
+         measured from the origin instead of from layer 0's last move)",
+        agg_a.extruded_length
+    );
+    assert_eq!(agg_a, agg_b, "same moves on both sides");
 }

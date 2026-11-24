@@ -8,14 +8,25 @@
 //! elsewhere on the line (a free-text object name, in principle). A single trailing `\r` is
 //! stripped from each line before it is split into words, so a `\r\n`-terminated file parses the
 //! same G-code as its `\n`-terminated twin; this is a parsing convenience only, distinct from
-//! L0/L1's byte-for-byte and declared-normalisation comparisons in `levels.rs`, which keep `\r`.
+//! L0/L1's byte-for-byte and declared-normalisation comparisons in `levels.rs`, which keep `\r`
+//! (R4 says L0 and L1 normalise nothing else, and this crate does not change that — L0 and L1
+//! still fail a CRLF-vs-LF pair; only L2 upward, which this stripping feeds, treat the two the
+//! same). **Decision (task silent, declared here since R4 does not mention it):** without this,
+//! a trailing axis word on a CRLF line would carry a literal `Y0\r` whose `f64` parse fails,
+//! silently dropping that axis from L3 and L4 rather than comparing it; `tests/levels.rs`'s
+//! `crlf_and_lf_pair_agree_from_l2_up` pins the intended outcome so a later change to this crate
+//! cannot alter it unnoticed.
 //!
 //! **Decision (task silent):** the E register's starting mode, before any `M82`/`M83`, is
-//! absolute — RepRap's own default and `GCodeWriter`'s (`src/libslic3r/GCodeWriter.cpp`
-//! constructs with `m_extrusion_axis` relative only after `M83`, and OrcaSlicer always emits an
-//! explicit `M82`/`M83` near the top of its start G-code, so this default is never actually
-//! exercised against real oracle output; it only matters for a hand-written fragment with no
-//! mode command at all, which this task's fixtures exercise directly).
+//! absolute — RepRap's own default and `GCodeWriter::preamble`'s (`src/libslic3r/GCodeWriter.cpp
+//! :298-301` emits `M83` only when `config.use_relative_e_distances` is set, `M82` otherwise,
+//! and only for flavors in the `FLAVOR_IS(...)` gate at `:289-296`, which includes
+//! `gcfMarlinLegacy`). Every Bambu machine profile this port's oracle configurations use sets
+//! `"gcode_flavor": "marlin"` (`resources/profiles/BBL/machine/fdm_machine_common.json:31`,
+//! mapped to `gcfMarlinLegacy` at `PrintConfig.cpp:225`), so that gate is always taken and an
+//! explicit `M82`/`M83` is always emitted near the top of real oracle output; this default is
+//! never actually exercised against it. It only matters for a hand-written fragment with no mode
+//! command at all, which this task's fixtures exercise directly.
 
 use std::collections::BTreeMap;
 
@@ -82,10 +93,13 @@ pub struct TagSpellingsSeen {
 /// label id:` and `; stop printing object, unique label id:` comments last opened or closed.
 ///
 /// Carried on every [`Move`] rather than as a side table, so a reader can ask "what layer, role
-/// or object was this move in" without re-walking the file — the "way to ask for the level
-/// reached within one layer, one role or one object" plan step 24 needs: filter a move slice by
-/// these fields, then call `levels::evaluate_l3`/`evaluate_l4` on the filtered slices, since both
-/// take move slices rather than whole files.
+/// or object was this move in" without re-walking the file. The "way to ask for the level
+/// reached within one layer, one role or one object" plan step 24 and task `39-compare-stages`
+/// need is [`crate::levels::evaluate_within`] with a [`crate::levels::Scope`] built from these
+/// fields — not a plain filter-the-move-slice-then-call-`evaluate_l4` recipe, which would lose
+/// each move's carried-forward position and report a filtered group's extruded/travel length
+/// measured from the scope's first move instead of from where the whole file's previous move
+/// actually left off.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Localisation {
     pub layer: Option<usize>,
@@ -263,7 +277,11 @@ fn is_move_command(command: &str) -> bool {
     )
 }
 
-const MOVE_AXES: [char; 8] = ['X', 'Y', 'Z', 'E', 'F', 'I', 'J', 'R'];
+/// The eight axis letters this parser captures into a move's `words`. Re-exported from
+/// `levels.rs`, which owns the canonical copy and uses the same array to decide what L3 checks
+/// and reports, so capture and comparison cannot silently drift apart by editing only one of
+/// them.
+use crate::levels::MOVE_AXES;
 
 /// Parses one G-code file into its L2 token stream and its L3/L4 move model in a single pass:
 /// localisation tags update the running layer/Z/role/object state, `T<n>` updates the active

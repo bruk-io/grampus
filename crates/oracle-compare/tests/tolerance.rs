@@ -114,6 +114,93 @@ fn cli_prints_the_declared_tolerance_and_its_source() {
 }
 
 #[test]
+fn an_unimplemented_comparison_function_is_refused_even_with_no_tolerance_value() {
+    // `Foo/NoTolFn.cpp`'s tolerance cell is empty (which alone would default to `Exact`,
+    // silently), but its `comparison function` cell names `rel`, which this crate does not
+    // implement. The function cell must be checked independently of whether a tolerance value
+    // was declared, or this row would resolve to `Exact` with the unimplemented function
+    // silently ignored.
+    let manifest = data_dir().join("manifest/tolerance.tsv");
+    let err = tolerance::from_manifest_row(manifest.to_str().unwrap(), "Foo/NoTolFn.cpp")
+        .expect_err("an unimplemented comparison function must be refused");
+    assert!(err.contains("rel"), "error should name the function: {err}");
+    assert!(
+        err.contains("Foo/NoTolFn.cpp"),
+        "error should name the row: {err}"
+    );
+}
+
+#[test]
+fn cli_refuses_an_unimplemented_comparison_function_with_no_tolerance_value() {
+    let a = data_dir().join("identical/a.gcode");
+    let b = data_dir().join("identical/b.gcode");
+    let manifest = data_dir().join("manifest/tolerance.tsv");
+    let (ok, stdout, stderr) = run(&[
+        a.to_str().unwrap(),
+        b.to_str().unwrap(),
+        "--tolerance-from-manifest",
+        manifest.to_str().unwrap(),
+        "--row",
+        "Foo/NoTolFn.cpp",
+    ]);
+    assert!(
+        !ok,
+        "an unimplemented comparison function must exit non-zero"
+    );
+    assert!(
+        stdout.is_empty(),
+        "nothing should be compared: stdout was {stdout}"
+    );
+    assert!(stderr.contains("rel"), "{stderr}");
+}
+
+#[test]
+fn cli_rejects_configuration_flag_with_tolerance_from_manifest() {
+    let a = data_dir().join("identical/a.gcode");
+    let b = data_dir().join("identical/b.gcode");
+    let manifest = data_dir().join("manifest/tolerance.tsv");
+    let (ok, stdout, stderr) = run(&[
+        a.to_str().unwrap(),
+        b.to_str().unwrap(),
+        "--tolerance-from-manifest",
+        manifest.to_str().unwrap(),
+        "--row",
+        "Foo/Bar.cpp",
+        "--configuration",
+        "basic_pla",
+    ]);
+    assert!(
+        !ok,
+        "--configuration with --tolerance-from-manifest must be refused, not silently dropped"
+    );
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("--configuration"), "{stderr}");
+}
+
+#[test]
+fn cli_rejects_row_flag_with_tolerance_from_config() {
+    let a = data_dir().join("identical/a.gcode");
+    let b = data_dir().join("identical/b.gcode");
+    let config = data_dir().join("config/tolerance.md");
+    let (ok, stdout, stderr) = run(&[
+        a.to_str().unwrap(),
+        b.to_str().unwrap(),
+        "--tolerance-from-config",
+        config.to_str().unwrap(),
+        "--configuration",
+        "basic_pla",
+        "--row",
+        "Foo/Bar.cpp",
+    ]);
+    assert!(
+        !ok,
+        "--row with --tolerance-from-config must be refused, not silently dropped"
+    );
+    assert!(stdout.is_empty());
+    assert!(stderr.contains("--row"), "{stderr}");
+}
+
+#[test]
 fn cli_exits_non_zero_and_names_the_row_with_no_reason() {
     let a = data_dir().join("small_drift/a.gcode");
     let b = data_dir().join("small_drift/b.gcode");

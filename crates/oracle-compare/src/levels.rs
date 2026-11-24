@@ -8,6 +8,40 @@
 //!
 //! L2, L3 and L4 (added by task `09-comparator-gcode-levels`) read the parse `gcode.rs` builds
 //! rather than re-reading raw bytes themselves.
+//!
+//! ## L4's six quantities, recomputed by hand on `tests/data/reordered_moves/`
+//!
+//! `a.gcode` is `M83` then `G1 X10 Y0 E1` then `G1 X-10 Y0 E1`; `b.gcode` is the same two moves
+//! in the opposite order. Both are one group: layer 0, role `Perimeter`, the whole file. Walking
+//! `a` in ascending move index, from the implicit origin `(0, 0)`:
+//!
+//! - **move count** is the number of `G0`-`G3` lines in the group: `2`.
+//! - **extruded length** is the sum, over every move whose E advances, of the Euclidean XY
+//!   distance from the previous move's resulting position (or the origin, before the first
+//!   move) to this move's: move 1 goes `(0,0)` to `(10,0)`, length `10`; move 2 goes `(10,0)` to
+//!   `(-10,0)`, length `20`; both advance E (relative mode, `E1` is a positive delta each time),
+//!   so extruded length is `10 + 20 = 30`.
+//! - **travel distance** is the same sum over moves whose E does not advance: `0`, since both
+//!   moves here extrude.
+//! - **E delta** is the sum of positive E advances in the group: relative mode makes each `E1`
+//!   word itself the delta, so `1 + 1 = 2`. A retraction (a negative delta, or zero) contributes
+//!   nothing to this sum — it is not subtracted.
+//! - **bounding box** is the min/max X and Y over the group's moves' resulting positions:
+//!   X ranges `10` and `-10`, Y stays `0`, so `(min_x=-10, max_x=10, min_y=0, max_y=0)`.
+//! - **layer count** is the number of layer boundaries the localisation found. For a per-layer,
+//!   per-role or per-(layer, role) group this is read as the number of *distinct layer indices
+//!   the group's own moves touch* (`Aggregate::layer_count`) — `1` here, since every move in
+//!   this group is layer 0. For the whole-file group it is instead
+//!   [`crate::gcode::ParsedFile::layer_boundaries`], the parser's raw count of layer-change tags,
+//!   because a trailing boundary with no move after it (see `tests/data/layer_count_mismatch/`)
+//!   would otherwise vanish from a moves-derived count; see [`evaluate_l4`]'s doc comment.
+//!
+//! `b.gcode` folds to the identical six numbers by the same arithmetic, in the reversed move
+//! order — which is the point of the fixture: the per-move X values disagree outright (L3
+//! fails) while every L4 aggregate agrees exactly (L4 passes). `tests/levels.rs`'s
+//! `reordered_moves_l4_aggregates_match_the_hand_computed_values` pins these six numbers against
+//! the code, and a mutation that swaps `extruded_length` and `travel_distance` in [`fold_group`]
+//! (confirmed by running it) makes that test fail.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -153,13 +187,16 @@ pub enum Side {
     B,
 }
 
-/// Which group of moves an L4 aggregate was computed over.
+/// Which group of moves an L4 aggregate was computed over. `Object` is produced only by
+/// [`evaluate_within`], never by [`evaluate_l4`] (which groups by layer and role, per R4 and the
+/// task; there is no whole-run per-object breakdown).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AggregateGroup {
     WholeFile,
     Layer(usize),
     Role(String),
     LayerRole(usize, String),
+    Object(String),
 }
 
 impl std::fmt::Display for AggregateGroup {
@@ -169,6 +206,7 @@ impl std::fmt::Display for AggregateGroup {
             AggregateGroup::Layer(n) => write!(f, "layer {n}"),
             AggregateGroup::Role(role) => write!(f, "role {role}"),
             AggregateGroup::LayerRole(n, role) => write!(f, "layer {n}, role {role}"),
+            AggregateGroup::Object(name) => write!(f, "object {name}"),
         }
     }
 }
@@ -318,6 +356,17 @@ fn localisation_at(
 /// the only comparison function `tolerance.rs` implements). Returns the outcome and the max/RMS
 /// deviation per axis compared, computed over the common prefix regardless of outcome, per R4
 /// ("print them whether or not the level passed").
+///
+/// **Decision (task silent): two move-free lists pass, vacuously.** If neither side has any
+/// `G0`-`G3` line (e.g. both inputs are G-code with no moves, or neither side's localisation
+/// scope in [`evaluate_within`] matched anything), `moves_a` and `moves_b` are both empty, the
+/// loop below never runs, and this returns `Pass` with no axis deviations — the same outcome
+/// [`evaluate_l4`] reaches on two empty aggregates. This is "identical" in the narrow sense that
+/// there is nothing recorded to disagree about, not a claim that the two files or scopes
+/// otherwise match; a caller comparing whole files always has L0-L2 available to catch that case,
+/// but a caller of `evaluate_within` with a scope that matches on neither side would see L3/L4
+/// both silently pass. `tests/levels.rs`'s `moves_free_pair_passes_l3_and_l4_vacuously` pins this
+/// so it is a documented outcome rather than an accident a later task discovers by surprise.
 pub fn evaluate_l3(
     moves_a: &[Move],
     moves_b: &[Move],
@@ -358,21 +407,41 @@ pub fn evaluate_l3(
                     }
                 }
                 (Some(x), Some(y)) => {
-                    if let (Some(xv), Some(yv)) = (x.value, y.value) {
-                        let dev = (xv - yv).abs();
-                        let entry = sums.entry(axis).or_insert((0.0, 0.0, 0));
-                        entry.0 = entry.0.max(dev);
-                        entry.1 += dev * dev;
-                        entry.2 += 1;
-                        if outcome.is_none() && dev > tolerance {
-                            outcome = Some(LevelOutcome::Fail(FailLocation::Move {
-                                index: i,
-                                layer: ma.localisation.layer,
-                                role: ma.localisation.role.clone(),
-                                object: ma.localisation.object.clone(),
-                                count_a: moves_a.len(),
-                                count_b: moves_b.len(),
-                            }));
+                    match (x.value, y.value) {
+                        (Some(xv), Some(yv)) if xv.is_finite() && yv.is_finite() => {
+                            let dev = (xv - yv).abs();
+                            let entry = sums.entry(axis).or_insert((0.0, 0.0, 0));
+                            entry.0 = entry.0.max(dev);
+                            entry.1 += dev * dev;
+                            entry.2 += 1;
+                            if outcome.is_none() && dev > tolerance {
+                                outcome = Some(LevelOutcome::Fail(FailLocation::Move {
+                                    index: i,
+                                    layer: ma.localisation.layer,
+                                    role: ma.localisation.role.clone(),
+                                    object: ma.localisation.object.clone(),
+                                    count_a: moves_a.len(),
+                                    count_b: moves_b.len(),
+                                }));
+                            }
+                        }
+                        // Exactly one side's literal failed to parse as a finite f64 (or
+                        // either did, e.g. "nan"), with the axis word present on both sides.
+                        // This is the same present/absent mismatch the arm above fails on, not
+                        // a numeric agreement: an unparseable/non-finite value carries no
+                        // information to compare, so treating it as "equal" would let a
+                        // garbled literal pass L3 silently.
+                        _ => {
+                            if outcome.is_none() {
+                                outcome = Some(LevelOutcome::Fail(FailLocation::Move {
+                                    index: i,
+                                    layer: ma.localisation.layer,
+                                    role: ma.localisation.role.clone(),
+                                    object: ma.localisation.object.clone(),
+                                    count_a: moves_a.len(),
+                                    count_b: moves_b.len(),
+                                }));
+                            }
                         }
                     }
                 }
@@ -517,9 +586,15 @@ pub fn compute_l4_aggregates(moves: &[Move]) -> L4Aggregates {
 }
 
 /// Checks move count, extruded length, E delta, the four bounding-box numbers and travel
-/// distance, in that fixed order, against `tolerance`. Layer count is deliberately not here —
-/// see [`compare_aggregate`] and [`whole_file_layer_count_failure`] for the two different ways
-/// the two call sites name a differing layer.
+/// distance, in that fixed order, against `tolerance`. Move count is checked against the same
+/// millimetre-unit `tolerance` as the length/position quantities, because R4 lists it among "the
+/// six quantities ... within the declared aggregate tolerance" without exempting it — unlike
+/// layer count, which is deliberately not here: R4 states no separate aggregate-tolerance unit
+/// for a count of layers, so it is compared exactly instead (see [`compare_aggregate`] and
+/// [`whole_file_layer_count_failure`] for the two different ways the two call sites name a
+/// differing layer). A declared tolerance of `1.0` or more does mean a one-move difference can
+/// pass L4 while a one-layer difference still fails; that follows from the same row's single
+/// tolerance number applying to every quantity this function checks, not from a bug here.
 fn compare_aggregate_quantities(
     group: AggregateGroup,
     a: &Aggregate,
@@ -715,4 +790,86 @@ pub fn evaluate_l4(
     }
 
     (outcome.unwrap_or(LevelOutcome::Pass), agg_a, agg_b)
+}
+
+/// A localisation scope: all moves in one layer, one role or one object, by exact match on
+/// [`crate::gcode::Localisation`]'s corresponding field. The "way to ask for the level reached
+/// within one layer, one role or one object" plan step 24 and task `39-compare-stages` need —
+/// see [`evaluate_within`], and [`crate::gcode::Localisation`]'s doc comment, which this type and
+/// function implement rather than the filter-a-slice-yourself recipe an earlier draft of that
+/// comment described (filtering a move slice and calling [`evaluate_l4`] on it directly loses
+/// each move's carried-forward position: its aggregate's lengths would be measured from the
+/// scope's first move instead of from where the full file's previous move actually left off).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Scope {
+    Layer(usize),
+    Role(String),
+    Object(String),
+}
+
+impl Scope {
+    fn matches(&self, loc: &gcode::Localisation) -> bool {
+        match self {
+            Scope::Layer(n) => loc.layer == Some(*n),
+            Scope::Role(r) => loc.role.as_deref() == Some(r.as_str()),
+            Scope::Object(o) => loc.object.as_deref() == Some(o.as_str()),
+        }
+    }
+
+    fn group(&self) -> AggregateGroup {
+        match self {
+            Scope::Layer(n) => AggregateGroup::Layer(*n),
+            Scope::Role(r) => AggregateGroup::Role(r.clone()),
+            Scope::Object(o) => AggregateGroup::Object(o.clone()),
+        }
+    }
+}
+
+/// L3 and L4 restricted to one [`Scope`] of each side's moves: the level(s) reached within one
+/// layer, one role or one object, which `39-compare-stages` falls back to on the exported G-code
+/// for the stages with no hook seam.
+///
+/// `move_stats` runs once over the *whole* move list on each side — exactly as
+/// [`compute_l4_aggregates`] already does for the whole-file/per-layer/per-role breakdown — so
+/// every move's extruded/travel length is still measured from where the previous move in the
+/// real file left off, even though only the moves matching `scope` are folded into the returned
+/// aggregate. L3 needs no such care: it compares each move's own (already carried-forward) axis
+/// values, never a delta between consecutive moves in the filtered list, so filtering the move
+/// slice before calling [`evaluate_l3`] is correct as-is.
+pub fn evaluate_within(
+    moves_a: &[Move],
+    moves_b: &[Move],
+    scope: &Scope,
+    tolerance: f64,
+) -> (LevelOutcome, LevelOutcome, Aggregate, Aggregate) {
+    let filtered_a: Vec<Move> = moves_a
+        .iter()
+        .filter(|m| scope.matches(&m.localisation))
+        .cloned()
+        .collect();
+    let filtered_b: Vec<Move> = moves_b
+        .iter()
+        .filter(|m| scope.matches(&m.localisation))
+        .cloned()
+        .collect();
+    let (l3, _) = evaluate_l3(&filtered_a, &filtered_b, tolerance);
+
+    let stats_a = move_stats(moves_a);
+    let stats_b = move_stats(moves_b);
+    let mut agg_a = Aggregate::default();
+    let mut agg_b = Aggregate::default();
+    for (m, stat) in moves_a.iter().zip(stats_a.iter()) {
+        if scope.matches(&m.localisation) {
+            fold_group(&mut agg_a, stat);
+        }
+    }
+    for (m, stat) in moves_b.iter().zip(stats_b.iter()) {
+        if scope.matches(&m.localisation) {
+            fold_group(&mut agg_b, stat);
+        }
+    }
+    let l4 =
+        compare_aggregate(scope.group(), &agg_a, &agg_b, tolerance).unwrap_or(LevelOutcome::Pass);
+
+    (l3, l4, agg_a, agg_b)
 }

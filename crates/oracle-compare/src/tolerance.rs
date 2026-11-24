@@ -148,33 +148,46 @@ fn parse_tolerance_cell(cell: &str) -> Result<Option<(f64, Option<String>, Strin
     Ok(Some((value, unit, reason)))
 }
 
+/// Resolves the `comparison function` cell on its own, independent of whether the row's
+/// `tolerance` cell carries a value. An empty cell means `abs` (the only function implemented),
+/// whether or not a tolerance value is declared; a non-empty, unimplemented name is refused
+/// unconditionally — the task asks to refuse "a comparison function the comparator does not
+/// implement" without exempting the case where the row otherwise defaults to exact, and reading
+/// it only inside the `Some` arm below (as an earlier version of this function did) let a row
+/// with an empty tolerance cell and an unimplemented function name resolve to `Exact` silently.
+fn parse_comparison_function(
+    function_cell: &str,
+    row_desc: &str,
+) -> Result<ComparisonFunction, String> {
+    let function_name = function_cell.trim();
+    if function_name.is_empty() {
+        return Ok(ComparisonFunction::Abs);
+    }
+    ComparisonFunction::parse(function_name).ok_or_else(|| {
+        format!("comparison function '{function_name}' is not implemented (row '{row_desc}')")
+    })
+}
+
 fn build_tolerance(
     tolerance_cell: &str,
     function_cell: &str,
     row_desc: &str,
     source: ToleranceSource,
 ) -> Result<Tolerance, String> {
+    // Checked before branching on the tolerance cell's own shape, so a row with no declared
+    // tolerance but an unimplemented comparison function is still refused rather than silently
+    // resolving to `Exact`.
+    let comparison_function = parse_comparison_function(function_cell, row_desc)?;
+
     match parse_tolerance_cell(tolerance_cell).map_err(|e| format!("{e} (row '{row_desc}')"))? {
         None => Ok(Tolerance::Exact),
-        Some((value, unit, reason)) => {
-            let function_name = function_cell.trim();
-            let comparison_function = if function_name.is_empty() {
-                ComparisonFunction::Abs
-            } else {
-                ComparisonFunction::parse(function_name).ok_or_else(|| {
-                    format!(
-                        "comparison function '{function_name}' is not implemented (row '{row_desc}')"
-                    )
-                })?
-            };
-            Ok(Tolerance::Declared {
-                value,
-                unit,
-                reason,
-                comparison_function,
-                source,
-            })
-        }
+        Some((value, unit, reason)) => Ok(Tolerance::Declared {
+            value,
+            unit,
+            reason,
+            comparison_function,
+            source,
+        }),
     }
 }
 

@@ -193,6 +193,11 @@ pub fn render_text(report: &Report) -> String {
         "    ",
         &report.l4_aggregates_a.whole,
         &report.l4_aggregates_b.whole,
+        // The whole-file group's layer count is the parser's raw layer-boundary count — the
+        // number `evaluate_l4` actually compares for this group — not the moves-derived
+        // `Aggregate::layer_count()`, which can under-count a trailing boundary with no move
+        // after it (see `tests/data/layer_count_mismatch/`).
+        Some((report.layer_boundaries_a, report.layer_boundaries_b)),
     );
     for layer in report
         .l4_aggregates_a
@@ -205,7 +210,7 @@ pub fn render_text(report: &Report) -> String {
         let empty = crate::Aggregate::default();
         let a = report.l4_aggregates_a.by_layer.get(layer).unwrap_or(&empty);
         let b = report.l4_aggregates_b.by_layer.get(layer).unwrap_or(&empty);
-        push_aggregate_pair_text(&mut out, "    ", a, b);
+        push_aggregate_pair_text(&mut out, "    ", a, b, None);
     }
     for role in report
         .l4_aggregates_a
@@ -218,18 +223,44 @@ pub fn render_text(report: &Report) -> String {
         let empty = crate::Aggregate::default();
         let a = report.l4_aggregates_a.by_role.get(role).unwrap_or(&empty);
         let b = report.l4_aggregates_b.by_role.get(role).unwrap_or(&empty);
-        push_aggregate_pair_text(&mut out, "    ", a, b);
+        push_aggregate_pair_text(&mut out, "    ", a, b, None);
+    }
+    for key in report
+        .l4_aggregates_a
+        .by_layer_role
+        .keys()
+        .chain(report.l4_aggregates_b.by_layer_role.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        out.push_str(&format!("  layer {}, role {}:\n", key.0, key.1));
+        let empty = crate::Aggregate::default();
+        let a = report
+            .l4_aggregates_a
+            .by_layer_role
+            .get(key)
+            .unwrap_or(&empty);
+        let b = report
+            .l4_aggregates_b
+            .by_layer_role
+            .get(key)
+            .unwrap_or(&empty);
+        push_aggregate_pair_text(&mut out, "    ", a, b, None);
     }
 
     out.push_str(&format!("tolerance: {}\n", report.tolerance));
     out
 }
 
+/// `layer_count_override`, when given, is `(a, b)` printed in place of `a.layer_count()` /
+/// `b.layer_count()` — used only for the whole-file group, whose layer count `evaluate_l4` reads
+/// from [`crate::Report::layer_boundaries_a`]/`_b` rather than from the aggregate (see the call
+/// site).
 fn push_aggregate_pair_text(
     out: &mut String,
     indent: &str,
     a: &crate::Aggregate,
     b: &crate::Aggregate,
+    layer_count_override: Option<(usize, usize)>,
 ) {
     out.push_str(&format!(
         "{indent}move count: a={} b={}\n",
@@ -252,10 +283,10 @@ fn push_aggregate_pair_text(
         bbox_text(a.bbox),
         bbox_text(b.bbox)
     ));
+    let (layer_count_a, layer_count_b) =
+        layer_count_override.unwrap_or((a.layer_count(), b.layer_count()));
     out.push_str(&format!(
-        "{indent}layer count: a={} b={}\n",
-        a.layer_count(),
-        b.layer_count()
+        "{indent}layer count: a={layer_count_a} b={layer_count_b}\n"
     ));
 }
 
@@ -296,6 +327,9 @@ fn group_json(group: &AggregateGroup) -> String {
                 "{{\"kind\":\"layer_role\",\"layer\":{n},\"role\":{}}}",
                 json_escape(role)
             )
+        }
+        AggregateGroup::Object(name) => {
+            format!("{{\"kind\":\"object\",\"object\":{}}}", json_escape(name))
         }
     }
 }
@@ -373,28 +407,38 @@ fn outcome_json(outcome: &LevelOutcome) -> String {
     }
 }
 
-fn aggregate_json(agg: &crate::Aggregate) -> String {
+/// `layer_count_override`, when given, replaces `agg.layer_count()` — see `push_aggregate_pair_text`'s
+/// doc comment; the same whole-file exception applies here.
+fn aggregate_json(agg: &crate::Aggregate, layer_count_override: Option<usize>) -> String {
     let bbox = match agg.bbox {
         Some((min_x, max_x, min_y, max_y)) => {
             format!("{{\"min_x\":{min_x},\"max_x\":{max_x},\"min_y\":{min_y},\"max_y\":{max_y}}}")
         }
         None => "null".to_string(),
     };
+    let layer_count = layer_count_override.unwrap_or_else(|| agg.layer_count());
     format!(
-        "{{\"move_count\":{},\"extruded_length\":{},\"e_delta\":{},\"travel_distance\":{},\"bbox\":{bbox},\"layer_count\":{}}}",
+        "{{\"move_count\":{},\"extruded_length\":{},\"e_delta\":{},\"travel_distance\":{},\"bbox\":{bbox},\"layer_count\":{layer_count}}}",
         agg.move_count,
         agg.extruded_length,
         agg.e_delta,
         agg.travel_distance,
-        agg.layer_count(),
     )
 }
 
-fn aggregate_pair_json(a: &crate::Aggregate, b: &crate::Aggregate) -> String {
+fn aggregate_pair_json(
+    a: &crate::Aggregate,
+    b: &crate::Aggregate,
+    layer_count_override: Option<(usize, usize)>,
+) -> String {
+    let (a_override, b_override) = match layer_count_override {
+        Some((ac, bc)) => (Some(ac), Some(bc)),
+        None => (None, None),
+    };
     format!(
         "{{\"a\":{},\"b\":{}}}",
-        aggregate_json(a),
-        aggregate_json(b)
+        aggregate_json(a, a_override),
+        aggregate_json(b, b_override)
     )
 }
 
@@ -415,7 +459,7 @@ fn l4_json(report: &Report) -> String {
         let empty = crate::Aggregate::default();
         let a = report.l4_aggregates_a.by_layer.get(layer).unwrap_or(&empty);
         let b = report.l4_aggregates_b.by_layer.get(layer).unwrap_or(&empty);
-        by_layer.push_str(&format!("\"{layer}\":{}", aggregate_pair_json(a, b)));
+        by_layer.push_str(&format!("\"{layer}\":{}", aggregate_pair_json(a, b, None)));
     }
     by_layer.push('}');
 
@@ -438,14 +482,53 @@ fn l4_json(report: &Report) -> String {
         by_role.push_str(&format!(
             "{}:{}",
             json_escape(role),
-            aggregate_pair_json(a, b)
+            aggregate_pair_json(a, b, None)
         ));
     }
     by_role.push('}');
 
+    let mut by_layer_role = String::from("{");
+    for (i, key) in report
+        .l4_aggregates_a
+        .by_layer_role
+        .keys()
+        .chain(report.l4_aggregates_b.by_layer_role.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .enumerate()
+    {
+        if i > 0 {
+            by_layer_role.push(',');
+        }
+        let empty = crate::Aggregate::default();
+        let a = report
+            .l4_aggregates_a
+            .by_layer_role
+            .get(key)
+            .unwrap_or(&empty);
+        let b = report
+            .l4_aggregates_b
+            .by_layer_role
+            .get(key)
+            .unwrap_or(&empty);
+        // The key is `"<layer>:<role>"` as a single JSON string (object keys must be strings;
+        // `group_json`'s `{"kind":"layer_role",...}` shape is for `stricter_failure`'s own
+        // nested object, not usable as a map key here).
+        by_layer_role.push_str(&format!(
+            "{}:{}",
+            json_escape(&format!("{}:{}", key.0, key.1)),
+            aggregate_pair_json(a, b, None)
+        ));
+    }
+    by_layer_role.push('}');
+
     format!(
-        "{{\"whole_file\":{},\"by_layer\":{by_layer},\"by_role\":{by_role}}}",
-        aggregate_pair_json(&report.l4_aggregates_a.whole, &report.l4_aggregates_b.whole)
+        "{{\"whole_file\":{},\"by_layer\":{by_layer},\"by_role\":{by_role},\"by_layer_role\":{by_layer_role}}}",
+        aggregate_pair_json(
+            &report.l4_aggregates_a.whole,
+            &report.l4_aggregates_b.whole,
+            Some((report.layer_boundaries_a, report.layer_boundaries_b)),
+        )
     )
 }
 
@@ -469,7 +552,9 @@ fn l3_json(report: &Report) -> String {
 /// `evaluated_levels` (array of level names), `stricter_failure` (`null` or `{"level": ...,
 /// ...the failing level's own shape}`), `first_differing_byte` (`null` or a number),
 /// `l3_axis_deviations` (an object keyed by axis letter), `l4_aggregates` (whole file, by layer,
-/// by role, each `{"a": ..., "b": ...}`), and `tolerance` (a string — see
+/// by role and by `"<layer>:<role>"`, each `{"a": ..., "b": ...}`; the whole-file pair's
+/// `layer_count` is `Report::layer_boundaries_a`/`_b`, not the aggregate's own
+/// `Aggregate::layer_count()` — see `aggregate_json`), and `tolerance` (a string — see
 /// [`crate::Tolerance`]'s `Display`, which this never diverges from).
 pub fn render_json(report: &Report) -> String {
     let mut levels_json = String::from("{");

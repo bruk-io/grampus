@@ -133,8 +133,24 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
                     .to_string(),
             );
         }
-        (Some(tsv), None) => ToleranceArgs::Manifest { tsv, row },
-        (None, Some(md)) => ToleranceArgs::Config { md, configuration },
+        (Some(tsv), None) => {
+            if configuration.is_some() {
+                return Err(
+                    "--configuration needs --tolerance-from-config, not --tolerance-from-manifest"
+                        .to_string(),
+                );
+            }
+            ToleranceArgs::Manifest { tsv, row }
+        }
+        (None, Some(md)) => {
+            if row.is_some() {
+                return Err(
+                    "--row needs --tolerance-from-manifest, not --tolerance-from-config"
+                        .to_string(),
+                );
+            }
+            ToleranceArgs::Config { md, configuration }
+        }
         (None, None) => {
             if row.is_some() {
                 return Err("--row needs --tolerance-from-manifest".to_string());

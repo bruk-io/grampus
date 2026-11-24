@@ -2,3 +2,4 @@ path	tolerance	comparison function
 Foo/Bar.cpp	0.01 mm; reason: oracle float jitter observed on this fixture	abs
 Foo/Baz.cpp	0.01 mm
 Foo/Qux.cpp
+Foo/NoTolFn.cpp		rel
