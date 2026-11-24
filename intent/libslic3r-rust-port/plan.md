@@ -516,6 +516,11 @@ C13's decision brought this artifact into the intent, so the file is committed b
 fan-out pull request is opened, and Step 15's `docs/PORTING.md` tells porters to take the Rust
 type from it verbatim. `just port-status` prints the count of `unknown` rows.
 
+`just ownership-check` regenerates the field list into a scratch directory and fails when the
+committed file disagrees with the headers at the pin, which is what Step 16 puts in the checks a
+task passes; plain `just ownership` rewrites the committed file and is for a person regenerating
+deliberately.
+
 This step waits on Step 11.
 
 ### Step 13: The order-dependence audits
@@ -532,7 +537,9 @@ it is checked at instead; Steps 10 and 27 add to it through the same command.
 The port's choices, which `docs/PORTING.md` then carries: sum in a fixed order, use total-order
 comparators, and use insertion-ordered maps wherever iteration order reaches output, so the port
 is deterministic where the oracle is not. Each such site in the port carries a
-`// FIDELITY(port):` marker, which is what makes the regeneration possible.
+`// FIDELITY(port):` marker, which is what makes the regeneration possible. `just audit-check` is
+the drift-detecting variant Step 16 puts in the checks a task passes: it regenerates all three
+reports into a scratch directory and fails when a committed one differs.
 
 This step waits on Step 11, and runs beside Step 12.
 
@@ -562,6 +569,17 @@ the sections R13 names, reading headings and not prose quality. And it regenerat
 differs: that report is the only place a knowingly slower translation lives, and the handover to
 the following intent. No check this step adds gates on throughput, instruction count or
 allocation, and none is added anywhere else in this plan.
+
+`just port-status` with no argument is all of the above, including the burn-down to zero and the
+in-scope-rows-remaining gate, which is how R16 and R26 are worded and which is therefore true
+only at the end of Step 23. It is not what a task's pull request passes. The script also takes
+`--per-commit`, which runs exactly the subset R23 puts in `.asdlc/checks` — the trailers and their
+agreement with the manifest row, the source paths at the pin, `// SAFETY:`, `// PORT SRC:` and the
+placeholder-constant check, the marker whitelist, the document sections, the `unknown` count and
+the perf-backlog drift — and which passes while rows are still `not-started` or `drafted`, because
+a module that is honestly a draft is not a fault. It prints the burn-down and the remaining row
+count in both modes and fails on them only without the flag. Step 16 puts `--per-commit` in the
+checks a task passes, and Steps 25, 26 and 27 call the gate.
 
 This step waits on Steps 11, 12, 13 and 15, because it checks their artifacts.
 
@@ -614,19 +632,26 @@ This step waits on Steps 11, 12 and 13.
 
 `.asdlc/checks` gains the code checks that need neither the oracle binary nor a built libslic3r,
 as further lines beside `just check`, which keeps its present meaning of linting the asdlc
-documents. The new line is `just port-check`, a recipe that runs `just port-status`,
-`just inventory-check`, `just ownership`, `just audit-order`, `oracle/provenance --check` over
-`port/goldens/` and `port/reports/`, and `cargo fmt --check`. Every one of those reads only the
-vendored source and the repository's own files, so a task that touches no code still passes with
-the document checks alone, and the document checks never wait on a build.
+documents. The new line is `just port-check`, a recipe that runs `just port-status --per-commit`,
+`just inventory-check`, `just ownership-check`, `just audit-check`,
+`oracle/provenance --check` over `port/goldens/` and `port/reports/`, and `cargo fmt --check`.
+Every one of those reads only the vendored source and the repository's own files, so a task that
+touches no code still passes with the document checks alone, and the document checks never wait on
+a build. The `-check` variants are the ones that regenerate into a scratch directory and diff, so
+CI detects drift instead of rewriting a committed file and leaving the tree dirty; the plain
+`just ownership`, `just audit-order` and `just inventory` are for a person regenerating
+deliberately. `just port-status` without `--per-commit` — the completion gate — runs in the macOS
+job beside the comparisons, not here.
 
 `.github/workflows/ci.yml` gains a shallow submodule initialisation in the existing ubuntu job —
 `git submodule update --init --depth 1 vendor/OrcaSlicer` — because the new checks read the
 vendored tree, and its comment that nothing here reads the submodule is corrected. It gains a
 second job on a macOS arm64 runner for everything that needs the oracle binary, a local
 libslic3r build, or a comparison against either: `just oracle-fetch`, `just oracle-build`,
-`cargo test --workspace`, `just oracle-parity`, and the comparison recipes of Steps 24 to 27 as
-they land. That job caches the dependency superbuild's install prefix,
+`cargo test --workspace` and `just oracle-parity`. A gate joins that job in the step that makes it
+pass and not before, because a job that fails on every pull request until the port is finished
+gates nothing: `just port-status` without `--per-commit` is added by Step 23, and each comparison
+recipe by its own step among Steps 24 to 27. Each of those steps names the line it adds. That job caches the dependency superbuild's install prefix,
 `vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep`, which is the only part upstream's own
 workflow keeps.
 
@@ -742,11 +767,16 @@ opened. The trial is recorded in `docs/WORKFLOW.md` in the same form a unit's pu
 both review verdicts, each citing `source:line` against `module:line`, and the module's manifest
 row.
 
-Add the check that holds every later unit to it: a pull-request check that fails unless the body
-records both review verdicts in that form and names the module's manifest row. It runs in the
-ubuntu job, reads the pull request body and the manifest, and needs no build, so it joins
-`.asdlc/checks`'s `just port-check` by way of a `--pr-body <file>` mode that is a no-op when no
-body is given.
+Add the check that holds every later unit to it: `port/port-status --pr-body <file>`, which fails
+unless the body records both review verdicts in that form and names a manifest row that exists.
+It fails closed — an empty, absent or non-conforming body is a failure, since that is the one case
+the check exists to catch — and it is skipped only for a pull request that adds no module, which
+it decides from the diff and not from the body. It runs as its own step of the ubuntu job of
+`.github/workflows/ci.yml`, which writes the body to a file with
+`gh pr view "$PR" --json body --jq .body` under the workflow's `GITHUB_TOKEN`, so this step also
+adds `pull-requests: read` to the workflow's `permissions`. It reads the pull request and so
+cannot live in
+`.asdlc/checks`, which a task also runs locally, and it needs no build.
 
 This step waits on Steps 14, 15, 18 and 20, and **every fan-out step waits on it**.
 
@@ -815,6 +845,9 @@ unit the row names has its `mod` line, status `ported`, no `todo!()` or `unimple
 passing R19 proof at its manifest tier; `just port-check` passes; and the pull request body
 carries both review verdicts in the form Step 21 fixed.
 
+The last task of this step adds `just port-status` — the gate, without `--per-commit` — to the
+macOS job of `.github/workflows/ci.yml`, which is the moment that gate starts holding.
+
 This step waits on Step 22, and Steps 24 to 27 wait on it.
 
 ### Step 24: Compare the benchy stage by stage
@@ -833,6 +866,8 @@ the exported G-code, localised by the `; FEATURE:`, `; Z_HEIGHT:` and per-object
 and says in its output that it is in fallback rather than reporting the last seam as the first
 difference.
 
+This step adds `just compare-stages` to the macOS job of `.github/workflows/ci.yml`.
+
 This step waits on Steps 5, 8 and 23, and becomes meaningful as soon as the first pipeline stage's
 files are all ported.
 
@@ -850,6 +885,8 @@ run time, so if Step 6 measured it weaker than L1 this command moves with it.
 C3's decision is that this end-to-end comparison is the acceptance gate rather than the first
 output, and that no throwaway bridge to the vendored C++ is built to get an earlier one.
 
+This step adds `just compare-benchy` to the macOS job of `.github/workflows/ci.yml`.
+
 This step waits on Steps 4, 5, 6, 9, 19 and 23.
 
 ### Step 26: Every committed fixture
@@ -864,6 +901,8 @@ that configuration's G-code gate.
 C6's decision makes this the measure of "usable to slice files for 3D printing" for this intent:
 the port slices a mesh plus a resolved configuration, the project-format and preset layers stay
 out, and the owner's own print on an X1 Carbon stays their own act and is not a requirement here.
+
+This step adds `just compare-fixtures` to the macOS job of `.github/workflows/ci.yml`.
 
 This step waits on Step 25.
 
@@ -880,6 +919,8 @@ divergence is named and checked at the gate Step 6 measured.
 
 The command fails if a divergence it reports has no row in `port/reports/divergences.md`, so the
 two cannot drift apart, and Step 13's `just audit-order` is what regenerates that file.
+
+This step adds `just compare-configurations` to the macOS job of `.github/workflows/ci.yml`.
 
 This step waits on Steps 6, 13 and 26.
 
@@ -980,32 +1021,36 @@ the application calls them (C14).
   `tests/surface.rs`; `oracle/provenance --check port/goldens/configs` exits 0;
   `grep -c printhost_apikey port/goldens/configs/*.json` shows the key present and empty, and a
   person reads `docs/ORACLE.md` and finds the two derived G-code-only keys named.
-- **R12** — `just port-status` exits 0 and prints that `docs/PORTING.md` holds the crate map, type
+- **R12** — `just port-status --per-commit` exits 0 and prints that `docs/PORTING.md` holds the
+  crate map, type
   map, idiom map, don't-translate list, banned-substitution list and the six rules; it exits
   non-zero when a section is removed; a person reads the scaling rule and finds one statement per
   API with its citation.
-- **R13** — `just port-status` exits 0 and prints that `docs/WORKFLOW.md` holds the unit of work,
+- **R13** — `just port-status --per-commit` exits 0 and prints that `docs/WORKFLOW.md` holds the
+  unit of work,
   the two phases, the loop, the rejection rule, the conflict discipline and the trial-run record;
   it exits non-zero when one is removed.
-- **R14** — `just port-status` exits 0 and prints the count per marker kind; it exits non-zero on
-  a module whose trailer is missing, whose source path does not exist at the pin or disagrees with
-  its manifest row, on an `unsafe` block with no `// SAFETY:`, on a numeric constant with no
-  `// PORT SRC:`, and on an unrecognised port marker.
-- **R15** — `just port-status` regenerates `port/reports/perf-backlog.md` from the
+- **R14** — `just port-status --per-commit` exits 0 and prints the count per marker kind; it exits
+  non-zero on a module whose trailer is missing, whose source path does not exist at the pin or
+  disagrees with its manifest row, on an `unsafe` block with no `// SAFETY:`, on a numeric constant
+  with no `// PORT SRC:`, and on an unrecognised port marker.
+- **R15** — `just port-status --per-commit` regenerates `port/reports/perf-backlog.md` from the
   `// PERF(port):` markers and exits non-zero when the committed file differs; a person reads
-  `.asdlc/checks` and the `justfile` and finds no check that gates on throughput, instruction
-  count or allocation.
+  `.asdlc/checks`, the `justfile` and `.github/workflows/ci.yml` and finds no check that gates on
+  throughput, instruction count or allocation.
 - **R16** — `just port-status` prints the counts of `todo!()`, `unimplemented!()` and modules gated
-  out of the build, and all three read zero before R21 is claimed; it exits non-zero on a numeric
-  constant whose `// PORT SRC:` line in the vendored file does not contain that literal.
+  out of the build, and exits 0 with all three at zero at the end of Step 23, which is before R21
+  is claimed; `just port-status --per-commit` exits non-zero on a numeric constant whose
+  `// PORT SRC:` line in the vendored file does not contain that literal.
 - **R17** — `cargo test -p slic3r-ffi` passes `tests/ffi_smoke.rs`, which calls into Clipper2,
   admesh, libnest2d, qhull and Boost.Polygon's Voronoi builder through the bridge; `just
   port-check` exits non-zero when a crate manifest is given a dependency on a named substitute for
   one of them.
 - **R18** — `just audit-order` regenerates `port/reports/order-containers.md`,
   `port/reports/order-comparators.md` and `port/reports/divergences.md` and prints the site count
-  of each; running it twice leaves them unchanged; `just port-status` exits non-zero on a site in
-  the port with no `// FIDELITY(port):` marker.
+  of each; `just audit-check` then exits 0 and prints nothing, and non-zero with a diff when one of
+  the three is edited by hand; `just port-status --per-commit` exits non-zero on a site in the port
+  with no `// FIDELITY(port):` marker.
 - **R19** — `cargo test --workspace` passes, and each ported unit's test names its proof path; a
   person picks a manifest row, reads its `proof path` column and finds the matching test in the
   module's crate; `grep -rn 'mock\|stub' crates/*/tests` finds nothing standing in for the code
@@ -1019,10 +1064,12 @@ the application calls them (C14).
 - **R22** — `just compare-fixtures` exits 0 and prints one line per fixture with the level reached
   and the gate it was held to.
 - **R23** — `cat .asdlc/checks` shows `just check` and `just port-check`; `just port-check` exits 0
-  on a machine with no oracle binary and no libslic3r build; the ubuntu job of
-  `.github/workflows/ci.yml` runs only those, and a person reads the file and finds every oracle
-  check in the macOS arm64 job; a pull request that changes only a document passes with the
-  document checks alone.
+  on a machine with no oracle binary and no libslic3r build, and at every point in the work,
+  including while in-scope manifest rows are still `not-started`; the ubuntu job of
+  `.github/workflows/ci.yml` runs those and the pull-request-body check, and a person reads the
+  file and finds every check that needs the oracle binary, a libslic3r build or a comparison
+  against either in the macOS arm64 job; a pull request that changes only a document passes with
+  the document checks alone.
 - **R24** — `grep -n 'arrange 0' oracle/slice` shows the flag passed on every invocation;
   `oracle/assert-placement` exits non-zero on a run whose bounding box the fixture record does not
   name, which `just compare-benchy` and `just compare-fixtures` both call; a person reads
@@ -1032,18 +1079,21 @@ the application calls them (C14).
   came from, its transform and its license, with the absence of an upstream license for
   `resources/handy_models/` stated; every `docs/ORACLE.md` configuration row names the fixtures it
   uses.
-- **R26** — `just port-status` exits 0 and prints `0 in-scope rows remaining`; before that it exits
-  non-zero and prints how many remain.
+- **R26** — `just port-status` exits 0 and prints `0 in-scope rows remaining`; before Step 23 ends
+  the same command exits non-zero and prints how many remain, which is why it is the gate the
+  macOS job gains in Step 23 and not one of the checks a task passes.
 - **R27** — `just compare-configurations` exits 0 and prints one line per configuration and
   artifact with the level reached and the gate it was held to, reports a `none` gate as a named
   divergence without failing, and exits non-zero when a reported divergence has no row in
   `port/reports/divergences.md`.
-- **R28** — the pull-request check prints both recorded verdicts and the manifest row it found, and
-  fails a pull request whose body has neither; a person reads `docs/WORKFLOW.md` and finds the
-  three-unit trial recorded in the same form, dated before the first fan-out pull request.
-- **R29** — `just port-status` exits non-zero and names the missing section when a heading is
-  removed from `docs/PORTING.md` or `docs/WORKFLOW.md`, and exits 0 with both complete.
-- **R30** — `just ownership` exits 0 and prints the row count; it exits non-zero when a
+- **R28** — `just port-status --pr-body <file>` prints both recorded verdicts and the manifest row
+  it found and exits 0; it exits non-zero on a body with one verdict, with no manifest row, and on
+  an empty body, for a pull request whose diff adds a module; a person reads `docs/WORKFLOW.md` and
+  finds the three-unit trial recorded in the same form, dated before the first fan-out pull
+  request.
+- **R29** — `just port-status --per-commit` exits non-zero and names the missing section when a
+  heading is removed from `docs/PORTING.md` or `docs/WORKFLOW.md`, and exits 0 with both complete.
+- **R30** — `just ownership-check` exits 0 and prints the row count; it exits non-zero when a
   raw-pointer field in an in-scope header has no row, when a row names a field that does not exist
   at the pin, and when a row other than `unknown` has no evidence; `just port-status` prints the
   count of `unknown` rows.
