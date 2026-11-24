@@ -502,17 +502,25 @@ def classify_container_usage(var_name: str, search_text: str) -> tuple[str, str,
         window_start = max(0, pos - 120)
         window_end = min(len(search_text), pos + 120)
         window = search_text[window_start:window_end]
-        if range_for_re.search(window):
+        # The evidence position is the *matched pattern's own* position (offset by
+        # window_start), not `pos` (the occurrence that triggered the window search) -- those
+        # differ whenever the real begin()/end()/range-for/algorithm call sits near, but is not
+        # at, this occurrence (e.g. an earlier `.find(...)` on the same variable, with the
+        # variable's real iterating use a few lines later in the same window).
+        m = range_for_re.search(window)
+        if m:
             if first_iter_pos is None:
-                first_iter_pos, first_iter_reason = pos, "range-for over the container"
+                first_iter_pos, first_iter_reason = window_start + m.start(), "range-for over the container"
             continue
-        if begin_end_re.search(window):
+        m = begin_end_re.search(window)
+        if m:
             if first_iter_pos is None:
-                first_iter_pos, first_iter_reason = pos, "begin()/end() (or cbegin()/cend()) called on the container"
+                first_iter_pos, first_iter_reason = window_start + m.start(), "begin()/end() (or cbegin()/cend()) called on the container"
             continue
-        if algo_re.search(window):
+        m = algo_re.search(window)
+        if m:
             if first_iter_pos is None:
-                first_iter_pos, first_iter_reason = pos, "handed to an algorithm or a reduction"
+                first_iter_pos, first_iter_reason = window_start + m.start(), "handed to an algorithm or a reduction"
             continue
         if lookup_re.match(search_text, pos) or lookup_re.search(search_text[max(0, pos - 2) : pos + 40]):
             continue
