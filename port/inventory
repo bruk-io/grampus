@@ -21,6 +21,7 @@ other means (an orphan pass, dead code still compiled in, Apple-only sources).
 
 from __future__ import annotations
 
+import functools
 import posixpath
 import re
 import sys
@@ -228,6 +229,7 @@ def resolve_include(including_relpath: str, include_text: str, tracked: set[str]
     return None
 
 
+@functools.cache
 def strip_comments(text: str) -> str:
     """Return text with `//` and `/* ... */` comments blanked out.
 
@@ -236,6 +238,10 @@ def strip_comments(text: str) -> str:
     check) is never mistaken for a comment start, and a block comment spanning multiple lines
     is handled: `vendor/OrcaSlicer/src/libslic3r/GCode/FanMover.cpp:18-37` is exactly such a
     block, wrapping four #include lines that must not become graph edges.
+
+    Memoised: every pass that scans the tree (the include graph, the class tables, the enum
+    read, the stage-block scan) strips the same file texts, and the scan itself is a
+    character-at-a-time loop over 340k lines.
     """
     out: list[str] = []
     i = 0
@@ -642,7 +648,7 @@ CLASS_OR_STRUCT_DECL_RE = re.compile(
 # initializer or a call before the real definition), so it does not walk past the first real
 # parenthesis looking for a later match.
 METHOD_DEFINITION_RE = re.compile(
-    r"^(?![ \t])[^\n(;{}]*?\b([A-Za-z_]\w*)::~?[A-Za-z_]\w*\s*\(",
+    r"^(?![ \t])[^\n(;{}]*?\b([A-Za-z_]\w*)::(~?[A-Za-z_]\w*)\s*\(",
     re.MULTILINE,
 )
 
@@ -655,13 +661,19 @@ def declared_classes(text: str) -> set[str]:
     return set(CLASS_OR_STRUCT_DECL_RE.findall(text))
 
 
-def defined_classes(text: str) -> set[str]:
-    """Return every class name a `.cpp`/`.mm` defines a member of, by scanning column-0
-    `ClassName::member(` definitions (comments stripped). A call site elsewhere in the file
-    reads as indented in this codebase's style and so is not column 0; this is a heuristic,
-    not a parser, and is only ever intersected against classes actually declared somewhere,
-    which is what keeps a stray match harmless."""
+def defined_methods(text: str) -> set[tuple[str, str]]:
+    """Return every `(class name, member name)` pair a `.cpp`/`.mm` defines, by scanning
+    column-0 `ClassName::member(` definitions (comments stripped). A call site elsewhere in
+    the file reads as indented in this codebase's style and so is not column 0; this is a
+    heuristic, not a parser."""
     return set(METHOD_DEFINITION_RE.findall(strip_comments(text)))
+
+
+def defined_classes(text: str) -> set[str]:
+    """Return every class name a `.cpp`/`.mm` defines a member of (see `defined_methods`).
+    Only ever intersected against classes actually declared somewhere, which is what keeps a
+    stray match harmless."""
+    return {cls for cls, _member in defined_methods(text)}
 
 
 def precompute_class_tables(
@@ -1087,31 +1099,241 @@ def parsed_enum_names(text: str, pattern: re.Pattern) -> list[str]:
     return names
 
 
-def stage_home_files(stage: str, relpaths: list[str], texts: dict[str, str]) -> set[str]:
-    """Return the files that are this stage's own block in the vendored source.
+def stage_blocks(
+    stage: str, relpaths: list[str], code: dict[str, str]
+) -> dict[str, list[tuple[int, int]]]:
+    """Return this stage's own block(s) in the vendored source, as file -> [(start, end)]
+    offsets into `code[file]` (the comment-stripped, string-literal-blanked text — see
+    `scannable_code`).
 
     For every stage but psConflictCheck: every file with a `this->`/`print->`
     `set_started(<stage>)` call whose matching `set_done(<stage>)` is at least
     MIN_BLOCK_GAP_LINES later (see SET_STARTED_RE_FMT's and MIN_BLOCK_GAP_LINES's own
-    comments for why both filters are needed). psConflictCheck has no set_started call to
-    find at all, so it seeds instead from every file mentioning its own distinctive call site.
+    comments for why both filters are needed); the block runs from the end of the
+    `set_started` call to the start of its matching `set_done`. psConflictCheck has no
+    set_started call to find at all, so its block is the enclosing statement around its own
+    distinctive call site (the call itself, which is all the step is).
     """
+    blocks: dict[str, list[tuple[int, int]]] = {}
     if stage == "psConflictCheck":
-        return {p for p in relpaths if CONFLICT_CHECK_CALL_RE.search(texts[p])}
+        for p in relpaths:
+            for match in CONFLICT_CHECK_CALL_RE.finditer(code[p]):
+                blocks.setdefault(p, []).append((match.start(), match.end()))
+        return blocks
     start_pattern = re.compile(SET_STARTED_RE_FMT.format(name=re.escape(stage)))
     done_pattern = re.compile(SET_DONE_RE_FMT.format(name=re.escape(stage)))
-    home: set[str] = set()
     for p in relpaths:
-        text = texts[p]
+        text = code[p]
         for start_match in start_pattern.finditer(text):
             done_match = done_pattern.search(text, start_match.end())
             if done_match is None:
                 continue
             gap = text[start_match.start() : done_match.start()].count("\n")
             if gap >= MIN_BLOCK_GAP_LINES:
-                home.add(p)
-                break
-    return home
+                blocks.setdefault(p, []).append((start_match.end(), done_match.start()))
+    return blocks
+
+
+#
+# --- Step 2 of the stage derivation: the functions a stage's own block calls ---------------
+#
+# The task's step 2 is "take the functions that block calls, and the include closure of the
+# files that define them, restricted to rows this task marks in scope". Resolving a C++ call
+# target without a compiler is only sound for calls whose receiver can be *typed*, so that is
+# the only form resolved here:
+#
+#   this->m(...)            -> the enclosing column-0 `Class::member(` definition's class
+#   recv->m(...)            -> recv's declared type, read from the enclosing class's header
+#   recv[i]->m(...)         -> the element class of recv's declared container type
+#   Class::m(...)           -> that class directly (a static member call)
+#
+# and the pair (class, member) is then looked up in the column-0 definition table
+# `defined_methods` builds. A *bare* identifier call — `diff(...)`, `size(...)` — is
+# deliberately left unresolved: the only table that could resolve it is this same
+# class-member table, and matching bare names against it attributes a call to whichever one
+# file in 607 happens to define a member of that name (`diff` -> Config.cpp's
+# `ConfigBase::diff`, `get_region` -> AppConfig.cpp, `size` -> SLA/SpatIndex.cpp), which is
+# wrong rather than merely coarse. Inheritance is not walked either: `m_print->set_status`
+# types `m_print` as `Print` but the definition is `PrintBase::set_status`, so it stays
+# unresolved. Both restrictions drop call sites rather than guess at them; the run prints how
+# many went unresolved, so the gap is visible rather than implied, and STEP_2_PROOF_TARGETS
+# below asserts that what does resolve is not silently empty.
+#
+CALL_ON_RECEIVER_RE = re.compile(
+    r"\b([A-Za-z_]\w*)\s*(\[[^\]\n]*\])?\s*(->|\.)\s*([A-Za-z_]\w*)\s*\("
+)
+# Three call sites at the pin that step 2 must resolve, each a different receiver form, so a
+# resolution that silently stops resolving anything fails loudly instead of quietly handing
+# every row back to the hub file's stage (which is exactly how this column read wrong before):
+#   posInfill:      m_layers[layer_idx]->make_fills(...)        PrintObject.cpp:826
+#                   -> LayerPtrs (Print.hpp:681) -> Layer -> Layer::make_fills, Fill/Fill.cpp
+#   posContouring:  m_layers[layer_idx]->make_contour_z(imesh)  PrintObject.cpp:903
+#                   -> Layer::make_contour_z, ContourZ.cpp (which passes 1 and 2 cannot even
+#                   reach — see ORPHAN_PROOF_FILES)
+#   psGCodeExport:  m_processor.initialize(path_tmp)            GCode.cpp:2926
+#                   -> GCodeProcessor::initialize, GCode/GCodeProcessor.cpp
+STEP_2_PROOF_TARGETS = {
+    "posInfill": "Fill/Fill.cpp",
+    "posContouring": "ContourZ.cpp",
+    "psGCodeExport": "GCode/GCodeProcessor.cpp",
+}
+CALL_QUALIFIED_RE = re.compile(r"\b([A-Za-z_]\w*)::([A-Za-z_]\w*)\s*\(")
+NAMESPACE_DECL_RE = re.compile(r"\bnamespace\s+([A-Za-z_]\w*)\s*\{")
+USING_ALIAS_RE = re.compile(r"\busing\s+([A-Za-z_]\w*)\s*=\s*([^;{}]+);")
+TYPEDEF_ALIAS_RE = re.compile(r"\btypedef\s+([^;{}]+?)\s+([A-Za-z_]\w*)\s*;")
+STRING_LITERAL_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+
+
+def scannable_code(text: str) -> str:
+    """Return text with comments stripped and string literals blanked, for call scanning.
+
+    Blanking literals matters: `BOOST_LOG_TRIVIAL(debug) << "PrintObject::slice_volumes()"`
+    would otherwise read as a qualified call to that member.
+    """
+    return STRING_LITERAL_RE.sub(
+        lambda m: '"' + " " * (len(m.group(0)) - 2) + '"', strip_comments(text)
+    )
+
+
+def collect_type_aliases(code: dict[str, str]) -> dict[str, str]:
+    """Map every `using X = <type>;` / `typedef <type> X;` alias name in the tree to its
+    right-hand side (first definition wins). This is what turns `LayerPtrs` (Print.hpp:681's
+    declared type for `m_layers`) into `std::vector<Layer*>`, and so into the class `Layer`."""
+    aliases: dict[str, str] = {}
+    for text in code.values():
+        for name, rhs in USING_ALIAS_RE.findall(text):
+            aliases.setdefault(name, rhs)
+        for rhs, name in TYPEDEF_ALIAS_RE.findall(text):
+            aliases.setdefault(name, rhs)
+    return aliases
+
+
+def classes_in_type(
+    type_text: str, aliases: dict[str, str], classes: set[str], namespaces: set[str]
+) -> set[str]:
+    """Return the tracked class names a declared type names, resolving alias hops first.
+
+    Scope qualifiers are dropped (`std::vector<Layer*>` -> `vector<Layer*>`) because a
+    qualifier is a namespace, not the receiver's class — and `std` in particular reads as a
+    declared class to `CLASS_OR_STRUCT_DECL_RE`, via `Time.cpp:128`'s
+    `struct std::tm * _gmtime_r(...)`. Names declared as a namespace anywhere in the tree are
+    excluded for the same reason.
+    """
+    seen: set[str] = set()
+    text = type_text.strip()
+    for _ in range(5):
+        bare = re.sub(r"\b(const|mutable|static|volatile|unsigned|signed)\b", " ", text)
+        single = re.fullmatch(r"\s*([A-Za-z_]\w*)\s*", bare)
+        if single is None or single.group(1) in seen or single.group(1) not in aliases:
+            text = bare
+            break
+        seen.add(single.group(1))
+        text = aliases[single.group(1)]
+    text = re.sub(r"\b[A-Za-z_]\w*\s*::", " ", text)
+    return (set(re.findall(r"[A-Za-z_]\w*", text)) & classes) - namespaces
+
+
+DECLARATION_RE_CACHE: dict[str, re.Pattern] = {}
+
+
+def declaration_pattern(ident: str) -> re.Pattern:
+    """Return (memoised) the pattern matching a declaration of `ident` and capturing its
+    declared type: a type token (optionally template-instantiated), optional `*`/`&`, the
+    name, then one of `; , ) = [`."""
+    pattern = DECLARATION_RE_CACHE.get(ident)
+    if pattern is None:
+        pattern = re.compile(
+            r"(?:^|[;{}(,])\s*((?:const\s+)?[A-Za-z_][\w:]*(?:\s*<[^;{}()]*>)?)"
+            r"\s*(?:\*|&|\*\s*const)?\s*\b" + re.escape(ident) + r"\s*(?:;|,|\)|=|\[)",
+            re.MULTILINE,
+        )
+        DECLARATION_RE_CACHE[ident] = pattern
+    return pattern
+
+
+def receiver_classes(
+    ident: str,
+    search_texts: list[str],
+    aliases: dict[str, str],
+    classes: set[str],
+    namespaces: set[str],
+) -> set[str]:
+    """Return the candidate classes `ident`'s declared type names, searching only the file the
+    call is in and the header that declares the enclosing class (members live there — e.g.
+    `LayerPtrs m_layers;` at Print.hpp:681 for a call inside `PrintObject::infill()` in
+    PrintObject.cpp). A receiver that does not resolve to exactly one tracked class is skipped
+    by the caller."""
+    found: set[str] = set()
+    pattern = declaration_pattern(ident)
+    for text in search_texts:
+        for match in pattern.finditer(text):
+            found |= classes_in_type(match.group(1), aliases, classes, namespaces)
+    return found
+
+
+def enclosing_class(text: str, position: int) -> str | None:
+    """Return the class of the nearest column-0 `Class::member(` definition before position
+    (the definition a call at that offset is inside), or None."""
+    last = None
+    for match in METHOD_DEFINITION_RE.finditer(text, 0, position):
+        last = match
+    return last.group(1) if last else None
+
+
+def resolve_block_call_targets(
+    blocks: dict[str, list[tuple[int, int]]],
+    code: dict[str, str],
+    method_defs: dict[tuple[str, str], set[str]],
+    class_headers: dict[str, set[str]],
+    aliases: dict[str, str],
+    classes: set[str],
+    namespaces: set[str],
+) -> tuple[set[str], int]:
+    """Return (the files defining the members this stage's blocks call, the number of call
+    sites left unresolved). See the step-2 comment block above for which call forms resolve."""
+    targets: set[str] = set()
+    unresolved = 0
+    receiver_cache: dict[tuple[str, str | None, str], set[str]] = {}
+    for relpath, spans in blocks.items():
+        text = code[relpath]
+        for start, end in spans:
+            body = text[start:end]
+            owner = enclosing_class(text, start)
+            search_texts = [text]
+            for header in sorted(class_headers.get(owner or "", set())):
+                search_texts.append(code[header])
+            consumed: set[tuple[int, int]] = set()
+            for match in CALL_ON_RECEIVER_RE.finditer(body):
+                receiver, _index, _arrow, member = match.groups()
+                consumed.add(match.span(4))
+                if receiver == "this":
+                    candidates = {owner} if owner else set()
+                else:
+                    # `recv[i]->m()` and `recv->m()` resolve the same way: the class names in
+                    # recv's declared type, which for a container type (`LayerPtrs` ->
+                    # `std::vector<Layer*>`) are its element classes. A call on the container
+                    # itself (`m_layers.size()`) then looks up (Layer, size), finds no tracked
+                    # definition, and is counted unresolved rather than guessed at.
+                    key = (relpath, owner, receiver)
+                    if key not in receiver_cache:
+                        receiver_cache[key] = receiver_classes(
+                            receiver, search_texts, aliases, classes, namespaces
+                        )
+                    candidates = receiver_cache[key]
+                if len(candidates) != 1:
+                    unresolved += 1
+                    continue
+                defining = method_defs.get((next(iter(candidates)), member), set())
+                if defining:
+                    targets |= defining
+                else:
+                    unresolved += 1
+            for match in CALL_QUALIFIED_RE.finditer(body):
+                class_name, member = match.groups()
+                if match.span(2) in consumed or class_name in namespaces:
+                    continue
+                targets |= method_defs.get((class_name, member), set())
+    return targets, unresolved
 
 
 def compute_pipeline_stages(
@@ -1119,33 +1341,34 @@ def compute_pipeline_stages(
     graph: dict[str, set[str]],
     in_scope_map: dict[str, bool],
 ) -> dict[str, str]:
-    """Compute every row's "pipeline stage or none" cell.
+    """Compute every row's "pipeline stage or none" cell, in the task's three steps.
 
-    Per stage: find its home files (its own block in the vendored source — see
-    `stage_home_files`) and take the pure #include closure of those files (pass 1 only — no
-    sibling, no orphan pass; those are scope rules, not claimed for stage attribution),
-    restricted to in-scope rows. A .cpp file is reached by a stage's closure only when it is
-    itself one of that stage's home files, or when something else reached by the closure
-    directly #includes it (rare — a .cpp is normally never #included). This is deliberate: a
-    sibling pass here would make every per-object stage whose home reaches PrintObject.cpp's
-    (or PrintObjectSlice.cpp's) shared header closure collide on the same rows harder than file
-    granularity already forces; pure #include closure keeps a .cpp seeded directly by its own
-    stage from also being reachable through another stage's hub header, because nothing
-    #includes a .cpp file.
+    Step 1: find the stage's own block in the vendored source by its `set_started(<stage>)`
+    call (see `stage_blocks`); the file holding it is a home file.
 
-    A row more than one stage's closure reaches carries the earliest stage in PIPELINE_ORDER;
-    a row no stage's closure reaches, and every out-of-scope row, carries "none". The
-    consequence, stated plainly: every per-object step's own block (`stage_home_files`) is
-    restricted to its real implementing file(s) now, so posSlice no longer swallows the other
-    per-object steps via Print.cpp's shared forwarding calls — but file granularity still
-    cannot separate the eight per-object steps whose own block lives in PrintObject.cpp itself
-    (every PrintObjectStep stage except posSlice, which has its own file,
-    PrintObjectSlice.cpp): they collide on PrintObject.cpp's closure and the earliest among
-    them (posPerimeters) wins every row. This is a function of the tree's own file layout, not
-    a tuned result.
+    Step 2: resolve the functions that block calls (see `resolve_block_call_targets`) and add
+    the in-scope files that define them to `home`. This is what gives each per-object step the
+    file that actually does its work rather than only the shared hub it is written in —
+    posInfill's block calls `m_layers[layer_idx]->make_fills(...)` (PrintObject.cpp:826), which
+    types `m_layers` through `LayerPtrs` (Print.hpp:681) to `Layer` and resolves to
+    `Layer::make_fills` at Fill/Fill.cpp:1353.
+
+    Then take the pure #include closure of `home` (no sibling, no orphan pass; those are scope
+    rules, not claimed for stage attribution), restricted to in-scope rows. A .cpp file is
+    reached by a stage's closure only when it is in that stage's `home`, or when something
+    reached by the closure directly #includes it (rare — a .cpp is normally never #included).
+
+    Step 3: a row more than one stage's closure reaches carries the earliest stage in
+    PIPELINE_ORDER; a row no stage's closure reaches, and every out-of-scope row, carries
+    "none". The consequence, stated plainly: header rows are still dominated by the earliest
+    stage whose closure reaches the hub Print.hpp, because PrintObjectSlice.cpp:30,
+    Fill/Fill.cpp:21 and most other implementing files include it and therefore share its whole
+    closure. Step 2 fixes the *implementation* files (a .cpp is unreachable by #include, so it
+    carries the stage that calls it), not the headers.
     """
     tracked = set(relpaths)
     texts = {p: (LIBSLIC3R_ROOT / p).read_bytes().decode("latin-1") for p in relpaths}
+    code = {p: scannable_code(t) for p, t in texts.items()}
 
     print_hpp_text = texts.get("Print.hpp", "")
     object_step_names = parsed_enum_names(print_hpp_text, PRINT_OBJECT_STEP_RE)
@@ -1185,10 +1408,61 @@ def compute_pipeline_stages(
                     stack.append(nxt)
         return seen
 
+    # The step-2 tables, built once over the whole tree from the same scanned text the call
+    # sites are read from.
+    method_defs: dict[tuple[str, str], set[str]] = {}
+    class_headers: dict[str, set[str]] = {}
+    declared: set[str] = set()
+    namespaces: set[str] = set()
+    for relpath, text in code.items():
+        namespaces |= set(NAMESPACE_DECL_RE.findall(text))
+        here = declared_classes(text)
+        declared |= here
+        if relpath.endswith((".h", ".hpp")):
+            for name in here:
+                class_headers.setdefault(name, set()).add(relpath)
+        elif relpath.endswith((".cpp", ".mm")):
+            for class_name, member in defined_methods(text):
+                method_defs.setdefault((class_name, member), set()).add(relpath)
+    aliases = collect_type_aliases(code)
+
     stage_closures: dict[str, set[str]] = {}
+    unresolved_total = 0
+    step_2_added: dict[str, set[str]] = {}
     for stage in PIPELINE_ORDER:
-        home = stage_home_files(stage, relpaths, texts)
-        stage_closures[stage] = closure_for(home)
+        blocks = stage_blocks(stage, relpaths, code)
+        home = set(blocks)
+        targets, unresolved = resolve_block_call_targets(
+            blocks, code, method_defs, class_headers, aliases, declared, namespaces
+        )
+        unresolved_total += unresolved
+        # "restricted to rows this task marks in scope" (the task's own step 2).
+        targets = {p for p in targets if in_scope_map.get(p, False)}
+        step_2_added[stage] = targets - home
+        stage_closures[stage] = closure_for(home | targets)
+    for stage, expected in STEP_2_PROOF_TARGETS.items():
+        if expected not in step_2_added.get(stage, set()):
+            raise SystemExit(
+                f"inventory: step 2 of the stage derivation did not resolve {stage}'s own "
+                f"block to {expected} (see STEP_2_PROOF_TARGETS for the call site it must "
+                "reach); a resolution that reaches nothing hands every row back to the hub "
+                "file's stage without saying so, so this is a failure, not a smaller answer"
+            )
+    print(
+        "inventory: stage step 2's typed-receiver resolution reached "
+        + ", ".join(
+            f"{stage} -> {path}" for stage, path in STEP_2_PROOF_TARGETS.items()
+        )
+        + " (the three asserted call sites)"
+    )
+    print(
+        "inventory: stage step 2 resolved the call targets inside each stage's own block to "
+        + ", ".join(
+            f"{stage}+{len(added)}" for stage, added in step_2_added.items() if added
+        )
+        + f" defining file(s); {unresolved_total} call sites could not be typed and were "
+        "skipped (bare-identifier calls, and members defined on a base class)"
+    )
 
     cells: dict[str, str] = {}
     for relpath in relpaths:
