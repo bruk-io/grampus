@@ -8,6 +8,25 @@ fn lossy(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// Renders a `FailLocation::Line` side for text output: the line's text when the normalised
+/// stream has a line at that number, or a marker distinct from an actual empty line when it has
+/// none (one side's normalised stream is a strict prefix of the other's).
+fn side_text(side: &Option<Vec<u8>>) -> String {
+    match side {
+        Some(bytes) => lossy(bytes),
+        None => "<no line>".to_string(),
+    }
+}
+
+/// Renders a `FailLocation::Line` side for JSON: the line's text, or `null` when the normalised
+/// stream has no line at that number at all.
+fn side_json(side: &Option<Vec<u8>>) -> String {
+    match side {
+        Some(bytes) => json_escape(&lossy(bytes)),
+        None => "null".to_string(),
+    }
+}
+
 fn outcome_text(outcome: &LevelOutcome) -> String {
     match outcome {
         LevelOutcome::Pass => "pass".to_string(),
@@ -18,8 +37,8 @@ fn outcome_text(outcome: &LevelOutcome) -> String {
         LevelOutcome::Fail(FailLocation::Line { number, a, b }) => {
             format!(
                 "fail at line {number}\n    a: {}\n    b: {}",
-                lossy(a),
-                lossy(b)
+                side_text(a),
+                side_text(b)
             )
         }
     }
@@ -101,8 +120,8 @@ fn outcome_json(outcome: &LevelOutcome) -> String {
         LevelOutcome::Fail(FailLocation::Line { number, a, b }) => {
             format!(
                 "{{\"outcome\":\"fail\",\"line\":{number},\"a\":{},\"b\":{}}}",
-                json_escape(&lossy(a)),
-                json_escape(&lossy(b))
+                side_json(a),
+                side_json(b)
             )
         }
     }
@@ -112,7 +131,9 @@ fn outcome_json(outcome: &LevelOutcome) -> String {
 /// `levels` (an object keyed `"L0"`..`"L4"`), `strongest_evaluated_level` (a level name or
 /// `null`), `evaluated_levels` (array of level names), `stricter_failure` (`null` or
 /// `{"level": ..., ...the failing level's own shape}`), `first_differing_byte` (`null` or a
-/// number), and `tolerance`.
+/// number), and `tolerance`. An L1 line failure's `"a"`/`"b"` are each a string, or `null` when
+/// that side's normalised stream has no line at that number at all (one side is a strict prefix
+/// of the other) — distinct from `""`, which means the line is present and empty.
 pub fn render_json(report: &Report) -> String {
     let mut levels_json = String::from("{");
     for (i, level) in Level::ALL.into_iter().enumerate() {

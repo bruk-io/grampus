@@ -74,14 +74,17 @@ pub fn normalise(data: &[u8]) -> Vec<u8> {
 }
 
 /// Where two byte streams first differ, at L0 (a raw byte offset) or at L1 (a one-based line
-/// number into each side's normalised stream, with both lines carried for display).
+/// number into each side's normalised stream, with both lines carried for display). A side is
+/// `None` when the normalised stream has no line at that number at all (one side is a strict
+/// prefix of the other), which must render as distinctly absent — not as an empty line, which a
+/// kept-but-blank line also produces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FailLocation {
     ByteOffset(usize),
     Line {
         number: usize,
-        a: Vec<u8>,
-        b: Vec<u8>,
+        a: Option<Vec<u8>>,
+        b: Option<Vec<u8>>,
     },
 }
 
@@ -101,7 +104,7 @@ impl LevelOutcome {
 
 /// Byte offset of the first position at which `a` and `b` differ, including a length mismatch
 /// (the offset of the end of the shorter side). `None` when the two are identical.
-fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
+pub(crate) fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
     let n = a.len().min(b.len());
     for i in 0..n {
         if a[i] != b[i] {
@@ -132,23 +135,14 @@ pub fn evaluate_l1(a: &[u8], b: &[u8]) -> LevelOutcome {
     let lines_a = getline_split(&na);
     let lines_b = getline_split(&nb);
     let n = lines_a.len().max(lines_b.len());
-    for i in 0..n {
-        let la = lines_a.get(i).copied().unwrap_or(&[]);
-        let lb = lines_b.get(i).copied().unwrap_or(&[]);
-        if la != lb {
-            return LevelOutcome::Fail(FailLocation::Line {
-                number: i + 1,
-                a: la.to_vec(),
-                b: lb.to_vec(),
-            });
-        }
-    }
-    // na != nb but no line-indexed difference was found: unreachable given getline_split is a
-    // faithful partition of each normalised stream, but fall back to a byte-offset style report
-    // rather than panicking.
+    let diverges_at = (0..n).find(|&i| lines_a.get(i) != lines_b.get(i)).expect(
+        "normalise re-emits exactly its kept lines, each followed by one \\n, so \
+             getline_split round-trips them: na != nb must show up as an Option-level \
+             difference somewhere in 0..n",
+    );
     LevelOutcome::Fail(FailLocation::Line {
-        number: n + 1,
-        a: Vec::new(),
-        b: Vec::new(),
+        number: diverges_at + 1,
+        a: lines_a.get(diverges_at).map(|l| l.to_vec()),
+        b: lines_b.get(diverges_at).map(|l| l.to_vec()),
     })
 }

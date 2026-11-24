@@ -11,7 +11,13 @@ pub use levels::{
 
 /// The five levels of sameness, ordered strongest to weakest per R4: L0 is the strictest claim
 /// (identical bytes), L4 the loosest (aggregate statistics within tolerance).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+///
+/// Deliberately not `PartialOrd`/`Ord`: `Level::ALL`'s declaration order is strongest-to-weakest,
+/// but `Report::strongest_evaluated_pass` below picks the *highest-indexed* pass (see its doc
+/// comment), the opposite of what a reader would expect `max()` on this enum to mean. Picking
+/// among levels goes through `index()` and an explicit `max_by_key`/`min_by_key` at the call
+/// site, never through a derived comparison, so the direction is visible at every use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     L0,
     L1,
@@ -168,15 +174,10 @@ pub fn compare(a: &[u8], b: &[u8]) -> Report {
         }
     });
 
-    // If nothing evaluated passed, L0 (always evaluated) must itself be a byte-offset failure:
-    // `evaluate_l0` only ever returns `Pass` or `Fail(ByteOffset(..))`.
+    // Computed straight from the raw inputs rather than recovered from L0's outcome, so this
+    // holds regardless of how L0 (or a later task's extra levels) produce their own outcome.
     let first_differing_byte = if strongest_evaluated_pass.is_none() {
-        match &outcomes[Level::L0.index()] {
-            LevelOutcome::Fail(FailLocation::ByteOffset(off)) => Some(*off),
-            other => unreachable!(
-                "L0 is always evaluated and only fails with a byte offset, got {other:?}"
-            ),
-        }
+        levels::first_difference(a, b)
     } else {
         None
     };
