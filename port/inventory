@@ -379,6 +379,617 @@ def compute_levels(graph: dict[str, set[str]]) -> dict[str, int]:
     return levels
 
 
+#
+# --- Scope (R8/R9, task 06-manifest-scope) -------------------------------------------------
+#
+# Scope is computed in four passes, re-run to a fixed point (passes 1-3), then the named
+# deductions (pass 4) are applied once. See the task's own prose for the rationale; this is
+# the mechanical implementation.
+
+# The four entry points' own translation units. `Model::read_from_file` is defined in
+# Model.cpp; `Print::process` and `Print::export_gcode` are defined in Print.cpp;
+# `Print::apply` is defined in PrintApply.cpp (its own translation unit, not Print.cpp).
+ENTRY_SEED_FILES = {"Model.cpp", "Print.cpp", "PrintApply.cpp"}
+
+# The three files passes 1 and 2 provably cannot reach (no header, no #include names them).
+# The orphan pass (pass 3) is what admits them, and this is the proof that it ran.
+ORPHAN_PROOF_FILES = {"LayerRegion.cpp", "ContourZ.cpp", "BeltPurge.cpp"}
+
+GCODE_STATISTICS_FILES = {"GCode/GCodeStatistics.cpp", "GCode/GCodeStatistics.hpp"}
+GCODE_STATISTICS_REASON = (
+    "in: the application calls export_gcode_statistics (src/OrcaSlicer.cpp:7231), which this "
+    "file defines; nothing inside vendor/OrcaSlicer/src/libslic3r reaches it."
+)
+
+FORMAT_KEEP_FILES = {"Format/STL.cpp", "Format/STL.hpp"}
+REASON_FORMAT = (
+    "out: The port's input is a committed STL plus a resolved config, so Format/STL.cpp and "
+    "Format/STL.hpp stay in and every other file under Format/ is out. Model::read_from_file "
+    "dispatches .drc, .amf and .3mf into these loaders (Model.cpp:462-470), including "
+    "Format/bbs_3mf.cpp."
+)
+
+PRESET_FILES = {
+    "Preset.cpp", "Preset.hpp",
+    "PresetBundle.cpp", "PresetBundle.hpp",
+    "PresetCacheFormat.cpp", "PresetCacheFormat.hpp",
+}
+REASON_PRESET = (
+    "out: The port's configuration input is the oracle's resolved config, not preset JSON. "
+    "C6 carries it."
+)
+
+ARRANGE_FILES = {
+    "Arrange.cpp", "Arrange.hpp",
+    "ModelArrange.cpp", "ModelArrange.hpp",
+    "IMEXArrange.cpp", "IMEXArrange.hpp",
+    "Orient.cpp", "Orient.hpp",
+}
+REASON_ARRANGE = (
+    "out: Placement is fixed in the fixture and `just oracle-slice` passes --arrange 0, so no "
+    "arranger runs in any comparison; the CLI reaches ModelArrange::arrange_objects only from "
+    "--copy (src/OrcaSlicer.cpp:5026-5040), which no configuration uses, and its default path "
+    "(:5637) is driven by Slic3r::GUI::PartPlate, which is out of scope. C14 carries the "
+    "deduction, because the application does call this code."
+)
+
+OBJC_FILE_REASONS = {
+    "MacUtils.mm": (
+        "out: MacUtils.mm is 23 lines holding is_macos_support_boost_add_file_log and "
+        "is_mac_version_15, two OS-version predicates no in-scope caller reaches."
+    ),
+    "Format/ModelIO.mm": (
+        "out: Format/ModelIO.mm is 26 lines whose whole content is make_temp_stl_with_modelio, "
+        "an Apple-only importer that converts an asset to a temporary STL before the tree's "
+        "own readers run, and every committed fixture is already an STL."
+    ),
+    "Format/ModelIO.hpp": (
+        "out: It is not itself Objective-C++, so its reason is its own — out, as the "
+        "header of an Apple-only importer no in-scope caller reaches."
+    ),
+}
+
+SLA_IN_SCOPE_REASONS = {
+    "SLA/IndexedMesh.cpp": (
+        "in: Z-contouring calls it (ContourZ.cpp, which includes SLA/IndexedMesh.hpp), with "
+        "AABBMesh.cpp, PrintObject.cpp and Layer.hpp in the same closure."
+    ),
+    "SLA/IndexedMesh.hpp": (
+        "in: Z-contouring calls it (ContourZ.cpp, which includes SLA/IndexedMesh.hpp), with "
+        "AABBMesh.cpp, PrintObject.cpp and Layer.hpp in the same closure."
+    ),
+}
+
+SLA_SPECIFIC_REASONS = {
+    "SLA/Hollowing.cpp": (
+        "out: SLA hollowing implementation; SLA/Hollowing.hpp stays in (Model.hpp, "
+        "AABBMesh.cpp carry it as data), but no in-scope caller invokes this file's functions. "
+        "The hollowing, pad and concave-hull implementations are out per R9."
+    ),
+    "SLA/Pad.cpp": (
+        "out: SLA pad implementation; no in-scope caller invokes it. The hollowing, pad and "
+        "concave-hull implementations are out per R9."
+    ),
+    "SLA/ConcaveHull.cpp": (
+        "out: SLA concave-hull implementation; no in-scope caller invokes it. The hollowing, "
+        "pad and concave-hull implementations are out per R9."
+    ),
+}
+
+REASON_GENERIC = "out: No caller in the four entry points' closure."
+REASON_DEAD = "out: Dead at the pin."
+
+# Parametric CAD (R8's table) is the whole CAD/ subsystem (OpenCASCADE-backed sketch/solid
+# modelling, gated by SLIC3R_CAD) plus CSGMesh/, which the GUI uses for CSG preview but which
+# no vendored libslic3r.cpp or .hpp includes at all.
+CAD_PATH_PREFIXES = ("CAD/", "CSGMesh/")
+
+# Texture baking (R8's table): the TextureBake/ and TextureToColor/ subsystems, plus the two
+# root-level files that drive them (TexturePainting is the GUI job that calls into
+# TextureToColor; TextureDisplacement is the GUI job that calls into TextureBake).
+TEXTURE_PATH_PREFIXES = ("TextureBake/", "TextureToColor/")
+TEXTURE_ROOT_FILES = {
+    "TexturePainting.cpp", "TexturePainting.hpp",
+    "TextureDisplacement.cpp", "TextureDisplacement.hpp",
+}
+
+# GUI-only mesh, measure and gizmo helpers (R8's table): editing tools the GUI's gizmos drive
+# (cut, measure, emboss/text, lay-on-face, connected-bodies check, SVG import for emboss,
+# mesh-cut-surface support, simplify/decimate) and mesh-boolean, none of which the four entry
+# points' closure calls. Named individually, rather than by a shared directory, because none
+# shares one: these are root-level files, each a self-contained gizmo backend.
+GUI_MESH_HELPER_FILES = {
+    "CutUtils.cpp", "CutUtils.hpp",
+    "CutSurface.cpp", "CutSurface.hpp",
+    "Measure.cpp", "Measure.hpp", "MeasureUtils.hpp",
+    "Emboss.cpp", "Emboss.hpp", "EmbossShape.hpp", "TextConfiguration.hpp",
+    "MeshBoolean.cpp", "MeshBoolean.hpp",
+    "LayOnFace.cpp", "LayOnFace.hpp",
+    "FaceDetector.cpp", "FaceDetector.hpp",
+    "ConnectedBodies.cpp", "ConnectedBodies.hpp",
+    "NSVGUtils.cpp", "NSVGUtils.hpp",
+    "QuadricEdgeCollapse.cpp", "QuadricEdgeCollapse.hpp",
+    "ShortEdgeCollapse.cpp", "ShortEdgeCollapse.hpp",
+    "TriangleMeshDeal.cpp", "TriangleMeshDeal.hpp",
+}
+
+# Strips a (non-nested) `template <...>` parameter list before class/struct matching, so
+# `template <class T>` never reads as a declaration of a class named `T`.
+TEMPLATE_PARAMS_RE = re.compile(r"template\s*<[^>]*>")
+# Requires an actual class *body* (eventually a '{', with no ';', '{' or '}' in between) so a
+# forward declaration (`class SLAPrint;`, or `friend class SLAPrint;`) does not count as
+# "declared" here: Model.hpp:73 forward-declares `class SLAPrint;` for a friend/pointer use,
+# and without this the orphan pass (which only needs a class to be *declared* somewhere
+# in-scope) would wrongly pull every SLAPrint.cpp/SLAPrintObject method — and the whole SLA
+# pipeline behind it — into scope on that one forward declaration alone.
+CLASS_OR_STRUCT_DECL_RE = re.compile(
+    r"\b(?:class|struct)\s+([A-Za-z_]\w*)\b(?:\s*final)?(?:\s*:[^;{}]*)?\s*\{"
+)
+
+# A member-function *definition* at column 0 (this codebase's house style for every top-level
+# definition): optional return-type tokens, then `ClassName::member(` or `ClassName::~member(`.
+# `(?![ \t])` requires the line's first character to be non-blank, which is what actually
+# excludes a call or a temporary's construction such as
+# `t = IndexedMesh::hit_result(oresult.score);` appearing indented inside a function body —
+# '^' alone is not enough, since MULTILINE '^' matches before the leading spaces too, not
+# only at true column 0. `[^\n(;{}]*?` then stops before an earlier '(' on the same line (an
+# initializer or a call before the real definition), so it does not walk past the first real
+# parenthesis looking for a later match.
+METHOD_DEFINITION_RE = re.compile(
+    r"^(?![ \t])[^\n(;{}]*?\b([A-Za-z_]\w*)::~?[A-Za-z_]\w*\s*\(",
+    re.MULTILINE,
+)
+
+
+def declared_classes(text: str) -> set[str]:
+    """Return every class/struct name `class X` or `struct X` names in text (comments
+    stripped, template parameter lists stripped first so `template <class T>` is not read as
+    declaring a class `T`)."""
+    text = TEMPLATE_PARAMS_RE.sub(" ", strip_comments(text))
+    return set(CLASS_OR_STRUCT_DECL_RE.findall(text))
+
+
+def defined_classes(text: str) -> set[str]:
+    """Return every class name a `.cpp`/`.mm` defines a member of, by scanning column-0
+    `ClassName::member(` definitions (comments stripped). A call site elsewhere in the file
+    reads as indented in this codebase's style and so is not column 0; this is a heuristic,
+    not a parser, and is only ever intersected against classes actually declared somewhere,
+    which is what keeps a stray match harmless."""
+    return set(METHOD_DEFINITION_RE.findall(strip_comments(text)))
+
+
+def precompute_class_tables(
+    relpaths: list[str],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Return (header -> classes it declares, source -> classes it defines a method of),
+    over every tracked file, read once."""
+    header_classes: dict[str, set[str]] = {}
+    source_classes: dict[str, set[str]] = {}
+    for relpath in relpaths:
+        text = (LIBSLIC3R_ROOT / relpath).read_bytes().decode("latin-1")
+        if relpath.endswith((".h", ".hpp")):
+            header_classes[relpath] = declared_classes(text)
+        elif relpath.endswith((".cpp", ".mm")):
+            source_classes[relpath] = defined_classes(text)
+    return header_classes, source_classes
+
+
+def same_stem_cpp(header_relpath: str) -> str:
+    """Return header_relpath's same-stem `.cpp` sibling path (not asserted to exist)."""
+    stem, _, _ = header_relpath.rpartition(".")
+    return stem + ".cpp"
+
+
+def closure_1_2_3(
+    seeds: set[str],
+    graph: dict[str, set[str]],
+    tracked: set[str],
+    headers: set[str],
+    sources: set[str],
+    header_classes: dict[str, set[str]],
+    source_classes: dict[str, set[str]],
+    excluded: frozenset[str] = frozenset(),
+) -> tuple[set[str], int]:
+    """Run passes 1-3 (include closure, same-stem sibling, orphan) to a fixed point from
+    seeds over graph, treating every relpath in excluded as absent (no node, no edge, never a
+    sibling or orphan candidate). Return (the resulting set, the round count at which it
+    stopped growing)."""
+    in_scope = set(seeds) - excluded
+    round_no = 0
+    while True:
+        round_no += 1
+        before = set(in_scope)
+
+        # Pass 1: include closure (a full BFS over the current set, every round; the only
+        # reason a later round ever finds something new is that pass 3 of the previous round
+        # added a .cpp whose own #include lines are edges nothing had followed yet).
+        stack = list(in_scope)
+        seen = set(in_scope)
+        while stack:
+            node = stack.pop()
+            for nxt in graph.get(node, ()):
+                if nxt in excluded or nxt not in tracked:
+                    continue
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        in_scope |= seen
+
+        # Pass 2: the same-stem .cpp sibling of every header now in scope.
+        for header in [p for p in in_scope if p in headers]:
+            sib = same_stem_cpp(header)
+            if sib in tracked and sib not in excluded:
+                in_scope.add(sib)
+
+        # Pass 3: the orphan pass. A .cpp defines a method of a class declared in an in-scope
+        # header -> it is admitted, however it was (or was not) otherwise reached.
+        in_scope_headers = [p for p in in_scope if p in headers]
+        declared: set[str] = set()
+        for header in in_scope_headers:
+            declared |= header_classes.get(header, set())
+        if declared:
+            for source in sources:
+                if source in in_scope or source in excluded:
+                    continue
+                if source_classes.get(source, set()) & declared:
+                    in_scope.add(source)
+
+        if in_scope == before:
+            return in_scope, round_no
+
+
+def classify_named_deduction(relpath: str) -> str | None:
+    """Return the reason text if relpath matches one of the task's explicitly named
+    deductions, else None. Checked in a fixed priority order so a file named by more than one
+    rule (there are none at the pin, but the order is still stated) takes the most specific."""
+    if relpath in SLA_SPECIFIC_REASONS:
+        return SLA_SPECIFIC_REASONS[relpath]
+    if relpath in OBJC_FILE_REASONS:
+        return OBJC_FILE_REASONS[relpath]
+    if relpath in PRESET_FILES:
+        return REASON_PRESET
+    if relpath in ARRANGE_FILES:
+        return REASON_ARRANGE
+    if relpath.startswith("Format/") and relpath not in FORMAT_KEEP_FILES:
+        return REASON_FORMAT
+    if relpath.startswith(CAD_PATH_PREFIXES):
+        return REASON_GENERIC
+    if relpath.startswith(TEXTURE_PATH_PREFIXES) or relpath in TEXTURE_ROOT_FILES:
+        return REASON_GENERIC
+    if relpath in GUI_MESH_HELPER_FILES:
+        return REASON_GENERIC
+    return None
+
+
+def compute_scope(
+    relpaths: list[str], graph: dict[str, set[str]], cmake_paths: list[str]
+) -> tuple[dict[str, str], int, dict[str, bool]]:
+    """Compute every row's "in scope or out with a reason" cell.
+
+    Returns (relpath -> cell text, the round count of the final fixed point, relpath -> bool
+    "is the row in scope"). Raises SystemExit if the three orphan-pass-only files are missing
+    from the result, or if an entry-point seed file is missing from the tree. cmake_paths is
+    the already-parsed build-file source list, reused so "Dead at the pin" means what it says:
+    a cmake-compiled file is never dead, however this script's own graph sees it.
+    """
+    tracked = set(relpaths)
+    missing_seeds = ENTRY_SEED_FILES - tracked
+    if missing_seeds:
+        raise SystemExit(
+            f"inventory: the four entry points' own translation units are missing from the "
+            f"tracked file set: {sorted(missing_seeds)}"
+        )
+    headers = {p for p in relpaths if p.endswith((".h", ".hpp"))}
+    sources = {p for p in relpaths if p.endswith((".cpp", ".mm"))}
+    header_classes, source_classes = precompute_class_tables(relpaths)
+
+    def run(excluded: frozenset[str]) -> tuple[set[str], int]:
+        return closure_1_2_3(
+            ENTRY_SEED_FILES, graph, tracked, headers, sources,
+            header_classes, source_classes, excluded,
+        )
+
+    # Passes 1-3 to a fixed point, then pass 4 (named deductions) removes the files the
+    # closure positively reached but that the task names as out. Because a deducted file is
+    # then excluded from the graph entirely (not just removed from the result), anything that
+    # was reachable *only* through it also falls out, and this is re-run to ITS OWN fixed
+    # point: deducting a bridge file can newly orphan something downstream of it.
+    excluded: frozenset[str] = frozenset()
+    scope, rounds = run(excluded)
+    while True:
+        newly_deducted = {p for p in scope if classify_named_deduction(p) is not None} - excluded
+        if not newly_deducted:
+            break
+        excluded = frozenset(excluded | newly_deducted)
+        scope, rounds = run(excluded)
+
+    missing_proof = ORPHAN_PROOF_FILES - scope
+    if missing_proof:
+        raise SystemExit(
+            f"inventory: the orphan pass did not admit {sorted(missing_proof)}; passes 1 and "
+            "2 alone cannot reach them, so their absence means the orphan pass is broken"
+        )
+    print(
+        f"inventory: the orphan pass admitted all three of {sorted(ORPHAN_PROOF_FILES)} "
+        "(none has a header or an #include anywhere in the tree naming it, so passes 1 and 2 "
+        "alone could not have reached them)"
+    )
+
+    # GCode/GCodeStatistics.{cpp,hpp} is in scope by the application's own call
+    # (src/OrcaSlicer.cpp:7231), which is outside this tree and so outside every pass above.
+    scope = scope | (GCODE_STATISTICS_FILES & tracked)
+
+    # "Dead at the pin": nothing else in the tracked tree includes it, and it does not define
+    # a method of any class declared anywhere in the tracked tree either (the same orphan test
+    # pass 3 runs, just unrestricted by scope) — so no mechanism this script knows about ties
+    # it to anything else at all. This is a heuristic over this file set, not a whole-program
+    # reachability proof (a file only ever called from outside libslic3r, e.g. GUI code under
+    # src/slic3r, would not be "dead" by that stricter standard, but nothing here can see that).
+    in_degree: dict[str, int] = {p: 0 for p in relpaths}
+    for dsts in graph.values():
+        for dst in dsts:
+            in_degree[dst] = in_degree.get(dst, 0) + 1
+    all_declared: set[str] = set()
+    for classes in header_classes.values():
+        all_declared |= classes
+    is_orphan_target = {
+        p for p in sources if source_classes.get(p, set()) & all_declared
+    }
+    cmake_compiled = set(cmake_paths) & tracked
+    # 03-manifest-file-set's cmake parser (parse_cmake_source_paths, not touched here) reads
+    # only the `lisbslic3r_sources` and `libslic3r_cgal` blocks. `OpenVDBUtils.cpp/.hpp` are a
+    # third, separately-named conditional (CMakeLists.txt:16-19,614: `OpenVDBUtils_SOURCES`,
+    # a single-line `set()` under `if (TARGET OpenVDB::openvdb)`), so cmake_paths never names
+    # them even though the build compiles them when that target exists; without this they
+    # would wrongly read as "Dead at the pin" for having no in-tree includer of their own.
+    build_conditional_but_not_dead = {"OpenVDBUtils.cpp", "OpenVDBUtils.hpp"}
+
+    def is_dead(relpath: str) -> bool:
+        if relpath in ENTRY_SEED_FILES:
+            return False
+        if in_degree.get(relpath, 0) > 0:
+            return False
+        if relpath in sources and relpath in is_orphan_target:
+            return False
+        if relpath in cmake_compiled or relpath in build_conditional_but_not_dead:
+            return False
+        # A header with zero in-tree includers is not provably dead: this script sees only
+        # src/libslic3r, and a header reached only from src/slic3r (GUI code) outside that
+        # tree would look identical from here. "Dead at the pin" is reserved for a .cpp/.mm
+        # this script can show is not compiled at all; an unreached header gets the generic
+        # reason instead, which is true of it regardless.
+        return relpath in sources
+
+    cells: dict[str, str] = {}
+    in_scope_map: dict[str, bool] = {}
+    for relpath in relpaths:
+        if relpath in GCODE_STATISTICS_FILES:
+            cells[relpath] = GCODE_STATISTICS_REASON
+            in_scope_map[relpath] = True
+            continue
+        named = classify_named_deduction(relpath)
+        if named is not None:
+            cells[relpath] = named
+            in_scope_map[relpath] = False
+            continue
+        if relpath in scope:
+            cells[relpath] = SLA_IN_SCOPE_REASONS.get(relpath, "in")
+            in_scope_map[relpath] = True
+            continue
+        cells[relpath] = REASON_DEAD if is_dead(relpath) else REASON_GENERIC
+        in_scope_map[relpath] = False
+
+    return cells, rounds, in_scope_map
+
+
+def report_case_sensitive_resolution(relpaths: list[str], tracked: set[str]) -> None:
+    """Print proof that include resolution is case-sensitive: show
+    Support/SupportMaterial.cpp's #include "utils.hpp" resolving to nothing, while Utils.hpp
+    is reached only through the exact spelling. Raises SystemExit if either fact is false
+    (the check that was meant to prove this would then be proving nothing)."""
+    target = "Support/SupportMaterial.cpp"
+    if target not in tracked:
+        return
+    text = (LIBSLIC3R_ROOT / target).read_bytes().decode("latin-1")
+    unresolved = [
+        include_text
+        for include_text in iter_active_includes(text)
+        if resolve_include(target, include_text, tracked) is None
+    ]
+    if "utils.hpp" not in unresolved:
+        raise SystemExit(
+            f"inventory: expected {target}'s #include \"utils.hpp\" to resolve to nothing "
+            "under case-sensitive matching, but it did not come back unresolved; include "
+            "resolution may have regressed to case-insensitive"
+        )
+    print(
+        f'inventory: include resolution is case-sensitive — {target}\'s #include "utils.hpp" '
+        f'resolves to nothing ({len(unresolved)} unresolved include(s) in that file), and '
+        '"Utils.hpp" enters the closure only through that exact spelling'
+    )
+
+
+def prove_orphan_pass_load_bearing(relpaths: list[str], graph: dict[str, set[str]]) -> None:
+    """Prove the orphan pass is load-bearing by re-running the scope computation with pass 3
+    disabled and showing the three proof files are then absent. Exits non-zero either way (the
+    same convention as --selftest): 1 when pass 3's absence is correctly shown to break the
+    three files (the expected, healthy outcome — the orphan pass does matter), 2 when it does
+    not (the proof itself is broken, since those three files have no header and no #include
+    naming them, so passes 1 and 2 alone must never reach them)."""
+    tracked = set(relpaths)
+    headers = {p for p in relpaths if p.endswith((".h", ".hpp"))}
+
+    in_scope = set(ENTRY_SEED_FILES)
+    while True:
+        before = set(in_scope)
+        stack = list(in_scope)
+        seen = set(in_scope)
+        while stack:
+            node = stack.pop()
+            for nxt in graph.get(node, ()):
+                if nxt in tracked and nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        in_scope |= seen
+        for header in [p for p in in_scope if p in headers]:
+            sib = same_stem_cpp(header)
+            if sib in tracked:
+                in_scope.add(sib)
+        # Pass 3 deliberately omitted.
+        if in_scope == before:
+            break
+
+    still_present = ORPHAN_PROOF_FILES & in_scope
+    if still_present:
+        print(
+            "inventory --prove-orphan-pass: FAILED — passes 1 and 2 alone already reached "
+            f"{sorted(still_present)}; the proof is wrong about what those passes can see"
+        )
+        sys.exit(2)
+    print(
+        "inventory --prove-orphan-pass: with pass 3 disabled, passes 1 and 2 alone reach none "
+        f"of {sorted(ORPHAN_PROOF_FILES)} — confirming the orphan pass is what admits them"
+    )
+    sys.exit(1)
+
+
+#
+# --- Pipeline stage (R8, task 06-manifest-scope) --------------------------------------------
+#
+
+PIPELINE_ORDER = [
+    "posSlice", "posPerimeters", "posPrepareInfill", "posInfill", "posIroning",
+    "posContouring", "posSupportMaterial", "posDetectOverhangsForLift", "posSimplifyPath",
+    "psWipeTower", "psSkirtBrim", "psGCodeExport", "psConflictCheck",
+]
+
+PRINT_OBJECT_STEP_RE = re.compile(r"enum\s+PrintObjectStep\s*\{([^}]*)\}", re.DOTALL)
+PRINT_STEP_RE = re.compile(r"enum\s+PrintStep\s*\{([^}]*)\}", re.DOTALL)
+
+SET_STARTED_RE_FMT = r"set_started\s*\(\s*{name}\s*\)"
+# psConflictCheck fires no set_started call at all (it has no SlicingPipelineStepPlugin
+# value and so no hook seam); its own block is identified by its own distinctive call
+# instead, into the file that implements it.
+CONFLICT_CHECK_CALL_RE = re.compile(r"ConflictChecker::find_inter_of_lines_in_diff_objs")
+
+
+def parsed_enum_names(text: str, pattern: re.Pattern) -> set[str]:
+    """Return every enumerator name declared in the first `enum ... { ... }` block pattern
+    matches (comments stripped first, `=` aliases' right-hand side dropped)."""
+    match = pattern.search(strip_comments(text))
+    if not match:
+        return set()
+    names: set[str] = set()
+    for entry in match.group(1).split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        name = entry.split("=")[0].strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def stage_home_files(stage: str, relpaths: list[str], texts: dict[str, str]) -> set[str]:
+    """Return the files that are this stage's own block in the vendored source: every file
+    whose text contains a literal `set_started(<stage>)` call, found mechanically rather than
+    at hardcoded locations (the task's own line citations are themselves "for example").
+    psGCodeExport additionally seeds from GCode.cpp/.hpp (the G-code writer itself, which is
+    what "export" means) and psConflictCheck — which has no set_started call to find at all —
+    seeds instead from the files that implement GCode/ConflictChecker, found by its own
+    distinctive call site."""
+    if stage == "psConflictCheck":
+        home = {"GCode/ConflictChecker.cpp", "GCode/ConflictChecker.hpp"}
+        home |= {
+            p for p in relpaths
+            if CONFLICT_CHECK_CALL_RE.search(texts[p])
+        }
+        return home & set(relpaths)
+    pattern = re.compile(SET_STARTED_RE_FMT.format(name=re.escape(stage)))
+    home = {p for p in relpaths if pattern.search(texts[p])}
+    if stage == "psGCodeExport":
+        home |= {"GCode.cpp", "GCode.hpp"} & set(relpaths)
+    return home
+
+
+def compute_pipeline_stages(
+    relpaths: list[str],
+    graph: dict[str, set[str]],
+    in_scope_map: dict[str, bool],
+) -> dict[str, str]:
+    """Compute every row's "pipeline stage or none" cell.
+
+    Per stage: find its home files (its own block in the vendored source) and take the pure
+    #include closure of those files (pass 1 only — no sibling, no orphan pass; those are scope
+    rules, not claimed for stage attribution), restricted to in-scope rows. A .cpp file is
+    reached by a stage's closure only when it is itself one of that stage's home files, or
+    when something else reached by the closure directly #includes it (rare — a .cpp is
+    normally never #included). This is deliberate: several stages' own `set_started` calls
+    live in the same hub file (Print.cpp holds psWipeTower's, psSkirtBrim's and part of
+    psSlice's and psConflictCheck's own blocks), so a sibling pass here would make every
+    stage whose home reaches that hub's shared header closure collide on the same rows, and
+    the earliest stage in PIPELINE_ORDER would win every tie — including the row for the
+    stage that actually implements the step (GCode/ConflictChecker.cpp would go to whichever
+    stage is earliest, never to psConflictCheck, which is the one requirement this derivation
+    must not fail). Pure #include closure avoids that: a .cpp seeded directly by its own stage
+    is never also reachable through another stage's shared hub header, because nothing
+    #includes a .cpp file.
+
+    A row more than one stage's closure reaches carries the earliest stage in PIPELINE_ORDER;
+    a row no stage's closure reaches, and every out-of-scope row, carries "none". The
+    consequence, stated plainly: most per-object stages whose own block lives in the shared
+    hub PrintObject.cpp (every one except posSlice) end up with no row of their own, because
+    nothing else in the tree #includes PrintObject.cpp and nothing distinguishes their closures
+    from posSlice's or each other's at file granularity. Only the stages with their own
+    distinctive implementation file — posSlice (PrintObjectSlice.cpp), psGCodeExport
+    (GCode.cpp/.hpp) and psConflictCheck (GCode/ConflictChecker.cpp/.hpp) — are guaranteed a
+    row; this is a function of the tree's own file layout, not a tuned result.
+    """
+    tracked = set(relpaths)
+    texts = {p: (LIBSLIC3R_ROOT / p).read_bytes().decode("latin-1") for p in relpaths}
+
+    print_hpp_text = texts.get("Print.hpp", "")
+    object_step_names = parsed_enum_names(print_hpp_text, PRINT_OBJECT_STEP_RE)
+    print_step_names = parsed_enum_names(print_hpp_text, PRINT_STEP_RE)
+    enum_names = object_step_names | print_step_names
+    missing_from_enums = set(PIPELINE_ORDER) - enum_names
+    if missing_from_enums:
+        raise SystemExit(
+            f"inventory: {sorted(missing_from_enums)} is not among the enumerators Print.hpp's "
+            "PrintObjectStep/PrintStep declare; the stage list must be read from those enums, "
+            "not restated here"
+        )
+
+    def closure_for(home: set[str]) -> set[str]:
+        stack = list(home & tracked)
+        seen = set(stack)
+        while stack:
+            node = stack.pop()
+            for nxt in graph.get(node, ()):
+                if nxt in tracked and nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return seen
+
+    stage_closures: dict[str, set[str]] = {}
+    for stage in PIPELINE_ORDER:
+        home = stage_home_files(stage, relpaths, texts)
+        stage_closures[stage] = closure_for(home)
+
+    cells: dict[str, str] = {}
+    for relpath in relpaths:
+        if not in_scope_map.get(relpath, False):
+            cells[relpath] = "none"
+            continue
+        assigned = "none"
+        for stage in PIPELINE_ORDER:
+            if relpath in stage_closures[stage]:
+                assigned = stage
+                break
+        cells[relpath] = assigned
+    return cells
+
+
 def run_selftest() -> None:
     """Prove the SCC pass's negative case on a synthetic three-node cycle, untouched tree.
 
@@ -402,13 +1013,27 @@ def run_selftest() -> None:
     is_flag=True,
     help="Prove the SCC pass's failure path on a synthetic three-node cycle, then exit non-zero.",
 )
-def main(selftest: bool) -> None:
+@click.option(
+    "--prove-orphan-pass",
+    is_flag=True,
+    help="Prove the orphan pass is load-bearing by re-running scope with it disabled, then "
+    "exit non-zero.",
+)
+def main(selftest: bool, prove_orphan_pass: bool) -> None:
     """Regenerate port/manifest.tsv from the vendored libslic3r tree."""
     if selftest:
         run_selftest()
         return
 
     relpaths = walk_file_set(LIBSLIC3R_ROOT)
+
+    if prove_orphan_pass:
+        if not relpaths:
+            raise SystemExit(f"inventory: found no source files under {LIBSLIC3R_ROOT}")
+        graph = build_include_graph(relpaths)
+        prove_orphan_pass_load_bearing(relpaths, graph)
+        return
+
     if not relpaths:
         raise SystemExit(f"inventory: found no source files under {LIBSLIC3R_ROOT}")
 
@@ -435,6 +1060,28 @@ def main(selftest: bool) -> None:
 
     levels = compute_levels(graph)
 
+    report_case_sensitive_resolution(relpaths, set(relpaths))
+
+    scope_cells, fixed_point_round, in_scope_map = compute_scope(relpaths, graph, cmake_paths)
+    if fixed_point_round <= 1:
+        raise SystemExit(
+            f"inventory: passes 1-3 reached their fixed point at round {fixed_point_round}, "
+            "but a single pass is known to produce a smaller, different set (ContourZ.cpp's "
+            "own #include of SLA/IndexedMesh.hpp is only visible from round 2 onward); this "
+            "means the re-run-to-fixed-point loop is broken"
+        )
+    print(
+        f"inventory: scope passes 1-3 reached their fixed point at round {fixed_point_round} "
+        "(the round that added nothing further; round 1 alone would have missed "
+        f"{sorted(ORPHAN_PROOF_FILES)}'s own further #include edges)"
+    )
+    in_scope_count = sum(1 for v in in_scope_map.values() if v)
+    print(
+        f"inventory: {in_scope_count} of {len(relpaths)} rows in scope after the four passes"
+    )
+
+    stage_cells = compute_pipeline_stages(relpaths, graph, in_scope_map)
+
     rows = []
     total_lines = 0
     for relpath in relpaths:
@@ -442,7 +1089,11 @@ def main(selftest: bool) -> None:
         lines = count_lines(LIBSLIC3R_ROOT / relpath)
         total_lines += lines
         level = levels[relpath]
-        row = [relpath, subsystem, str(lines), str(level)] + [""] * (len(HEADER) - 4)
+        row = [relpath, subsystem, str(lines), str(level), ""]
+        row.append(scope_cells[relpath])
+        row.append("")
+        row.append(stage_cells[relpath])
+        row.extend([""] * (len(HEADER) - len(row)))
         rows.append(row)
 
     # The row set is the filesystem walk by construction, but this asserts it rather than
