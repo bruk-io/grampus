@@ -1,0 +1,208 @@
+header path	line	declaring type	field	C++ type	class	evidence	rust type
+AABBMesh.hpp	32	AABBMesh	m_tm	const indexed_triangle_set *			
+AABBMesh.hpp	72	hit_result	m_mesh	const AABBMesh *			
+Arachne/SkeletalTrapezoidation.hpp	144	TransitionMidRef	edge	edge_t *			
+Arachne/SkeletalTrapezoidation.hpp	166	SkeletalTrapezoidation	vd_edge_to_he_edge	ankerl::unordered_dense::map<const VD::edge_type *, edge_t *>			
+Arachne/SkeletalTrapezoidation.hpp	172	SkeletalTrapezoidation	vd_node_to_he_node	ankerl::unordered_dense::map<const VD::vertex_type *, node_t *>			
+Arachne/SkeletalTrapezoidation.hpp	174	SkeletalTrapezoidation	p_generated_toolpaths	std::vector<VariableWidthLines> *			
+Arachne/utils/HalfEdge.hpp	23	HalfEdge	twin	edge_t *			
+Arachne/utils/HalfEdge.hpp	24	HalfEdge	next	edge_t *			
+Arachne/utils/HalfEdge.hpp	25	HalfEdge	prev	edge_t *			
+Arachne/utils/HalfEdge.hpp	26	HalfEdge	from	node_t *			
+Arachne/utils/HalfEdge.hpp	27	HalfEdge	to	node_t *			
+Arachne/utils/HalfEdgeNode.hpp	24	HalfEdgeNode	incident_edge	edge_t *			
+Arachne/utils/PolygonsPointIndex.hpp	28	PathsPointIndex	polygons	const Paths *			
+ClipperUtils.hpp	98	iterator	m_ptr	const Points *			
+ClipperUtils.hpp	314	SurfacesPtrProvider	m_surfaces	const SurfacesPtr &			
+Config.hpp	263	ConfigSubstitution	opt_def	const ConfigOptionDef *			
+Config.hpp	2150	ConfigOptionEnumGeneric	keys_map	const t_config_enum_values *			
+Config.hpp	2213	ConfigOptionEnumsGenericTempl	keys_map	const t_config_enum_values *			
+Config.hpp	2616	ConfigOptionDef	enum_keys_map	const t_config_enum_values *			
+Config.hpp	2633	ConfigOptionDef	nocli	static const constexpr char *			
+Config.hpp	2658	ConfigDef	by_serialization_key_ordinal	std::map<size_t, const ConfigOptionDef*>			
+ConnectedBodies.hpp	39	IslandLocator	m_islands	const ExPolygons *			
+EdgeGrid.hpp	96	Contour	m_begin	const Slic3r::Point *			
+EdgeGrid.hpp	98	Contour	m_end	const Slic3r::Point *			
+Extruder.hpp	96	Extruder	m_config	GCodeConfig *			
+ExtrusionEntityCollection.hpp	37	ExtrusionEntityCollection	entities	ExtrusionEntitiesPtr			
+Fill/AdaptiveInfillField.hpp	30	Slice	expolygons	const ExPolygons *			
+Fill/Fill.hpp	34	Filler	fill	Fill *			
+Fill/FillBase.hpp	119	FillParams	config	const           PrintRegionConfig *			
+Fill/FillBase.hpp	162	Fill	adapt_fill_octree	FillAdaptive::Octree *			
+Fill/FillBase.hpp	165	Fill	adaptive_infill_field	const AdaptiveInfillField *			
+Fill/FillBase.hpp	168	Fill	print_config	const PrintConfig *			
+Fill/FillBase.hpp	172	Fill	print_object_config	const PrintObjectConfig *			
+Fill/FillLightning.hpp	30	Filler	generator	Generator *			
+FlushVolPredictor.hpp	47	GenericFlushPredictor	predictor	FlushVolPredictor *			
+GCode.hpp	197	WipeTowerIntegration	m_print_config	const PrintConfig *			
+GCode.hpp	365	LayerToPrint	object_layer	const Layer *			
+GCode.hpp	366	LayerToPrint	support_layer	const SupportLayer *			
+GCode.hpp	367	LayerToPrint	original_object	const PrintObject *			
+GCode.hpp	368	LayerToPrint	belt_brim_band	const BeltBrimBand *			
+GCode.hpp	439	GCodeOutputStream	f	FILE *			
+GCode.hpp	605	ObjectByExtruder	support	const ExtrusionEntityCollection *			
+GCode.hpp	612	Region	perimeters	std::vector<const ExtrusionEntity*>			
+GCode.hpp	614	Region	infills	std::vector<const ExtrusionEntity*>			
+GCode.hpp	616	Region	infills_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>			
+GCode.hpp	618	Region	perimeters_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>			
+GCode.hpp	762	PlaceholderParserIntegration	opt_position	ConfigOptionFloats *			
+GCode.hpp	763	PlaceholderParserIntegration	opt_zhop	ConfigOptionFloat *			
+GCode.hpp	764	PlaceholderParserIntegration	opt_e_position	ConfigOptionFloats *			
+GCode.hpp	765	PlaceholderParserIntegration	opt_e_retracted	ConfigOptionFloats *			
+GCode.hpp	766	PlaceholderParserIntegration	opt_e_restart_extra	ConfigOptionFloats *			
+GCode.hpp	767	PlaceholderParserIntegration	opt_extruded_volume	ConfigOptionFloats *			
+GCode.hpp	768	PlaceholderParserIntegration	opt_extruded_weight	ConfigOptionFloats *			
+GCode.hpp	769	PlaceholderParserIntegration	opt_extruded_volume_total	ConfigOptionFloat *			
+GCode.hpp	770	PlaceholderParserIntegration	opt_extruded_weight_total	ConfigOptionFloat *			
+GCode.hpp	823	GCode	m_instance_names	std::unordered_map<const PrintInstance*, std::string>			
+GCode.hpp	840	GCode	m_layer	const Layer *			
+GCode.hpp	908	GCode	m_last_obj_copy	std::pair<const PrintObject*, Point>			
+GCode.hpp	916	GCode	m_print	Print *			
+GCode.hpp	919	GCode	m_printed_objects	std::vector<const PrintObject*>			
+GCode.hpp	931	GCode	m_curr_print	Print *			
+GCode.hpp	955	GCode	m_belt_floor_object	const PrintObject *			
+GCode.hpp	962	BeltFloorObjectGuard	slot	const PrintObject *&			
+GCode.hpp	969	GCode	m_belt_travel_target	const ExtrusionPath *			
+GCode.hpp	972	GCode	m_belt_uncut_line_lengths	const std::vector<double> *			
+GCode/ConflictChecker.hpp	26	LineWithID	_id	const void *			
+GCode/ConflictChecker.hpp	37	ExtrusionLayer	layer	const Layer *			
+GCode/ConflictChecker.hpp	69	LinesBucket	_id	const void *			
+GCode/ConflictChecker.hpp	122	LinesBucketQueue	line_bucket_ptr_queue	std::priority_queue<LinesBucket *, std::vector<LinesBucket *>, LinesBucketPtrComp>			
+GCode/ConflictChecker.hpp	141	ConflictComputeResult	_obj1	const void *			
+GCode/ConflictChecker.hpp	142	ConflictComputeResult	_obj2	const void *			
+GCode/ExtrusionProcessor.hpp	448	PrecomputedOverhangLayer	object	const PrintObject *			
+GCode/ExtrusionProcessor.hpp	449	PrecomputedOverhangLayer	layer	const Layer *			
+GCode/ExtrusionProcessor.hpp	493	ExtrusionQualityEstimator	prev_layer_boundaries	std::unordered_map<const PrintObject*, std::shared_ptr<const Boundaries>>			
+GCode/ExtrusionProcessor.hpp	494	ExtrusionQualityEstimator	prev_curled_extrusions	std::unordered_map<const PrintObject*, std::shared_ptr<const CurledLines>>			
+GCode/ExtrusionProcessor.hpp	495	ExtrusionQualityEstimator	prev_layer_sources	std::unordered_map<const PrintObject*, const Layer*>			
+GCode/ExtrusionProcessor.hpp	497	ExtrusionQualityEstimator	last_prepared_layers	std::unordered_map<const PrintObject*, const Layer*>			
+GCode/ExtrusionProcessor.hpp	499	ExtrusionQualityEstimator	current_object	const PrintObject *			
+GCode/GCodeProcessor.hpp	163	ConflictResult	_obj1	const void *			
+GCode/GCodeProcessor.hpp	164	ConflictResult	_obj2	const void *			
+GCode/GCodeProcessor.hpp	1400	GCodeProcessor	m_print	Print *			
+GCode/PreciseSeam.hpp	66	PreciseSeamWarnings	modifier_usage	std::unordered_map<const ModelVolume*, ModifierUsage>			
+GCode/PreciseSeam.hpp	90	ExtractionContext	layer	const Layer *			
+GCode/PreciseSeam.hpp	91	ExtractionContext	modifier	const ModelVolume *			
+GCode/PreciseSeam.hpp	92	ExtractionContext	warnings	PreciseSeamWarnings *			
+GCode/PreciseSeam.hpp	151	WeakModifierSegment	modifier	const ModelVolume *			
+GCode/PreciseSeamInternal.hpp	22	FragmentBindingFailure	reason	const char *			
+GCode/PressureEqualizer.hpp	210	PressureEqualizer	m_layer_results	std::queue<LayerResult*>			
+GCode/RetractWhenCrossingPerimeters.hpp	21	RetractWhenCrossingPerimeters	m_layer	const Layer *			
+GCode/RetractWhenCrossingPerimeters.hpp	23	RetractWhenCrossingPerimeters	m_internal_islands	std::vector<const ExPolygon*>			
+GCode/SeamPlacer.hpp	160	SeamPlacer	m_seam_per_object	std::unordered_map<const PrintObject*, PrintObjectSeamData>			
+GCode/SpiralVase.hpp	50	SpiralVase	m_previous_layer	std::vector<SpiralPoint> *			
+GCode/Thumbnails.hpp	29	CompressedImageBuffer	data	void *			
+GCode/TimelapsePosPicker.hpp	26	PosPickCtx	curr_layer	const Layer *			
+GCode/TimelapsePosPicker.hpp	29	PosPickCtx	printed_objects	std::optional<std::vector<const PrintObject*>>			
+GCode/TimelapsePosPicker.hpp	72	TimelapsePosPicker	print	const Print *			
+GCode/TimelapsePosPicker.hpp	85	TimelapsePosPicker	bbox_cache	std::unordered_map<const PrintInstance*, BoundingBoxf3>			
+GCode/ToolOrdering.hpp	105	WipingExtrusions	entity_map	std::map<std::tuple<const ExtrusionEntity*, const PrintObject *>, ExtruderPerCopy>			
+GCode/ToolOrdering.hpp	107	WipingExtrusions	support_map	std::map<const PrintObject*, int>			
+GCode/ToolOrdering.hpp	109	WipingExtrusions	support_intf_map	std::map<const PrintObject*, int>			
+GCode/ToolOrdering.hpp	112	WipingExtrusions	m_layer_tools	const LayerTools *			
+GCode/ToolOrdering.hpp	196	LayerTools	custom_gcode	const CustomGCode::Item *			
+GCode/ToolOrdering.hpp	223	MixedSubLayerGroup	per_object_gradient	std::map<const PrintObject*, ObjectGradient>			
+GCode/ToolOrdering.hpp	232	VolumeKey	obj	const PrintObject *			
+GCode/ToolOrdering.hpp	404	ToolOrdering	m_print_full_config	const DynamicPrintConfig *			
+GCode/ToolOrdering.hpp	405	ToolOrdering	m_print_config_ptr	const PrintConfig *			
+GCode/ToolOrdering.hpp	406	ToolOrdering	m_mixed_object_layers	std::map<unsigned int, std::map<const PrintObject*, std::vector<size_t>>>			
+GCode/ToolOrdering.hpp	410	ToolOrdering	m_object_all_layer_indices	std::map<const PrintObject*, std::vector<size_t>>			
+GCode/ToolOrdering.hpp	425	ToolOrdering	m_print_object_ptr	const PrintObject *			
+GCode/ToolOrdering.hpp	426	ToolOrdering	m_print	Print *			
+GCode/WipeTower.hpp	414	WipeTower	m_multi_nozzle_group_result	const MultiNozzleUtils::LayeredNozzleGroupResult *			
+GCode/WipeTower.hpp	443	WipeTower	m_cur_block	WipeTowerBlock *			
+GCodeWriter.hpp	261	GCodeWriter	m_curr_filament_extruder	std::vector<Extruder*>			
+GCodeWriter.hpp	401	GCodeFormatter	buf_end	char *			
+Geometry/VoronoiUtils.hpp	19	SegmentCellRange	edge_begin	const VoronoiDiagram::edge_type *			
+Geometry/VoronoiUtils.hpp	20	SegmentCellRange	edge_end	const VoronoiDiagram::edge_type *			
+Geometry/VoronoiUtils.hpp	34	PointCellRange	edge_begin	const VoronoiDiagram::edge_type *			
+Geometry/VoronoiUtils.hpp	35	PointCellRange	edge_end	const VoronoiDiagram::edge_type *			
+InstanceLock.hpp	53	InstanceLock	m_slot	Slot *			
+Layer.hpp	132	LayerRegion	m_layer	Layer *			
+Layer.hpp	133	LayerRegion	m_region	const PrintRegion *			
+Layer.hpp	144	Layer	upper_layer	Layer *			
+Layer.hpp	146	Layer	lower_layer	Layer *			
+Layer.hpp	292	Layer	m_object	PrintObject *			
+Layer.hpp	293	Layer	m_regions	LayerRegionPtrs			
+Layer.hpp	343	AreaGroup	area	ExPolygon *			
+MarchingSquares.hpp	224	Grid	m_rst	const Rst *			
+MarchingSquares.hpp	403	CellIt	grid	const Rst *			
+Model.hpp	187	ModelMaterial	m_model	Model *			
+Model.hpp	387	ModelObject	instances	ModelInstancePtrs			
+Model.hpp	390	ModelObject	volumes	ModelVolumePtrs			
+Model.hpp	663	ModelObject	m_model	Model *			
+Model.hpp	1180	ModelVolume	object	ModelObject *			
+Model.hpp	1557	ModelInstance	object	ModelObject *			
+Model.hpp	1697	Model	materials	ModelMaterialMap			
+Model.hpp	1700	Model	objects	ModelObjectPtrs			
+MutablePolygon.hpp	43	const_iterator	m_data	const MutablePolygon *			
+MutablePolygon.hpp	67	iterator	m_data	MutablePolygon *			
+PNGReadWrite.hpp	49	ReadBuf	buf	const void *			
+PerimeterGenerator.hpp	85	PerimeterGenerator	slices	const SurfaceCollection *			
+PerimeterGenerator.hpp	87	PerimeterGenerator	compatible_regions	const LayerRegionPtrs *			
+PerimeterGenerator.hpp	88	PerimeterGenerator	upper_slices	const ExPolygons *			
+PerimeterGenerator.hpp	89	PerimeterGenerator	upper_slices_same_region	const SurfaceCollection *			
+PerimeterGenerator.hpp	90	PerimeterGenerator	lower_slices	const ExPolygons *			
+PerimeterGenerator.hpp	98	PerimeterGenerator	config	const PrintRegionConfig *			
+PerimeterGenerator.hpp	99	PerimeterGenerator	object_config	const PrintObjectConfig *			
+PerimeterGenerator.hpp	100	PerimeterGenerator	print_config	const PrintConfig *			
+PerimeterGenerator.hpp	101	PerimeterGenerator	loops	ExtrusionEntityCollection *			
+PerimeterGenerator.hpp	103	PerimeterGenerator	gap_fill	ExtrusionEntityCollection *			
+PerimeterGenerator.hpp	104	PerimeterGenerator	fill_surfaces	SurfaceCollection *			
+PerimeterGenerator.hpp	105	PerimeterGenerator	fill_no_overlap	ExPolygons *			
+PlaceholderParser.hpp	92	PlaceholderParser	m_external_config	const DynamicConfig *			
+Print.hpp	217	ConstVectorOfPtrsAdaptor	m_data	const std::vector<T*> *			
+Print.hpp	239	PrintInstance	print_object	PrintObject *			
+Print.hpp	241	PrintInstance	model_instance	const ModelInstance *			
+Print.hpp	276	VolumeRegion	model_volume	const ModelVolume *			
+Print.hpp	280	VolumeRegion	region	PrintRegion *			
+Print.hpp	282	VolumeRegion	bbox	const BoundingBox *			
+Print.hpp	284	VolumeRegion	prev_same_region	const VolumeRegion *			
+Print.hpp	294	PaintedRegion	region	PrintRegion *			
+Print.hpp	307	FuzzySkinPaintedRegion	region	PrintRegion *			
+Print.hpp	319	LayerRangeRegions	config	const DynamicPrintConfig *			
+Print.hpp	674	PrintObject	m_shared_regions	PrintObjectRegions *			
+Print.hpp	680	PrintObject	m_layers	LayerPtrs			
+Print.hpp	681	PrintObject	m_belt_truncated_layers	LayerPtrs			
+Print.hpp	686	BeltDroppedFill	layer	Layer *			
+Print.hpp	689	BeltDroppedFill	entity	ExtrusionEntity *			
+Print.hpp	692	PrintObject	m_support_layers	SupportLayerPtrs			
+Print.hpp	716	PrintObject	m_shared_object	PrintObject *			
+Print.hpp	1512	Print	m_objects	PrintObjectPtrs			
+Print.hpp	1513	Print	m_print_regions	PrintRegionPtrs			
+Print.hpp	1547	Print	m_sequential_dynamic_orderings	std::map<const PrintObject*, ToolOrdering>			
+PrintBase.hpp	39	StringObjectException	object	ObjectBase const *			
+PrintBase.hpp	360	PrintObjectBase	m_model_object	ModelObject *			
+PrintBase.hpp	375	PrintTryCancel	m_print	const PrintBase *			
+PrintBase.hpp	690	PrintObjectBaseWithState	m_print	PrintType *			
+PrintConfig.hpp	1131	StaticCache	m_defaults	T *			
+ProjectTask.hpp	137	BBLSliceInfo	profile_	BBLProfile *			
+ProjectTask.hpp	240	BBLSubTask	parent_task_	BBLTask *			
+ProjectTask.hpp	272	BBLTask	profile_	BBLProfile *			
+ProjectTask.hpp	276	BBLTask	subtasks	std::vector<BBLSubTask*>			
+ProjectTask.hpp	277	BBLTask	slice_info	std::map<std::string, BBLSliceInfo*>			
+ProjectTask.hpp	298	BBLProfile	tasks	std::vector<BBLTask*>			
+ProjectTask.hpp	310	BBLProfile	project_	BBLProject *			
+ProjectTask.hpp	311	BBLProfile	slice_info	std::map<std::string, BBLSliceInfo*>			
+ProjectTask.hpp	337	BBLProject	profiles	std::vector<BBLProfile*>			
+SLA/IndexedMesh.hpp	38	IndexedMesh	m_tm	const indexed_triangle_set *			
+SLA/IndexedMesh.hpp	81	hit_result	m_mesh	const IndexedMesh *			
+SVG.hpp	94	SVG	f	FILE *			
+Support/SupportMaterial.hpp	83	PrintObjectSupportMaterial	m_print_config	const PrintConfig *			
+Support/SupportMaterial.hpp	91	PrintObjectSupportMaterial	m_object_config	const PrintObjectConfig *			
+Support/TreeSupport.hpp	64	SupportNode	NO_PARENT	static constexpr SupportNode *			
+Support/TreeSupport.hpp	168	SupportNode	parent	SupportNode *			
+Support/TreeSupport.hpp	177	SupportNode	parents	std::vector<SupportNode*>			
+Support/TreeSupport.hpp	178	SupportNode	child	SupportNode *			
+Support/TreeSupport.hpp	179	SupportNode	merged_neighbours	std::list<SupportNode*>			
+Support/TreeSupport.hpp	417	TreeSupport	m_print_config	const PrintConfig *			
+Support/TreeSupport.hpp	425	TreeSupport	overhang_types	std::map<const ExPolygon*, OverhangType>			
+Support/TreeSupport.hpp	429	TreeSupport	contact_nodes	std::vector<std::vector<SupportNode*>>			
+Support/TreeSupport.hpp	438	TreeSupport	m_object	PrintObject *			
+Support/TreeSupport.hpp	439	TreeSupport	m_object_config	const PrintObjectConfig *			
+Support/TreeSupportCommon.hpp	786	InterfacePlacer	top_contacts	SupportGeneratorLayersPtr &			
+Support/TreeSupportCommon.hpp	787	InterfacePlacer	top_interfaces	SupportGeneratorLayersPtr &			
+Support/TreeSupportCommon.hpp	788	InterfacePlacer	top_base_interfaces	SupportGeneratorLayersPtr &			
+Utils.hpp	543	FilePtr	f	FILE *			
+calib.hpp	287	CalibPressureAdvanceLine	mp_gcodegen	GCode *			
+clonable_ptr.hpp	140	clonable_ptr	px	T *			
