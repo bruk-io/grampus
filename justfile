@@ -15,7 +15,8 @@ oracle-fetch:
 # build the vendored OrcaSlicer tree on this platform
 oracle-build:
     ./oracle/build-libslic3r
-# regenerate port/manifest.tsv's file set and per-file derived columns from the vendored tree
+# regenerate port/manifest.tsv's file set and per-file derived columns, and port/cut.tsv, from
+# the vendored tree
 inventory:
     ./port/inventory
 # variadic (not two-parameter) because `just` rejects a surplus argument to a fixed-arity recipe,
