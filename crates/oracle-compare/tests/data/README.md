@@ -5,9 +5,21 @@ of plan step 5) must build and pass its tests on a machine with no oracle binary
 build, so it never invokes the oracle and commits no file a run of it produced. Task
 `09-comparator-gcode-levels` (part 2 of step 5) holds to the same rule for its own fixtures below.
 
-The plan's "pair taken from two real runs of Step 2" is committed by task
-**`10-comparator-json`**, the last part of step 5, which depends on `04-oracle-slice` and so has
-the oracle available.
+The plan's "pair taken from two real runs of Step 2" has arrived: it is `tests/data/real/`,
+committed by task **`10-comparator-json`**, the last part of step 5, which depends on
+`04-oracle-slice` and so has the oracle available.
+
+## Task 10's fixtures (JSON, and the real pair)
+
+| Directory | What it covers |
+|---|---|
+| `json_settings_identical/` | Two byte-identical `settings.json` fragments: `L0`. |
+| `json_settings_pipeline_plugin/` | Differ only in `slicing_pipeline_plugin`: `none` naming that key with the allowance off, `L1` with it on. |
+| `json_settings_other_key/` | Differ in `layer_height` (an unrelated key), with the allowance tried both off and on: `none` naming `/layer_height` either way — the allowance never excuses a different key. |
+| `json_statistics_generator/` | Differ only in `generator`: `L1`, not `L0`. |
+| `json_statistics_other_key/` | Differ in `summary.time`: `none` naming `/summary/time`. |
+| `json_malformed/` | `a.json` is truncated (not valid JSON) and `b.json` is: reported as `none` with the first raw differing byte, for both `--settings` and `--statistics`, never a panic. |
+| `real/run1/`, `real/run2/` | **The real pair.** Two runs of `just oracle-slice vendor/OrcaSlicer/tests/data/frog_legs.obj base-fff --export-settings --export-statistics` against the pinned v2.5.2 oracle (each run ≈4.5s). Each `runN/` holds that run's `settings.json`, `plate_1.statistics.json`, and `plate_1.gcode` truncated to its header block plus one full layer (the first 3226 of 20894 lines, cut immediately before the second `; CHANGE_LAYER`, identically on both sides). **Measured, not assumed:** `diff`/`cmp` found all three artifacts — the two full `settings.json`, the two full `plate_1.statistics.json`, and the two full `plate_1.gcode` (568128 bytes each) — byte-identical between the two runs; `tests/json.rs`'s `real_settings_pair_reaches_l0` and `real_statistics_pair_reaches_l0`, and `tests/levels.rs`'s `real_gcode_excerpt_pair_passes_every_level`, assert exactly that measured outcome (`Level::L0`, every G-code level passing) rather than a value picked in advance. |
 
 ## Task 08's fixtures (L0, L1)
 

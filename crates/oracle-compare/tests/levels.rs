@@ -649,3 +649,30 @@ fn evaluate_within_carries_forward_the_real_previous_position_across_the_scope_b
     );
     assert_eq!(agg_a, agg_b, "same moves on both sides");
 }
+
+// ---------------------------------------------------------------------------------------------
+// The real pair (task `10-comparator-json`'s own obligation): an excerpt — header block plus one
+// full layer — of `plate_1.gcode` from two actual `just oracle-slice
+// vendor/OrcaSlicer/tests/data/frog_legs.obj base-fff --export-settings --export-statistics`
+// runs, committed under `tests/data/real/`. See `tests/json.rs` for the same two runs' settings
+// and statistics dumps, and `tests/data/README.md` for which runs produced them.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn real_gcode_excerpt_pair_passes_every_level() {
+    // Measured, not assumed: `cmp`/`diff` on the two runs' full `plate_1.gcode` (568128 bytes
+    // each) found them byte-identical before this excerpt was cut, and both excerpts were cut at
+    // the same line number (3226, `wc -l` confirmed) so truncation itself cannot manufacture a
+    // difference the full files do not have.
+    let a = read_file("real/run1/plate_1.gcode");
+    let b = read_file("real/run2/plate_1.gcode");
+    let report = compare(&a, &b);
+    for level in Level::ALL {
+        assert_eq!(
+            *report.outcome(level),
+            LevelOutcome::Pass,
+            "{level} should pass on the real excerpted pair"
+        );
+    }
+    assert_eq!(report.strongest_evaluated_pass, Some(Level::L4));
+}
