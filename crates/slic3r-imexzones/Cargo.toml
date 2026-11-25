@@ -1,0 +1,15 @@
+[package]
+name = "slic3r-imexzones"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-config = { path = "../slic3r-config" }
+slic3r-imexhelpers = { path = "../slic3r-imexhelpers" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

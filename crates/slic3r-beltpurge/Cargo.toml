@@ -1,0 +1,23 @@
+[package]
+name = "slic3r-beltpurge"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-beltbrim = { path = "../slic3r-beltbrim" }
+slic3r-exception = { path = "../slic3r-exception" }
+slic3r-extrusionentity = { path = "../slic3r-extrusionentity" }
+slic3r-extrusionentitycollection = { path = "../slic3r-extrusionentitycollection" }
+slic3r-format = { path = "../slic3r-format" }
+slic3r-gcode = { path = "../slic3r-gcode" }
+slic3r-i18n = { path = "../slic3r-i18n" }
+slic3r-layer = { path = "../slic3r-layer" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-localesutils = { path = "../slic3r-localesutils" }
+slic3r-print = { path = "../slic3r-print" }
+slic3r-printbase = { path = "../slic3r-printbase" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

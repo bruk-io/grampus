@@ -1,0 +1,42 @@
+[package]
+name = "slic3r-model"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-aabbtreeindirect = { path = "../slic3r-aabbtreeindirect" }
+slic3r-appconfig = { path = "../slic3r-appconfig" }
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-brimearspoint = { path = "../slic3r-brimearspoint" }
+slic3r-buildvolume = { path = "../slic3r-buildvolume" }
+slic3r-calib = { path = "../slic3r-calib" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-config = { path = "../slic3r-config" }
+slic3r-customgcode = { path = "../slic3r-customgcode" }
+slic3r-enum-bitmask = { path = "../slic3r-enum-bitmask" }
+slic3r-exception = { path = "../slic3r-exception" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-gcodewriter = { path = "../slic3r-gcodewriter" }
+slic3r-geometry = { path = "../slic3r-geometry" }
+slic3r-i18n = { path = "../slic3r-i18n" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-materialtype = { path = "../slic3r-materialtype" }
+slic3r-meshrepair = { path = "../slic3r-meshrepair" }
+slic3r-mtutils = { path = "../slic3r-mtutils" }
+slic3r-objectid = { path = "../slic3r-objectid" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+slic3r-semver = { path = "../slic3r-semver" }
+slic3r-sla = { path = "../slic3r-sla" }
+slic3r-slicing = { path = "../slic3r-slicing" }
+slic3r-svg = { path = "../slic3r-svg" }
+slic3r-tesselate = { path = "../slic3r-tesselate" }
+slic3r-trianglemesh = { path = "../slic3r-trianglemesh" }
+slic3r-trianglemeshslicer = { path = "../slic3r-trianglemeshslicer" }
+slic3r-triangleselector = { path = "../slic3r-triangleselector" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

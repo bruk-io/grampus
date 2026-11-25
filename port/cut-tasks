@@ -20,15 +20,22 @@ does not touch -- and writes one batched cut file per phase:
 - ``phase-b``    -> ``port/taskcuts/phase-b.tsv``.
 
 A **unit** is one libslic3r ``.cpp`` plus its same-stem header (``.h`` or ``.hpp``) -- one
-manifest row each, one unit between them, grouped here by stripping the extension from
-``path``. A unit's line sum adds every member row's ``lines`` cell; its "unit paths" lists
-every member row's own path. A header with no same-stem ``.cpp`` (most of
-``foundation``'s set) or a ``.cpp`` with no same-stem header (e.g. ``LayerRegion.cpp``,
+manifest row each, one unit between them, grouped here (for ``phase-a`` and ``phase-b``) by
+stripping the extension from ``path``, and (for ``foundation`` only) by the shared ``target
+module`` cell instead, since a ``template-heavy: yes`` header and its in-scope same-stem
+``.cpp`` must merge into one unit even on the one pair in the in-scope manifest whose stems
+differ only by case (``Utils.hpp`` / ``utils.cpp``) -- a path-stem group misses that pair, a
+``target module`` group does not, because ``07-crate-cut`` already gives the pair one target
+module regardless of case. A unit's line sum adds every member row's ``lines`` cell; its "unit
+paths" lists every member row's own path, in path order. A header with no same-stem ``.cpp``
+(most of ``foundation``'s set) or a ``.cpp`` with no same-stem header (e.g. ``LayerRegion.cpp``,
 ``ContourZ.cpp``, ``BeltPurge.cpp``, per R8) is a one-row unit. Grouping only ever happens
 *within* a phase's own already-selected row set -- a row the phase does not select (out of
-scope, not ``template-heavy`` for ``foundation``, already ported for ``phase-a``) never pulls
-its sibling into the unit, so e.g. ``AABBMesh.hpp`` (``template-heavy=yes``) is foundation's own
-one-row unit and never drags in ``AABBMesh.cpp`` (``template-heavy=no``).
+scope, not ``template-heavy`` and not that ``.cpp`` sibling for ``foundation``, already ported
+for ``phase-a``) never pulls its sibling into the unit, so e.g. ``AABBMesh.hpp``
+(``template-heavy=yes``) is foundation's own one-row unit and never drags in ``AABBMesh.cpp``
+(``template-heavy=no``) -- ``AABBMesh.cpp``'s own cell is ``no`` and it shares no ``target
+module`` with a selected row other than its own already-excluded self.
 
 ``phase-a``'s "already ported" skip is **not reimplemented here**: it calls ``port/inventory``'s
 own status function (imported as a module, since that file is the single place the rule lives)
@@ -151,12 +158,23 @@ def is_in_scope(header: list[str], row: list[str]) -> bool:
 
 
 def group_units(
-    header: list[str], rows: list[list[str]], selector
+    header: list[str], rows: list[list[str]], selector, *, group_key=None
 ) -> list[dict]:
-    """Group rows selector(row) accepts into units sharing a path stem (path with its
-    extension stripped). Every row a unit is built from must be in scope: a row the caller's
-    selector drops never pulls its same-stem sibling into the unit it would otherwise share --
-    the caller decides what is selected, this only groups what was.
+    """Group rows selector(row) accepts into units sharing a group key. Every row a unit is
+    built from must be in scope: a row the caller's selector drops never pulls its sibling into
+    the unit it would otherwise share -- the caller decides what is selected, this only groups
+    what was.
+
+    group_key(row) picks the key two selected rows must share to land in the same unit.
+    Defaults to row's path with its extension stripped (its stem), which is what every phase but
+    ``foundation`` wants: a ``.cpp`` and its same-stem header. ``foundation`` passes the row's
+    ``target module`` cell instead (see ``generate_foundation``), because that is the one column
+    guaranteed to agree for a ``template-heavy: yes`` header and its in-scope same-stem ``.cpp``
+    even where their path stems differ only by case.
+
+    A unit's own "stem" field (used for sorting, never for grouping when group_key is given) is
+    always its lexicographically-first member path's stem, so an order that reads "then path"
+    is unaffected by which key did the grouping.
 
     Returns one dict per unit: stem, paths (sorted), lines (sum across member rows), crate
     (the member rows' shared target crate), crate_level (their shared crate-level level, as
@@ -171,7 +189,13 @@ def group_units(
     crate_level_i = column_index(header, "crate-level level")
     crate_i = column_index(header, "target crate")
 
-    by_stem: dict[str, list[list[str]]] = {}
+    def default_key(row: list[str]) -> str:
+        stem, _ext = os.path.splitext(row[path_i])
+        return stem
+
+    key_fn = group_key if group_key is not None else default_key
+
+    by_key: dict[str, list[list[str]]] = {}
     for row in rows:
         if not selector(row):
             continue
@@ -180,19 +204,19 @@ def group_units(
                 f"cut-tasks: {row[path_i]!r} was selected but is not in scope; every phase's "
                 "unit set must be a subset of the in-scope rows"
             )
-        stem, _ext = os.path.splitext(row[path_i])
-        by_stem.setdefault(stem, []).append(row)
+        by_key.setdefault(key_fn(row), []).append(row)
 
     units: list[dict] = []
-    for stem, member_rows in by_stem.items():
+    for key, member_rows in by_key.items():
         member_rows = sorted(member_rows, key=lambda r: r[path_i])
         crate_levels = {member[crate_level_i] for member in member_rows}
         crates = {member[crate_i] for member in member_rows}
         if len(crate_levels) != 1 or len(crates) != 1:
             raise SystemExit(
-                f"cut-tasks: unit {stem!r}'s member rows disagree on crate or crate-level "
+                f"cut-tasks: unit {key!r}'s member rows disagree on crate or crate-level "
                 f"level: {member_rows!r}"
             )
+        stem, _ext = os.path.splitext(member_rows[0][path_i])
         units.append(
             {
                 "stem": stem,
@@ -273,13 +297,49 @@ def generate_foundation(header: list[str], rows: list[list[str]]) -> tuple[list[
     A single unit already over FOUNDATION_MAX_LINES (Config.hpp alone, 3,154 lines, is the one
     case in the committed manifest) still becomes a batch of its own: there is no smaller row to
     split it into, the same fallback phase-a's own rule states explicitly ("a unit of more than
-    2,500 lines is a task on its own")."""
+    2,500 lines is a task on its own").
+
+    task 34-foundation-spike's own "What to build" adds one more rule on top of the generic
+    `group_units` selection `group_units`'s own docstring describes (a row the selector drops
+    never pulls in its same-stem sibling): "A template-heavy: yes header whose same-stem .cpp is
+    in scope brings that .cpp row into the same foundation unit" -- because 07-crate-cut gives a
+    .cpp and its same-stem .hpp one target module, so a .cpp left to Phase A would draft over a
+    hand-designed foundation module at that same path. `template-heavy` itself never seeds "yes"
+    for a .cpp row (port/inventory's `seed_judgement_cells`: "it never fires for ... a .cpp/.mm
+    row, both of which always seed 'no'"), so that pairing cannot be read off the .cpp row's own
+    cell the way `group_units`'s generic selector reads every other phase's rows; it has to be
+    computed here, from the sibling header's cell, as foundation's own selector.
+
+    The pairing is read off `target module`, not off the path stem: `07-crate-cut` gives a
+    `.cpp` and its same-stem header one `target module` regardless of case, and the in-scope
+    manifest has exactly one pair whose path stems differ only by case (`Utils.hpp` /
+    `utils.cpp`) -- a path-stem comparison silently drops that one pair's `.cpp`, leaving a Phase
+    A row that would draft over the hand-designed module at the same target path, exactly what
+    this rule exists to prevent. So both the selector (which rows join the foundation set) and
+    the grouping (`group_units`'s `group_key`, below) key on `target module`."""
     template_heavy_i = column_index(header, "template-heavy")
+    path_i = column_index(header, "path")
+    target_i = column_index(header, "target module")
+
+    yes_header_targets = {
+        row[target_i]
+        for row in rows
+        if is_in_scope(header, row)
+        and row[path_i].endswith((".h", ".hpp"))
+        and row[template_heavy_i] == "yes"
+    }
 
     def selector(row: list[str]) -> bool:
-        return is_in_scope(header, row) and row[template_heavy_i] == "yes"
+        if not is_in_scope(header, row):
+            return False
+        if row[template_heavy_i] == "yes":
+            return True
+        # Not itself template-heavy (true of every .cpp row by construction) -- still selected
+        # when it shares its target module with a yes-marked header, so group_units pairs them
+        # (target module, not path stem, so the one case-differing pair still merges).
+        return row[path_i].endswith(".cpp") and row[target_i] in yes_header_targets
 
-    units = group_units(header, rows, selector)
+    units = group_units(header, rows, selector, group_key=lambda row: row[target_i])
     units.sort(key=lambda unit: (unit["crate_level"], unit["stem"]))
     batches = batch_units(units, FOUNDATION_MAX_UNITS, FOUNDATION_MAX_LINES)
 

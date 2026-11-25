@@ -1,0 +1,30 @@
+[package]
+name = "slic3r-printapply"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-belttransform = { path = "../slic3r-belttransform" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-config = { path = "../slic3r-config" }
+slic3r-customgcode = { path = "../slic3r-customgcode" }
+slic3r-filamentmixer = { path = "../slic3r-filamentmixer" }
+slic3r-geometry = { path = "../slic3r-geometry" }
+slic3r-imexhelpers = { path = "../slic3r-imexhelpers" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-model = { path = "../slic3r-model" }
+slic3r-multinozzleutils = { path = "../slic3r-multinozzleutils" }
+slic3r-objectid = { path = "../slic3r-objectid" }
+slic3r-placeholderparser = { path = "../slic3r-placeholderparser" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-print = { path = "../slic3r-print" }
+slic3r-printbase = { path = "../slic3r-printbase" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+slic3r-slicing = { path = "../slic3r-slicing" }
+slic3r-trianglemesh = { path = "../slic3r-trianglemesh" }
+slic3r-triangleselector = { path = "../slic3r-triangleselector" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

@@ -1,0 +1,22 @@
+[package]
+name = "slic3r-trianglemesh"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-execution = { path = "../slic3r-execution" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-extrusionentity = { path = "../slic3r-extrusionentity" }
+slic3r-geometry = { path = "../slic3r-geometry" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-line = { path = "../slic3r-line" }
+slic3r-meshsplitimpl = { path = "../slic3r-meshsplitimpl" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-trianglemeshslicer = { path = "../slic3r-trianglemeshslicer" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

@@ -1,0 +1,74 @@
+[package]
+name = "slic3r-gcode"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-aabbtreeindirect = { path = "../slic3r-aabbtreeindirect" }
+slic3r-aabbtreelines = { path = "../slic3r-aabbtreelines" }
+slic3r-arcfitter = { path = "../slic3r-arcfitter" }
+slic3r-beltbrim = { path = "../slic3r-beltbrim" }
+slic3r-belttransform = { path = "../slic3r-belttransform" }
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-calib = { path = "../slic3r-calib" }
+slic3r-circle = { path = "../slic3r-circle" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-clonable-ptr = { path = "../slic3r-clonable-ptr" }
+slic3r-commondefs = { path = "../slic3r-commondefs" }
+slic3r-config = { path = "../slic3r-config" }
+slic3r-connectedbodies = { path = "../slic3r-connectedbodies" }
+slic3r-customgcode = { path = "../slic3r-customgcode" }
+slic3r-edgegrid = { path = "../slic3r-edgegrid" }
+slic3r-enum-bitmask = { path = "../slic3r-enum-bitmask" }
+slic3r-exception = { path = "../slic3r-exception" }
+slic3r-exclusionvolumegeometry = { path = "../slic3r-exclusionvolumegeometry" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-extruder = { path = "../slic3r-extruder" }
+slic3r-extrusionentity = { path = "../slic3r-extrusionentity" }
+slic3r-extrusionentitycollection = { path = "../slic3r-extrusionentitycollection" }
+slic3r-filamentgroup = { path = "../slic3r-filamentgroup" }
+slic3r-filamentgrouputils = { path = "../slic3r-filamentgrouputils" }
+slic3r-filamentmixer = { path = "../slic3r-filamentmixer" }
+slic3r-fill = { path = "../slic3r-fill" }
+slic3r-flow = { path = "../slic3r-flow" }
+slic3r-format = { path = "../slic3r-format" }
+slic3r-gcodereader = { path = "../slic3r-gcodereader" }
+slic3r-gcodewriter = { path = "../slic3r-gcodewriter" }
+slic3r-geometry = { path = "../slic3r-geometry" }
+slic3r-geometry-dir = { path = "../slic3r-geometry-dir" }
+slic3r-i18n = { path = "../slic3r-i18n" }
+slic3r-imexhelpers = { path = "../slic3r-imexhelpers" }
+slic3r-kdtreeindirect = { path = "../slic3r-kdtreeindirect" }
+slic3r-layer = { path = "../slic3r-layer" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-lifecycleevents = { path = "../slic3r-lifecycleevents" }
+slic3r-line = { path = "../slic3r-line" }
+slic3r-localesutils = { path = "../slic3r-localesutils" }
+slic3r-model = { path = "../slic3r-model" }
+slic3r-multimaterialsegmentation = { path = "../slic3r-multimaterialsegmentation" }
+slic3r-multinozzleutils = { path = "../slic3r-multinozzleutils" }
+slic3r-objectid = { path = "../slic3r-objectid" }
+slic3r-parameterutils = { path = "../slic3r-parameterutils" }
+slic3r-placeholderparser = { path = "../slic3r-placeholderparser" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-polyline = { path = "../slic3r-polyline" }
+slic3r-print = { path = "../slic3r-print" }
+slic3r-printbase = { path = "../slic3r-printbase" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+slic3r-shortedgecollapse = { path = "../slic3r-shortedgecollapse" }
+slic3r-shortestpath = { path = "../slic3r-shortestpath" }
+slic3r-slicing = { path = "../slic3r-slicing" }
+slic3r-surface = { path = "../slic3r-surface" }
+slic3r-surfacecollection = { path = "../slic3r-surfacecollection" }
+slic3r-svg = { path = "../slic3r-svg" }
+slic3r-time = { path = "../slic3r-time" }
+slic3r-trianglemesh = { path = "../slic3r-trianglemesh" }
+slic3r-triangleselector = { path = "../slic3r-triangleselector" }
+slic3r-trianglesetsampling = { path = "../slic3r-trianglesetsampling" }
+slic3r-triangulation = { path = "../slic3r-triangulation" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

@@ -1,0 +1,22 @@
+[package]
+name = "slic3r-appconfig"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-calib = { path = "../slic3r-calib" }
+slic3r-config = { path = "../slic3r-config" }
+slic3r-exception = { path = "../slic3r-exception" }
+slic3r-format = { path = "../slic3r-format" }
+slic3r-instancelock = { path = "../slic3r-instancelock" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-localesutils = { path = "../slic3r-localesutils" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+slic3r-semver = { path = "../slic3r-semver" }
+slic3r-technologies = { path = "../slic3r-technologies" }
+slic3r-thread = { path = "../slic3r-thread" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

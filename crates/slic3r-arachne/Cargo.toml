@@ -1,0 +1,24 @@
+[package]
+name = "slic3r-arachne"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-arachne-beadingstrategy = { path = "../slic3r-arachne-beadingstrategy" }
+slic3r-arachne-utils = { path = "../slic3r-arachne-utils" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-edgegrid = { path = "../slic3r-edgegrid" }
+slic3r-flow = { path = "../slic3r-flow" }
+slic3r-geometry = { path = "../slic3r-geometry" }
+slic3r-geometry-dir = { path = "../slic3r-geometry-dir" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-line = { path = "../slic3r-line" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+slic3r-svg = { path = "../slic3r-svg" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

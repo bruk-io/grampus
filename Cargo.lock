@@ -80,6 +80,1886 @@ dependencies = [
 ]
 
 [[package]]
+name = "slic3r-aabbmesh"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-execution",
+ "slic3r-point",
+ "slic3r-proof",
+ "slic3r-sla",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-aabbtreeindirect"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-aabbtreelines"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-algorithm"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-aabbtreelines",
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-clipperzutils",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+ "slic3r-svg",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-appconfig"
+version = "0.1.0"
+dependencies = [
+ "slic3r-calib",
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-format",
+ "slic3r-instancelock",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-semver",
+ "slic3r-technologies",
+ "slic3r-thread",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-arachne"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arachne-beadingstrategy",
+ "slic3r-arachne-utils",
+ "slic3r-clipperutils",
+ "slic3r-edgegrid",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-geometry-dir",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-svg",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-arachne-beadingstrategy"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-arachne-utils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-clipperzutils",
+ "slic3r-extrusionentity",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+ "slic3r-variablewidth",
+]
+
+[[package]]
+name = "slic3r-arcfitter"
+version = "0.1.0"
+dependencies = [
+ "slic3r-circle",
+ "slic3r-libslic3r",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-beltbrim"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-flow",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+]
+
+[[package]]
+name = "slic3r-beltgcode"
+version = "0.1.0"
+dependencies = [
+ "slic3r-belttransform",
+ "slic3r-gcodewriter",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-beltpurge"
+version = "0.1.0"
+dependencies = [
+ "slic3r-beltbrim",
+ "slic3r-exception",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-format",
+ "slic3r-gcode",
+ "slic3r-i18n",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-print",
+ "slic3r-printbase",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-beltslicestrategy"
+version = "0.1.0"
+dependencies = [
+ "slic3r-belttransform",
+ "slic3r-libslic3r",
+ "slic3r-model",
+ "slic3r-point",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-belttransform"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-config",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-boundingbox"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-bridgedetector"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-principalcomponents2d",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-brim"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-brimearspoint",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-edgegrid",
+ "slic3r-exclusionvolumegeometry",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-materialtype",
+ "slic3r-model",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-multipoint",
+ "slic3r-objectid",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-printbase",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-brimearspoint"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-buildvolume"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-extrusionentity",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-calib"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clonable-ptr",
+ "slic3r-config",
+ "slic3r-customgcode",
+ "slic3r-extruder",
+ "slic3r-flow",
+ "slic3r-gcodewriter",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-circle"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-clipperutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-surface",
+]
+
+[[package]]
+name = "slic3r-clipperzutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-clonable-ptr"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-color"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-colordecomposerecipe"
+version = "0.1.0"
+dependencies = [
+ "slic3r-filamentmixer",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-commondefs"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-config"
+version = "0.1.0"
+dependencies = [
+ "slic3r-clonable-ptr",
+ "slic3r-exception",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-point",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-connectedbodies"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-geometry-dir",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+ "slic3r-trianglemesh",
+ "slic3r-trianglemeshslicer",
+]
+
+[[package]]
+name = "slic3r-contourz"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-sla",
+]
+
+[[package]]
+name = "slic3r-customgcode"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-edgegrid"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-pngreadwrite",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+ "slic3r-svg",
+]
+
+[[package]]
+name = "slic3r-elephantfootcompensation"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-edgegrid",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-enum-bitmask"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-exception"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-exclusionvolumegeometry"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-filamentmixer",
+ "slic3r-geometry-dir",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-execution"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-expolygon"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-expolygoncollection"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-extruder"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-extrusionentity"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arcfitter",
+ "slic3r-extrusionentitycollection",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-extrusionentitycollection"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-feature-fuzzyskin"
+version = "0.1.0"
+dependencies = [
+ "slic3r-algorithm",
+ "slic3r-arachne-utils",
+ "slic3r-clipperutils",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-surface",
+]
+
+[[package]]
+name = "slic3r-feature-interlocking"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-expolygon",
+ "slic3r-fill",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+]
+
+[[package]]
+name = "slic3r-filamentgroup"
+version = "0.1.0"
+dependencies = [
+ "slic3r-filamentgrouputils",
+ "slic3r-flushvolpredictor",
+ "slic3r-libslic3r",
+ "slic3r-multinozzleutils",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-filamentgrouputils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-libslic3r",
+ "slic3r-multinozzleutils",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-filamentmixer"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-filamentmixermodel",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-localesutils",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-filamentmixermodel"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-fill"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreelines",
+ "slic3r-arachne",
+ "slic3r-arachne-utils",
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-edgegrid",
+ "slic3r-exception",
+ "slic3r-execution",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-fill-lightning",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-geometry-dir",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-marchingsquares",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-slicing",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+ "slic3r-utils",
+ "slic3r-variablewidth",
+]
+
+[[package]]
+name = "slic3r-fill-lightning"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-edgegrid",
+ "slic3r-expolygon",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+]
+
+[[package]]
+name = "slic3r-flow"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-flushvolpredictor"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-format"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-gcode"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-aabbtreelines",
+ "slic3r-arcfitter",
+ "slic3r-beltbrim",
+ "slic3r-belttransform",
+ "slic3r-boundingbox",
+ "slic3r-calib",
+ "slic3r-circle",
+ "slic3r-clipperutils",
+ "slic3r-clonable-ptr",
+ "slic3r-commondefs",
+ "slic3r-config",
+ "slic3r-connectedbodies",
+ "slic3r-customgcode",
+ "slic3r-edgegrid",
+ "slic3r-enum-bitmask",
+ "slic3r-exception",
+ "slic3r-exclusionvolumegeometry",
+ "slic3r-expolygon",
+ "slic3r-extruder",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-filamentgroup",
+ "slic3r-filamentgrouputils",
+ "slic3r-filamentmixer",
+ "slic3r-fill",
+ "slic3r-flow",
+ "slic3r-format",
+ "slic3r-gcodereader",
+ "slic3r-gcodewriter",
+ "slic3r-geometry",
+ "slic3r-geometry-dir",
+ "slic3r-i18n",
+ "slic3r-imexhelpers",
+ "slic3r-kdtreeindirect",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-lifecycleevents",
+ "slic3r-line",
+ "slic3r-localesutils",
+ "slic3r-model",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-multinozzleutils",
+ "slic3r-objectid",
+ "slic3r-parameterutils",
+ "slic3r-placeholderparser",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printbase",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortedgecollapse",
+ "slic3r-shortestpath",
+ "slic3r-slicing",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+ "slic3r-time",
+ "slic3r-trianglemesh",
+ "slic3r-triangleselector",
+ "slic3r-trianglesetsampling",
+ "slic3r-triangulation",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-gcodereader"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-gcodewriter"
+version = "0.1.0"
+dependencies = [
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-extruder",
+ "slic3r-geometry",
+ "slic3r-i18n",
+ "slic3r-imexhelpers",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-localesutils",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-geometry"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-geometry-dir"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arachne-utils",
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-exception",
+ "slic3r-expolygon",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+ "slic3r-svg",
+]
+
+[[package]]
+name = "slic3r-i18n"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-imexhelpers"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-imexzones"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-config",
+ "slic3r-imexhelpers",
+ "slic3r-point",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-instancelock"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-int128"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-intersectionpoints"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-aabbtreelines",
+ "slic3r-expolygon",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-kdtreeindirect"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-layer"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-objectid",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-layerregion"
+version = "0.1.0"
+dependencies = [
+ "slic3r-algorithm",
+ "slic3r-boundingbox",
+ "slic3r-bridgedetector",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-perimetergenerator",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-libslic3r"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+ "slic3r-semver",
+]
+
+[[package]]
+name = "slic3r-lifecycleevents"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-line"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-localesutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-macutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-marchingsquares"
+version = "0.1.0"
+dependencies = [
+ "slic3r-execution",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-materialtype"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-meshrepair"
+version = "0.1.0"
+dependencies = [
+ "slic3r-i18n",
+ "slic3r-proof",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-meshsplitimpl"
+version = "0.1.0"
+dependencies = [
+ "slic3r-execution",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-minimumspanningtree"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-model"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-appconfig",
+ "slic3r-boundingbox",
+ "slic3r-brimearspoint",
+ "slic3r-buildvolume",
+ "slic3r-calib",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-customgcode",
+ "slic3r-enum-bitmask",
+ "slic3r-exception",
+ "slic3r-expolygon",
+ "slic3r-gcodewriter",
+ "slic3r-geometry",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-materialtype",
+ "slic3r-meshrepair",
+ "slic3r-mtutils",
+ "slic3r-objectid",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-semver",
+ "slic3r-sla",
+ "slic3r-slicing",
+ "slic3r-svg",
+ "slic3r-tesselate",
+ "slic3r-trianglemesh",
+ "slic3r-trianglemeshslicer",
+ "slic3r-triangleselector",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-mtutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-multimaterialsegmentation"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-edgegrid",
+ "slic3r-expolygon",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-mutablepolygon",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-trianglemeshslicer",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-multinozzleutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-printconfig",
+ "slic3r-projecttask",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-multipoint"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-mutablepolygon"
+version = "0.1.0"
+dependencies = [
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-mutablepriorityqueue"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-normalutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-model",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-objectid"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-parameterutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-perimetergenerator"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreelines",
+ "slic3r-arachne-utils",
+ "slic3r-boundingbox",
+ "slic3r-bridgedetector",
+ "slic3r-clipperutils",
+ "slic3r-clipperzutils",
+ "slic3r-config",
+ "slic3r-expolygon",
+ "slic3r-expolygoncollection",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-feature-fuzzyskin",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-variablewidth",
+]
+
+[[package]]
+name = "slic3r-placeholderparser"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-flow",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-platform"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-pngreadwrite"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-point"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-int128",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-polygon"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-polyline"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arcfitter",
+ "slic3r-boundingbox",
+ "slic3r-circle",
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-principalcomponents2d"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-print"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arcfitter",
+ "slic3r-beltbrim",
+ "slic3r-beltgcode",
+ "slic3r-belttransform",
+ "slic3r-boundingbox",
+ "slic3r-brim",
+ "slic3r-calib",
+ "slic3r-circle",
+ "slic3r-clipperutils",
+ "slic3r-commondefs",
+ "slic3r-config",
+ "slic3r-customgcode",
+ "slic3r-exception",
+ "slic3r-exclusionvolumegeometry",
+ "slic3r-expolygon",
+ "slic3r-extruder",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-filamentgroup",
+ "slic3r-filamentgrouputils",
+ "slic3r-filamentmixer",
+ "slic3r-flow",
+ "slic3r-format",
+ "slic3r-geometry",
+ "slic3r-geometry-dir",
+ "slic3r-i18n",
+ "slic3r-imexhelpers",
+ "slic3r-imexzones",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-lifecycleevents",
+ "slic3r-localesutils",
+ "slic3r-materialtype",
+ "slic3r-model",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-multinozzleutils",
+ "slic3r-objectid",
+ "slic3r-placeholderparser",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-printbase",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-slicing",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-thread",
+ "slic3r-time",
+ "slic3r-trianglemesh",
+ "slic3r-trianglemeshslicer",
+ "slic3r-triangleselector",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-printapply"
+version = "0.1.0"
+dependencies = [
+ "slic3r-belttransform",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-customgcode",
+ "slic3r-filamentmixer",
+ "slic3r-geometry",
+ "slic3r-imexhelpers",
+ "slic3r-libslic3r",
+ "slic3r-model",
+ "slic3r-multinozzleutils",
+ "slic3r-objectid",
+ "slic3r-placeholderparser",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-print",
+ "slic3r-printbase",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-slicing",
+ "slic3r-trianglemesh",
+ "slic3r-triangleselector",
+]
+
+[[package]]
+name = "slic3r-printbase"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-model",
+ "slic3r-objectid",
+ "slic3r-placeholderparser",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-printconfig"
+version = "0.1.0"
+dependencies = [
+ "slic3r-commondefs",
+ "slic3r-config",
+ "slic3r-enum-bitmask",
+ "slic3r-filamentmixer",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-materialtype",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfigconstants",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-printconfigconstants"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-printobject"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-aabbtreelines",
+ "slic3r-beltbrim",
+ "slic3r-belttransform",
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-connectedbodies",
+ "slic3r-exception",
+ "slic3r-expolygon",
+ "slic3r-extrusionentitycollection",
+ "slic3r-fill",
+ "slic3r-fill-lightning",
+ "slic3r-flow",
+ "slic3r-format",
+ "slic3r-geometry",
+ "slic3r-i18n",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-model",
+ "slic3r-mutablepolygon",
+ "slic3r-perimetergenerator",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printbase",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-sla",
+ "slic3r-slicing",
+ "slic3r-support",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+ "slic3r-tesselate",
+ "slic3r-timer",
+ "slic3r-trianglemesh",
+ "slic3r-trianglemeshslicer",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-printobjectslice"
+version = "0.1.0"
+dependencies = [
+ "slic3r-beltslicestrategy",
+ "slic3r-belttransform",
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-elephantfootcompensation",
+ "slic3r-exception",
+ "slic3r-expolygon",
+ "slic3r-feature-interlocking",
+ "slic3r-flow",
+ "slic3r-geometry",
+ "slic3r-i18n",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-model",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-objectid",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-print",
+ "slic3r-printbase",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-slicing",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-trianglemesh",
+ "slic3r-trianglemeshslicer",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-printregion"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-print",
+ "slic3r-printconfig",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-projecttask"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-proof"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-semver"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-shortedgecollapse"
+version = "0.1.0"
+dependencies = [
+ "slic3r-normalutils",
+ "slic3r-point",
+ "slic3r-proof",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-shortestpath"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-kdtreeindirect",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-mutablepriorityqueue",
+ "slic3r-point",
+ "slic3r-polyline",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-sla"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-boundingbox",
+ "slic3r-execution",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-slicing"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+ "slic3r-slicingadaptive",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-slicingadaptive"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-support"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-aabbtreelines",
+ "slic3r-boundingbox",
+ "slic3r-buildvolume",
+ "slic3r-clipperutils",
+ "slic3r-clipperzutils",
+ "slic3r-color",
+ "slic3r-config",
+ "slic3r-edgegrid",
+ "slic3r-exception",
+ "slic3r-exclusionvolumegeometry",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-fill-lightning",
+ "slic3r-flow",
+ "slic3r-format",
+ "slic3r-geometry",
+ "slic3r-i18n",
+ "slic3r-layer",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-materialtype",
+ "slic3r-minimumspanningtree",
+ "slic3r-model",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-multipoint",
+ "slic3r-mutablepolygon",
+ "slic3r-pngreadwrite",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-print",
+ "slic3r-printconfig",
+ "slic3r-proof",
+ "slic3r-shortestpath",
+ "slic3r-slicing",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-svg",
+ "slic3r-trianglemeshslicer",
+ "slic3r-triangleselector",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-surface"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-surfacecollection"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+ "slic3r-surface",
+ "slic3r-svg",
+]
+
+[[package]]
+name = "slic3r-svg"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-proof",
+ "slic3r-surface",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-technologies"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-tesselate"
+version = "0.1.0"
+dependencies = [
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-thread"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-time"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-timer"
+version = "0.1.0"
+dependencies = [
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-trianglemesh"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-execution",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-meshsplitimpl",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+ "slic3r-trianglemeshslicer",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-trianglemeshslicer"
+version = "0.1.0"
+dependencies = [
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+ "slic3r-tesselate",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-triangleselector"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-proof",
+ "slic3r-trianglemesh",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-trianglesetsampling"
+version = "0.1.0"
+dependencies = [
+ "slic3r-point",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-triangulation"
+version = "0.1.0"
+dependencies = [
+ "slic3r-expolygon",
+ "slic3r-intersectionpoints",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-proof",
+]
+
+[[package]]
+name = "slic3r-utils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-macutils",
+ "slic3r-platform",
+ "slic3r-proof",
+ "slic3r-semver",
+]
+
+[[package]]
+name = "slic3r-variablewidth"
+version = "0.1.0"
+dependencies = [
+ "slic3r-extrusionentity",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polyline",
+ "slic3r-proof",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"

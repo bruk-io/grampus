@@ -1,0 +1,16 @@
+[package]
+name = "slic3r-intersectionpoints"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-aabbtreeindirect = { path = "../slic3r-aabbtreeindirect" }
+slic3r-aabbtreelines = { path = "../slic3r-aabbtreelines" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-line = { path = "../slic3r-line" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

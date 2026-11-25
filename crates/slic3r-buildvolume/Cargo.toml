@@ -1,0 +1,17 @@
+[package]
+name = "slic3r-buildvolume"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-extrusionentity = { path = "../slic3r-extrusionentity" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-trianglemesh = { path = "../slic3r-trianglemesh" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }
