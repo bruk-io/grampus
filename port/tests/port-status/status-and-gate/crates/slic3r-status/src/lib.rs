@@ -5,6 +5,7 @@
 // drafted_mod, not_started_mod and outscope_mod are deliberately NOT named here: each must
 // stay unreached for its own row's expected status.
 
+mod mod_reached_todo_mod;
 mod no_proof_mod;
 mod ported_mod;
 mod ported_with_fuzz;
