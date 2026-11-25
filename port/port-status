@@ -6,14 +6,23 @@
 # ]
 # ///
 
-"""Check every ported module's PORT STATUS trailer and port markers (R14, R15, R16 part).
+"""Check every ported module's PORT STATUS trailer and port markers (R14, R15, R16, R19, R26,
+R29, R30).
 
-``port/port-status`` is the one command the porting work is held to. This is **part 1** of
-plan step 14 (task `21-port-status-markers`): the per-module, text-based checks that do not
-need a build, the oracle binary or a libslic3r build to run. `22-port-status-gates` adds the
-status derivation, the burn-down, the in-scope gate, the ``unknown`` count and the document
-section checks; `23-perf-backlog` adds the perf-backlog report and its per-marker assertion.
-Both later tasks call back into this module rather than duplicating its scan.
+``port/port-status`` is the one command the porting work is held to. Task `21-port-status-markers`
+added the per-module, text-based checks below (``scan_tree``) that do not need a build, the
+oracle binary or a libslic3r build to run; task `23-perf-backlog` added the perf-backlog report's
+per-marker assertion (``check_perf_fidelity``, folded into ``scan_tree``). This task,
+`22-port-status-gates`, adds everything else: deriving every ``port/manifest.tsv`` row's status
+from the Rust tree (``derive_row_status``) rather than reading its ``status`` cell as a fact; the
+burn-down and the completion gate (``compute_gate``) R16 and R26 state; the required-fuzz-target
+check (``check_fuzz_targets``, R19's second half); the two document-section checks
+(``check_document_sections``, R12/R13/R29); and the ``--per-commit`` / bare mode split that ties
+all of it together (see ``full_check`` and ``main``). ``--per-commit`` runs every check in this
+module except the gate itself, and passes while a row's derived status is ``not-started`` or
+``drafted``; the bare (default) command adds the gate -- the burn-down at zero and every in-scope
+row ``ported`` -- which is true only at the end of plan step 23, not at a port task's own pull
+request.
 
 A **ported module** is any ``.rs`` file found under ``<tree>/crates/*/src/**/*.rs`` (never
 ``crates/*/tests/``, which the glob does not reach) whose path appears in ``port/manifest.tsv``'s
@@ -41,11 +50,12 @@ has to run cleanly over Phase A drafts that are not valid Rust and that ``cargo 
 sees (no ``mod`` line reaches them yet). It never builds anything, never reads the oracle
 binary and never needs a libslic3r build.
 
-Resolution: ``--tree`` (default: the repository root) redirects where the module scan and
-``port/manifest.tsv`` are read from -- it is how ``--self-test`` runs the same checks over the
-fixture trees under ``port/tests/port-status/`` -- but ``vendor/OrcaSlicer/`` always resolves
-from the actual repository root (this script's own location), never from ``--tree``, because
-the pin is the pin and a fixture tree carries no vendored copy of its own.
+Resolution: ``--tree`` (default: the repository root) redirects where the module scan,
+``port/manifest.tsv``, ``port/ownership.tsv``, ``crates/`` (for mod-reachability and the
+burn-down) and the two documents (R29) are read from -- it is how ``--self-test`` runs the same
+checks over the fixture trees under ``port/tests/port-status/`` -- but ``vendor/OrcaSlicer/``
+always resolves from the actual repository root (this script's own location), never from
+``--tree``, because the pin is the pin and a fixture tree carries no vendored copy of its own.
 
 Vendored-path spelling: a path written in a trailer's ``source:`` line or in a
 ``// PORT SRC:`` marker is always written relative to ``vendor/OrcaSlicer/`` itself, i.e. with
@@ -72,6 +82,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -127,6 +138,522 @@ MARKER_WHITELIST_UPPER = {name.upper() for name in MARKER_WHITELIST}
 # task 23-perf-backlog: the two marker kinds a generated report is built from.
 PERF_PREFIX = "PERF(port)"
 FIDELITY_PREFIX = "FIDELITY(port)"
+
+# --------------------------------------------------------------------------------------------
+# 22-port-status-gates: status derivation, the burn-down gate, the required-fuzz-target check
+# and the two document-section checks.
+# --------------------------------------------------------------------------------------------
+
+# A `mod name;` declaration (file-per-module or mod.rs per directory), read the same way
+# port/inventory's own `compute_mod_reachable_files` reads it (plan step 11's rule): both
+# scripts compute mod-reachability the same way from the same tree, so the module-to-manifest
+# direction (port/inventory) and the manifest-to-module direction (this script, R26) can never
+# silently disagree about what "a mod declaration reaches it" means. Applied here to
+# `classify_lines`' own code-only view (``li.code`` joined), not a separate comment stripper --
+# one comment policy for both "does a mod line reach it" and "does todo!()/unimplemented!()
+# remain", stated once, here.
+MOD_DECL_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*;", re.MULTILINE)
+TODO_RE = re.compile(r"\btodo!\s*\(")
+UNIMPLEMENTED_RE = re.compile(r"\bunimplemented!\s*\(")
+TODO_OR_UNIMPLEMENTED_RE = re.compile(r"\btodo!\s*\(|\bunimplemented!\s*\(")
+
+# The proof-presence convention this task fixes (task.md: "The proof-presence convention,
+# fixed here"): a `#[test]` attribute on its own line, the test function it attaches to, and a
+# `// PROOF: <proof path cell, verbatim>` line "beside" it -- in the contiguous `//` comment
+# block directly above the `#[test]` attribute, on the attribute or fn-signature line itself
+# (a trailing comment), or on the line directly inside the function's opening brace. Judgement
+# call: "beside" is read generously (a small bounded window) rather than "the line
+# immediately above `#[test]`" alone, because the six existing marker conventions in this file
+# (`// SAFETY:`, `// PORT SRC:`) are already read from a *contiguous comment block* above their
+# code, not just the one adjacent line -- see the pull request body for why this one window is
+# chosen and not a narrower one.
+TEST_ATTR_RE = re.compile(r"^\s*#\s*\[\s*test\s*\]\s*$")
+PROOF_FN_DECL_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)")
+PROOF_LINE_RE = re.compile(r"^\s*//\s*PROOF:\s*(?P<path>.*?)\s*$")
+
+# The manifest's scope cell (task.md: "in scope or out with a reason") is "in", or "in: <reason>"
+# -- never a bare prefix match against anything else, since the only other value this column
+# takes is "out" / "out: <reason>" (port/inventory's own `compute_scope`).
+def is_in_scope(row: dict[str, str]) -> bool:
+    cell = row.get("in scope or out with a reason", "").strip()
+    return cell.split(":", 1)[0].strip() == "in"
+
+
+def has_port_status_trailer_naming(text: str, relpath: str) -> bool:
+    """True if `text` carries a line containing the literal "PORT STATUS" with `relpath`
+    (a manifest row's own vendored `path` cell, e.g. "Geometry/Circle.cpp") within a few lines
+    of it -- the same loose, textual presence test `port/inventory`'s own
+    `has_port_status_trailer` uses for the same purpose (the module-to-manifest direction), so
+    the "drafted" half of status derivation reads a module's trailer exactly the way
+    `port/inventory` already does. This is deliberately looser than `check_trailer`'s full
+    grammar validation elsewhere in this file: a malformed trailer that still names the row is
+    still "honestly a draft" (task.md), and `check_trailer`'s own finding is what tells a porter
+    the trailer needs fixing, not status derivation."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if TRAILER_HEADER.removeprefix("// ") in line and relpath in "\n".join(
+            lines[i : i + 8]
+        ):
+            return True
+    return False
+
+
+def compute_mod_reachable_files(crates_root: Path) -> frozenset[Path]:
+    """Every `.rs` file under `crates_root` reachable from some crate's `src/lib.rs` by a chain
+    of `mod name;` declarations (file-per-module, or `mod.rs` per directory) -- the same
+    traversal `port/inventory`'s `compute_mod_reachable_files` runs, reimplemented here rather
+    than imported (importing that script would also run its own CLI machinery, the same reason
+    `escape_cell` is duplicated above). Comment policy: `mod` declarations are read from
+    `classify_lines`' code-only view, the same view `derive_row_status` reads `todo!()` /
+    `unimplemented!()` from, so a comment that merely mentions either cannot fool this script
+    two different ways."""
+    reachable: set[Path] = set()
+    if not crates_root.is_dir():
+        return frozenset()
+    for crate_dir in sorted(p for p in crates_root.iterdir() if p.is_dir()):
+        lib_rs = crate_dir / "src" / "lib.rs"
+        if not lib_rs.is_file():
+            continue
+        stack = [lib_rs]
+        seen = {lib_rs}
+        while stack:
+            f = stack.pop()
+            reachable.add(f)
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            resolve_dir = f.parent if f.name in ("lib.rs", "mod.rs") else f.parent / f.stem
+            code_only = "\n".join(li.code for li in classify_lines(text))
+            for name in MOD_DECL_RE.findall(code_only):
+                for candidate in (resolve_dir / f"{name}.rs", resolve_dir / name / "mod.rs"):
+                    if candidate.is_file() and candidate not in seen:
+                        seen.add(candidate)
+                        stack.append(candidate)
+    return frozenset(reachable)
+
+
+def extract_cfg_test_text(text: str) -> str:
+    """The raw text of every `#[cfg(test)]` module body in `text`, found by the same brace
+    counting `classify_lines` already does for the numeric-literal rule's own cfg(test)
+    exemption (masking string/char literals first, so a brace written inside a string cannot
+    move the depth) -- reimplemented here as a standalone extractor because `classify_lines`
+    reports exemption per line, not the body's own text, and the proof convention needs the
+    latter."""
+    lines = text.splitlines()
+    masked_lines = strip_block_comments(text).splitlines()
+    out_lines: list[str] = []
+    in_block = False
+    depth = 0
+    seen_open = False
+    for raw, masked in zip(lines, masked_lines):
+        stripped = raw.strip()
+        if not in_block and CFG_TEST_RE.match(stripped):
+            in_block = True
+            depth = 0
+            seen_open = False
+            continue
+        if in_block:
+            code, _comment = split_code_comment(masked)
+            masked_code = mask_strings(code)
+            opens = masked_code.count("{")
+            closes = masked_code.count("}")
+            if opens:
+                seen_open = True
+            depth += opens - closes
+            out_lines.append(raw)
+            if seen_open and depth <= 0:
+                in_block = False
+    return "\n".join(out_lines)
+
+
+def find_proof_match(text: str, module_snake: str, proof_path_cell: str) -> bool:
+    """True if `text` carries a `#[test]`-attributed function whose name contains
+    `module_snake` and which carries, beside it (see `PROOF_LINE_RE`'s own comment for the
+    window), the literal line `// PROOF: <proof_path_cell>`."""
+    if not proof_path_cell:
+        return False
+    wanted = proof_path_cell.strip()
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if not TEST_ATTR_RE.match(line):
+            continue
+        j = i + 1
+        while j < len(lines) and (not lines[j].strip() or lines[j].strip().startswith("#[")):
+            j += 1
+        if j >= len(lines):
+            continue
+        m = PROOF_FN_DECL_RE.match(lines[j])
+        if not m or module_snake not in m.group(1):
+            continue
+        window_start = i
+        k = i - 1
+        while k >= 0 and lines[k].strip().startswith("//"):
+            window_start = k
+            k -= 1
+        window_end = min(j + 1, len(lines) - 1)
+        for li in range(window_start, window_end + 1):
+            pm = PROOF_LINE_RE.match(lines[li])
+            if pm and pm.group("path") == wanted:
+                return True
+    return False
+
+
+def proof_present(row: dict[str, str], target_path: Path, tree: Path) -> bool:
+    """True if the row's declared `proof path` cell has a matching `// PROOF:` marker beside a
+    test naming the module's snake_case name (its file stem), in a file under the row's target
+    crate's `crates/<crate>/tests/`, or in a `#[cfg(test)]` module inside the module file
+    itself (task.md's "proof-presence convention, fixed here"). An empty `proof path` cell can
+    never be satisfied -- there is nothing for a `// PROOF:` marker to name verbatim.
+
+    Matched against *this row's own* `proof path` cell, verbatim, as task.md states it -- never
+    against a sibling row's. A `.cpp`/`.hpp` pair is two manifest rows sharing one target
+    module, and where their `proof path` cells disagree (a measured ~56 of the committed
+    manifest's 232 distinct in-scope target modules), the module needs a distinct `// PROOF:
+    <n>` marker for each cell before every one of its rows derives `ported` -- one row's marker
+    does not satisfy its sibling row's own cell. Noted here, not worked around, because task.md
+    ties the marker to "the row's proof path cell", not to the module; a porter of such a module
+    should expect to write more than one `// PROOF:` marker."""
+    proof_path_cell = row.get("proof path", "").strip()
+    if not proof_path_cell:
+        return False
+    crate = row.get("target crate", "").strip()
+    module_snake = target_path.stem
+    if crate:
+        tests_dir = tree / "crates" / crate / "tests"
+        if tests_dir.is_dir():
+            for f in sorted(tests_dir.rglob("*.rs")):
+                try:
+                    text = f.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if find_proof_match(text, module_snake, proof_path_cell):
+                    return True
+    try:
+        module_text = target_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    cfg_test_text = extract_cfg_test_text(module_text)
+    if cfg_test_text and find_proof_match(cfg_test_text, module_snake, proof_path_cell):
+        return True
+    return False
+
+
+def derive_row_status(row: dict[str, str], tree: Path, mod_reachable: frozenset[Path]) -> str:
+    """Derive one `port/manifest.tsv` row's status from the Rust tree alone (task.md's status
+    rule), never reading the row's own `status` cell:
+
+    - `ported` -- a `mod` declaration reaches the target file, it holds no `todo!()` and no
+      `unimplemented!()`, and its proof is present (`proof_present`).
+    - `drafted` -- a `mod` declaration reaches the target file but it is not `ported` because its
+      proof is not yet present (Done-when's own tested case -- "a module with a `mod` line, no
+      `todo!()` and no `unimplemented!()` but no `// PROOF:` marker ... derives as `drafted` and
+      not as `ported`"); or no `mod` declaration reaches it, but it carries a `PORT STATUS`
+      trailer naming this row's own vendored `path` (a Phase A draft, task.md's "honestly a
+      draft"). Strictly task.md's bullet ("no `mod` declaration reaches it"), matching
+      `port/inventory`'s own rule exactly: a `mod`-reached file that still holds a live
+      `todo!()`/`unimplemented!()` is `not-started` below, not grouped in here.
+    - `not-started` -- anything else, including no `target module` cell, no file there at all,
+      or a `mod`-reached file that still holds a live `todo!()`/`unimplemented!()`.
+
+    This computation is the authority R26's gate uses (task.md), which is not the same as
+    `port/inventory`'s own status cell agreeing with it: `port/inventory` evaluates only the
+    text-visible half of this same rule -- the target file present with a trailer naming the
+    row, the `mod` line, and the absence of `todo!()`/`unimplemented!()` -- and hands the proof
+    half to this script. So a module can read `ported` in `port/manifest.tsv`'s own `status`
+    cell while this script derives `drafted` for it (the proof is not yet present); that cell is
+    informational, and this derivation, not the cell, is what the gate and every check above
+    read.
+    """
+    target_module_cell = row.get("target module", "").strip()
+    if not target_module_cell:
+        return "not-started"
+    target_path = tree / target_module_cell
+    if not target_path.is_file():
+        return "not-started"
+    text = target_path.read_text(encoding="utf-8", errors="replace")
+    code_only = "\n".join(li.code for li in classify_lines(text))
+    has_todo_or_unimpl = bool(TODO_OR_UNIMPLEMENTED_RE.search(code_only))
+    reached = target_path in mod_reachable
+    if reached:
+        if has_todo_or_unimpl:
+            return "not-started"
+        if proof_present(row, target_path, tree):
+            return "ported"
+        return "drafted"
+    source_cell = row.get("path", "").strip()
+    if source_cell and has_port_status_trailer_naming(text, source_cell):
+        return "drafted"
+    return "not-started"
+
+
+def required_fuzz_target_relpath(row: dict[str, str]) -> str:
+    """`crates/slic3r-ffi/fuzz/fuzz_targets/<crate>_<module>.rs` -- the one exact path the
+    required-fuzz-target check accepts (task.md: "that exact path, so a file naming the module
+    at any other path does not satisfy the check")."""
+    crate = row.get("target crate", "").strip()
+    module_cell = row.get("target module", "").strip()
+    stem = Path(module_cell).stem if module_cell else ""
+    return f"crates/slic3r-ffi/fuzz/fuzz_targets/{crate}_{stem}.rs"
+
+
+def check_fuzz_targets(
+    tree: Path,
+    manifest_rows: list[dict[str, str]],
+    mod_reachable: frozenset[Path],
+    result: ScanResult,
+) -> None:
+    """R19's second half: a row whose `fuzz target` is `required` and whose derived status is
+    `ported` fails unless `required_fuzz_target_relpath` exists. Fires only at `ported` -- a
+    `not-started` or `drafted` row is never failed by it, because a Phase A draft has no proof
+    and no target yet (task.md).
+
+    A `.cpp`/`.hpp` pair shares one target module across two manifest rows, so both rows derive
+    the same `required_fuzz_target_relpath`; reported once per distinct path, not once per row,
+    so a module missing its fuzz target is not double-counted."""
+    reported: set[str] = set()
+    for row in manifest_rows:
+        if row.get("fuzz target", "").strip() != "required":
+            continue
+        if derive_row_status(row, tree, mod_reachable) != "ported":
+            continue
+        target_relpath = required_fuzz_target_relpath(row)
+        if target_relpath in reported:
+            continue
+        if not (tree / target_relpath).is_file():
+            reported.add(target_relpath)
+            result.fail(
+                row.get("target module", "") or row.get("path", ""),
+                1,
+                "missing-fuzz-target",
+                f"this row's 'fuzz target' is 'required' and its derived status is 'ported', "
+                f"but {target_relpath} does not exist",
+            )
+
+
+# The twelve and six heading strings task.md fixes verbatim (R12, R13, R29): matched on the
+# exact heading text, not on keywords, because renaming one must break this check.
+PORTING_SECTION_HEADINGS = [
+    "## Crate map",
+    "## Type map",
+    "## Idiom map",
+    "## Don't-translate list",
+    "## Banned-substitution list",
+    "## Rules",
+    "### Scaling conversions",
+    "### Float widths",
+    "### Rounding modes",
+    "### Error sets",
+    "### Number formatting",
+    "### Linked libraries",
+]
+WORKFLOW_SECTION_HEADINGS = [
+    "## Unit of work",
+    "## The two phases",
+    "## The loop",
+    "## The rejection rule",
+    "## Conflict discipline",
+    "## Trial-run record",
+]
+DOCUMENT_SECTION_SPEC = [
+    ("docs/PORTING.md", PORTING_SECTION_HEADINGS),
+    ("docs/WORKFLOW.md", WORKFLOW_SECTION_HEADINGS),
+]
+
+
+def check_document_sections(
+    tree: Path, result: ScanResult
+) -> list[tuple[str, int, int]]:
+    """R29: fail, naming the exact missing heading text, unless `docs/PORTING.md` and
+    `docs/WORKFLOW.md` (resolved under `tree`, so `--tree` and `--self-test` can exercise a
+    fixture copy without touching the real documents) each carry every heading
+    `DOCUMENT_SECTION_SPEC` lists, matched as a whole trimmed line -- reading headings, not
+    prose quality.
+
+    Returns `[(doc_relpath, required_count, present_count), ...]` so `main` can print, per R12
+    and R13's own recorded proof ("exits 0 **and prints that** docs/PORTING.md holds the crate
+    map, type map, …"), that the document was actually read and found to hold its sections --
+    not just that the check happened to add no finding this run."""
+    summary: list[tuple[str, int, int]] = []
+    for doc_relpath, headings in DOCUMENT_SECTION_SPEC:
+        doc_path = tree / doc_relpath
+        if not doc_path.is_file():
+            result.fail(
+                doc_relpath,
+                1,
+                "missing-document-section",
+                f"{doc_relpath} does not exist, so it carries none of its required headings",
+            )
+            summary.append((doc_relpath, len(headings), 0))
+            continue
+        present = {
+            line.strip()
+            for line in doc_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        }
+        present_count = 0
+        for heading in headings:
+            if heading in present:
+                present_count += 1
+            else:
+                result.fail(
+                    doc_relpath,
+                    1,
+                    "missing-document-section",
+                    f"{doc_relpath} is missing the required heading {heading!r}",
+                )
+        summary.append((doc_relpath, len(headings), present_count))
+    return summary
+
+
+def count_unknown_ownership_rows(tree: Path) -> int:
+    """The count of `port/ownership.tsv` rows whose `class` column is literally `unknown` --
+    printed, and never failed on, in both modes (R30, task.md). Task `16-ownership-spike`'s
+    `VALID_CLASSES` treats an empty `class` cell as a distinct, deliberate state (not yet
+    classified) from the explicit `unknown`, so this count can read 0 while every row is still
+    unclassified; `count_unclassified_ownership_rows` prints that blank count alongside it so
+    the never-failing metric is not mistaken for "nothing left to classify"."""
+    path = tree / "port" / "ownership.tsv"
+    if not path.is_file():
+        return 0
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return 0
+    header = lines[0].split("\t")
+    try:
+        idx = header.index("class")
+    except ValueError:
+        return 0
+    count = 0
+    for line in lines[1:]:
+        if not line:
+            continue
+        cells = line.split("\t")
+        if idx < len(cells) and cells[idx].strip() == "unknown":
+            count += 1
+    return count
+
+
+def count_unclassified_ownership_rows(tree: Path) -> tuple[int, int]:
+    """`(blank_count, total_count)` over `port/ownership.tsv`'s `class` column: the count of
+    rows whose cell is empty (not yet classified at all, distinct from the explicit `unknown`
+    `count_unknown_ownership_rows` counts) and the total row count. Printed alongside the
+    `unknown` count so a reader is not left to conclude 208 raw-pointer fields are classified
+    when none are; task `51-ownership-blank-class-gate` owns gating on this, not this task."""
+    path = tree / "port" / "ownership.tsv"
+    if not path.is_file():
+        return 0, 0
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        return 0, 0
+    header = lines[0].split("\t")
+    try:
+        idx = header.index("class")
+    except ValueError:
+        return 0, 0
+    blank = 0
+    total = 0
+    for line in lines[1:]:
+        if not line:
+            continue
+        total += 1
+        cells = line.split("\t")
+        if idx >= len(cells) or cells[idx].strip() == "":
+            blank += 1
+    return blank, total
+
+
+@dataclass
+class GateResult:
+    """The burn-down and gate counts (R16, R26, R30), computed once per run and printed in both
+    modes; only the no-argument mode fails on them (task.md)."""
+
+    todo_count: int = 0
+    unimplemented_count: int = 0
+    gated_out_count: int = 0
+    remaining_count: int = 0
+    unknown_ownership_count: int = 0
+
+    @property
+    def burn_down_total(self) -> int:
+        return self.todo_count + self.unimplemented_count + self.gated_out_count
+
+    def failed(self) -> bool:
+        return bool(self.burn_down_total or self.remaining_count)
+
+
+def carries_port_status_trailer(text: str) -> bool:
+    """True if `text` has a line reading exactly `// PORT STATUS` -- the burn-down's own
+    "gated out of the build" test (task.md: "a file under `crates/*/src/` that carries a `PORT
+    STATUS` trailer and that no `mod` declaration reaches"), which names no particular row (a
+    file gated out is counted whether or not it still matches a manifest row at all)."""
+    return any(line.strip() == TRAILER_HEADER for line in text.splitlines())
+
+
+def compute_gate(
+    tree: Path, manifest_rows: list[dict[str, str]], mod_reachable: frozenset[Path]
+) -> GateResult:
+    gate = GateResult()
+    crates_root = tree / "crates"
+    if crates_root.is_dir():
+        for rs_path in sorted(crates_root.glob("*/src/**/*.rs")):
+            try:
+                text = rs_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            code_only = "\n".join(li.code for li in classify_lines(text))
+            gate.todo_count += len(TODO_RE.findall(code_only))
+            gate.unimplemented_count += len(UNIMPLEMENTED_RE.findall(code_only))
+            if rs_path not in mod_reachable and carries_port_status_trailer(text):
+                gate.gated_out_count += 1
+    in_scope_rows = [r for r in manifest_rows if is_in_scope(r)]
+    gate.remaining_count = sum(
+        1 for r in in_scope_rows if derive_row_status(r, tree, mod_reachable) != "ported"
+    )
+    gate.unknown_ownership_count = count_unknown_ownership_rows(tree)
+    return gate
+
+
+def full_check(tree: Path) -> tuple[ScanResult, GateResult, list[tuple[str, int, int]]]:
+    """This task's own seam: `scan_tree` (task 21's and task 23's per-module and per-marker
+    checks, untouched) plus the required-fuzz-target check and the two document-section checks
+    -- all four always active, in both modes (task.md's `--per-commit` subset) -- plus the gate
+    counts, which only the no-argument mode fails on. Kept apart from `scan_tree` itself so
+    `run_selftest`'s existing fixture loop (task 21, task 23) keeps exercising `scan_tree` alone,
+    unchanged, over fixture trees that carry no `docs/` directory of their own.
+
+    Returns `(result, gate, doc_summary)`; `doc_summary` is `check_document_sections`'s own
+    return value, carried through so `main` can print, per R12/R13's own recorded proof, that
+    each document was read and found to hold its sections -- not just that no finding came
+    back this run."""
+    result = scan_tree(tree)
+    manifest_rows = load_manifest(tree / "port" / "manifest.tsv")
+    mod_reachable = compute_mod_reachable_files(tree / "crates")
+    check_fuzz_targets(tree, manifest_rows, mod_reachable, result)
+    doc_summary = check_document_sections(tree, result)
+    gate = compute_gate(tree, manifest_rows, mod_reachable)
+    return result, gate, doc_summary
+
+
+def format_remaining_line(gate: GateResult) -> str:
+    """R26's exact remaining-rows wording (Done-when: "on a tree with no in-scope rows
+    remaining ... prints `0 in-scope rows remaining`, and on a tree with rows remaining it
+    prints that count in the same wording"). Factored out of `main` so the self-test can assert
+    this literal string through the same function `main` prints with, not a re-typed copy of
+    it."""
+    return (
+        "0 in-scope rows remaining"
+        if gate.remaining_count == 0
+        else f"{gate.remaining_count} in-scope rows remaining"
+    )
+
+
+def compute_exit_failed(result: ScanResult, gate: GateResult, per_commit: bool) -> bool:
+    """The exact verdict `main` exits on: any finding fails either mode; the gate (the burn-down
+    at zero and every in-scope row `ported`) fails only the bare (default) mode. Factored out of
+    `main` so the self-test calls the very function that decides the exit code, rather than
+    re-implementing its condition and only checking `result.findings`/`gate.failed()`
+    separately."""
+    return bool(result.findings) or (not per_commit and gate.failed())
 
 
 def classify_comment_marker(text: str) -> tuple[str, str] | None:
@@ -280,6 +807,44 @@ def resolve_vendored(written_path: str) -> tuple[Path, str | None]:
 # --------------------------------------------------------------------------------------------
 # Manifest
 # --------------------------------------------------------------------------------------------
+
+# The columns status derivation and the gate read from port/manifest.tsv's header
+# (14-manifest-columns owns the spellings). `check_manifest_shape` guards the gate against
+# reading a missing or mis-headed manifest as zero in-scope rows remaining, which `failed()`
+# would otherwise read as the port being complete.
+REQUIRED_MANIFEST_COLUMNS = (
+    "in scope or out with a reason",
+    "target crate",
+    "target module",
+    "proof path",
+    "fuzz target",
+)
+
+
+def check_manifest_shape(tree: Path) -> str | None:
+    """Return an error message if `tree/port/manifest.tsv` does not exist, or its header is
+    missing a column `derive_row_status`, `is_in_scope` or `check_fuzz_targets` reads; `None` if
+    the manifest is at least structurally usable. Guards R26's completion gate against failing
+    open: a tree whose manifest is absent or whose scope column was renamed still derives zero
+    in-scope rows today (`is_in_scope` returns False for a cell it cannot find), which
+    `GateResult.failed()` reads as the port being done rather than as a broken manifest -- this
+    is checked once, against the real tree being scanned, before anything else runs, the same
+    way `check_pin` guards the vendored submodule's pin. Deliberately silent about a manifest
+    that parses with every required column but has zero in-scope *rows*: `port/tests/port-
+    status/doc-sections-complete` and `doc-sections-missing` are committed fixtures with a
+    header-only manifest, by design (task.md), so that is not itself a fault."""
+    path = tree / "port" / "manifest.tsv"
+    if not path.is_file():
+        return f"{path} does not exist; the completion gate cannot derive any row from it"
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    header = lines[0].split("\t") if lines else []
+    missing = [c for c in REQUIRED_MANIFEST_COLUMNS if c not in header]
+    if missing:
+        return (
+            f"{path}'s header is missing column(s) {missing!r}, which status derivation and "
+            "the completion gate both read"
+        )
+    return None
 
 
 def load_manifest(path: Path) -> list[dict[str, str]]:
@@ -455,7 +1020,9 @@ class LineInfo:
     code: str
     comment: str
     is_pure_comment: bool
-    exempt: bool  # exempt position for the numeric-literal rule: attribute or cfg(test) body
+    exempt: bool  # exempt position for the numeric-literal rule AND the marker whitelist
+    # (22-port-status-gates: the latter only so a `// PROOF:` marker inside a `#[cfg(test)]`
+    # module does not trip `check_marker_whitelist`): attribute line or cfg(test) body.
 
 
 def classify_lines(text: str) -> list[LineInfo]:
@@ -619,7 +1186,36 @@ def find_literals(code: str) -> list[re.Match[str]]:
 
 
 def check_marker_whitelist(path: str, lines: list[LineInfo], result: ScanResult) -> None:
+    """Judgement call recorded here, in `--help` (MARKER_WHITELIST_HELP) and in the pull request
+    body (22-port-status-gates): a `// PROOF: <path>` line, the proof-presence convention this
+    task adds, is not a port marker R14 closes the whitelist over, so rather than widen that
+    closed six-marker list to a seventh spelling, this check does not run at all on an exempt
+    line (`info.exempt`) -- inside a `#[cfg(test)]` module body, or on an attribute line, the
+    two positions `classify_lines` already marks exempt for the numeric-literal rule
+    (`--help`'s "Exempt positions").
+
+    The exemption is the position, not the spelling, so it is **wider than `// PROOF:`** in two
+    ways, disclosed here and in `--help` rather than narrowed: inside those positions a
+    near-miss spelling is not flagged either (`// TODO:` written in a `#[cfg(test)]` block is
+    not a finding -- measured), and a recognised marker there is not added to `marker_counts`
+    (`// PORT NOTE:` written there prints as `PORT NOTE=0` -- measured). The printed count
+    therefore excludes test-module markers, which is a narrowing of R14's "prints the count per
+    marker kind" that this task chose over widening R14's six-marker list. It is at least
+    consistent with the convention's other sanctioned form, a file under
+    `crates/<crate>/tests/`, which `scan_tree`'s own glob (`crates/*/src/**/*.rs`) never reads,
+    so markers there were never counted either.
+
+    The exemption is this check's alone and is **not** uniform across the script: `check_safety`
+    and `scan_markers`' well-formedness rules are exempt-unaware, so an `unsafe` block inside a
+    `#[cfg(test)]` module still needs its `// SAFETY:` comment and a malformed `// PERF(port):`
+    written there is still a finding (both measured), while the counts above print those same
+    markers as 0.
+
+    Everywhere else in a ported module's `src/` file, a stray `// PROOF:` is still an ordinary
+    unrecognised-marker finding, like any other near miss."""
     for i, info in enumerate(lines):
+        if info.exempt:
+            continue
         for comment_text in ([info.comment] if info.comment else []) + (
             [info.raw.strip()] if info.is_pure_comment and not info.comment else []
         ):
@@ -637,7 +1233,8 @@ def check_marker_whitelist(path: str, lines: list[LineInfo], result: ScanResult)
                     "unrecognized-marker",
                     f"'// {prefix}:' is not one of the six recognised markers "
                     f"({', '.join(sorted(MARKER_WHITELIST))}); no near-miss spelling is "
-                    "accepted and there is no per-file opt-out",
+                    "accepted and no marker, allowlist file or comment opts a file or a line "
+                    "out -- the only exemptions are positional (--help, 'Exempt positions')",
                 )
 
 
@@ -1547,6 +2144,262 @@ def _check_perf_reason_excludes_doc_comment() -> list[str]:
     return []
 
 
+def _check_manifest_shape_guard() -> list[str]:
+    """`check_manifest_shape`, checked directly against the two broken shapes a reviewer found
+    (22-port-status-gates): a tree with no `port/manifest.tsv` at all, and one whose header is
+    missing a column the derivation reads -- the guard that stops R26's completion gate from
+    failing open (reading a missing or mis-headed manifest's zero in-scope rows as the port
+    being complete), and the two shapes it must NOT flag: a real, well-formed manifest, and a
+    header-only one (zero rows), which `doc-sections-complete`'s own committed fixture already
+    relies on passing clean."""
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        error = check_manifest_shape(Path(tmp))
+        if error is None or "does not exist" not in error:
+            failures.append(
+                f"missing-manifest: expected an error naming the file as missing, got {error!r}"
+            )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        (tmp_path / "port").mkdir()
+        (tmp_path / "port" / "manifest.tsv").write_text(
+            "path\ttarget crate\ttarget module\tscope\tequality tier\tproof path\tfuzz target\n",
+            encoding="utf-8",
+        )
+        error = check_manifest_shape(tmp_path)
+        if error is None or "missing column" not in error:
+            failures.append(
+                "renamed-header-column: expected an error naming the missing column, got "
+                f"{error!r}"
+            )
+
+    ok_error = check_manifest_shape(FIXTURES_ROOT / "status-and-gate")
+    if ok_error is not None:
+        failures.append(
+            f"status-and-gate fixture: expected check_manifest_shape to return None, got "
+            f"{ok_error!r}"
+        )
+
+    ok_error = check_manifest_shape(FIXTURES_ROOT / "doc-sections-complete")
+    if ok_error is not None:
+        failures.append(
+            "doc-sections-complete fixture (header-only, zero in-scope rows by design): "
+            f"expected check_manifest_shape to return None, got {ok_error!r}"
+        )
+
+    return failures
+
+
+def _check_status_derivation() -> list[str]:
+    """`derive_row_status`, checked directly against every row of the
+    `status-and-gate` fixture (22-port-status-gates): a direct, runnable proof of the status
+    rule itself, field by field, rather than only through the gate's pass/fail exit code."""
+    tree = FIXTURES_ROOT / "status-and-gate"
+    rows = load_manifest(tree / "port" / "manifest.tsv")
+    mod_reachable = compute_mod_reachable_files(tree / "crates")
+    expected = {
+        "crates/slic3r-status/src/drafted_mod.rs": "drafted",
+        "crates/slic3r-status/src/not_started_mod.rs": "not-started",
+        "crates/slic3r-status/src/no_proof_mod.rs": "drafted",
+        "crates/slic3r-status/src/ported_mod.rs": "ported",
+        "crates/slic3r-status/src/ported_with_fuzz.rs": "ported",
+        "crates/slic3r-status/src/outscope_mod.rs": "not-started",
+        # A `mod` declaration reaches this one too (lib.rs), but it still holds a live
+        # `todo!()`: must derive "not-started", not "drafted" (the strict reading of task.md's
+        # bullet, matching port/inventory -- see derive_row_status's own docstring).
+        "crates/slic3r-status/src/mod_reached_todo_mod.rs": "not-started",
+    }
+    # Guards against this check silently passing over an empty or renamed fixture (the same
+    # shape of guard `_check_perf_row_shape` already uses for its own fixture): a loop that
+    # never runs its body is indistinguishable from one that ran and found no disagreement.
+    if len(rows) != len(expected):
+        return [
+            f"status-and-gate fixture: expected exactly {len(expected)} manifest row(s), "
+            f"got {len(rows)}: {[r.get('target module') for r in rows]!r}"
+        ]
+    seen = {row["target module"] for row in rows}
+    if seen != set(expected):
+        return [
+            f"status-and-gate fixture: expected rows for {sorted(expected)!r}, got "
+            f"{sorted(seen)!r}"
+        ]
+    failures = []
+    for row in rows:
+        target = row["target module"]
+        want = expected[target]
+        got = derive_row_status(row, tree, mod_reachable)
+        if got != want:
+            failures.append(f"{target}: expected status {want!r}, got {got!r}")
+    out_of_scope = [r for r in rows if r["target module"].endswith("outscope_mod.rs")]
+    if out_of_scope and is_in_scope(out_of_scope[0]):
+        failures.append("outscope_mod.rs's row is 'out:' but is_in_scope reported True")
+    return failures
+
+
+def _check_status_and_gate_fixtures() -> list[str]:
+    """Six fixtures (22-port-status-gates), each run through `full_check` in both modes, as a
+    direct, runnable proof of the Done-when lines this task adds: the two-mode split (through
+    `compute_exit_failed`, the very function `main` exits on), the remaining-rows wording
+    (through `format_remaining_line`, `R26`'s own `0 in-scope rows remaining` and the non-zero
+    form), the burn-down's "gated out of the build" count, the required-fuzz-target check firing
+    only at `ported` and only at the one exact path, and the in-file `#[cfg(test)]` proof form
+    not tripping the marker whitelist."""
+    failures: list[str] = []
+
+    def run(tree_name: str) -> tuple[ScanResult, GateResult, list[tuple[str, int, int]]]:
+        return full_check(FIXTURES_ROOT / tree_name)
+
+    # status-and-gate: one finding (the missing required fuzz target for ported_mod.rs), in
+    # both modes (full_check's own findings do not depend on --per-commit; only the gate's
+    # pass/fail verdict does, which compute_exit_failed applies on top); gated-out=1
+    # (drafted_mod.rs); 4 in-scope rows remaining (drafted_mod, not_started_mod, no_proof_mod,
+    # mod_reached_todo_mod -- outscope_mod is out of scope and never counted).
+    result, gate, _docs = run("status-and-gate")
+    rules = [f.rule for f in result.findings]
+    if rules != ["missing-fuzz-target"]:
+        failures.append(f"status-and-gate: expected exactly one 'missing-fuzz-target' finding, got {rules!r}")
+    if gate.gated_out_count != 1:
+        failures.append(f"status-and-gate: expected gated_out_count=1, got {gate.gated_out_count}")
+    if gate.remaining_count != 4:
+        failures.append(f"status-and-gate: expected remaining_count=4, got {gate.remaining_count}")
+    if not (bool(result.findings) or gate.failed()):
+        failures.append("status-and-gate: expected the bare gate to fail (findings or gate.failed())")
+    # The verdict and the remaining-rows line through the exact functions main() itself calls
+    # (not a re-typed copy of their conditions): the 'missing-fuzz-target' finding fails both
+    # modes here, so both must report failed.
+    if compute_exit_failed(result, gate, per_commit=True) is not True:
+        failures.append(
+            "status-and-gate: expected --per-commit to fail too (the missing-fuzz-target "
+            "finding fails both modes)"
+        )
+    if compute_exit_failed(result, gate, per_commit=False) is not True:
+        failures.append("status-and-gate: expected the bare mode to fail")
+    if format_remaining_line(gate) != "4 in-scope rows remaining":
+        failures.append(
+            f"status-and-gate: expected the remaining-rows line '4 in-scope rows remaining', "
+            f"got {format_remaining_line(gate)!r}"
+        )
+
+    # status-per-commit-clean: no ported row at all (one drafted, one not-started, one out of
+    # scope) -- --per-commit must pass clean (no findings), the bare gate must still fail, with
+    # remaining_count=2 and gated_out_count=1.
+    result, gate, _docs = run("status-per-commit-clean")
+    if result.findings:
+        failures.append(
+            f"status-per-commit-clean: expected 0 findings for --per-commit, got "
+            f"{[f.render() for f in result.findings]}"
+        )
+    if gate.remaining_count != 2:
+        failures.append(f"status-per-commit-clean: expected remaining_count=2, got {gate.remaining_count}")
+    if gate.gated_out_count != 1:
+        failures.append(f"status-per-commit-clean: expected gated_out_count=1, got {gate.gated_out_count}")
+    if not gate.failed():
+        failures.append("status-per-commit-clean: expected the bare gate to fail (2 rows remaining)")
+    # This is the two-mode split itself (task.md: "--per-commit ... passes while a row's
+    # derived status is not-started or drafted"): --per-commit must exit clean here, the bare
+    # mode must not, checked through main()'s own verdict function and its own wording
+    # function -- not a copy of either.
+    if compute_exit_failed(result, gate, per_commit=True) is not False:
+        failures.append("status-per-commit-clean: expected --per-commit to pass (no findings, drafted/not-started only)")
+    if compute_exit_failed(result, gate, per_commit=False) is not True:
+        failures.append("status-per-commit-clean: expected the bare mode to fail")
+    if format_remaining_line(gate) != "2 in-scope rows remaining":
+        failures.append(
+            f"status-per-commit-clean: expected the remaining-rows line '2 in-scope rows "
+            f"remaining', got {format_remaining_line(gate)!r}"
+        )
+
+    # status-all-ported: the one in-scope row is ported, burn-down is all zero -- both modes
+    # clean, and the remaining-rows count is exactly 0 (R26's "0 in-scope rows remaining").
+    result, gate, _docs = run("status-all-ported")
+    if result.findings:
+        failures.append(
+            f"status-all-ported: expected 0 findings, got {[f.render() for f in result.findings]}"
+        )
+    if gate.remaining_count != 0 or gate.failed():
+        failures.append(
+            f"status-all-ported: expected a clean gate (0 remaining, 0 burn-down), got "
+            f"remaining={gate.remaining_count}, burn_down_total={gate.burn_down_total}"
+        )
+    if compute_exit_failed(result, gate, per_commit=True) is not False:
+        failures.append("status-all-ported: expected --per-commit to pass")
+    if compute_exit_failed(result, gate, per_commit=False) is not False:
+        failures.append("status-all-ported: expected the bare mode to pass (R26: 0 remaining)")
+    if format_remaining_line(gate) != "0 in-scope rows remaining":
+        failures.append(
+            f"status-all-ported: expected the remaining-rows line '0 in-scope rows remaining', "
+            f"got {format_remaining_line(gate)!r}"
+        )
+
+    # status-all-ported-inline-proof (the blocker a reviewer found, fixed): identical to
+    # status-all-ported except the proof lives in the module's own `#[cfg(test)]` block, not
+    # under crates/<crate>/tests/ -- task.md's other sanctioned form. Must derive "ported" the
+    # same way, and -- the actual bug -- --per-commit must not flag '// PROOF:' as an
+    # unrecognized-marker: before the fix this fixture's exit was 1, not 0.
+    result, gate, _docs = run("status-all-ported-inline-proof")
+    if result.findings:
+        failures.append(
+            "status-all-ported-inline-proof: expected 0 findings, got "
+            f"{[f.render() for f in result.findings]}"
+        )
+    if gate.remaining_count != 0:
+        failures.append(
+            f"status-all-ported-inline-proof: expected remaining_count=0, got {gate.remaining_count}"
+        )
+    if compute_exit_failed(result, gate, per_commit=True) is not False:
+        failures.append(
+            "status-all-ported-inline-proof: expected --per-commit to pass (an in-file "
+            "#[cfg(test)] proof marker must not trip the marker whitelist)"
+        )
+
+    # doc-sections-complete / doc-sections-missing: the two document-section checks (R12, R13,
+    # R29), naming the exact missing heading text.
+    result, _gate, docs = run("doc-sections-complete")
+    if result.findings:
+        failures.append(
+            f"doc-sections-complete: expected 0 findings, got {[f.render() for f in result.findings]}"
+        )
+    expected_docs = {"docs/PORTING.md": 12, "docs/WORKFLOW.md": 6}
+    seen_docs = {d: required for d, required, _present in docs}
+    if seen_docs != expected_docs:
+        failures.append(
+            f"doc-sections-complete: expected doc_summary to name {expected_docs!r}, got "
+            f"{seen_docs!r}"
+        )
+    for doc_relpath, required_count, present_count in docs:
+        if present_count != required_count:
+            failures.append(
+                f"doc-sections-complete: {doc_relpath} expected {required_count} of "
+                f"{required_count} sections present, got {present_count}"
+            )
+    result, _gate, docs = run("doc-sections-missing")
+    if not docs:
+        failures.append("doc-sections-missing: expected check_document_sections to report both documents, got none")
+    present_by_doc = {d: present for d, _required, present in docs}
+    if present_by_doc.get("docs/PORTING.md") != 11:
+        failures.append(
+            f"doc-sections-missing: expected docs/PORTING.md to report 11 of 12 sections "
+            f"present, got {present_by_doc.get('docs/PORTING.md')!r}"
+        )
+    if present_by_doc.get("docs/WORKFLOW.md") != 5:
+        failures.append(
+            f"doc-sections-missing: expected docs/WORKFLOW.md to report 5 of 6 sections "
+            f"present, got {present_by_doc.get('docs/WORKFLOW.md')!r}"
+        )
+    messages = [f.message for f in result.findings]
+    if not any("### Rounding modes" in m for m in messages):
+        failures.append(
+            f"doc-sections-missing: expected a finding naming '### Rounding modes', got {messages!r}"
+        )
+    if not any("## The rejection rule" in m for m in messages):
+        failures.append(
+            f"doc-sections-missing: expected a finding naming '## The rejection rule', got {messages!r}"
+        )
+
+    return failures
+
+
 def run_selftest() -> int:
     regex_failures = _check_candidate_marker_regex()
     for failure in regex_failures:
@@ -1560,7 +2413,48 @@ def run_selftest() -> int:
     for failure in doc_comment_failures:
         click.echo(f"self-test: perf-backlog reason/doc-comment check FAILED: {failure}")
 
-    ok = not regex_failures and not perf_row_failures and not doc_comment_failures
+    manifest_shape_failures = _check_manifest_shape_guard()
+    if manifest_shape_failures:
+        for failure in manifest_shape_failures:
+            click.echo(f"self-test: manifest-shape guard check FAILED: {failure}")
+    else:
+        click.echo(
+            "self-test: manifest-shape-guard: OK (check_manifest_shape errors on an absent "
+            "port/manifest.tsv and on one missing a required header column, and passes clean "
+            "on a real manifest and on a header-only one)"
+        )
+
+    status_derivation_failures = _check_status_derivation()
+    if status_derivation_failures:
+        for failure in status_derivation_failures:
+            click.echo(f"self-test: status derivation check FAILED: {failure}")
+    else:
+        click.echo(
+            "self-test: status-derivation: OK (derive_row_status matched the expected status "
+            "for every row of the status-and-gate fixture: drafted, not-started, ported and "
+            "the mod-reached-with-todo case)"
+        )
+
+    status_gate_failures = _check_status_and_gate_fixtures()
+    if status_gate_failures:
+        for failure in status_gate_failures:
+            click.echo(f"self-test: status/gate fixture check FAILED: {failure}")
+    else:
+        click.echo(
+            "self-test: status-and-gate-fixtures: OK (status-and-gate, status-per-commit-clean, "
+            "status-all-ported, status-all-ported-inline-proof, doc-sections-complete and "
+            "doc-sections-missing all matched their expected findings, gate counts, exit "
+            "verdicts in both modes, and remaining-rows wording)"
+        )
+
+    ok = (
+        not regex_failures
+        and not perf_row_failures
+        and not doc_comment_failures
+        and not manifest_shape_failures
+        and not status_derivation_failures
+        and not status_gate_failures
+    )
     for name, expect_pass, must_contain in SELFTEST_FIXTURES:
         fixture_dir = FIXTURES_ROOT / name
         if not fixture_dir.is_dir():
@@ -1649,15 +2543,63 @@ SAFETY:, PORT SRC: or FIDELITY(port):. A line comment that looks like a marker (
 word, optionally "(port)", then a colon -- or, case-insensitively, the exact spelling of one of
 the six) but spells none of these six exactly is a finding -- e.g. "// TODO:", "// Todo(port):"
 or "// PORT-SRC:". Ordinary prose such as "// Returns:" is never a candidate and never flagged.
+\b
+Exempt positions (closed): this check does not run at all on a line inside a #[cfg(test)]
+module body, nor on an attribute line such as #[inline] -- the same two positions marked exempt
+for the numeric-literal rule above. Inside them nothing is examined, so the exemption is wider
+than the "// PROOF:" convention it exists for: a near-miss spelling written there is not
+flagged ("// TODO:" inside a #[cfg(test)] block is not a finding), and a recognised marker
+written there is not added to the per-marker counts printed above ("// PORT NOTE:" there prints
+as PORT NOTE=0). The printed count therefore excludes test-module markers, a deliberate
+narrowing of R14's "prints the count per marker kind" chosen over widening R14's closed
+six-marker list to a seventh spelling. It is consistent with the convention's other test
+position, a file under crates/<crate>/tests/, which this script's own glob
+(crates/*/src/**/*.rs) never reads and whose markers were never counted either.
+\b
+That exemption belongs to this check alone and is not uniform across the script: an "unsafe"
+block inside a #[cfg(test)] module still needs its "// SAFETY:" comment, and a malformed
+"// PERF(port):" or "// FIDELITY(port):" written there is still a finding (those rules are
+exempt-unaware), while the counts above print those same markers as 0.
+\b
+"// PROOF: <path>" (the proof-presence convention, see below) is not a port marker and is never
+whitelisted or counted. Both of its sanctioned forms sit in the positions above -- a
+#[cfg(test)] module, exempt here, or a file under crates/<crate>/tests/, which this script
+never reads -- so neither form widens the six-marker whitelist R14 states. Anywhere else in a
+ported module it is an ordinary unrecognised-marker finding like any other near miss: the
+exemption is the position, not the spelling.
+"""
+
+GATE_HELP = """\
+\b
+Status, the gate and the two modes (R14, R16, R19, R26, R29): every port/manifest.tsv row's
+status is derived from the Rust tree, never read from its own "status" cell -- "ported" needs a
+mod declaration reaching the target file, no todo!()/unimplemented!(), and a "// PROOF: <proof
+path>" marker beside a #[test] naming the module; "drafted" is everything short of that with
+either a PORT STATUS trailer (no mod line yet) or a mod line with no proof; anything else is
+"not-started". --per-commit runs every check above plus the required-fuzz-target check (a
+"required" row that is "ported" needs crates/slic3r-ffi/fuzz/fuzz_targets/<crate>_<module>.rs,
+that exact path) and the two document-section checks (R12/R13/R29, docs/PORTING.md and
+docs/WORKFLOW.md's exact headings) -- and passes while a row is "not-started" or "drafted". Only
+the bare command adds the gate: the burn-down (todo!(), unimplemented!(), modules gated out of
+the build) at zero and every in-scope row "ported". Both modes print the burn-down, the
+remaining-row count and the "unknown" (and unclassified) port/ownership.tsv row counts, and a
+line stating that status above judges a proof's presence, never its outcome -- cargo test
+--workspace is what actually runs a proof; only the bare command fails on the burn-down and the
+remaining-row count. Exits non-zero before any of this, in either mode, if port/manifest.tsv is
+missing or its header lacks a column status derivation or the gate reads, since zero in-scope
+rows derived from a broken manifest must never read as the port being complete.
 """
 
 FULL_HELP = (
-    "Check every ported module's PORT STATUS trailer and port markers (R14, R15, R16).\n\n"
+    "Check every ported module's PORT STATUS trailer and port markers (R14, R15, R16, R19, R26, "
+    "R29, R30).\n\n"
     + TRAILER_HELP
     + "\n"
     + NUMERIC_RULE_HELP
     + "\n"
     + MARKER_WHITELIST_HELP
+    + "\n"
+    + GATE_HELP
 )
 
 
@@ -1673,10 +2615,11 @@ FULL_HELP = (
 @click.option(
     "--per-commit",
     is_flag=True,
-    help="Run the subset of checks a port task's branch passes. At this task, every check "
-    "here is one of those, so this flag does not yet change behaviour; 22-port-status-gates "
-    "adds the burn-down, the in-scope gate and the document-section checks that fail only "
-    "without this flag.",
+    help="Run the subset of checks a port task's branch passes: every per-module and "
+    "per-marker check above, the required-fuzz-target check and the two document-section "
+    "checks. Passes while a row's derived status is 'not-started' or 'drafted'. Still prints "
+    "the burn-down, the remaining-row count and the 'unknown' ownership count, but does not "
+    "fail on them -- only the no-argument (default) mode, the completion gate, does.",
 )
 @click.option("--self-test", "self_test", is_flag=True, help="Run every fixture under port/tests/port-status/ and assert its expected result.")
 def main(tree: Path | None, per_commit: bool, self_test: bool) -> None:
@@ -1689,7 +2632,12 @@ def main(tree: Path | None, per_commit: bool, self_test: bool) -> None:
         sys.exit(run_selftest())
 
     tree_root = tree.resolve() if tree is not None else REPO_ROOT
-    result = scan_tree(tree_root)
+    manifest_error = check_manifest_shape(tree_root)
+    if manifest_error:
+        click.echo(f"error: {manifest_error}", err=True)
+        sys.exit(1)
+
+    result, gate, doc_summary = full_check(tree_root)
 
     for finding in result.findings:
         click.echo(finding.render())
@@ -1700,7 +2648,36 @@ def main(tree: Path | None, per_commit: bool, self_test: bool) -> None:
         f"port-status ({mode}): {result.modules_scanned} module(s) scanned, "
         f"{len(result.findings)} finding(s); marker counts: {counts}"
     )
-    sys.exit(1 if result.findings else 0)
+    for doc_relpath, required_count, present_count in doc_summary:
+        if present_count == required_count:
+            click.echo(
+                f"port-status ({mode}): {doc_relpath} holds all {required_count} required "
+                "sections"
+            )
+        else:
+            click.echo(
+                f"port-status ({mode}): {doc_relpath} holds {present_count} of "
+                f"{required_count} required sections"
+            )
+    click.echo(
+        f"port-status ({mode}): burn-down: todo!()={gate.todo_count}, "
+        f"unimplemented!()={gate.unimplemented_count}, "
+        f"modules gated out of the build={gate.gated_out_count}"
+    )
+    click.echo(f"port-status ({mode}): {format_remaining_line(gate)}")
+    blank_count, total_ownership_rows = count_unclassified_ownership_rows(tree_root)
+    click.echo(
+        f"port-status ({mode}): {gate.unknown_ownership_count} unknown row(s) and "
+        f"{blank_count} unclassified row(s) of {total_ownership_rows} in port/ownership.tsv"
+    )
+    click.echo(
+        f"port-status ({mode}): a row's status above judges whether its proof is present, "
+        "never its outcome -- cargo test --workspace is what actually runs a proof and reports "
+        "whether it passes"
+    )
+
+    failed = compute_exit_failed(result, gate, per_commit)
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":
