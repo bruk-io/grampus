@@ -466,7 +466,13 @@ Task `26-stage-dump-seams`'s own decisions, filling `dump_seams.cpp`'s body:
   (shared by every path of that same loop, reset by nothing a nested collection does) recovers
   that distinction at the cost of one key already in the record; a bare `ExtrusionPath` or an
   `ExtrusionMultiPath`'s own path still gets the `-` sentinel, since neither groups its paths
-  into anything a loop index would mean.
+  into anything a loop index would mean. Checked, not assumed: every `ExtrusionLoop` the
+  committed `20mm_cube base-fff` corpus actually produces holds exactly one path (confirmed
+  by scanning every record for two paths sharing a non-sentinel `loop=` value -- none exist), so
+  this corpus does not itself contain a case where the old `0`/`1` flag and the new index would
+  print different output; the distinction is real in the library's own data structure (an
+  `ExtrusionLoop::paths` vector can and does hold more than one path at other configurations and
+  seams) but is not demonstrated by this task's own committed dumps.
 - **The walk still flattens a collection's own nesting, and still does not write
   `ExtrusionEntityCollection::no_sort`, `ExtrusionLoop::loop_role()` or `ExtrusionLoop::
   print_after_infill`.** Widening the `loop=` key (above) closes the one gap a reviewer
