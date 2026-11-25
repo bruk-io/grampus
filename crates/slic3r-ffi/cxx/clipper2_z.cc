@@ -36,7 +36,7 @@ rust::Vec<CPathZ> from_paths64_z(const Clipper2Lib_Z::Paths64 &paths) {
 } // namespace
 
 // Clipper2Lib_Z::Clipper64 over the subject paths with no clip paths and no Z-fill callback --
-// the surface src/libslic3r/ClipperZUtils.cpp's clip_zpaths() wraps (ClipperZUtils.cpp:46-69),
+// the surface src/libslic3r/ClipperZUtils.cpp's clip_zpaths() wraps (ClipperZUtils.cpp:48-77),
 // minus the callback this bridge does not wire yet.
 rust::Vec<CPathZ> clipper2_z_union(const rust::Vec<CPathZ> &subject) {
     Clipper2Lib_Z::Clipper64 clipper;

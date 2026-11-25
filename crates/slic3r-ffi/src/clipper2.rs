@@ -50,6 +50,9 @@ mod ffi {
         points: Vec<CPointZ>,
     }
 
+    // SAFETY: this is cxx's own unsafe-extern declaration block, not a hand-written
+    // unsafe expression -- it carries no body, and the only unsafety is in the bindings
+    // `cxx` generates from it, not in Rust written here.
     unsafe extern "C++" {
         include!("cxx/clipper2_shim.h");
 
@@ -61,7 +64,7 @@ mod ffi {
 
         /// `Clipper2Lib::ClipperOffset::Execute(delta, ...)` with `JoinType::Miter` and
         /// `EndType::Polygon` -- `DefaultJoinType`/`DefaultEndType` at
-        /// `src/libslic3r/ClipperUtils.hpp:31,33`.
+        /// `src/libslic3r/ClipperUtils.hpp:32,34`.
         fn clipper2_offset(subject: &Vec<CPath64>, delta: f64) -> Vec<CPath64>;
 
         /// `Clipper2Lib_Z::Clipper64::Execute(ClipType::Union, FillRule::NonZero, ...)`, the Z

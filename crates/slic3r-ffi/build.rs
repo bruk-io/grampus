@@ -17,13 +17,6 @@ use std::path::PathBuf;
 const DEPS_PREFIX_VAR: &str = "GRAMPUS_DEPS_PREFIX";
 const DEPS_PREFIX_DEFAULT: &str = "vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep/usr/local";
 
-/// `-ffp-contract=off`: not a preference. The library this crate links and the one
-/// `oracle/build-libslic3r` builds are the normative oracle for every per-unit and per-stage
-/// proof only when both carry this flag (`just port-check`'s drift check fails the build
-/// otherwise). Applied to the shared `Build` before any `.file()` call below, so a unit a later
-/// task adds cannot miss it.
-const FFP_CONTRACT_FLAG: &str = "-ffp-contract=off";
-
 /// The five sources `deps_src/clipper2/CMakeLists.txt:26-32` names -- exactly these, unmodified,
 /// at the pin. `clipper2_z.cpp` `#define`s `USINGZ` itself and `#include`s the other four
 /// (`Clipper2Lib/src/clipper2_z.cpp:1-9`), which is why compiling all five together is not a
@@ -111,8 +104,14 @@ fn main() {
         workspace_root.join("vendor/OrcaSlicer/deps_src/clipper2/Clipper2Lib/include");
 
     let mut build = cxx_build::bridge("src/clipper2.rs");
-    // Before any .file() call: see FFP_CONTRACT_FLAG's doc comment above.
-    build.flag(FFP_CONTRACT_FLAG);
+    // `-ffp-contract=off`: not a preference. The library this crate links and the one
+    // `oracle/build-libslic3r` builds are the normative oracle for every per-unit and per-stage
+    // proof only when both carry this flag (`just port-check`'s drift check fails the build
+    // otherwise, by grepping for this exact call below -- not a bare substring anywhere in this
+    // file, which a stray prose mention of the flag could satisfy without the flag reaching the
+    // compiler). Applied to the shared `Build` before any `.file()` call, so a unit a later task
+    // adds cannot miss it.
+    build.flag("-ffp-contract=off");
     build
         .std("c++17")
         .include(&crate_dir)

@@ -5,8 +5,9 @@
 //!
 //! One row per library this crate is responsible for, filled in as each is bound. Task
 //! 29-ffi-bridge-core (plan step 17, part 1) fills Clipper2's row and makes the NLopt
-//! determination; the task it waits on nothing for and that depends on it (step 17, part 2)
-//! fills the other four bindings.
+//! determination (recorded below as **No**, not a binding); the task it waits on nothing for and
+//! that depends on it (step 17, part 2) fills the four remaining bindings -- admesh, qhull,
+//! libnest2d and Boost.Polygon's Voronoi builder.
 //!
 //! | Library | Source at the pin | Bound | Evidence |
 //! |---|---|---|---|
@@ -18,8 +19,13 @@
 //! | NLopt | superbuild, `deps/NLopt/NLopt.cmake` fetches v2.5.0 by URL | **No** -- determined by this task | Absent from `src/libslic3r/CMakeLists.txt`'s `target_link_libraries`; its only libslic3r includer of `Optimize/NLoptOptimizer.hpp` (which itself `#include <nlopt.h>` at `:15`) is `SLA/SupportTreeBuildsteps.cpp`, out of scope per `port/manifest.tsv`'s row for that file (`out: SLA support-tree generation's per-step algorithm; no in-scope caller invokes it.`) and R9. Reaches libslic3r only transitively through libnest2d's optimizer backends (`Arrange.cpp:28`, `SupportTree.cpp:19-20`, both `libnest2d/optimizers/nlopt/*.hpp`, not `nlopt.h` directly), which is libnest2d's binding to account for, not a reason to bind NLopt itself here |
 //!
 //! Any `unsafe` block this crate writes carries a safety-justification line comment (`just
-//! port-status --per-commit` checks for one on every line using the word `unsafe`); as of this
-//! table every bridge function here is a plain `cxx` call with no hand-written `unsafe` in the
-//! Rust.
+//! port-status --per-commit` checks for one on every line using the word `unsafe`). As of this
+//! table the crate has exactly one such block: [`clipper2`]'s `unsafe extern "C++" { ... }`
+//! declaration, `cxx`'s own bridge syntax rather than a hand-written `unsafe` expression -- it
+//! carries no body of its own, and the only unsafety is in the bindings `cxx` generates from it.
+//! It carries its own safety-justification comment at the declaration, in `src/clipper2.rs`.
+//! `port-status` selects this crate for scanning on that comment's marker alone (the crate has
+//! no `port/manifest.tsv` row to select it by) and checks the marker without demanding the
+//! completion trailer only a manifest row, or a trailer already written, could authorize.
 
 pub mod clipper2;

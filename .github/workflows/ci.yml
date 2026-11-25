@@ -145,19 +145,24 @@ jobs:
       # keeps. Restore-only: nothing this job runs fills that tree, so there is nothing of this
       # job's own to save.
       #
-      # This cannot hit oracle.yml's cache entry today, even though the key prefix below matches
-      # it exactly: actions/cache resolves an entry by key AND by a version hash computed over
-      # the `path` list, and oracle.yml saves two paths (`vendor/OrcaSlicer/deps/build/arm64` and
-      # `vendor/OrcaSlicer/deps/DL_CACHE`) where this restores one, a child of the first.
-      # Different path lists mean different versions, so an identical key still misses. This
-      # step is kept anyway because task.md's Done-when names this exact path as the one this
-      # task caches; it starts hitting only once a later change makes the two path lists agree
-      # -- either by widening this restore to oracle.yml's two-entry list, or by oracle.yml
-      # adding a save under this narrower path.
+      # task 29-ffi-bridge-core: widened to oracle.yml's own two-entry `path` list (and copied
+      # its key/restore-keys verbatim), because actions/cache resolves an entry by key AND by a
+      # version hash computed over the `path` list -- a narrower, single-path restore here used
+      # to miss oracle.yml's save even on an identical key, because oracle.yml saves two paths
+      # (`vendor/OrcaSlicer/deps/build/arm64` and `vendor/OrcaSlicer/deps/DL_CACHE`) where this
+      # restored only the first path's child, `.../arm64/OrcaSlicer_dep`. Confirmed a matching
+      # entry exists for this pin (`gh cache list`, key prefix
+      # `oracle-deps-arm64-f92a7c065c5718b8ef1baac1cd704df2911238f4-`) before making this change:
+      # this crate's build.rs now runs in this job's `cargo test --workspace` and needs the
+      # superbuild prefix's `tbbmalloc` and TBB headers to not panic (build.rs:83), which is what
+      # exposed the mismatch -- no earlier crate in the workspace required this job to actually
+      # build anything.
       - name: Restore the dependency superbuild
         uses: actions/cache/restore@v4
         with:
-          path: vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep
+          path: |
+            vendor/OrcaSlicer/deps/build/arm64
+            vendor/OrcaSlicer/deps/DL_CACHE
           key: oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
           restore-keys: |
             oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-

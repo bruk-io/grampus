@@ -47,7 +47,7 @@ rust::Vec<CPath64> clipper2_union(const rust::Vec<CPath64> &subject) {
 }
 
 // Clipper2Lib::ClipperOffset with the library's own defaults
-// (src/libslic3r/ClipperUtils.hpp:31,33: DefaultJoinType = jtMiter, DefaultEndType = etOpenButt
+// (src/libslic3r/ClipperUtils.hpp:32,34: DefaultJoinType = jtMiter, DefaultEndType = etOpenButt
 // for open paths, but offsetting a closed polygon on both sides is EndType::Polygon, as
 // ClipperUtils.cpp's offset() overloads use for a closed subject).
 rust::Vec<CPath64> clipper2_offset(const rust::Vec<CPath64> &subject, double delta) {
