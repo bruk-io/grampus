@@ -23,6 +23,33 @@
 // helper is proven through its enclosing file's exported surface instead -- R19's stated
 // fallback.
 //
+// COMPILE FLAGS ALSO DIFFER FROM THE ORACLE'S OWN COMPILATION OF THE INCLUDED FILE, BEYOND
+// `-ffp-contract=off`: this translation unit is compiled at this crate's own optimisation level
+// (`-O0`, no `-DNDEBUG`) and without libslic3r's own `DEFINES`, not at the oracle's `-O3
+// -DNDEBUG`. That is irrelevant to a pure data repack such as `to_paths64` below, but a later
+// candidate file must also be checked for `assert()` (live at `-O0`/no `NDEBUG`, compiled out in
+// the oracle) and for code guarded by one of libslic3r's own `DEFINES`, not only for the
+// duplicate-symbol collision above.
+//
+// THE DUPLICATE-SYMBOL CONSTRAINT APPLIED TO THIS FILE'S OWN CHOICE: `ClipperZUtils.cpp` declares
+// two externally-linked functions, `Slic3r::ClipperZUtils::clip_zpaths` and `::area` (`to_paths64`
+// and `append_zpaths`, below, are both `static`). Measured empirically (fewest strong,
+// non-template externally-linked symbols of any in-scope `proof path` `3` candidate whose built
+// object this task could inspect -- see this task's pull request body), but not zero: including
+// this file here also defines `clip_zpaths` and `area` in this crate's own archive, alongside
+// `liblibslic3r.a`'s copy of the same two symbols. Nothing today needs either symbol resolved, so
+// neither archive member is ever extracted and there is no collision (verified: see this task's
+// pull request body for the command and its output). A later task MUST NOT add, anywhere in
+// `crates/slic3r-ffi` or a crate that links it, a direct FFI binding that calls the oracle's
+// `clip_zpaths` or `area` through `liblibslic3r.a` (for example a differential-fuzz proof path 1
+// for `slic3r-clipperzutils`) while this file is still `#include`d here: doing so would make `ld`
+// extract both archives' copies of those two symbols into the same link, which is a duplicate
+// definition. The `slic3r-clipperzutils` port task should route any need for `clip_zpaths`/`area`
+// through this same included translation unit instead (as `path3_to_paths64` below already does
+// for `to_paths64`), or stop `#include`ing `ClipperZUtils.cpp` here first. This branch does not
+// record this constraint on `port/manifest.tsv`'s `ClipperZUtils.cpp` row -- task
+// `31-proof-harness` may not touch that file; see this task's pull request body.
+//
 // THIS FILE'S CHOICE: `src/libslic3r/ClipperZUtils.cpp` (`port/manifest.tsv`'s `proof path` `3`
 // row). Its `static` `to_paths64` (internal linkage, reachable only in this translation unit,
 // after the `#include` below) converts one `Slic3r::ClipperZUtils::ZPath` into one

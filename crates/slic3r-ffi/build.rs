@@ -66,32 +66,48 @@ const LINK_LINE_TARGETS: &[&str] = &["libslic3r_tests", "fff_print_tests"];
 /// proof shims use.
 const DROPPED_LINK_SUBSTRINGS: &[&str] = &["deps_src/clipper2/", "tests/catch2/"];
 
-/// Finds `needle` in `content` and collects every following `  NAME = value` line -- CMake
-/// Ninja's own indentation for a build edge's variables -- up to the first line that is not
-/// indented that way (the next build edge, or a blank line). Purely textual: this crate already
-/// parses `oracle/build-libslic3r`'s and its own `CXX_FLAGS`/`build.flag(...)` lines the same
-/// way (`just port-check`'s drift check), never a CMake or Ninja grammar.
-fn ninja_edge_vars(content: &str, needle: &str) -> Option<HashMap<String, String>> {
+/// Finds every line in `content` containing `needle` and, for each, collects the following
+/// `  NAME = value` lines -- CMake Ninja's own indentation for a build edge's variables -- up to
+/// the first line that is not indented that way (the next build edge, or a blank line). A CMake
+/// that emits the rule declaration (`rule CXX_EXECUTABLE_LINKER__<target>_Release`, no
+/// `LINK_LIBRARIES`) into the same per-config file as the build edge (which does carry
+/// `LINK_LIBRARIES`) would otherwise make the first match -- the rule block -- look like the
+/// whole story, so every match is collected and the caller picks the one that actually has the
+/// variable it needs. Purely textual: this crate already parses `oracle/build-libslic3r`'s and
+/// its own `CXX_FLAGS`/`build.flag(...)` lines the same way (`just port-check`'s drift check),
+/// never a CMake or Ninja grammar.
+fn ninja_edge_vars_all(content: &str, needle: &str) -> Vec<HashMap<String, String>> {
     let lines: Vec<&str> = content.lines().collect();
-    let start = lines.iter().position(|l| l.contains(needle))?;
-    let mut vars = HashMap::new();
-    for line in &lines[start + 1..] {
-        if !line.starts_with("  ") {
-            break;
+    let mut blocks = Vec::new();
+    for start in lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.contains(needle))
+        .map(|(i, _)| i)
+    {
+        let mut vars = HashMap::new();
+        for line in &lines[start + 1..] {
+            if !line.starts_with("  ") {
+                break;
+            }
+            if let Some(eq) = line.find(" = ") {
+                let name = line[2..eq].trim().to_string();
+                let value = line[eq + 3..].to_string();
+                vars.insert(name, value);
+            }
         }
-        if let Some(eq) = line.find(" = ") {
-            let name = line[2..eq].trim().to_string();
-            let value = line[eq + 3..].to_string();
-            vars.insert(name, value);
-        }
+        blocks.push(vars);
     }
-    Some(vars)
+    blocks
 }
 
 /// Searches `NINJA_FILES_TO_SEARCH` under `build_dir` for the Release-config link edge of
 /// `libslic3r_tests`, falling back to `fff_print_tests`. Returns the target name found, its
 /// `LINK_LIBRARIES` value, and the file it was read from (for `cargo:rerun-if-changed` and the
-/// build-time note naming where this derivation actually read its link line from).
+/// build-time note naming where this derivation actually read its link line from). Keeps the
+/// first block, among every occurrence of the needle in the file, that actually carries a
+/// `LINK_LIBRARIES` variable -- not just the first occurrence of the needle itself, which may be
+/// the `rule` declaration rather than the build edge.
 fn find_link_libraries(build_dir: &Path) -> Option<(&'static str, String, PathBuf)> {
     for rel in NINJA_FILES_TO_SEARCH {
         let path = build_dir.join(rel);
@@ -100,7 +116,7 @@ fn find_link_libraries(build_dir: &Path) -> Option<(&'static str, String, PathBu
         };
         for target in LINK_LINE_TARGETS {
             let needle = format!("CXX_EXECUTABLE_LINKER__{target}_Release");
-            if let Some(vars) = ninja_edge_vars(&content, &needle) {
+            for vars in ninja_edge_vars_all(&content, &needle) {
                 if let Some(libs) = vars.get("LINK_LIBRARIES") {
                     return Some((target, libs.clone(), path));
                 }
@@ -298,6 +314,17 @@ fn main() {
         link_ninja_file.display()
     );
     println!("cargo:rerun-if-changed={}", link_ninja_file.display());
+    // NOTE: `link_libraries`'s own tokens can carry CMake's *absolute* paths, baked in at the
+    // configure time of whichever checkout built `oracle_build_dir` -- normally this one, but a
+    // build tree cloned copy-on-write from another checkout (for example a worktree created from
+    // a checkout that already ran `just oracle-build`) keeps that other checkout's paths. So the
+    // `tbbmalloc`/TBB-header guard above, which resolves strictly from `DEPS_PREFIX_VAR`/
+    // `deps_prefix`, can pass while some of the archives `emit_link_directives` below actually
+    // points the linker at live under a different prefix than the one just validated. Harmless
+    // when the two coincide (an ordinary clone, or CI); the fix, if this ever needs one, is
+    // deriving the guard's own path from a token of `link_libraries` instead of from
+    // `DEPS_PREFIX_VAR` -- not weakening the guard, which still correctly proves *some* tbbmalloc
+    // is present.
     emit_link_directives(&oracle_build_dir, &link_libraries);
 
     // Include paths for `cxx/proof_shims.cpp` and `cxx/include_vendored.cpp`: the same set

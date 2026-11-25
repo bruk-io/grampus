@@ -6,6 +6,15 @@
 //! oracle against yet, which is exactly what a harness proof checks instead: that the FFI call,
 //! the included translation unit and `tiers::compare_unit`'s dispatch all actually reach the
 //! pin's own compiled code and compare what they claim to.
+//!
+//! CONSTRAINT ON THIS FILE: the path-1 proof's expected value (`1`) holds only because nothing
+//! else in this test binary constructs a `Slic3r::ObjectBase` before `wipe_tower_object_id()` is
+//! first called (`ObjectID.cpp`'s `s_last_id` is a process-global counter shared by every
+//! `ObjectBase`, and `wipe_tower_object_id()`'s `static ObjectBase mine` is the first one built
+//! once that call runs). Do not add a test to this file that constructs or reaches an
+//! `ObjectBase` before `object_id_wipe_tower_object_id_proves_path_1` has run -- it would turn
+//! this proof into an order-dependent flake rather than a compile error. A test needing an
+//! `ObjectBase` belongs in its own integration-test file instead.
 
 use slic3r_ffi::proof::{path1_wipe_tower_object_id, path3_to_paths64, ProofZPoint};
 use slic3r_proof::{compare_unit, Oracle};

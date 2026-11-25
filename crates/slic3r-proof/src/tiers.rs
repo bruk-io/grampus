@@ -283,7 +283,7 @@ macro_rules! impl_proof_value_int {
         )+
     };
 }
-impl_proof_value_int!(i32, i64, u32, u64);
+impl_proof_value_int!(i32, i64, u32, u64, isize, usize);
 
 impl ProofValue for f64 {
     fn tiers_eq(&self, other: &Self) -> bool {
@@ -435,10 +435,17 @@ fn parse_row(
 
         let tolerance_cell = fields.get(tolerance_col).copied().unwrap_or("");
         let function_cell = fields.get(function_col).copied().unwrap_or("");
-        // Validated unconditionally -- a malformed tolerance cell is refused whether or not the
-        // row's tier will go on to read it (an `exact` row has "no tolerance path reachable",
-        // but a tolerance value with no reason is still refused, never silently ignored).
+        // Both validated unconditionally, before branching on the tier -- a malformed tolerance
+        // cell is refused whether or not the row's tier will go on to read it (an `exact` row has
+        // "no tolerance path reachable", but a tolerance value with no reason is still refused,
+        // never silently ignored), and the same now holds for the comparison function: reading it
+        // only inside the float arm let an `exact` row naming an unimplemented function resolve
+        // silently instead of being refused, the same shape `oracle-compare`'s `build_tolerance`
+        // documents fixing. An empty cell still means `Abs` on every tier, so this changes nothing
+        // for a well-formed `exact` row (whose comparison-function cell is empty, as every `exact`
+        // row in the real manifest's is).
         let declared = parse_tolerance_cell(tolerance_cell, source_path)?;
+        let comparison_function = parse_comparison_function(function_cell, source_path)?;
 
         let tier_cell = fields.get(tier_col).copied().unwrap_or("").trim();
         let tier = if tier_cell.eq_ignore_ascii_case("exact") {
@@ -452,7 +459,6 @@ fn parse_row(
                 declared.ok_or_else(|| TierError::FloatRowMissingTolerance {
                     source_path: source_path.to_string(),
                 })?;
-            let comparison_function = parse_comparison_function(function_cell, source_path)?;
             Tier::Float {
                 value,
                 unit,

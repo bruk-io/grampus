@@ -40,12 +40,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SELFTEST_ROOT = REPO_ROOT / "port" / "tests" / "check-mocks"
 TRAILER_HEADER = "// PORT STATUS"
 
-# Whole "identifier-like" words containing one of the four banned substrings, case-insensitively
-# -- not a bare substring scan (which would also flag a path containing "crates/stubborn-foo"
-# spelled from an unrelated word), but still just a regex over plain text, never a Rust token
-# scan: a `\w*` run on either side of the banned substring, matched anywhere on the line,
-# including inside a comment or a string literal -- there is no allowlist, so a comment that
-# merely discusses a banned word is caught exactly like code that declares one.
+# Whole "identifier-like" words containing one of the four banned substrings, case-insensitively.
+# This still flags a word that merely *contains* one of them for an unrelated reason -- a path
+# component spelled "crates/stubborn-foo", or the English word "stubborn" in a comment -- because
+# the `\w*` run on either side of the banned substring absorbs the surrounding letters rather than
+# anchoring on a whole separate word; it is not a bare substring scan only in that it reports the
+# whole enclosing word as the match, not an arbitrary span. There is no allowlist for this on
+# purpose: the three proof paths make a stand-in unnecessary, so the rule is "any word containing
+# one of the four substrings, anywhere on the line, including inside a comment or a string
+# literal," full stop, and the next false positive is expected to be fixed by renaming the word,
+# not by adding an exception here. (`\w*` on both sides is required to catch `stub_helper`, the
+# shape the fixture `banned-in-ported-cfg-test` depends on -- do not tighten it.)
 BANNED_RE = re.compile(r"\b\w*(?:mock|stub|fake|dummy)\w*\b", re.IGNORECASE)
 
 
