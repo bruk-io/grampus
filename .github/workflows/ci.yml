@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # Computes whether this push or pull request touches anything the macOS job's checks read,
@@ -69,6 +70,18 @@ jobs:
       - name: Guard the branch
         if: github.event_name == 'pull_request'
         run: just guard "$GITHUB_HEAD_REF"
+
+      # R28, task 36-pr-body-check: reads the pull request itself, so it cannot live in
+      # .asdlc/checks, which a task also runs locally -- and needs no oracle binary or
+      # libslic3r build, so it runs here rather than in the oracle-checks job below.
+      - name: Check the pull request body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR" --json body --jq .body > /tmp/pr-body.txt
+          just pr-body-check /tmp/pr-body.txt
 
   # Everything that needs the oracle binary, a local libslic3r build, or a comparison against
   # either (R23) — none of the document checks above wait on this job. Only `just oracle-fetch`
