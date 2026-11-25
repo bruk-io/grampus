@@ -110,3 +110,37 @@ audit-check:
 # what runs it, on main, alongside `just audit-check`.
 perf-check:
     ./port/regenerate --check
+
+# build (if needed) and run the per-stage dumper (R5, plan step 8) over <fixture> <configuration>;
+# *ARGS is variadic so the two driver modes' flags reach the program --
+# `just oracle-dump 20mm_cube base-fff --config port/goldens/configs/base-fff.json` and
+# `just oracle-dump 20mm_cube base-fff --set enable_support=1` both work (task 25-stage-dumper).
+# Builds oracle/stage-dump/ into the gitignored oracle/.cache/stage-dump/arm64 (never into
+# vendor/OrcaSlicer/), runs the program twice over the same fixture, configuration and ARGS --
+# once armed (registers and arms the slicing-pipeline hook, writing one dump per fired seam),
+# once with --unarmed (hook never registered, option left empty) -- and proves the two runs'
+# exported G-code agree at L1 through `just compare ... --require L1`: the flag is what makes
+# the check a check, since without --require the comparator exits 0 at every level including
+# none. Copies the armed run's dumps to the committed port/dumps/<fixture-stem>-<configuration>/
+# (05-oracle-provenance's path) and prints their count.
+oracle-dump fixture configuration *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    build_dir=oracle/.cache/stage-dump/arm64
+    cmake -S oracle/stage-dump -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
+    cmake --build "$build_dir" --target stage_dump >/dev/null
+    bin="$build_dir/stage_dump"
+    fixture_stem=$(basename "{{fixture}}" .stl)
+    pair_dir="port/dumps/${fixture_stem}-{{configuration}}"
+    run_root=oracle/.cache/stage-dump/runs
+    mkdir -p "$run_root"
+    armed_dir=$(mktemp -d "$run_root/armed-XXXXXX")
+    unarmed_dir=$(mktemp -d "$run_root/unarmed-XXXXXX")
+    "$bin" "{{fixture}}" "{{configuration}}" --out "$armed_dir" {{ARGS}}
+    "$bin" "{{fixture}}" "{{configuration}}" --out "$unarmed_dir" --unarmed {{ARGS}}
+    just compare "$armed_dir/plate_1.gcode" "$unarmed_dir/plate_1.gcode" --require L1
+    echo "L1"
+    mkdir -p "$pair_dir"
+    rm -f "$pair_dir"/*.dump
+    cp "$armed_dir"/*.dump "$pair_dir"/
+    echo "copied $(ls "$pair_dir"/*.dump | wc -l | tr -d ' ') dump(s) to $pair_dir"
