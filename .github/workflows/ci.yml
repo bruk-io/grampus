@@ -114,12 +114,15 @@ jobs:
   #
   # `just oracle-parity` is not covered by that move. Task 13 touched only the build; plan step
   # 10 and task 28-oracle-parity's own text both still name this job -- the one below, in this
-  # file -- as where `just oracle-parity` lands. What is genuinely open, and left open here
-  # rather than resolved by assertion: `just oracle-parity` needs a built libslic3r to compare
-  # against the release binary, and this job builds nothing today -- the build now lives in
-  # oracle.yml's own job. Where task 28 gets that built library from (this job also gains
-  # `oracle-build`, or `oracle-parity` reads oracle.yml's build tree some other way) is for that
-  # task to settle, not this comment.
+  # file -- as where `just oracle-parity` lands. `just oracle-parity` needs a built libslic3r to
+  # compare against the release binary, and this job still builds nothing itself -- task
+  # 31-proof-harness answered where that library comes from: a restore-only
+  # `actions/cache/restore` of `vendor/OrcaSlicer/build/arm64` under oracle.yml's own key, the
+  # same restore-only shape the dependency-superbuild step below already used. That cache is
+  # warmed by oracle.yml's job on every push to `main` that touches the pin or the build script,
+  # so it is normally a hit; a miss (this pin's very first such push, or an evicted entry) skips
+  # both `cargo test --workspace` and `just oracle-parity` for that run with a `::notice::`
+  # rather than failing the job, so this does not ship a permanently red required-looking check.
   oracle-checks:
     needs: changes
     # `!cancelled()` is load-bearing, not decorative: without it, GitHub skips this job whenever
@@ -180,9 +183,21 @@ jobs:
           key: oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
           restore-keys: |
             oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-
-      # No cache of vendor/OrcaSlicer/build/arm64 here: nothing in this job builds it, and it
-      # arrives with the `just oracle-build` step task 13-build-libslic3r added to oracle.yml,
-      # keyed there on the same pin and on that task's own CMake flags.
+      # task 31-proof-harness: restore-only, same reasoning as the dependency superbuild step
+      # above -- nothing in this job builds vendor/OrcaSlicer/build/arm64, only oracle.yml's own
+      # job does, under this same key. Added because this crate's build.rs (crates/slic3r-ffi)
+      # now panics when this tree is absent (its proof paths 1 and 3 link against it), which
+      # would otherwise make "Run the workspace's tests" below fail on every PR this job runs
+      # for, forever, until a later task happens to warm this cache from oracle.yml. The step
+      # below that checks for liblibslic3r.a's presence already existed for `just oracle-parity`
+      # and is reused here, moved earlier, to gate the test step the same way.
+      - name: Restore the main project's build tree
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/OrcaSlicer/build/arm64
+          key: oracle-build-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+          restore-keys: |
+            oracle-build-arm64-${{ steps.submodule.outputs.sha }}-
 
       # GH_TOKEN authenticates oracle/fetch-release's `gh release download` call: the first CI
       # run of this step, unauthenticated, hit OrcaSlicer/OrcaSlicer's public rate limit (HTTP
@@ -195,19 +210,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: just oracle-fetch
 
-      - name: Run the workspace's tests
-        run: cargo test --workspace
-
-      # This job builds no libslic3r (see the job-level comment above): `just oracle-parity`
-      # needs vendor/OrcaSlicer/build/arm64's archives, which only oracle.yml's own job produces
-      # and caches, under a two-path cache key (vendor/OrcaSlicer/deps/build/arm64 +
-      # vendor/OrcaSlicer/deps/DL_CACHE) this job's "Restore the dependency superbuild" step
-      # above cannot match (different path list, different actions/cache version -- its own
-      # comment explains why). Resolving that is a later task's job, not this one's: this step
-      # only checks whether the archives happen to be present (e.g. a self-hosted or
-      # pre-warmed runner) and, when they are not, skips the parity step with a clear note
-      # instead of failing the job -- so this pull request does not ship a permanently red
-      # required-looking check for every later task's PR.
+      # Moved ahead of "Run the workspace's tests" (task 31-proof-harness): that step now needs
+      # this answer too, not only `just oracle-parity` below. The cache restore above usually
+      # makes this `true` (oracle.yml warms this same key on every push to main that touches the
+      # pin or the build script), but a cache miss -- the very first PR after this cache's key
+      # changes, or an evicted entry -- must not fail the job; it must skip both gated steps with
+      # a clear note instead, the same trade this step always made for `just oracle-parity`.
       - name: Check whether the built libslic3r is available
         id: libslic3r-built
         run: |
@@ -217,8 +225,12 @@ jobs:
             echo "built=true" >> "$GITHUB_OUTPUT"
           else
             echo "built=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::skipping just oracle-parity: this job builds no libslic3r and $a is absent. See this job's own comment above (oracle.yml owns that build); a later task must either cache-restore it here or source it another way."
+            echo "::notice::skipping cargo test --workspace and just oracle-parity: no cached vendor/OrcaSlicer/build/arm64 for this pin/build-script hash yet ($a is absent). oracle.yml's oracle-build job writes this cache on push to main; it is expected to exist by the time this is read again. A later task must either make this a harder failure or source the tree another way if it does not."
           fi
+
+      - name: Run the workspace's tests
+        if: steps.libslic3r-built.outputs.built == 'true'
+        run: cargo test --workspace
 
       - name: Report whether the two oracles agree
         if: steps.libslic3r-built.outputs.built == 'true'
