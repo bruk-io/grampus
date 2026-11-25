@@ -89,23 +89,33 @@ jobs:
   #
   # The fallback this step's task.md records -- if the first cold build's wall-clock or disk
   # cost exceeds the runner's or the cache's limit, `just oracle-build` and `just oracle-parity`
-  # move to `main` only, and this job keeps just the two lines below -- has already been taken,
-  # in a stronger form than "`main` only": task 13-build-libslic3r measured a cold build at
-  # 46m12s (stage one) + 35m08s (stage two) on a hosted macos-15 runner (vendor/README.md), and
-  # moved `just oracle-build` into its own `.github/workflows/oracle.yml`, which runs on
-  # `workflow_dispatch`, on push to `main`, and on a pull request that touches
-  # `oracle/build-libslic3r`, that workflow or the submodule pin -- paths far narrower than this
-  # job's own filter below, because almost no change in this repository can affect that build.
-  # So `just oracle-build` and `just oracle-parity` are never lines in *this* job; they stay
-  # where task 13 already put them, and the two names above are listed only so a later task does
-  # not duplicate that workflow by mistake.
-  oracle:
+  # move to `main` only, and this job keeps just the two lines below -- has been taken for the
+  # build alone: task 13-build-libslic3r measured a cold build at 46m12s (stage one) + 35m08s
+  # (stage two) on a hosted macos-15 runner (vendor/README.md), and moved `just oracle-build`
+  # into its own `.github/workflows/oracle.yml`, which runs on `workflow_dispatch`, on push to
+  # `main`, and on a pull request that touches `oracle/build-libslic3r`, that workflow or the
+  # submodule pin -- paths far narrower than this job's own filter below, because almost no
+  # change in this repository can affect that build. So `just oracle-build` is never a line in
+  # *this* job; it stays where task 13 put it.
+  #
+  # `just oracle-parity` is not covered by that move. Task 13 touched only the build; plan step
+  # 10 and task 28-oracle-parity's own text both still name this job -- the one below, in this
+  # file -- as where `just oracle-parity` lands. What is genuinely open, and left open here
+  # rather than resolved by assertion: `just oracle-parity` needs a built libslic3r to compare
+  # against the release binary, and this job builds nothing today -- the build now lives in
+  # oracle.yml's own job. Where task 28 gets that built library from (this job also gains
+  # `oracle-build`, or `oracle-parity` reads oracle.yml's build tree some other way) is for that
+  # task to settle, not this comment.
+  oracle-checks:
     needs: changes
-    # `always()` is load-bearing, not decorative: without it, GitHub skips this job whenever
+    # `!cancelled()` is load-bearing, not decorative: without it, GitHub skips this job whenever
     # `changes` fails or is cancelled, before this expression is even evaluated -- which is
     # exactly the trap this step's task.md names, because it would silently take the
-    # unconditional push-to-main case away along with the filter.
-    if: always() && (github.event_name == 'push' || (needs.changes.result == 'success' && needs.changes.outputs.oracle == 'true'))
+    # unconditional push-to-main case away along with the filter. `!cancelled()` rather than
+    # `always()`: it still runs on a failed or skipped filter job, but not on a cancelled
+    # workflow run (e.g. superseded by a newer push), which `always()` would also start a macOS
+    # runner for.
+    if: "!cancelled() && (github.event_name == 'push' || (needs.changes.result == 'success' && needs.changes.outputs.oracle == 'true'))"
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -132,11 +142,18 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD:vendor/OrcaSlicer)" >> "$GITHUB_OUTPUT"
 
       # The dependency superbuild's install prefix -- the only part oracle.yml's own workflow
-      # keeps -- restored here so a later task that adds `just oracle-build` to this job does
-      # not start from zero. Restore-only: nothing this job runs fills that tree, so there is
-      # nothing of this job's own to save, and oracle.yml is what populates and saves it, under
-      # the same key prefix (sha plus a hash of oracle/build-libslic3r) so a hit here reuses its
-      # cache rather than missing on a prefix this job invented.
+      # keeps. Restore-only: nothing this job runs fills that tree, so there is nothing of this
+      # job's own to save.
+      #
+      # This cannot hit oracle.yml's cache entry today, even though the key prefix below matches
+      # it exactly: actions/cache resolves an entry by key AND by a version hash computed over
+      # the `path` list, and oracle.yml saves two paths (`vendor/OrcaSlicer/deps/build/arm64` and
+      # `vendor/OrcaSlicer/deps/DL_CACHE`) where this restores one, a child of the first.
+      # Different path lists mean different versions, so an identical key still misses. This
+      # step is kept anyway because task.md's Done-when names this exact path as the one this
+      # task caches; it starts hitting only once a later change makes the two path lists agree
+      # -- either by widening this restore to oracle.yml's two-entry list, or by oracle.yml
+      # adding a save under this narrower path.
       - name: Restore the dependency superbuild
         uses: actions/cache/restore@v4
         with:
