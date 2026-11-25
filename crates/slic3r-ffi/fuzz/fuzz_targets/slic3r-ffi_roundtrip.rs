@@ -67,7 +67,10 @@ impl<'a> Arbitrary<'a> for ArbPolygon {
 /// branch's own committed target drives the FFI side alone and does not construct one, since no
 /// ported module exists yet to take an `ExPolygon`-shaped input.
 #[derive(Debug, Clone)]
-#[allow(dead_code, reason = "committed for a future differential target's reuse; unread here")]
+#[allow(
+    dead_code,
+    reason = "committed for a future differential target's reuse; unread here"
+)]
 struct ArbExPolygon {
     contour: ArbPolygon,
     holes: Vec<ArbPolygon>,
@@ -86,12 +89,19 @@ fuzz_target!(|polygon: ArbPolygon| {
     // Checked, not only argued by ArbPolygon::arbitrary's construction (which always builds
     // three mandatory points plus an arbitrary tail): a generated polygon must hold at least
     // three points, the task's own "Done when" line.
-    assert!(polygon.points.len() >= 3, "ArbPolygon must generate at least three points");
+    assert!(
+        polygon.points.len() >= 3,
+        "ArbPolygon must generate at least three points"
+    );
 
     let path: Vec<ProofZPoint> = polygon
         .points
         .iter()
-        .map(|p| ProofZPoint { x: p.x, y: p.y, z: 0 })
+        .map(|p| ProofZPoint {
+            x: p.x,
+            y: p.y,
+            z: 0,
+        })
         .collect();
 
     let result = path3_to_paths64(&path);

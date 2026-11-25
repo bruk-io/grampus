@@ -46,15 +46,16 @@ fn ex_polygon_lslices_at_pos_slice_proves_path_2() {
 
 /// Rule 1 (the module doc): a coordinate above 2^53 is parsed as `i64` and comes back unchanged,
 /// never round-tripped through `f64` (which would silently round `9007199254740993` to
-/// `9007199254740992`). Reads the hand-written fixture through `dumps::parse_records` directly --
-/// the fixture carries no provenance header by design (see its own leading comment), so
-/// `dumps::read_dump`, which enforces rule 2 below, would refuse it; `parse_records` is the one
-/// function this module exposes with no such requirement.
+/// `9007199254740992`). Reads the hand-written fixture through
+/// `dumps::parse_hand_written_fixture_records` directly -- the fixture carries no provenance
+/// header by design (see its own leading comment), so `dumps::read_dump`, which enforces rule 2
+/// below, would refuse it; this is the one function this module exposes with no such requirement.
 #[test]
 fn oversized_coordinate_survives_exact() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/oversized-coordinate.dump");
     let text = std::fs::read_to_string(&path).expect("the hand-written fixture must be committed");
-    let records = dumps::parse_records(&text, &path).expect("the fixture's one line must parse");
+    let records = dumps::parse_hand_written_fixture_records(&text, &path)
+        .expect("the fixture's one line must parse");
     assert_eq!(records.len(), 1);
     assert_eq!(
         records[0].points,
@@ -183,4 +184,226 @@ fn dump_derived_vec_compares_through_compare_unit_at() {
     .expect(
         "layer 1's lslices square has 4 points (8 flattened x,y components), same as layer 0's",
     );
+}
+
+/// `points_at` refuses (rather than silently returning) a field whose records carry an `object=`
+/// key -- `object_skirt` is `psSkirtBrim`'s print-wide, per-`Print::objects()` record, so a call
+/// with no way to pin that axis must not be answered by merging every object's coordinates into
+/// one list. Proven against the real committed `port/dumps/20mm_cube-base-fff/psSkirtBrim.dump`,
+/// whose one `object_skirt` record already carries `object=0`.
+#[test]
+fn points_at_refuses_a_field_with_an_object_axis() {
+    let dump = dumps::read_dump_default("20mm_cube-base-fff", "psSkirtBrim")
+        .expect("read psSkirtBrim.dump");
+    let err = dump
+        .points_at("object_skirt", None, None)
+        .expect_err("object_skirt carries an 'object=' key this call does not constrain");
+    match err {
+        DumpError::AmbiguousAxis { key, .. } => assert_eq!(key, "object"),
+        other => panic!("expected AmbiguousAxis, got {other}"),
+    }
+}
+
+/// The same refusal for the `group=`/`brim=` axes `skirt_brim_group_skirt`/
+/// `skirt_brim_group_brim` carry -- proven against the real committed
+/// `port/dumps/3DBenchy-base-fff/psSkirtBrim.dump` (`20mm_cube-base-fff`'s own copy has no skirt
+/// or brim groups: `base-fff`'s `skirt_brim_groups count=0`), whose `skirt_brim_group_brim`
+/// records carry `group=0 brim=0`.
+#[test]
+fn points_at_refuses_a_field_with_a_group_axis() {
+    let dump = dumps::read_dump_default("3DBenchy-base-fff", "psSkirtBrim")
+        .expect("read 3DBenchy-base-fff/psSkirtBrim.dump");
+    let err = dump
+        .points_at("skirt_brim_group_brim", None, None)
+        .expect_err("skirt_brim_group_brim carries a 'group=' key this call does not constrain");
+    match err {
+        DumpError::AmbiguousAxis { key, .. } => assert_eq!(key, "group"),
+        other => panic!("expected AmbiguousAxis, got {other}"),
+    }
+}
+
+/// The false-pass this refusal replaces, shown directly: two objects' `object_skirt` records
+/// (synthetic, built in memory through `parse_dump_text` with the real pinned header -- not a
+/// second committed `.dump` file, since `oversized-coordinate.dump` is this branch's one
+/// hand-written exception) would, without the fix, silently concatenate into one list;
+/// `points_at` now refuses the call outright instead, and a caller that actually needs
+/// per-object access reads `Record::key_i64(path, "object")` on `dump.field("object_skirt")`
+/// directly (the header-level `seam`/`object` keys plus this record key are what the "keyed by
+/// seam, object, layer and region" Done-when line is satisfied through).
+#[test]
+fn points_at_never_merges_two_objects_coordinates() {
+    let text = format!(
+        "; provenance\n;   oracle-commit: {}\n; seam: psSkirtBrim\n; object: print\n\
+         field=object_skirt layer=- region=- object=0 count=1\n\
+         field=object_skirt layer=- region=- object=0 path=0 role=Skirt loop=- n=2 pts=1,1,0 2,2,0\n\
+         field=object_skirt layer=- region=- object=1 count=1\n\
+         field=object_skirt layer=- region=- object=1 path=0 role=Skirt loop=- n=2 pts=7,7,0 8,8,0\n",
+        dumps::PINNED_COMMIT
+    );
+    let dump = dumps::parse_dump_text(&text, Path::new("synthetic/two-object-skirt.dump"))
+        .expect("synthetic two-object text must parse");
+    let err = dump
+        .points_at("object_skirt", None, None)
+        .expect_err("two objects' records must never be silently merged into one list");
+    assert!(matches!(err, DumpError::AmbiguousAxis { .. }), "{err}");
+
+    // The per-record axis a caller falls back to still discriminates correctly.
+    let object_0: Vec<i64> = dump
+        .field("object_skirt")
+        .filter(|r| r.key_i64(&dump.path, "object").unwrap() == Some(0))
+        .flat_map(|r| r.points.iter().flatten().copied())
+        .collect();
+    assert_eq!(object_0, vec![1, 1, 0, 2, 2, 0]);
+}
+
+/// `points_at_support_layer` discriminates by `support_layer`, not merging every support layer
+/// into one list (synthetic text, same reasoning as above: `20mm_cube-base-fff`'s `base-fff`
+/// configuration has no support material at all, so no committed dump carries a `support_layer=`
+/// record to prove this against).
+#[test]
+fn points_at_support_layer_discriminates_by_support_layer() {
+    let text = format!(
+        "; provenance\n;   oracle-commit: {}\n; seam: posSupportMaterial\n; object: 0\n\
+         field=lslices layer=0 region=- poly=0 ring=contour n=2 pts=9,9 10,10\n\
+         field=support_islands layer=- region=- support_layer=0 poly=0 ring=contour n=2 pts=1,1 2,2\n\
+         field=support_islands layer=- region=- support_layer=1 poly=0 ring=contour n=2 pts=3,3 4,4\n",
+        dumps::PINNED_COMMIT
+    );
+    let dump = dumps::parse_dump_text(&text, Path::new("synthetic/two-support-layers.dump"))
+        .expect("synthetic two-support-layer text must parse");
+
+    assert_eq!(
+        dump.points_at_support_layer("support_islands", Some(0))
+            .expect("support_layer 0 must be found"),
+        vec![1, 1, 2, 2]
+    );
+    assert_eq!(
+        dump.points_at_support_layer("support_islands", Some(1))
+            .expect("support_layer 1 must be found"),
+        vec![3, 3, 4, 4]
+    );
+
+    // A field with no `support_layer=` key at all (e.g. `lslices`) is never a candidate match,
+    // regardless of the `support_layer` argument -- before the fix, `None` matched it by treating
+    // its absent key as equal to `None`, silently merging every layer and region together.
+    let err = dump
+        .points_at_support_layer("lslices", None)
+        .expect_err("a field with no support_layer key must never match points_at_support_layer");
+    assert!(matches!(err, DumpError::FieldNotFound { .. }), "{err}");
+}
+
+/// `Record::value_f64`/`scalar_f64`/`pair_f64` over the real committed
+/// `port/dumps/20mm_cube-base-fff/psWipeTower.dump`: a plain scalar (`wipe_tower_depth`), a plain
+/// decimal integer scalar (`wipe_tower_number_of_toolchanges`), a `min=`/`max=` pair
+/// (`wipe_tower_bbx`), and a comma-paired `value=` (`wipe_tower_rib_offset`) -- the two shapes
+/// `oracle/stage-dump/README.md`'s "Dump format" section names for these fields, all actually
+/// readable through a typed accessor rather than only through `Record::raw`.
+#[test]
+fn scalar_and_pair_accessors_read_the_real_wipe_tower_dump() {
+    let dump = dumps::read_dump_default("20mm_cube-base-fff", "psWipeTower")
+        .expect("read psWipeTower.dump");
+
+    let depth = dump
+        .field("wipe_tower_depth")
+        .next()
+        .expect("wipe_tower_depth record must exist");
+    assert_eq!(depth.value_f64(&dump.path).unwrap(), Some(0.0));
+
+    let toolchanges = dump
+        .field("wipe_tower_number_of_toolchanges")
+        .next()
+        .expect("wipe_tower_number_of_toolchanges record must exist");
+    assert_eq!(toolchanges.value_f64(&dump.path).unwrap(), Some(-1.0));
+
+    let bbx = dump
+        .field("wipe_tower_bbx")
+        .next()
+        .expect("wipe_tower_bbx record must exist");
+    assert_eq!(
+        bbx.value_f64(&dump.path).unwrap(),
+        None,
+        "no 'value=' key on this record"
+    );
+    assert_eq!(bbx.pair_f64(&dump.path, "min").unwrap(), Some((0.0, 0.0)));
+    assert_eq!(bbx.pair_f64(&dump.path, "max").unwrap(), Some((0.0, 0.0)));
+
+    let rib_offset = dump
+        .field("wipe_tower_rib_offset")
+        .next()
+        .expect("wipe_tower_rib_offset record must exist");
+    rib_offset
+        .value_f64(&dump.path)
+        .expect_err("'value=' on this record is a comma-separated pair, not a single scalar");
+    assert_eq!(
+        rib_offset.pair_f64(&dump.path, "value").unwrap(),
+        Some((0.0, 0.0))
+    );
+}
+
+/// `Record::value_f64` over the real committed `port/dumps/20mm_cube-base-fff/posSlice.dump`'s
+/// `print_z` field at layer 0 -- the one normal-range `parse_hexfloat` case no committed test
+/// exercised before this task's fix pass, matching Python's own `float.fromhex` for the same
+/// token (`0x1.999999999999ap-3` -> `0.2`).
+#[test]
+fn print_z_scalar_parses_the_real_hexfloat_token() {
+    let dump =
+        dumps::read_dump_default("20mm_cube-base-fff", "posSlice").expect("read posSlice.dump");
+    let print_z_layer_0 = dump
+        .field("print_z")
+        .find(|r| r.layer(&dump.path).unwrap() == Some(0))
+        .expect("print_z must carry a layer-0 record");
+    assert_eq!(print_z_layer_0.value_f64(&dump.path).unwrap(), Some(0.2));
+}
+
+/// `parse_hexfloat`'s subnormal-exponent fix: `0x1p-1074` is the smallest positive subnormal
+/// `f64` (`f64::from_bits(1)`), which the original single-`powi` scaling silently rounded to
+/// `0.0` (`2f64.powi(-1074)` overflows its own intermediate to `0.0`). Synthetic text (no real
+/// dump ever carries a coordinate or scalar anywhere near this magnitude -- see the module doc),
+/// checked bit-for-bit against `f64::from_bits`, not a decimal literal, since `4.9e-324` would
+/// itself round through parsing.
+#[test]
+fn subnormal_hexfloat_survives_exact() {
+    let text = format!(
+        "; provenance\n;   oracle-commit: {}\n; seam: posSlice\n; object: 0\n\
+         field=subnormal_probe layer=- region=- value=0x1p-1074\n",
+        dumps::PINNED_COMMIT
+    );
+    let dump = dumps::parse_dump_text(&text, Path::new("synthetic/subnormal.dump"))
+        .expect("synthetic subnormal text must parse");
+    let record = dump.field("subnormal_probe").next().unwrap();
+    let value = record.value_f64(&dump.path).unwrap().unwrap();
+    assert_eq!(value.to_bits(), f64::from_bits(1).to_bits());
+    assert_ne!(
+        value, 0.0,
+        "the original scaling rounded this subnormal value to zero"
+    );
+}
+
+/// A `pts=` line whose declared `n=` disagrees with the number of tuples actually present is
+/// refused rather than silently accepted -- a truncated or garbled line, not merely an
+/// unexpected one.
+#[test]
+fn declared_point_count_mismatch_is_refused() {
+    let text = format!(
+        "; provenance\n;   oracle-commit: {}\n; seam: posSlice\n; object: 0\n\
+         field=lslices layer=0 region=- poly=0 ring=contour n=2 pts=1,2\n",
+        dumps::PINNED_COMMIT
+    );
+    let err = dumps::parse_dump_text(&text, Path::new("synthetic/bad-n.dump"))
+        .expect_err("n=2 with only one pts tuple present must be refused");
+    assert!(matches!(err, DumpError::MalformedLine { .. }), "{err}");
+}
+
+/// A `pts=` tuple whose component count is neither 2 (`x,y`) nor 3 (`x,y,z`) is refused, matching
+/// `Record::points`'s own documented invariant.
+#[test]
+fn malformed_point_arity_is_refused() {
+    let text = format!(
+        "; provenance\n;   oracle-commit: {}\n; seam: posSlice\n; object: 0\n\
+         field=lslices layer=0 region=- poly=0 ring=contour n=1 pts=1,2,3,4,5\n",
+        dumps::PINNED_COMMIT
+    );
+    let err = dumps::parse_dump_text(&text, Path::new("synthetic/bad-arity.dump"))
+        .expect_err("a 5-component 'pts=' tuple must be refused");
+    assert!(matches!(err, DumpError::MalformedLine { .. }), "{err}");
 }

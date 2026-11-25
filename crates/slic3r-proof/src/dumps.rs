@@ -16,7 +16,7 @@
 //!    written with C's `%a` (hexadecimal floating-point) conversion instead, which *is* exact for
 //!    the value held -- [`parse_hexfloat`] parses that shape, used only for those scalar fields,
 //!    never for a coordinate.
-//! 2. [`parse_dump_text`] (and so [`read_dump`]/[`read_dump_at`]) refuses a dump whose leading
+//! 2. [`parse_dump_text`] (and so [`read_dump`]/[`read_dump_default`]) refuses a dump whose leading
 //!    provenance block carries no `oracle-commit` key, or one that disagrees with [`PINNED_COMMIT`],
 //!    with a [`DumpError`] naming the file -- never comparing against a stale dump. This is the
 //!    same judgement `oracle/provenance --check` makes (plan step 3), reimplemented here rather
@@ -26,13 +26,16 @@
 //!    workspace root's `port/dumps/` -- no path is hardcoded into [`read_dump`] itself, mirroring
 //!    `tiers.rs`'s `GRAMPUS_MANIFEST_PATH` convention for `port/manifest.tsv`.
 //!
-//! [`parse_records`] is the one exception to rule 2: a pure body-line parser with no header
-//! requirement at all, used internally by [`parse_dump_text`] and exposed directly for
-//! `crates/slic3r-proof/tests/data/oversized-coordinate.dump` -- the one hand-written fixture
+//! [`parse_hand_written_fixture_records`] is the one exception to rule 2: a pure body-line parser
+//! with no header requirement at all, used internally by [`parse_dump_text`] and exposed directly
+//! for `crates/slic3r-proof/tests/data/oversized-coordinate.dump` -- the one hand-written fixture
 //! this branch commits (see its own leading comment), which carries no provenance header by
 //! design (a 256 by 256 mm bed at `SCALING_FACTOR` cannot produce a real coordinate anywhere
 //! near 2^53, so no oracle run can ever write this case) and so cannot be read through
-//! [`read_dump`]/[`parse_dump_text`], which would refuse it for exactly that reason.
+//! [`read_dump`]/[`parse_dump_text`], which would refuse it for exactly that reason. Its name
+//! says so, so a consumer reaching for a general dump reader finds only [`read_dump`]/
+//! [`read_dump_default`]/[`parse_dump_text`] instead of a provenance-free entry point into any
+//! dump text.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -108,6 +111,17 @@ pub enum DumpError {
         field: String,
         detail: String,
     },
+    /// A record [`Dump::points_at`] (or [`Dump::points_at_support_layer`]) matched on `field`
+    /// (and `layer`/`region`, or `support_layer`) also carries a record-placing key the call did
+    /// not constrain at all (`support_layer`, `object`, `group` or `brim`) -- refused rather than
+    /// silently concatenated with every other record that differs only in that key, which would
+    /// merge e.g. two print objects' `object_skirt` coordinates into one list.
+    AmbiguousAxis {
+        path: PathBuf,
+        field: String,
+        key: &'static str,
+        line: usize,
+    },
 }
 
 impl fmt::Display for DumpError {
@@ -168,6 +182,18 @@ impl fmt::Display for DumpError {
                 "slic3r-proof/dumps: {}: no '{field}' record found ({detail})",
                 path.display()
             ),
+            DumpError::AmbiguousAxis {
+                path,
+                field,
+                key,
+                line,
+            } => write!(
+                f,
+                "slic3r-proof/dumps: {}:{line}: field '{field}' carries a '{key}=' key this call \
+                 did not constrain; refused rather than merged across its values (use a \
+                 '{key}'-aware accessor instead)",
+                path.display()
+            ),
         }
     }
 }
@@ -191,7 +217,7 @@ pub struct Record {
     /// `ExtrusionEntityCollection` leaf path), every component parsed with
     /// [`str::parse::<i64>`] and never through a float.
     pub points: Vec<Vec<i64>>,
-    /// This record's 1-based line number in the file `parse_records` read it from -- `text`'s own
+    /// This record's 1-based line number in the file it was read from -- `text`'s own
     /// `str::lines()` index, header lines included, so it is the line a reader would actually
     /// find by opening the file, not an index into [`Dump::records`] (which holds body records
     /// only, since the header is never pushed into it).
@@ -260,15 +286,61 @@ impl Record {
         }
     }
 
-    /// A scalar `value=` token: a plain decimal integer (`wipe_tower_number_of_toolchanges`) or a
-    /// hex float (every other scalar field -- `print_z`, `slice_z`, `height`, each
-    /// `wipe_tower_*` field). Dispatches on whether the token looks like a hex float (`0x`/`-0x`
-    /// prefix) -- never a coordinate, so this is never used for a `pts=` component.
-    pub fn value_f64(&self, path: &Path) -> Result<Option<f64>, DumpError> {
-        match self.get("value") {
+    /// Any single-valued scalar key (`value`, or, on a record that uses them instead, `min`/
+    /// `max`): a plain decimal integer (`wipe_tower_number_of_toolchanges`) or a hex float (every
+    /// other scalar field -- `print_z`, `slice_z`, `height`, each `wipe_tower_*` field).
+    /// Dispatches on whether the token looks like a hex float (`0x`/`-0x` prefix) -- never a
+    /// coordinate, so this is never used for a `pts=` component. `Ok(None)` only when `key` is
+    /// absent or the `-` sentinel; a key present but holding a comma-separated pair (`min=`/
+    /// `max=`/`value=` on `wipe_tower_bbx`/`wipe_tower_rib_offset`) is a [`DumpError`], not a
+    /// silent `None` -- see [`Record::pair_f64`] for that shape.
+    pub fn scalar_f64(&self, path: &Path, key: &str) -> Result<Option<f64>, DumpError> {
+        match self.get(key) {
             None => Ok(None),
+            Some(v) if v.contains(',') => Err(DumpError::MalformedHexFloat {
+                path: path.to_path_buf(),
+                line: self.line,
+                token: v.to_string(),
+                detail: format!(
+                    "'{key}={v}' is a comma-separated pair; read it with Record::pair_f64, not scalar_f64"
+                ),
+            }),
             Some(v) => parse_scalar(v, path, self.line).map(Some),
         }
+    }
+
+    /// A comma-separated pair of scalar values under `key` (`min=`/`max=` on `wipe_tower_bbx`,
+    /// `value=` on `wipe_tower_rib_offset` -- a bounding box and a 2D offset are each two scalars,
+    /// not one, per `oracle/stage-dump/README.md`'s "Dump format" section). `Ok(None)` only when
+    /// `key` is absent or the `-` sentinel; a single, non-paired value is a [`DumpError`].
+    pub fn pair_f64(&self, path: &Path, key: &str) -> Result<Option<(f64, f64)>, DumpError> {
+        match self.get(key) {
+            None => Ok(None),
+            Some(v) => match v.split_once(',') {
+                Some((a, b)) => {
+                    let a = parse_scalar(a, path, self.line)?;
+                    let b = parse_scalar(b, path, self.line)?;
+                    Ok(Some((a, b)))
+                }
+                None => Err(DumpError::MalformedHexFloat {
+                    path: path.to_path_buf(),
+                    line: self.line,
+                    token: v.to_string(),
+                    detail: format!(
+                        "'{key}={v}' has no ',' -- not a pair; read it with scalar_f64"
+                    ),
+                }),
+            },
+        }
+    }
+
+    /// A scalar `value=` token, read through [`Record::scalar_f64`]. Kept as its own method
+    /// because `value` is overwhelmingly the key a caller reaches for; `wipe_tower_bbx`'s
+    /// `min=`/`max=` pair and `wipe_tower_rib_offset`'s paired `value=` need
+    /// [`Record::scalar_f64`] (by key) or [`Record::pair_f64`] instead, since this method's
+    /// `Ok(None)` cannot tell "absent" apart from "present but paired".
+    pub fn value_f64(&self, path: &Path) -> Result<Option<f64>, DumpError> {
+        self.scalar_f64(path, "value")
     }
 }
 
@@ -340,7 +412,17 @@ fn parse_hexfloat(token: &str, path: &Path, line: usize) -> Result<f64, DumpErro
         value += digit as f64 * scale;
         scale /= 16.0;
     }
-    value *= 2f64.powi(exp);
+    // Scaled in two halves rather than one `2f64.powi(exp)`: a single `powi` call for an extreme
+    // negative exponent (a subnormal double, exp <= -1023 or so) computes 2^-exp as an
+    // intermediate that overflows to infinity, so `value / infinity` silently rounds to 0.0
+    // instead of the true (tiny, nonzero) subnormal value. Splitting `exp` into two halves keeps
+    // each factor's own exponent within the normal range, so each `powi` call -- and so the
+    // product -- stays exact (multiplying by a power of two only ever shifts a float's binary
+    // exponent, never rounds its mantissa, as long as neither factor over/underflows).
+    let half = exp / 2;
+    let rest = exp - half;
+    value *= 2f64.powi(half);
+    value *= 2f64.powi(rest);
     Ok(if neg { -value } else { value })
 }
 
@@ -366,6 +448,16 @@ impl Dump {
         self.records.iter().filter(move |r| r.field == field)
     }
 
+    /// Record-placing keys that identify *which* record a field's line belongs to beyond
+    /// `field`/`layer`/`region`: `support_layer` (a support-layer field indexes
+    /// `PrintObject::support_layers()`, a separate collection from `layers()`), `object` (a
+    /// print-wide seam's `object_skirt` writes one record per `Print::objects()` entry), and
+    /// `group`/`brim` (`psSkirtBrim`'s own `skirt_brim_group_skirt`/`skirt_brim_group_brim`
+    /// records, one per `SkirtBrimGroup` and, for a brim, one per brim within it).
+    /// `filament_id` is deliberately excluded: `dump_seams.cpp` writes it as an attribute of the
+    /// record `group`/`brim` already place, never as a second axis a brim is indexed by.
+    const UNCONSTRAINED_AXES: [&'static str; 4] = ["support_layer", "object", "group", "brim"];
+
     /// The flattened coordinates of every point `field`'s records carry at `(layer, region)` (an
     /// `ExPolygons`/`SurfaceCollection` field summary record contributes no points of its own, so
     /// concatenating every matching record's `points` is exactly the field's full point list at
@@ -374,9 +466,15 @@ impl Dump {
     /// `fills`) would otherwise have every region's points silently merged into one list and
     /// compared as if it were a single polygon, a false pass this harness exists to prevent.
     /// Pass `region: None` for a field with no region axis at all (`lslices`; every print-wide
-    /// field). `Err(DumpError::FieldNotFound)` when no record matches at all -- refused rather
-    /// than silently returning an empty `Vec` indistinguishable from "this polygon has zero
-    /// points".
+    /// field). The same protection applies to every other record-placing key this call does not
+    /// take as a parameter (see [`Dump::UNCONSTRAINED_AXES`]): a matched record that carries one
+    /// of those keys is refused with [`DumpError::AmbiguousAxis`] rather than merged across its
+    /// values -- this is why `object_skirt` (`object=`), `skirt_brim_group_skirt`/
+    /// `skirt_brim_group_brim` (`group=`/`brim=`) and `support_islands`/`support_fills`
+    /// (`support_layer=`) are not reachable through this call at all; the last of those has its
+    /// own accessor, [`Dump::points_at_support_layer`]. `Err(DumpError::FieldNotFound)` when no
+    /// record matches at all -- refused rather than silently returning an empty `Vec`
+    /// indistinguishable from "this polygon has zero points".
     pub fn points_at(
         &self,
         field: &str,
@@ -394,6 +492,21 @@ impl Dump {
             }
             if record.region(&self.path)? != region {
                 continue;
+            }
+            let mut ambiguous_key: Option<&'static str> = None;
+            for key in Self::UNCONSTRAINED_AXES {
+                if record.get(key).is_some() {
+                    ambiguous_key = Some(key);
+                    break;
+                }
+            }
+            if let Some(key) = ambiguous_key {
+                return Err(DumpError::AmbiguousAxis {
+                    path: self.path.clone(),
+                    field: field.to_string(),
+                    key,
+                    line: record.line,
+                });
             }
             matched_any = true;
             for point in &record.points {
@@ -414,6 +527,11 @@ impl Dump {
     /// (`support_islands`, `support_fills`) carries `layer=-` and indexes by `support_layer=<S>`
     /// instead -- a separate collection (`PrintObject::support_layers()`) from `layers()`, so
     /// matching it through `points_at`'s `layer` parameter would silently compare the wrong axis.
+    /// A record with no `support_layer` key at all is never a candidate match, regardless of
+    /// `support_layer`'s value here -- it is not a support-layer record, so treating its absent
+    /// key as equal to `None` would (and, before this check existed, did) silently merge every
+    /// layer and region of a non-support field (or the whole, unindexed `support_layer=-`
+    /// summary line a support field itself carries no such line for) into one list.
     pub fn points_at_support_layer(
         &self,
         field: &str,
@@ -425,7 +543,10 @@ impl Dump {
             if record.field != field {
                 continue;
             }
-            if record.support_layer(&self.path)? != support_layer {
+            let Some(sl) = record.support_layer(&self.path)? else {
+                continue;
+            };
+            if Some(sl) != support_layer {
                 continue;
             }
             matched_any = true;
@@ -482,6 +603,23 @@ fn parse_record_line(line_text: &str, lineno: usize, path: &Path) -> Result<Reco
         }
     }
 
+    // `n=<k>` (an `ExPolygons`/`SurfaceCollection` ring or an `ExtrusionEntityCollection` leaf
+    // path) declares how many `pts=` tuples the line carries; cross-checked against the number
+    // actually parsed, rather than trusting a declared count a truncated or garbled line could
+    // disagree with -- the same "refuse rather than compare" rule the header applies, applied
+    // here to the body.
+    if let Some(n_str) = raw.get("n") {
+        let declared: usize = n_str.parse().map_err(|e: std::num::ParseIntError| {
+            malformed(format!("'n={n_str}' is not a valid integer: {e}"))
+        })?;
+        if declared != points.len() {
+            return Err(malformed(format!(
+                "declared n={declared} does not match the {} 'pts=' tuple(s) actually present",
+                points.len()
+            )));
+        }
+    }
+
     Ok(Record {
         field,
         raw,
@@ -491,9 +629,11 @@ fn parse_record_line(line_text: &str, lineno: usize, path: &Path) -> Result<Reco
 }
 
 /// Parses one `x,y` or `x,y,z` coordinate tuple -- every component through [`str::parse::<i64>`],
-/// never through a float (the module doc's rule 1).
+/// never through a float (the module doc's rule 1) -- and refuses a tuple whose component count
+/// is neither 2 nor 3, the only two shapes [`Record::points`]' own doc promises a caller.
 fn parse_point(tok: &str, path: &Path, lineno: usize) -> Result<Vec<i64>, DumpError> {
-    tok.split(',')
+    let point: Vec<i64> = tok
+        .split(',')
         .map(|part| {
             part.parse::<i64>()
                 .map_err(|e| DumpError::MalformedInteger {
@@ -503,15 +643,29 @@ fn parse_point(tok: &str, path: &Path, lineno: usize) -> Result<Vec<i64>, DumpEr
                     detail: e.to_string(),
                 })
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    if point.len() != 2 && point.len() != 3 {
+        return Err(DumpError::MalformedLine {
+            path: path.to_path_buf(),
+            line: lineno,
+            reason: format!(
+                "'pts=' tuple '{tok}' has {} component(s), expected 2 (x,y) or 3 (x,y,z)",
+                point.len()
+            ),
+        });
+    }
+    Ok(point)
 }
 
 /// The pure body-line parser: skips every blank or `;`-prefixed line (a dump's header, wherever
 /// it appears) and parses every other line as a [`Record`]. Carries no provenance requirement at
-/// all -- rule 2 of the module doc is [`parse_dump_text`]'s job, not this function's, which is
-/// exactly why `crates/slic3r-proof/tests/data/oversized-coordinate.dump` (no header, by design)
-/// is read through this function directly rather than through [`read_dump`].
-pub fn parse_records(text: &str, path: &Path) -> Result<Vec<Record>, DumpError> {
+/// all -- rule 2 of the module doc is [`parse_dump_text`]'s job, not this function's. Private
+/// rather than exposed directly: a public, generically-named "parse any dump text" function
+/// would be a second, unguarded way into a dump's body that bypasses rule 2 entirely, for every
+/// caller, not only the one hand-written fixture that genuinely needs it. See
+/// [`parse_hand_written_fixture_records`] for that one caller's own, specifically-named entry
+/// point.
+fn parse_records(text: &str, path: &Path) -> Result<Vec<Record>, DumpError> {
     let mut records = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
@@ -521,6 +675,21 @@ pub fn parse_records(text: &str, path: &Path) -> Result<Vec<Record>, DumpError> 
         records.push(parse_record_line(trimmed, idx + 1, path)?);
     }
     Ok(records)
+}
+
+/// The one exception to rule 2 (see the module doc): reads
+/// `crates/slic3r-proof/tests/data/oversized-coordinate.dump`-shaped text with no provenance
+/// header requirement at all. Named for that one caller rather than for general use -- a
+/// consumer reaching for a dump reader should find [`read_dump`]/[`read_dump_default`]/
+/// [`parse_dump_text`] instead, each of which does enforce rule 2 -- and is otherwise exactly
+/// [`parse_records`], the body-line parser every real dump is also read through internally (via
+/// [`parse_dump_text`]), kept private so this is the only way to reach it without a provenance
+/// check.
+pub fn parse_hand_written_fixture_records(
+    text: &str,
+    path: &Path,
+) -> Result<Vec<Record>, DumpError> {
+    parse_records(text, path)
 }
 
 /// Parses `key: value` out of one leading `;`-comment line, the shape both the indented

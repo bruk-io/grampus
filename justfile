@@ -270,12 +270,20 @@ pr-body-check file *args:
 # forwards its own trailing flags through unchanged. `cargo-fuzz`'s instrumentation needs a
 # nightly rustc the pinned stable toolchain (rust-toolchain.toml, unchanged by this task) cannot
 # provide, so this recipe names `+nightly` explicitly rather than the fuzz crate (which has no
-# `rust-toolchain.toml` of its own) carrying a toolchain override. Where `cargo-fuzz` is not
-# installed for that toolchain, this recipe names the install command and exits non-zero rather
-# than installing it itself.
+# `rust-toolchain.toml` of its own) carrying a toolchain override. Checks the nightly toolchain
+# itself before checking for cargo-fuzz: `cargo +nightly fuzz --help` fails the same way whether
+# the nightly toolchain is missing or cargo-fuzz is missing under it, so a single check could only
+# ever name one of the two and would name the wrong one on a machine with no nightly toolchain at
+# all (this repo's own rust-toolchain.toml pins stable, and installs nothing else). Where either
+# is missing, this recipe names its own install command and exits non-zero rather than installing
+# it itself.
 fuzz target *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
+    if ! cargo +nightly -V >/dev/null 2>&1; then
+      echo "just fuzz: the nightly toolchain is not installed; install it with \`rustup toolchain install nightly\`" >&2
+      exit 1
+    fi
     if ! cargo +nightly fuzz --help >/dev/null 2>&1; then
       echo "just fuzz: cargo-fuzz is not installed for the nightly toolchain; install it with \`cargo +nightly install cargo-fuzz\`" >&2
       exit 1
