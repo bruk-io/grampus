@@ -71,9 +71,10 @@ its ownership. The remaining seven are all of `ProjectTask.hpp`'s cross-pointer 
 these from a constructor parameter or looks them up (`get_slice_info`); nothing under
 `src/libslic3r` ever `push_back`s into `tasks`/`profiles` or deletes a `profile_`/`project_`/
 `slice_info` pointee -- the object graph that would settle it (if one exists) is built in GUI code
-under `src/slic3r/GUI`, which is out of scope for this header's own evidence. Each carries a
-conservative `Arc<Mutex<Pointee>>` (the pointee's own pointer is never `const`, so a porter must
-assume concurrent mutation until a later pass resolves it).
+under `src/slic3r/GUI`, which is out of scope for this header's own evidence. These seven, plus
+`Layer.hpp:344` `area`, carry the conservative `Arc<Mutex<Pointee>>` (the pointee's own pointer is
+never `const`, so a porter must assume concurrent mutation until a later pass resolves it); only
+`buf_end` departs from that default, for the reason given above.
 
 **Rows this plan departs from a mechanical default, named individually:**
 - `Config.hpp:2636` `nocli`: `static const constexpr char *` is a string-literal constant, not a
@@ -136,3 +137,12 @@ that reason.
   pointee's Rust type carries `mut` or `Mutex`.
 - `git diff main -- port/ownership.tsv` touches exactly 120 lines, and columns 1-5 (`header path`,
   `line`, `declaring type`, `field`, `C++ type`) are byte-identical to `main` on every row.
+- Every evidence cell's `path:line` citation was checked against the vendored source directly
+  (`sed -n '<line>p' <file>`), not just transcribed while reading -- this is what caught the real
+  mistakes this branch's history fixes (a wrong file, a call site cited instead of the delete
+  inside it, and two citations thrown off by a `latin-1`-decoding bug in the checking script
+  itself: a stray UTF-8 continuation byte inside a Chinese comment decodes as U+0085, which
+  Python's `splitlines()` treats as its own line break, desyncing line numbers from what
+  `grep`/`sed` report for every line after it in a file with non-ASCII comments -- common in this
+  codebase's BBS-authored sections). A sibling batch re-using this method should decode source as
+  UTF-8, not `latin-1`, when counting lines for a citation.
