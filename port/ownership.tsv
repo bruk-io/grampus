@@ -1,6 +1,6 @@
 header path	line	declaring type	field	C++ type	class	evidence	rust type
-AABBMesh.hpp	34	AABBMesh	m_tm	const indexed_triangle_set *	borrowed	AABBMesh.cpp:85, AABBMesh.cpp:94	&'a indexed_triangle_set
-AABBMesh.hpp	73	hit_result	m_mesh	const AABBMesh *	borrowed	AABBMesh.hpp:79, AABBMesh.hpp:80	&'a AABBMesh
+AABBMesh.hpp	34	AABBMesh	m_tm	const indexed_triangle_set *			
+AABBMesh.hpp	73	hit_result	m_mesh	const AABBMesh *			
 Arachne/SkeletalTrapezoidation.hpp	145	TransitionMidRef	edge	edge_t *			
 Arachne/SkeletalTrapezoidation.hpp	172	SkeletalTrapezoidation	vd_edge_to_he_edge	ankerl::unordered_dense::map<const VD::edge_type *, edge_t *>			
 Arachne/SkeletalTrapezoidation.hpp	173	SkeletalTrapezoidation	vd_node_to_he_node	ankerl::unordered_dense::map<const VD::vertex_type *, node_t *>			
@@ -12,19 +12,19 @@ Arachne/utils/HalfEdge.hpp	27	HalfEdge	from	node_t *
 Arachne/utils/HalfEdge.hpp	28	HalfEdge	to	node_t *			
 Arachne/utils/HalfEdgeNode.hpp	25	HalfEdgeNode	incident_edge	edge_t *			
 Arachne/utils/PolygonsPointIndex.hpp	32	PathsPointIndex	polygons	const Paths *			
-ClipperUtils.hpp	99	iterator	m_ptr	const Points *	borrowed	ClipperUtils.hpp:92	&'a Points
-ClipperUtils.hpp	315	SurfacesPtrProvider	m_surfaces	const SurfacesPtr &	borrowed	ClipperUtils.hpp:278	&'a [Surface]
-Config.hpp	264	ConfigSubstitution	opt_def	const ConfigOptionDef *	borrowed	Config.cpp:707, Config.cpp:725	&'a ConfigOptionDef
-Config.hpp	2152	ConfigOptionEnumGeneric	keys_map	const t_config_enum_values *	borrowed	Config.hpp:2149 (keys_map(nullptr) default, set from a static enum table by callers)	&'a HashMap<String, i32>
-Config.hpp	2215	ConfigOptionEnumsGenericTempl	keys_map	const t_config_enum_values *	borrowed	Config.hpp:2210 (keys_map(nullptr) default, set from a static enum table by callers)	&'a HashMap<String, i32>
-Config.hpp	2619	ConfigOptionDef	enum_keys_map	const t_config_enum_values *	borrowed	Config.hpp:2617, 2618 ("Maps enum_values to enums. Initialized by ConfigOptionEnum<xxx>::get_enum_values()")	&'a HashMap<String, i32>
-Config.hpp	2636	ConfigOptionDef	nocli	static const constexpr char *	borrowed	Config.hpp:2635, 2636 (string-literal constant, never reassigned)	&'static str
-Config.hpp	2659	ConfigDef	by_serialization_key_ordinal	std::map<size_t, const ConfigOptionDef*>	borrowed	Config.hpp:2658 (secondary index into ConfigDef::options, which owns the ConfigOptionDef values)	HashMap<usize, &'a ConfigOptionDef>
-ConnectedBodies.hpp	40	IslandLocator	m_islands	const ExPolygons *	borrowed	ConnectedBodies.hpp:31 ("The islands must outlive the locator.")	&'a ExPolygons
-EdgeGrid.hpp	98	Contour	m_begin	const Slic3r::Point *	borrowed	EdgeGrid.hpp:30, EdgeGrid.hpp:32 (Contour constructed from an external Points/pointer pair it does not copy)	&'a Point
-EdgeGrid.hpp	99	Contour	m_end	const Slic3r::Point *	borrowed	EdgeGrid.hpp:30, EdgeGrid.hpp:32	&'a Point
-Extruder.hpp	99	Extruder	m_config	GCodeConfig *	borrowed	Extruder.hpp:98 ("Reference to GCodeConfig instance owned by GCodeWriter.")	&'a mut GCodeConfig
-ExtrusionEntityCollection.hpp	39	ExtrusionEntityCollection	entities	ExtrusionEntitiesPtr	owned	ExtrusionEntityCollection.hpp:39 ("we own these entities"), ExtrusionEntityCollection.cpp:48-52 (clear() deletes each)	Vec<ExtrusionEntity>
+ClipperUtils.hpp	99	iterator	m_ptr	const Points *			
+ClipperUtils.hpp	315	SurfacesPtrProvider	m_surfaces	const SurfacesPtr &			
+Config.hpp	264	ConfigSubstitution	opt_def	const ConfigOptionDef *			
+Config.hpp	2152	ConfigOptionEnumGeneric	keys_map	const t_config_enum_values *			
+Config.hpp	2215	ConfigOptionEnumsGenericTempl	keys_map	const t_config_enum_values *			
+Config.hpp	2619	ConfigOptionDef	enum_keys_map	const t_config_enum_values *			
+Config.hpp	2636	ConfigOptionDef	nocli	static const constexpr char *			
+Config.hpp	2659	ConfigDef	by_serialization_key_ordinal	std::map<size_t, const ConfigOptionDef*>			
+ConnectedBodies.hpp	40	IslandLocator	m_islands	const ExPolygons *			
+EdgeGrid.hpp	98	Contour	m_begin	const Slic3r::Point *			
+EdgeGrid.hpp	99	Contour	m_end	const Slic3r::Point *			
+Extruder.hpp	99	Extruder	m_config	GCodeConfig *			
+ExtrusionEntityCollection.hpp	39	ExtrusionEntityCollection	entities	ExtrusionEntitiesPtr			
 Fill/AdaptiveInfillField.hpp	31	Slice	expolygons	const ExPolygons *			
 Fill/AdaptiveInfillField.hpp	116	AdaptiveTpms	equation	float (*)(float x, float y, float z)			
 Fill/Fill.hpp	35	Filler	fill	Fill *			
@@ -34,37 +34,37 @@ Fill/FillBase.hpp	168	Fill	adaptive_infill_field	const AdaptiveInfillField *
 Fill/FillBase.hpp	172	Fill	print_config	const PrintConfig *			
 Fill/FillBase.hpp	173	Fill	print_object_config	const PrintObjectConfig *			
 Fill/FillLightning.hpp	32	Filler	generator	Generator *			
-FlushVolPredictor.hpp	48	GenericFlushPredictor	predictor	FlushVolPredictor *	borrowed	FlushVolPredictor.cpp:320, FlushVolPredictor.cpp:325-337 (points into a static, process-lifetime cache keyed by dataset_value)	&'static FlushVolPredictor
-GCode.hpp	198	WipeTowerIntegration	m_print_config	const PrintConfig *	borrowed	GCode.cpp:4762 (constructed from print.config())	&'a PrintConfig
-GCode.hpp	366	LayerToPrint	object_layer	const Layer *	borrowed	GCode.hpp:364 (LayerToPrint() : object_layer(nullptr), ...)	&'a Layer
-GCode.hpp	367	LayerToPrint	support_layer	const SupportLayer *	borrowed	GCode.hpp:364	&'a SupportLayer
-GCode.hpp	368	LayerToPrint	original_object	const PrintObject *	borrowed	GCode.hpp:364, GCode.hpp:368 ("BBS: used for shared object logic")	&'a PrintObject
-GCode.hpp	375	LayerToPrint	belt_brim_band	const BeltBrimBand *	borrowed	GCode.hpp:369-374 ("an apron band ... Deliberately not a Layer")	&'a BeltBrimBand
-GCode.hpp	440	GCodeOutputStream	f	FILE *	owned	GCode.hpp:418 (constructor takes the FILE* by value), GCode.hpp:419 (~GCodeOutputStream closes it), GCode.cpp:9126-9130 (close() calls ::fclose)	std::fs::File
-GCode.hpp	606	ObjectByExtruder	support	const ExtrusionEntityCollection *	borrowed	GCode.cpp:7134 ("obj.support = &support_layer.support_fills;")	&'a ExtrusionEntityCollection
-GCode.hpp	614	Region	perimeters	std::vector<const ExtrusionEntity*>	borrowed	GCode.hpp:613 ("Non-owned references to LayerRegion::perimeters::entities")	Vec<&'a ExtrusionEntity>
-GCode.hpp	616	Region	infills	std::vector<const ExtrusionEntity*>	borrowed	GCode.hpp:615 ("Non-owned references to LayerRegion::fills::entities")	Vec<&'a ExtrusionEntity>
-GCode.hpp	618	Region	infills_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>	borrowed	GCode.cpp:11767-11797 (perimeters_or_infills_overrides points at copies_extruder, owned by WipingExtrusions)	Vec<&'a WipingExtrusions::ExtruderPerCopy>
-GCode.hpp	619	Region	perimeters_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>	borrowed	GCode.cpp:11767-11797	Vec<&'a WipingExtrusions::ExtruderPerCopy>
-GCode.hpp	763	PlaceholderParserIntegration	opt_position	ConfigOptionFloats *	borrowed	GCode.cpp:2246-2248 (new ConfigOptionFloats(...) handed to output_config.set_key_value(), which owns it from then on)	&'a mut ConfigOptionFloats
-GCode.hpp	764	PlaceholderParserIntegration	opt_zhop	ConfigOptionFloat *	borrowed	GCode.cpp:2249-2250 (new ConfigOptionFloat(...) handed to this->parser.set(), which owns it from then on)	&'a mut ConfigOptionFloat
-GCode.hpp	765	PlaceholderParserIntegration	opt_e_position	ConfigOptionFloats *	borrowed	GCode.cpp:2233-2234 (new ConfigOptionFloats(...) handed to output_config.set_key_value())	&'a mut ConfigOptionFloats
-GCode.hpp	766	PlaceholderParserIntegration	opt_e_retracted	ConfigOptionFloats *	borrowed	GCode.cpp:2230 (this->output_config.set_key_value("e_restart_extra", this->opt_e_restart_extra))	&'a mut ConfigOptionFloats
-GCode.hpp	767	PlaceholderParserIntegration	opt_e_restart_extra	ConfigOptionFloats *	borrowed	GCode.cpp:2230	&'a mut ConfigOptionFloats
-GCode.hpp	768	PlaceholderParserIntegration	opt_extruded_volume	ConfigOptionFloats *	borrowed	GCode.cpp:2237-2238 (new ConfigOptionFloats(...), this->parser.set("extruded_volume", ...))	&'a mut ConfigOptionFloats
-GCode.hpp	769	PlaceholderParserIntegration	opt_extruded_weight	ConfigOptionFloats *	borrowed	GCode.cpp:2238-2239	&'a mut ConfigOptionFloats
-GCode.hpp	770	PlaceholderParserIntegration	opt_extruded_volume_total	ConfigOptionFloat *	borrowed	GCode.cpp:2239-2241	&'a mut ConfigOptionFloat
-GCode.hpp	771	PlaceholderParserIntegration	opt_extruded_weight_total	ConfigOptionFloat *	borrowed	GCode.cpp:2239-2241	&'a mut ConfigOptionFloat
-GCode.hpp	825	GCode	m_instance_names	std::unordered_map<const PrintInstance*, std::string>	borrowed	GCode.hpp:824 ("Object label names by instance, built on first use ...")	HashMap<&'a PrintInstance, String>
-GCode.hpp	843	GCode	m_layer	const Layer *	borrowed	GCode.hpp:842 ("Current layer processed.")	&'a Layer
-GCode.hpp	910	GCode	m_last_obj_copy	std::pair<const PrintObject*, Point>	borrowed	GCode.hpp:909 ("Index of a last object copy extruded.")	(&'a PrintObject, Point)
-GCode.hpp	919	GCode	m_print	Print *	borrowed	GCode.cpp (GCode::do_export/process take the Print to export by pointer; GCode does not own it)	&'a mut Print
-GCode.hpp	921	GCode	m_printed_objects	std::vector<const PrintObject*>	borrowed	GCode.cpp:4729 (m_printed_objects.emplace_back(&object))	Vec<&'a PrintObject>
-GCode.hpp	934	GCode	m_curr_print	Print *	borrowed	GCode.cpp:2867 (m_curr_print = print;)	&'a mut Print
-GCode.hpp	961	GCode	m_belt_floor_object	const PrintObject *	borrowed	GCode.hpp:957-960 ("Those paths publish the owner here for the duration of the emission. Never left set.")	&'a PrintObject
-GCode.hpp	963	BeltFloorObjectGuard	slot	const PrintObject *&	borrowed	GCode.hpp:962-965 (BeltFloorObjectGuard(slot, o) : slot(s) { slot = o; })	&'a mut Option<&'b PrintObject>
-GCode.hpp	972	GCode	m_belt_travel_target	const ExtrusionPath *	borrowed	GCode.hpp:969-971 ("the travel being emitted leads to ... null for any other travel")	&'a ExtrusionPath
-GCode.hpp	975	GCode	m_belt_uncut_line_lengths	const std::vector<double> *	borrowed	GCode.hpp:973-974 ("the length, mm, of the uncut line ... null for any other path")	&'a std::vec::Vec<f64>
+FlushVolPredictor.hpp	48	GenericFlushPredictor	predictor	FlushVolPredictor *			
+GCode.hpp	198	WipeTowerIntegration	m_print_config	const PrintConfig *			
+GCode.hpp	366	LayerToPrint	object_layer	const Layer *			
+GCode.hpp	367	LayerToPrint	support_layer	const SupportLayer *			
+GCode.hpp	368	LayerToPrint	original_object	const PrintObject *			
+GCode.hpp	375	LayerToPrint	belt_brim_band	const BeltBrimBand *			
+GCode.hpp	440	GCodeOutputStream	f	FILE *			
+GCode.hpp	606	ObjectByExtruder	support	const ExtrusionEntityCollection *			
+GCode.hpp	614	Region	perimeters	std::vector<const ExtrusionEntity*>			
+GCode.hpp	616	Region	infills	std::vector<const ExtrusionEntity*>			
+GCode.hpp	618	Region	infills_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>			
+GCode.hpp	619	Region	perimeters_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>			
+GCode.hpp	763	PlaceholderParserIntegration	opt_position	ConfigOptionFloats *			
+GCode.hpp	764	PlaceholderParserIntegration	opt_zhop	ConfigOptionFloat *			
+GCode.hpp	765	PlaceholderParserIntegration	opt_e_position	ConfigOptionFloats *			
+GCode.hpp	766	PlaceholderParserIntegration	opt_e_retracted	ConfigOptionFloats *			
+GCode.hpp	767	PlaceholderParserIntegration	opt_e_restart_extra	ConfigOptionFloats *			
+GCode.hpp	768	PlaceholderParserIntegration	opt_extruded_volume	ConfigOptionFloats *			
+GCode.hpp	769	PlaceholderParserIntegration	opt_extruded_weight	ConfigOptionFloats *			
+GCode.hpp	770	PlaceholderParserIntegration	opt_extruded_volume_total	ConfigOptionFloat *			
+GCode.hpp	771	PlaceholderParserIntegration	opt_extruded_weight_total	ConfigOptionFloat *			
+GCode.hpp	825	GCode	m_instance_names	std::unordered_map<const PrintInstance*, std::string>			
+GCode.hpp	843	GCode	m_layer	const Layer *			
+GCode.hpp	910	GCode	m_last_obj_copy	std::pair<const PrintObject*, Point>			
+GCode.hpp	919	GCode	m_print	Print *			
+GCode.hpp	921	GCode	m_printed_objects	std::vector<const PrintObject*>			
+GCode.hpp	934	GCode	m_curr_print	Print *			
+GCode.hpp	961	GCode	m_belt_floor_object	const PrintObject *			
+GCode.hpp	963	BeltFloorObjectGuard	slot	const PrintObject *&			
+GCode.hpp	972	GCode	m_belt_travel_target	const ExtrusionPath *			
+GCode.hpp	975	GCode	m_belt_uncut_line_lengths	const std::vector<double> *			
 GCode/ConflictChecker.hpp	27	LineWithID	_id	const void *			
 GCode/ConflictChecker.hpp	38	ExtrusionLayer	layer	const Layer *			
 GCode/ConflictChecker.hpp	70	LinesBucket	_id	const void *			
@@ -112,83 +112,83 @@ GCode/ToolOrdering.hpp	426	ToolOrdering	m_print_object_ptr	const PrintObject *
 GCode/ToolOrdering.hpp	427	ToolOrdering	m_print	Print *			
 GCode/WipeTower.hpp	415	WipeTower	m_multi_nozzle_group_result	const MultiNozzleUtils::LayeredNozzleGroupResult *			
 GCode/WipeTower.hpp	444	WipeTower	m_cur_block	WipeTowerBlock *			
-GCodeWriter.hpp	262	GCodeWriter	m_curr_filament_extruder	std::vector<Extruder*>	borrowed	GCodeWriter.cpp:809, GCodeWriter.cpp:1680 (m_curr_filament_extruder[id] = &*filament_extruder_iter, an iterator into m_filament_extruders)	Vec<&'a mut Extruder>
-GCodeWriter.hpp	402	GCodeFormatter	buf_end	char *	unknown	GCodeWriter.hpp:321 (this->buf_end = buf + buflen;) -- a pointer into GCodeFormatter's own inline buf[buflen] field, always a compile-time-constant offset; no class in the vocabulary (owned/shared/borrowed/back-reference/ffi) describes a self-pointer into the same struct's inline array cleanly	Arc<Mutex<u8>>
+GCodeWriter.hpp	262	GCodeWriter	m_curr_filament_extruder	std::vector<Extruder*>			
+GCodeWriter.hpp	402	GCodeFormatter	buf_end	char *			
 Geometry/VoronoiUtils.hpp	20	SegmentCellRange	edge_begin	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	21	SegmentCellRange	edge_end	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	35	PointCellRange	edge_begin	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	36	PointCellRange	edge_end	const VoronoiDiagram::edge_type *			
-InstanceLock.hpp	55	InstanceLock	m_slot	Slot *	borrowed	InstanceLock.cpp:84-89 ("Never freed: a save during static destruction still needs its slot."; slot_for looks a Slot up in a leaked, process-lifetime registry)	&'static Slot
-Layer.hpp	133	LayerRegion	m_layer	Layer *	back-reference	Layer.hpp:131 (LayerRegion(Layer *layer, ...) : m_layer(layer) {})	usize
-Layer.hpp	134	LayerRegion	m_region	const PrintRegion *	borrowed	Layer.hpp:131 (LayerRegion(Layer *layer, const PrintRegion *region) : ..., m_region(region) {})	&'a PrintRegion
-Layer.hpp	146	Layer	upper_layer	Layer *	back-reference	Layer.hpp:146 (sibling pointer into the same PrintObject::m_layers collection)	usize
-Layer.hpp	147	Layer	lower_layer	Layer *	back-reference	Layer.hpp:147	usize
-Layer.hpp	293	Layer	m_object	PrintObject *	back-reference	Layer.hpp:118-119 (PrintObject* object() { return m_object; })	usize
-Layer.hpp	294	Layer	m_regions	LayerRegionPtrs	owned	Layer.cpp:31-35 (~Layer() { for (LayerRegion *region : m_regions) delete region; })	Vec<LayerRegion>
-Layer.hpp	344	AreaGroup	area	ExPolygon *	unknown	Layer.hpp:344, Layer.hpp:351 (AreaGroup(ExPolygon *a, ...) : area(a) {}) -- AreaGroup has no other use anywhere under vendor/OrcaSlicer/src/libslic3r, so its ownership cannot be settled from the vendored tree	Arc<Mutex<ExPolygon>>
-MarchingSquares.hpp	225	Grid	m_rst	const Rst *	borrowed	MarchingSquares.hpp:223 (template<class Rst> class Grid wraps an externally-owned raster)	&'a Rst
-MarchingSquares.hpp	404	CellIt	grid	const Rst *	borrowed	MarchingSquares.hpp:404 (CellIt mirrors Grid::m_rst)	&'a Rst
-Model.hpp	189	ModelMaterial	m_model	Model *	back-reference	Model.hpp:188 ("Parent, owning this material.")	usize
-Model.hpp	390	ModelObject	instances	ModelInstancePtrs	owned	Model.hpp:388-389 ("Instances ... are owned by this ModelObject."), Model.cpp:1583-1588 (delete_instance deletes *i)	Vec<ModelInstance>
-Model.hpp	393	ModelObject	volumes	ModelVolumePtrs	owned	Model.hpp:392 ("ModelVolumes are owned by this ModelObject."), Model.cpp:1457-1461 (delete_volume deletes *i)	Vec<ModelVolume>
-Model.hpp	666	ModelObject	m_model	Model *	back-reference	Model.hpp:665 ("Parent object, owning this ModelObject.")	usize
-Model.hpp	1182	ModelVolume	object	ModelObject *	back-reference	Model.hpp:1181 ("Parent object owning this ModelVolume.")	usize
-Model.hpp	1559	ModelInstance	object	ModelObject *	back-reference	Model.hpp:1558 ("Parent object, owning this instance.")	usize
-Model.hpp	1700	Model	materials	ModelMaterialMap	owned	Model.hpp:1699 ("Materials are owned by a model ..."), Model.cpp:778-779 (clear_materials deletes m.second)	HashMap<String, ModelMaterial>
-Model.hpp	1702	Model	objects	ModelObjectPtrs	owned	Model.hpp:1701 ("Objects are owned by a model."), Model.cpp:688-689 (delete model_object)	Vec<ModelObject>
-MutablePolygon.hpp	44	const_iterator	m_data	const MutablePolygon *	borrowed	MutablePolygon.hpp:41 (const_iterator(const MutablePolygon *data, ...) : m_data(data) {})	&'a MutablePolygon
-MutablePolygon.hpp	68	iterator	m_data	MutablePolygon *	borrowed	MutablePolygon.hpp:65 (iterator(MutablePolygon *data, ...) : m_data(data) {})	&'a mut MutablePolygon
-PNGReadWrite.hpp	49	ReadBuf	buf	const void *	borrowed	PNGReadWrite.hpp:48 ("Encoded png data buffer: a simple read-only buffer and its size.")	&'a [u8]
-PerimeterGenerator.hpp	87	PerimeterGenerator	slices	const SurfaceCollection *	borrowed	PerimeterGenerator.hpp:84 ("// Inputs:")	&'a SurfaceCollection
-PerimeterGenerator.hpp	88	PerimeterGenerator	compatible_regions	const LayerRegionPtrs *	borrowed	PerimeterGenerator.hpp:84	&'a [LayerRegion]
-PerimeterGenerator.hpp	89	PerimeterGenerator	upper_slices	const ExPolygons *	borrowed	PerimeterGenerator.hpp:84	&'a ExPolygons
-PerimeterGenerator.hpp	90	PerimeterGenerator	upper_slices_same_region	const SurfaceCollection *	borrowed	PerimeterGenerator.hpp:84	&'a SurfaceCollection
-PerimeterGenerator.hpp	91	PerimeterGenerator	lower_slices	const ExPolygons *	borrowed	PerimeterGenerator.hpp:84	&'a ExPolygons
-PerimeterGenerator.hpp	99	PerimeterGenerator	config	const PrintRegionConfig *	borrowed	PerimeterGenerator.hpp:84	&'a PrintRegionConfig
-PerimeterGenerator.hpp	100	PerimeterGenerator	object_config	const PrintObjectConfig *	borrowed	PerimeterGenerator.hpp:84	&'a PrintObjectConfig
-PerimeterGenerator.hpp	101	PerimeterGenerator	print_config	const PrintConfig *	borrowed	PerimeterGenerator.hpp:84	&'a PrintConfig
-PerimeterGenerator.hpp	103	PerimeterGenerator	loops	ExtrusionEntityCollection *	borrowed	PerimeterGenerator.hpp:98 ("// Outputs:")	&'a mut ExtrusionEntityCollection
-PerimeterGenerator.hpp	104	PerimeterGenerator	gap_fill	ExtrusionEntityCollection *	borrowed	PerimeterGenerator.hpp:98	&'a mut ExtrusionEntityCollection
-PerimeterGenerator.hpp	105	PerimeterGenerator	fill_surfaces	SurfaceCollection *	borrowed	PerimeterGenerator.hpp:98	&'a mut SurfaceCollection
-PerimeterGenerator.hpp	107	PerimeterGenerator	fill_no_overlap	ExPolygons *	borrowed	PerimeterGenerator.hpp:98	&'a mut ExPolygons
-PlaceholderParser.hpp	93	PlaceholderParser	m_external_config	const DynamicConfig *	borrowed	PlaceholderParser.hpp:91 ("config has a higher priority than external_config when looking up a symbol.")	&'a DynamicConfig
-Print.hpp	218	ConstVectorOfPtrsAdaptor	m_data	const std::vector<T*> *	borrowed	Print.hpp:215 (ConstVectorOfPtrsAdaptor(const std::vector<T*> *data) : m_data(data) {}) -- a pointer to a vector of pointers, held by a view that owns neither	&'a [T]
-Print.hpp	241	PrintInstance	print_object	PrintObject *	back-reference	Print.hpp:240 ("Parent PrintObject")	usize
-Print.hpp	243	PrintInstance	model_instance	const ModelInstance *	borrowed	Print.hpp:242 ("Source ModelInstance of a ModelObject, for which this print_object was created.")	&'a ModelInstance
-Print.hpp	278	VolumeRegion	model_volume	const ModelVolume *	borrowed	Print.hpp:277 ("ID of the associated ModelVolume.")	&'a ModelVolume
-Print.hpp	282	VolumeRegion	region	PrintRegion *	borrowed	Print.hpp:281 ("Pointer to PrintObjectRegions::all_regions, null for a negative volume.")	&'a mut PrintRegion
-Print.hpp	284	VolumeRegion	bbox	const BoundingBox *	borrowed	Print.hpp:283 ("Pointer to VolumeExtents::bbox.")	&'a BoundingBox
-Print.hpp	286	VolumeRegion	prev_same_region	const VolumeRegion *	back-reference	Print.hpp:285 ("To speed up merging of same regions." -- a sibling pointer into the same volume_regions collection)	usize
-Print.hpp	296	PaintedRegion	region	PrintRegion *	borrowed	Print.hpp:295 ("Pointer to PrintObjectRegions::all_regions.")	&'a mut PrintRegion
-Print.hpp	309	FuzzySkinPaintedRegion	region	PrintRegion *	borrowed	Print.hpp:307-308 ("Pointer to PrintObjectRegions::all_regions.")	&'a mut PrintRegion
-Print.hpp	322	LayerRangeRegions	config	const DynamicPrintConfig *	borrowed	Print.hpp:321 ("Config is owned by the associated ModelObject.")	&'a DynamicPrintConfig
-Print.hpp	678	PrintObject	m_shared_regions	PrintObjectRegions *	shared	Print.hpp:676-677 ("Shared among PrintObjects created for the same ModelObject."), PrintObject.cpp:170 (if (m_shared_regions && --m_shared_regions->m_ref_cnt == 0) delete m_shared_regions;)	Arc<PrintObjectRegions>
-Print.hpp	681	PrintObject	m_layers	LayerPtrs	owned	Print.cpp:1309-1311 (for (Layer *l : m_layers) delete l; m_layers.clear();)	Vec<Layer>
-Print.hpp	682	PrintObject	m_belt_truncated_layers	LayerPtrs	owned	Print.cpp:1312-1314 (for (Layer *l : m_belt_truncated_layers) delete l; m_belt_truncated_layers.clear();)	Vec<Layer>
-Print.hpp	687	BeltDroppedFill	layer	Layer *	borrowed	Print.hpp:684-685 ("Fills removed by belt_drop_unclaimed_fills() ..."; layer identifies, but does not own, the Layer the fill came from)	&'a Layer
-Print.hpp	690	BeltDroppedFill	entity	ExtrusionEntity *	owned	Print.hpp:684-686 ("owned by this vector until restored or until clear_layers() deletes them"), PrintObject.cpp:1319-1320 (for (const BeltDroppedFill &d : m_belt_dropped_fills) delete d.entity;)	Box<ExtrusionEntity>
-Print.hpp	693	PrintObject	m_support_layers	SupportLayerPtrs	owned	PrintObject.cpp:171-172 (clear_layers(); clear_support_layers();), same ownership pattern as m_layers	Vec<SupportLayer>
-Print.hpp	718	PrintObject	m_shared_object	PrintObject *	back-reference	Print.hpp:717 ("points at another object the print owns" -- a sibling pointer into Print::m_objects)	usize
-Print.hpp	1513	Print	m_objects	PrintObjectPtrs	owned	Print.cpp:243-244 (for (PrintObject *object : m_objects) delete object;)	Vec<PrintObject>
-Print.hpp	1514	Print	m_print_regions	PrintRegionPtrs	borrowed	PrintApply.cpp:2233 (m_print_regions.emplace_back(print_region.get())  -- extracted from a unique_ptr owned by PrintObjectRegions::all_regions), Print.cpp:246 (m_print_regions.clear(); -- no delete) -- DEPARTS from the task's "owning spine" framing: the committed headers show this is a non-owning aggregate cache, not an owner	Vec<&'a mut PrintRegion>
-Print.hpp	1551	Print	m_sequential_dynamic_orderings	std::map<const PrintObject*, ToolOrdering>	back-reference	Print.hpp:1549-1550 ("keyed by object ... Rebuilt (or cleared) on every process()." -- keys point into Print's own m_objects)	HashMap<usize, ToolOrdering>
-PrintBase.hpp	40	StringObjectException	object	ObjectBase const *	borrowed	PrintBase.hpp:38 ("BBS: error with object")	&'a ObjectBase
-PrintBase.hpp	362	PrintObjectBase	m_model_object	ModelObject *	back-reference	PrintBase.hpp:361 (PrintObjectBase(ModelObject *model_object) : m_model_object(model_object) {})	usize
-PrintBase.hpp	376	PrintTryCancel	m_print	const PrintBase *	back-reference	PrintBase.hpp:373-375 (PrintTryCancel wraps print.throw_if_canceled() across a cancellation boundary)	Weak<PrintBase>
-PrintBase.hpp	691	PrintObjectBaseWithState	m_print	PrintType *	back-reference	PrintBase.hpp:685-690 (friend PrintType; m_print used by throw_if_canceled() across a worker-thread boundary)	Weak<PrintType>
-PrintConfig.hpp	1132	StaticCache	m_defaults	T *	borrowed	PrintConfig.hpp:1109-1111 (finalize(T *defaults, ...) { ...; m_defaults = defaults; ...} mutates *m_defaults through this pointer)	&'a mut T
-ProjectTask.hpp	138	BBLSliceInfo	profile_	BBLProfile *	unknown	ProjectTask.cpp:49-53 (BBLTask::BBLTask(BBLProfile *profile) { profile_ = profile; ... } -- assigned from a caller-owned pointer with no destructor or delete anywhere under vendor/OrcaSlicer/src/libslic3r to settle ownership)	Arc<Mutex<BBLProfile>>
-ProjectTask.hpp	241	BBLSubTask	parent_task_	BBLTask *	back-reference	ProjectTask.cpp:59-61 (BBLSubTask::BBLSubTask(BBLTask *task) { parent_task_ = task; }), ProjectTask.cpp:141-167 (BBLTask owns its subtasks: delete then recreate)	usize
-ProjectTask.hpp	273	BBLTask	profile_	BBLProfile *	unknown	ProjectTask.cpp:49-53 (BBLTask::BBLTask(BBLProfile *profile) { profile_ = profile; ... } -- no delete or ownership evidence anywhere under vendor/OrcaSlicer/src/libslic3r)	Arc<Mutex<BBLProfile>>
-ProjectTask.hpp	277	BBLTask	subtasks	std::vector<BBLSubTask*>	owned	ProjectTask.cpp:141-167 (for (...) delete subtasks[i]; subtasks.clear(); ... new BBLSubTask(this); subtasks.push_back(new_subtask);)	Vec<BBLSubTask>
-ProjectTask.hpp	278	BBLTask	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:38-43 (get_slice_info only looks the map up; nothing under vendor/OrcaSlicer/src/libslic3r inserts into or frees slice_info's values)	HashMap<String, Arc<Mutex<BBLSliceInfo>>>
-ProjectTask.hpp	300	BBLProfile	tasks	std::vector<BBLTask*>	unknown	ProjectTask.hpp:300 -- no push_back, iteration or delete of BBLProfile::tasks appears anywhere under vendor/OrcaSlicer/src/libslic3r	Vec<Arc<Mutex<BBLTask>>>
-ProjectTask.hpp	311	BBLProfile	project_	BBLProject *	unknown	ProjectTask.cpp:29-35 (BBLProfile::BBLProfile(BBLProject *project) { project_ = project; ... } -- no delete or ownership evidence anywhere under vendor/OrcaSlicer/src/libslic3r)	Arc<Mutex<BBLProject>>
-ProjectTask.hpp	312	BBLProfile	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:38-43 (get_slice_info only looks the map up; nothing under vendor/OrcaSlicer/src/libslic3r inserts into or frees slice_info's values)	HashMap<String, Arc<Mutex<BBLSliceInfo>>>
-ProjectTask.hpp	340	BBLProject	profiles	std::vector<BBLProfile*>	unknown	ProjectTask.hpp:340 -- no push_back, iteration or delete of BBLProject::profiles appears anywhere under vendor/OrcaSlicer/src/libslic3r	Vec<Arc<Mutex<BBLProfile>>>
+InstanceLock.hpp	55	InstanceLock	m_slot	Slot *			
+Layer.hpp	133	LayerRegion	m_layer	Layer *			
+Layer.hpp	134	LayerRegion	m_region	const PrintRegion *			
+Layer.hpp	146	Layer	upper_layer	Layer *			
+Layer.hpp	147	Layer	lower_layer	Layer *			
+Layer.hpp	293	Layer	m_object	PrintObject *			
+Layer.hpp	294	Layer	m_regions	LayerRegionPtrs			
+Layer.hpp	344	AreaGroup	area	ExPolygon *			
+MarchingSquares.hpp	225	Grid	m_rst	const Rst *			
+MarchingSquares.hpp	404	CellIt	grid	const Rst *			
+Model.hpp	189	ModelMaterial	m_model	Model *			
+Model.hpp	390	ModelObject	instances	ModelInstancePtrs			
+Model.hpp	393	ModelObject	volumes	ModelVolumePtrs			
+Model.hpp	666	ModelObject	m_model	Model *			
+Model.hpp	1182	ModelVolume	object	ModelObject *			
+Model.hpp	1559	ModelInstance	object	ModelObject *			
+Model.hpp	1700	Model	materials	ModelMaterialMap			
+Model.hpp	1702	Model	objects	ModelObjectPtrs			
+MutablePolygon.hpp	44	const_iterator	m_data	const MutablePolygon *			
+MutablePolygon.hpp	68	iterator	m_data	MutablePolygon *			
+PNGReadWrite.hpp	49	ReadBuf	buf	const void *			
+PerimeterGenerator.hpp	87	PerimeterGenerator	slices	const SurfaceCollection *			
+PerimeterGenerator.hpp	88	PerimeterGenerator	compatible_regions	const LayerRegionPtrs *			
+PerimeterGenerator.hpp	89	PerimeterGenerator	upper_slices	const ExPolygons *			
+PerimeterGenerator.hpp	90	PerimeterGenerator	upper_slices_same_region	const SurfaceCollection *			
+PerimeterGenerator.hpp	91	PerimeterGenerator	lower_slices	const ExPolygons *			
+PerimeterGenerator.hpp	99	PerimeterGenerator	config	const PrintRegionConfig *			
+PerimeterGenerator.hpp	100	PerimeterGenerator	object_config	const PrintObjectConfig *			
+PerimeterGenerator.hpp	101	PerimeterGenerator	print_config	const PrintConfig *			
+PerimeterGenerator.hpp	103	PerimeterGenerator	loops	ExtrusionEntityCollection *			
+PerimeterGenerator.hpp	104	PerimeterGenerator	gap_fill	ExtrusionEntityCollection *			
+PerimeterGenerator.hpp	105	PerimeterGenerator	fill_surfaces	SurfaceCollection *			
+PerimeterGenerator.hpp	107	PerimeterGenerator	fill_no_overlap	ExPolygons *			
+PlaceholderParser.hpp	93	PlaceholderParser	m_external_config	const DynamicConfig *			
+Print.hpp	218	ConstVectorOfPtrsAdaptor	m_data	const std::vector<T*> *			
+Print.hpp	241	PrintInstance	print_object	PrintObject *			
+Print.hpp	243	PrintInstance	model_instance	const ModelInstance *			
+Print.hpp	278	VolumeRegion	model_volume	const ModelVolume *			
+Print.hpp	282	VolumeRegion	region	PrintRegion *			
+Print.hpp	284	VolumeRegion	bbox	const BoundingBox *			
+Print.hpp	286	VolumeRegion	prev_same_region	const VolumeRegion *			
+Print.hpp	296	PaintedRegion	region	PrintRegion *			
+Print.hpp	309	FuzzySkinPaintedRegion	region	PrintRegion *			
+Print.hpp	322	LayerRangeRegions	config	const DynamicPrintConfig *			
+Print.hpp	678	PrintObject	m_shared_regions	PrintObjectRegions *			
+Print.hpp	681	PrintObject	m_layers	LayerPtrs			
+Print.hpp	682	PrintObject	m_belt_truncated_layers	LayerPtrs			
+Print.hpp	687	BeltDroppedFill	layer	Layer *			
+Print.hpp	690	BeltDroppedFill	entity	ExtrusionEntity *			
+Print.hpp	693	PrintObject	m_support_layers	SupportLayerPtrs			
+Print.hpp	718	PrintObject	m_shared_object	PrintObject *			
+Print.hpp	1513	Print	m_objects	PrintObjectPtrs			
+Print.hpp	1514	Print	m_print_regions	PrintRegionPtrs			
+Print.hpp	1551	Print	m_sequential_dynamic_orderings	std::map<const PrintObject*, ToolOrdering>			
+PrintBase.hpp	40	StringObjectException	object	ObjectBase const *			
+PrintBase.hpp	362	PrintObjectBase	m_model_object	ModelObject *			
+PrintBase.hpp	376	PrintTryCancel	m_print	const PrintBase *			
+PrintBase.hpp	691	PrintObjectBaseWithState	m_print	PrintType *			
+PrintConfig.hpp	1132	StaticCache	m_defaults	T *			
+ProjectTask.hpp	138	BBLSliceInfo	profile_	BBLProfile *			
+ProjectTask.hpp	241	BBLSubTask	parent_task_	BBLTask *			
+ProjectTask.hpp	273	BBLTask	profile_	BBLProfile *			
+ProjectTask.hpp	277	BBLTask	subtasks	std::vector<BBLSubTask*>			
+ProjectTask.hpp	278	BBLTask	slice_info	std::map<std::string, BBLSliceInfo*>			
+ProjectTask.hpp	300	BBLProfile	tasks	std::vector<BBLTask*>			
+ProjectTask.hpp	311	BBLProfile	project_	BBLProject *			
+ProjectTask.hpp	312	BBLProfile	slice_info	std::map<std::string, BBLSliceInfo*>			
+ProjectTask.hpp	340	BBLProject	profiles	std::vector<BBLProfile*>			
 SLA/IndexedMesh.hpp	40	IndexedMesh	m_tm	const indexed_triangle_set *			
 SLA/IndexedMesh.hpp	82	hit_result	m_mesh	const IndexedMesh *			
-SVG.hpp	95	SVG	f	FILE *	owned	SVG.hpp:43 (~SVG() { if (f != NULL) Close(); }), SVG.cpp:49 (this->f = boost::nowide::fopen(afilename, "w");)	std::fs::File
+SVG.hpp	95	SVG	f	FILE *			
 Support/SupportMaterial.hpp	91	PrintObjectSupportMaterial	m_print_config	const PrintConfig *			
 Support/SupportMaterial.hpp	92	PrintObjectSupportMaterial	m_object_config	const PrintObjectConfig *			
 Support/TreeSupport.hpp	65	SupportNode	NO_PARENT	static constexpr SupportNode *			
@@ -204,6 +204,6 @@ Support/TreeSupport.hpp	440	TreeSupport	m_object_config	const PrintObjectConfig 
 Support/TreeSupportCommon.hpp	787	InterfacePlacer	top_contacts	SupportGeneratorLayersPtr &			
 Support/TreeSupportCommon.hpp	788	InterfacePlacer	top_interfaces	SupportGeneratorLayersPtr &			
 Support/TreeSupportCommon.hpp	789	InterfacePlacer	top_base_interfaces	SupportGeneratorLayersPtr &			
-Utils.hpp	544	FilePtr	f	FILE *	owned	Utils.hpp:536-543 (FilePtr(FILE *f) : f(f) {} ~FilePtr() { this->close(); } -- fcloses f)	std::fs::File
-calib.hpp	289	CalibPressureAdvanceLine	mp_gcodegen	GCode *	borrowed	calib.cpp:476 (: CalibPressureAdvance(gcodegen->config()), mp_gcodegen(gcodegen))	&'a mut GCode
-clonable_ptr.hpp	141	clonable_ptr	px	T *	owned	clonable_ptr.hpp:46-48 (clonable_ptr(const clonable_ptr& rhs) : px(rhs ? rhs.px->clone() : nullptr) {}), clonable_ptr.hpp:125-128 (destroy() { delete px; px = nullptr; })	Box<T>
+Utils.hpp	544	FilePtr	f	FILE *			
+calib.hpp	289	CalibPressureAdvanceLine	mp_gcodegen	GCode *			
+clonable_ptr.hpp	141	clonable_ptr	px	T *			

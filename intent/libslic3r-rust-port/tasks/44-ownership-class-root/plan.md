@@ -16,31 +16,36 @@ kind: plan
 collection pointers of three graphs: (a) `Print`/`PrintObject`/`Layer`/`LayerRegion`, (b)
 `Model`/`ModelObject`/`ModelVolume`, and (c) `PrintBase.hpp`'s `m_print` pair (`:376`, `:691`).
 The default table conditions the Rust shape on whether the owner holds an `Arc`: `Weak<Pointee>`
-if it does, `usize` (an index into the owning collection) otherwise. This batch's `owned` rows in
-graphs (a) and (b) are, without exception, plain `Vec<Pointee>` or `HashMap<K, Pointee>` by value
-(`Print::m_objects` deletes each `PrintObject*` directly, `Model::materials` deletes each
-`ModelMaterial*` directly, and so on for `m_layers`, `m_support_layers`, `Layer::m_regions`,
-`Model::objects`, `ModelObject::volumes`/`instances` -- see the per-row evidence in
-`port/ownership.tsv`). None of those owners is `Arc`, so every back-reference in graphs (a) and (b)
-resolves to **`usize`**: `LayerRegion::m_layer` is an index into `PrintObject::m_layers`,
-`Layer::m_object` an index into `Print::m_objects`, `Layer::upper_layer`/`lower_layer` and
-`Print.hpp:718`'s `m_shared_object` are indices into the same Vec the pointing object itself lives
-in, `ModelObject::m_model`/`ModelMaterial::m_model` are indices into... no single Vec (`Model` is
-the singular root, not a Vec element) -- but graph (b)'s own pointees that *are* Vec elements
-(`ModelVolume::object`, `ModelInstance::object`, both indices into `Model::objects`) get the same
-`usize` shape, and this plan applies that one shape across the whole graph rather than splitting it
-by pointee, per the task's "one answer per graph, not per row."
+if it does, `usize` (an index into the owning collection) otherwise.
 
-Graph (c), the `PrintBase.hpp` pair, is different: both `PrintTryCancel::m_print` and
-`PrintObjectBaseWithState::m_print` reference the single `Print`/`PrintBase` instance driving the
-whole slice, not an element of any Vec this batch classifies -- there is no "owning collection" to
-index into. `PrintBase`'s own cancellation machinery (`state_mutex`, `cancel_callback`,
-`throw_if_canceled()`) exists specifically so a worker thread and a cancelling caller can both
-reach the same `Print` across a thread boundary, which is exactly the shape `Arc<Print>` is for in
-the port. Graph (c) therefore resolves to **`Weak<Pointee>`** (`Weak<PrintBase>`,
-`Weak<PrintType>`), on the assumption that whatever owns the live `Print` during slicing holds an
-`Arc<Print>`. This is the one graph where this batch departs from "index," named here because a
-later task should not have to re-derive it from a different sibling batch's guess.
+Every `owned` row this batch found in graphs (a) and (b) is, without exception, a plain
+`Vec<Pointee>` or `HashMap<K, Pointee>` by value (`Print::m_objects` deletes each `PrintObject*`
+directly, `Model::materials` deletes each `ModelMaterial*` directly, and so on for `m_layers`,
+`m_support_layers`, `Layer::m_regions`, `Model::objects`, `ModelObject::volumes`/`instances` -- see
+the per-row evidence in `port/ownership.tsv`). None of those owners is `Arc`. An earlier draft of
+this plan then tried to treat graph (c) differently -- giving `PrintBase.hpp`'s pair `Weak<Print>`
+on the theory that `PrintBase`'s cancellation machinery (`state_mutex`, `cancel_callback`,
+`throw_if_canceled()`) implies the real port wraps `Print` in `Arc` -- while giving
+`Model.hpp:189`/`:666` (`ModelMaterial`/`ModelObject`'s own `m_model`, which equally reference a
+singular root rather than a Vec element) `usize` regardless. That is the same structural fact
+(pointee is the singular root, not a collection element) answered two different ways four rows
+apart, which is exactly the "one answer per row instead of one per graph" failure this step exists
+to avoid.
+
+This plan resolves that by dropping the `Arc<Print>` guess: nothing at the v2.5.2 pin shows `Print`
+or `PrintBase` behind an `Arc` or any other shared-ownership wrapper -- the mutex/cancel-callback
+machinery shows the design is thread-*aware*, not that this specific pointer is `Arc`-backed, and
+every other row in this batch traces its class to a comment or a `.cpp` site, never to an inference
+about a design the headers do not show. **All three graphs therefore resolve to `usize`**,
+including the two rows whose pointee is a singular root rather than a Vec element
+(`Model.hpp:189`/`:666`'s `m_model`, and `PrintBase.hpp:376`/`:691`'s `m_print`): there being only
+one such instance, the "index" is a fixed, trivial handle rather than a position in an array, and
+whether the real port stores it at all or instead threads the owner through as an explicit
+parameter is an implementation decision this classification pass does not make. The discriminator
+that keeps the file consistent is: **a back-reference is `Weak` only where this batch's own
+evidence shows its owner holding an `Arc`, and `usize` otherwise** -- not which named graph the row
+happens to sit in. At this pin, no row in any of the three graphs meets that bar, so every
+back-reference in this batch is `usize`.
 
 ### Step 2: Classify every row with cited evidence, applying the per-class defaults
 - delivers: R30
@@ -53,7 +58,11 @@ in the same tree. `port/ownership.tsv` carries the result; this plan does not du
 **Rows this plan leaves `unknown`, and why** (9 rows): `GCodeWriter.hpp:402` `buf_end` is a pointer
 into `GCodeFormatter`'s own inline `buf[buflen]` array -- always `buf + buflen`, a self-referential
 cursor the vocabulary's six classes do not describe cleanly (not freed, not external, not a
-parent/child cycle). `Layer.hpp:344` `area` (`AreaGroup::area`) has no use anywhere under
+parent/child cycle). Its rust type departs from the `unknown` default's mechanical
+`Arc<Mutex<Pointee>>`: that type is nonsense for a buffer cursor (there is nothing to share or
+mutex-guard -- the pointer's whole content is `buf + buflen`, a compile-time constant), so this row
+carries `usize` instead, the offset a porter can actually use once `buf` becomes a plain
+`[u8; buflen]` array. `Layer.hpp:344` `area` (`AreaGroup::area`) has no use anywhere under
 `vendor/OrcaSlicer/src/libslic3r` beyond its own declaration and constructor, so nothing settles
 its ownership. The remaining seven are all of `ProjectTask.hpp`'s cross-pointer fields except
 `subtasks` (owned, confirmed by an explicit `delete`/`new` pair in `ProjectTask.cpp`) and
