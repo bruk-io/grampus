@@ -67,10 +67,11 @@ regenerated list there too (``ownership.tsv``, next to the always-empty stdout l
 it against the committed file as an ordered, duplicate-sensitive list -- not a byte diff, but not a
 set either, so neither a reordered nor a duplicated committed row passes. It additionally validates
 every row's own class/evidence rule (not caught by that comparison, since those three cells are
-carried forward and so would compare equal even when individually invalid): a ``class`` other than
-``unknown`` with no evidence fails, and an ``unknown`` row missing either its evidence ``path:line``
-or its Rust type fails. ``just ownership-check`` prints the committed file's own row count on
-success -- the plan's recorded proof line for R30.
+carried forward and so would compare equal even when individually invalid): a ``class`` that is
+not one of the six valid values -- a blank cell among them -- fails; a class other than
+``unknown`` with no evidence fails; and an ``unknown`` row missing either its evidence
+``path:line`` or its Rust type fails. ``just ownership-check`` prints the committed file's own row
+count on success -- the plan's recorded proof line for R30.
 """
 
 from __future__ import annotations
@@ -732,11 +733,11 @@ def generate(pointer_aliases: frozenset[str] | None = None) -> list[list[str]]:
 
 
 def validate_rows(rows: list[list[str]]) -> list[str]:
-    """Return every rule violation in rows (empty if none): an invalid class value, a non-blank,
-    non-unknown class with no evidence, or an unknown row missing its evidence path:line or its
-    Rust type. This is independent of (and not caught by) a diff against the committed file,
-    because class/evidence/rust type are carried forward verbatim -- a byte-identical
-    regeneration still carries a badly-filled-in cell unchanged."""
+    """Return every rule violation in rows (empty if none): an invalid class value (a blank class
+    among them), a non-``unknown`` class with no evidence, or an unknown row missing its evidence
+    path:line or its Rust type. This is independent of (and not caught by) a diff against the
+    committed file, because class/evidence/rust type are carried forward verbatim -- a
+    byte-identical regeneration still carries a badly-filled-in cell unchanged."""
     cls_i, ev_i, rust_i = HEADER.index("class"), HEADER.index("evidence"), HEADER.index("rust type")
     problems = []
     for row in rows:
