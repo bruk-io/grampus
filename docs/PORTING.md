@@ -557,8 +557,16 @@ branches are built side by side and every shared append point is a merge conflic
 
 `<unit>` is the unit's `port/manifest.tsv` `target module` file stem (`object_id` for
 `crates/slic3r-objectid/src/object_id.rs`), so the shim's name is derivable from the manifest row
-and two units can never pick the same file name. A shim carries plain integers and plain
-floating-point values across the bridge, never a libslic3r type.
+and two units can never pick the same file name.
+
+**What a shim may carry across the bridge:** a plain integer or a plain floating-point value, a
+`rust::Vec` of those, and a `cxx` bridge `struct` whose every field is one of those — never a
+libslic3r type. The third is not an exception grudgingly allowed: the one proof-path-3 unit in
+the tree is built that way (`crates/slic3r-ffi/src/proof_units/clipper_z_utils.rs`'s
+`ProofZPoint`, three `i64` fields standing for one `ClipperZUtils::ZPoint`), and the first
+version of this rule, written as "plain integers and plain floating-point values" alone, forbade
+the shape of its own worked example. A coordinate travels as a 64-bit integer and never through
+an `f64` (`coord_t` is `int64_t` at the pin, `src/libslic3r/libslic3r.h:45-48`).
 
 `crates/slic3r-ffi/build.rs` globs both directories: every `src/proof_units/*.rs` goes to
 `cxx_build::bridges`, every `cxx/proof_units/*.cpp` onto the one shared `cxx_build::Build` that
@@ -596,10 +604,22 @@ for example `// PORT SRC: external: ISO/IEC 9899:2018 7.21.6.1 p8 -- %g renders 
 notation when the converted value's exponent is less than -4`, or a named linked library and
 version with its file and line under the superbuild. `port/port-status` accepts it without a
 vendored-line lookup, requires the text after `external:` to be non-empty, and **counts and
-prints every external marker separately, with its text**, so a reviewer can audit each one. It
-exempts nothing else: a literal with no marker of either form still fails, and an external
-marker on one line does not exempt the file, the module or any other line. `docs/WORKFLOW.md`
-makes checking every external marker against the source it cites a reviewer's job.
+prints every external marker separately, with its text**, so a reviewer can audit each one.
+`docs/WORKFLOW.md` makes checking every external marker against the source it cites a reviewer's
+job.
+
+Three things it deliberately does not do, each of which the form's first implementation did and
+a reviewer measured:
+
+- It does not exempt the file, the module or any other line. A literal with no marker of either
+  form still fails.
+- It does not cover **more than one literal on its own line**. There is no cited line to match a
+  literal against, so one marker on a line carrying two or three would legitimise all of them —
+  a per-line exemption in all but name. Such a line is its own finding; the externally defined
+  constant goes on a line of its own.
+- It does not suppress a vendored marker sitting in the same comment block. A
+  `// PORT SRC: <path>:<line>` naming a line that does not exist at the pin is still R16's own
+  placeholder-constant failure, with or without an external marker beside it.
 
 "Beside" means the same for both forms: on the literal's own line, or in the contiguous run of
 `//` comment lines ending on the line directly above it. **A blank line between the marker and
@@ -646,24 +666,39 @@ The named unit is the in-scope unit whose proof exercises this one. Such a row c
 `// PROOF:` marker of its own, and `port/port-status` derives it as `ported` only when its module
 exists, a `mod` line reaches it, it holds no `todo!()`/`unimplemented!()`, and the named row is
 itself `ported`. A cell naming no manifest row, an out-of-scope row, itself, or a row whose own
-proof path is another `enclosing:` cell is a finding and derives `drafted` — a chain is refused
-outright, which is also what makes a cycle impossible. The cell is set by the regeneration or
-amendment pull request that writes `port/manifest.tsv`, never by a port task.
+proof path is another `enclosing:` cell, or a row in a different `target crate`, is a finding and
+derives `drafted` — a chain is refused outright, which is also what makes a cycle impossible, and
+the same-crate requirement is the widest check a text rule can make of R19's "its **enclosing
+file's** exported surface" (the manifest has no "this file includes that one" column), so it is a
+floor and not the whole of that wording: a reviewer still reads whether the named unit's proof
+really exercises this one. The cell is set by the regeneration or amendment pull request that
+writes `port/manifest.tsv`, never by a port task.
 
 **The decision, second half.** A `// PROOF:` marker counts only over a test that compares a value
-the **oracle** produced against a value this port computed. The oracle's own entry points are the
-per-unit proof bridges `slic3r-proof` re-exports and the committed stage dumps (decision 1's
-route), plus an `extern "C"` declaration; a comparison counts when its arguments name both a
-value bound from one of those and a different identifier of its own that is neither a literal nor
-a field or method name. A marker over a test that reaches no oracle, or that compares an oracle
-value only against a literal, is a `proof-marker-not-differential` finding and its row stays
-`drafted`.
+the **oracle** produced against a value this port computed.
+
+The oracle's own entry points are the per-unit proof bridges `slic3r-proof` re-exports and the
+committed stage dumps (decision 1's route), plus an `extern "C"` declaration. A name holds an
+oracle value when it is bound — by a `let`, a tuple pattern or a `for` pattern — off an
+expression that reaches one of those, whether by an imported name or by a fully-qualified
+`proof_units::`/`dumps::` path. A comparison counts when it names an oracle value and a value of
+this port's own, **in two different arguments**, or in one argument that itself makes a call (so
+`assert!(agrees(ported, oracle))` counts and `assert_eq!(oracle[index], 5)`, where the loop
+variable merely shares an argument with the oracle value, does not). The port's side must be a
+plain value identifier: a macro name (`vec!`, `format!`), either end of a path
+(`String::from`, `Oracle::Built`), a field or method name, a turbofish's type argument and the
+literal and type words are none of them values this port computed. A marker over a test that
+reaches no oracle, or that compares an oracle value only against a literal, is a
+`proof-marker-not-differential` finding and its row stays `drafted`.
 
 **Its stated limit.** A hand-transcribed named constant in the test's own scope is not
 mechanically distinguishable from the ported module's own `pub const`: comparing an oracle value
 against such a constant still counts, and remains a reviewer's judgement. What the rule does
 catch is a test that reaches no oracle at all, and one that compares an oracle value only against
-a literal — the two shapes the first port attempts actually produced.
+a literal — the two shapes the first port attempts actually produced. Every accept and reject the
+rule is held to is listed in `port/port-status --self-test` and in
+`crates/oracle-compare/src/stages.rs`'s own tests, in the same order in both, so a reader can see
+exactly where the line falls.
 
 Both halves are mirrored in `crates/oracle-compare/src/stages.rs`, which carries the Rust copy of
 this derivation that `just compare-stages` reads, so the two authorities cannot disagree about

@@ -142,8 +142,9 @@ const LIBNEST2D_VENDORED_SOURCE: &str = "vendor/OrcaSlicer/deps_src/libnest2d/sr
 /// through `target_link_libraries(libslic3r PUBLIC ... libnest2d ...)`).
 ///
 /// That justification covers the TUs that, in the oracle build, actually depend on `libnest2d`:
-/// `libslic3r`'s own sources -- which includes task 31-proof-harness's
-/// `cxx/proof_units/clipper_z_utils.cpp`, since the vendored `.cpp` it includes *is* a `libslic3r` source
+/// `libslic3r`'s own sources -- which includes the proof-path-3 unit
+/// `cxx/proof_units/clipper_z_utils.cpp`, since the vendored `.cpp` it includes *is* a
+/// `libslic3r` source
 /// and the oracle compiles that file with exactly these four defines, so giving them to that TU
 /// moves it towards the oracle's command line rather than away from it.
 ///
@@ -258,6 +259,34 @@ fn discover_proof_units(crate_dir: &Path) -> Vec<ProofUnit> {
             );
         }
         names.push(name);
+    }
+    // The shim directory is globbed too, so an orphan there is a named failure rather than a
+    // file that is silently never compiled: a port task that writes its two C++ files and
+    // forgets the bridge would otherwise get an unresolved-name error from its own test, with
+    // nothing pointing at the missing file. The bridge-without-shim direction is checked below.
+    let mut shim_names: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&shim_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("cpp") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                shim_names.push(stem.to_string());
+            }
+        }
+    }
+    for stem in &shim_names {
+        if !names.contains(stem) {
+            panic!(
+                "slic3r-ffi build.rs: {:?} has no bridge at {:?}. A proof unit is exactly three \
+                 files: cxx/proof_units/<unit>.h, cxx/proof_units/<unit>.cpp and \
+                 src/proof_units/<unit>.rs -- without the bridge the shim is never compiled and \
+                 nothing can call it.",
+                shim_dir.join(format!("{stem}.cpp")),
+                bridge_dir.join(format!("{stem}.rs"))
+            );
+        }
     }
     names.sort();
 

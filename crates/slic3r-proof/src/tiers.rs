@@ -256,7 +256,8 @@ impl std::error::Error for TierError {}
 /// needs its own impl.
 ///
 /// No impl for a struct type is provided or intended: a bridge struct such as
-/// `slic3r_ffi::proof_units::clipper_z_utils::ProofZPoint` lives in a different crate, and implementing a trait this
+/// `proof_units::clipper_z_utils::ProofZPoint` lives in a different crate, and implementing a
+/// trait this
 /// crate owns for a type a dependency owns is fine by Rust's orphan rule either way the
 /// dependency runs -- but adding that impl *here* (the only direction that does not also need a
 /// reverse dependency back onto this crate) would make `tiers.rs` know about every bridge

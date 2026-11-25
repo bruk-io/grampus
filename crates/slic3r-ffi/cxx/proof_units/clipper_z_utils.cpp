@@ -25,9 +25,12 @@
 //
 // COMPILE FLAGS ALSO DIFFER FROM THE ORACLE'S OWN COMPILATION OF THE INCLUDED FILE, BEYOND
 // `-ffp-contract=off`: this translation unit is compiled at this crate's own optimisation level
-// (`-O0`, no `-DNDEBUG`) and without libslic3r's own `DEFINES`, not at the oracle's `-O3
-// -DNDEBUG`. That is irrelevant to a pure data repack such as `to_paths64` below, but a later
-// candidate file must also be checked for `assert()` (live at `-O0`/no `NDEBUG`, compiled out in
+// (`-O0` under the `dev`/`test` profile -- `cc` follows cargo's `OPT_LEVEL`, so
+// `cargo test --release` compiles it at `-O3`) and with no `-DNDEBUG` either way, not at the
+// oracle's `-O3 -DNDEBUG`. It also gets the four `LIBNEST2D_*` defines the shared `Build`
+// applies and not libslic3r's own `DEFINES`. That is irrelevant to a pure data repack such as
+// `to_paths64` below, but **every unit on this shared `Build` inherits it**, so a later
+// candidate file must also be checked for `assert()` (live with no `NDEBUG`, compiled out in
 // the oracle) and for code guarded by one of libslic3r's own `DEFINES`, not only for the
 // duplicate-symbol collision above.
 //
@@ -102,7 +105,19 @@
 // `clip_zpaths` and `area` in this crate's own archive, alongside `liblibslic3r.a`'s copy of the
 // same two symbols. Nothing today needs either symbol resolved, so
 // neither archive member is ever extracted and there is no collision (verified: see this task's
-// pull request body for the command and its output). A later task MUST NOT add, anywhere in
+// pull request body for the command and its output).
+//
+// **THE REACH OF THAT CONSTRAINT WIDENED ON 2026-11-25** and is stated again here because it now
+// binds hundreds of tasks rather than one crate. Before that date the crates that linked this
+// translation unit were `crates/slic3r-proof` and its own tests. Decision 1 (`docs/PORTING.md`,
+// "Decisions recorded on 2026-11-25") makes `slic3r-proof` re-export `slic3r_ffi::proof_units`,
+// so **every port crate that dev-depends on `slic3r-proof` -- which is every port crate --
+// links this translation unit**; `nm` confirms `__GLOBAL__sub_I_clipper_z_utils.cpp` is present
+// in `crates/slic3r-objectid`'s own proof binary, which used to link nothing but its own
+// private archive. Read the paragraph below as "anywhere in `crates/slic3r-ffi`, or in any crate
+// that dev-depends on `slic3r-proof`", not "a crate that links `slic3r-ffi`".
+//
+// A later task MUST NOT add, anywhere in
 // `crates/slic3r-ffi` or a crate that links it, a direct FFI binding that calls the oracle's
 // `clip_zpaths` or `area` through `liblibslic3r.a` (for example a differential-fuzz proof path 1
 // for `slic3r-clipperzutils`) while this file is still `#include`d here: doing so would make `ld`

@@ -6,10 +6,25 @@
 //
 // `Slic3r::wipe_tower_object_id()`/`wipe_tower_instance_id()` (`src/libslic3r/ObjectID.cpp`) are
 // externally linked symbols in the archive `just oracle-build` produces, reached through
-// `build.rs`'s derived link line (read from the CMake build tree, not enumerated). They are
-// deterministic per test binary: `ObjectID.cpp`'s file-static `s_last_id` starts at 0, so the
-// first `Slic3r::ObjectBase` a process constructs has id 1 and the second id 2. Every caller of
-// these two therefore has to be the only test in its binary; both
+// `build.rs`'s derived link line (read from the CMake build tree, not enumerated). That is a
+// change from how these were reached before 2026-11-25, and it moves where the counter lives:
+// the proof now runs against the pin's own `-O3 -DNDEBUG` object out of `liblibslic3r.a`,
+// closing the recorded deviation a per-crate `build.rs` carried (it recompiled `ObjectID.cpp`
+// locally at `-O0` -- "the source is the pin, the object file is this build's").
+//
+// `ObjectID.cpp`'s file-static `s_last_id` starts at 0, so the first `Slic3r::ObjectBase` a
+// *process* constructs has id 1 and the second id 2. **The counter is now the linked archive's,
+// shared with every libslic3r translation unit the link extracts**, not a counter private to one
+// crate's own two object files -- so the precondition is no longer structural. Seven archive
+// members reference `Slic3r::ObjectBase::s_last_id` (`Model.cpp.o`, `Print.cpp.o`,
+// `PrintObject.cpp.o`, `SLAPrint.cpp.o`, `CutUtils.cpp.o`, `bbs_3mf.cpp.o`, `PrintApply.cpp.o`);
+// none of them is extracted into either proof binary today, measured with `nm`, because nothing
+// in those binaries needs a symbol they define. A later task that adds one transitive reference
+// to any of the seven would change that, and the proof would then fail loudly rather than
+// silently: `harness_paths.rs` compares against the literal `1`, and
+// `object_id_proof_path_1.rs` against an independently advancing Rust counter.
+//
+// Every caller of these two must still be the only test in its binary; both
 // `crates/slic3r-proof/tests/harness_paths.rs` and
 // `crates/slic3r-objectid/tests/object_id_proof_path_1.rs` carry that constraint at the top of
 // their own files.

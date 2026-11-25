@@ -2,8 +2,9 @@
 //! module exists at this step (task 34-foundation-spike's fan-out is where the first one lands,
 //! and plan step 20 commits the first truly differential target against it), so this target
 //! drives the FFI side alone: it round-trips an arbitrary polygon through
-//! `slic3r_ffi::proof_units::clipper_z_utils::path3_to_paths64` -- `Slic3r::ClipperZUtils::to_paths64`, a pure repack
-//! with no arithmetic (`crates/slic3r-ffi/cxx/proof_units/clipper_z_utils.cpp`'s own module doc) -- and
+//! `proof_units::clipper_z_utils::path3_to_paths64` -- `Slic3r::ClipperZUtils::to_paths64`, a
+//! pure repack with no arithmetic (`cxx/proof_units/clipper_z_utils.cpp`'s own module doc) --
+//! and
 //! asserts every coordinate comes back unchanged. That is what makes the `cargo-fuzz` crate,
 //! its `Arbitrary` implementations and the `just fuzz <target>` recipe real rather than
 //! described.

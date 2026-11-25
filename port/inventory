@@ -877,16 +877,24 @@ def declaration_only_free_functions(text: str) -> set[str] | None:
 
 
 def defines_free_function(text: str, name: str) -> bool:
-    """True if `text` carries a column-0 *definition* of the free function `name`: the
-    signature, then `{`, which may sit on the following line (this codebase's style for a free
-    function, e.g. `src/libslic3r/MacUtils.mm:6-7`).
+    """True if `text` carries a *definition* of the free function `name`: the signature, then
+    `{`, which may sit on the following line (this codebase's style for a free function, e.g.
+    `src/libslic3r/MacUtils.mm:6-7`).
 
-    Column 0 is what separates a definition from a call inside another function's body, the same
-    anchor `METHOD_DEFINITION_RE` already relies on for a member function. `[^;{}]` throughout
-    keeps the match inside one declarator, so a declaration (`)` then `;`) can never satisfy it.
+    **Leading whitespace is allowed**, unlike `METHOD_DEFINITION_RE`'s column-0 anchor. A
+    reviewer found the column-0 version blind to a definition indented inside its namespace
+    block: `src/libslic3r/Format/ModelIO.mm:6` defines `make_temp_stl_with_modelio` four spaces
+    in, so the scan found no definer for it at all and the rule then bailed on its "every
+    declared name must have a definition somewhere" guard rather than deducting the header. The
+    rule was calibrating a scanner blind spot instead of its own reach.
+
+    Relaxing the anchor does not admit a *call*, because `[^\n(;{}]*?` before the name cannot
+    match an opening parenthesis: `if (f()) {` and `while (x) { f(); }` are both excluded by the
+    `(` and the `;` the class forbids, and a declaration (`)` then `;`) can never satisfy the
+    trailing `{`. Measured: the deduction set at the pin is unchanged by the relaxation.
     """
     pattern = re.compile(
-        r"^(?![ \t])[^\n(;{}]*?\b" + re.escape(name) + r"\s*\([^;{}]*\)[^;{}]*?\{",
+        r"^[ \t]*[^\n(;{}]*?\b" + re.escape(name) + r"\s*\([^;{}]*\)[^;{}]*?\{",
         re.MULTILINE,
     )
     return pattern.search(strip_comments(text)) is not None

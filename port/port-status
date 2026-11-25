@@ -191,6 +191,10 @@ PROOF_PATH_ENCLOSING_RE = re.compile(r"^enclosing:\s*(?P<path>.+?)\s*$")
 # API; the assertion macros are what a unit comparing more than one value per call uses (every
 # proof on `main` does, measured). Matched as a call/macro name followed by `(`, on the test
 # body's masked text, so a mention inside a string or a comment is never one.
+# A call inside one comparison argument: an identifier (or a path's last segment) followed by
+# `(`. See `has_differential_comparison` for the one case this decides.
+CALL_IN_ARGUMENT_RE = re.compile(r"[A-Za-z_]\w*\s*\(")
+
 COMPARISON_CALL_RE = re.compile(
     r"\b(?:compare_unit|compare_unit_at|assert_eq|assert_ne|assert|debug_assert|"
     r"debug_assert_eq|debug_assert_ne)\s*!?\s*\("
@@ -209,10 +213,31 @@ ORACLE_PATH_SEGMENTS = ("proof_units", "dumps")
 # oracle symbol is an oracle entry point wherever it legitimately appears.
 EXTERN_C_FN_RE = re.compile(r"\bfn\s+([A-Za-z_]\w*)\s*\(")
 
-# An identifier token, and the same token when it is a field or method name (preceded by `.`).
-# The second is excluded wherever the rule asks for "an identifier of its own", because
-# `dump.seam` must not read as naming something other than `dump`.
+# Every identifier token that is not a field or method name (not preceded by `.`). This is the
+# view the ORACLE side is read with: an oracle may legitimately be reached through a path, so
+# `dumps::read_dump_default` must still name `dumps`.
 IDENT_RE = re.compile(r"(?<![\w.])([A-Za-z_]\w*)")
+
+# The narrower view the PORTED side is read with: a plain value identifier, not a path segment, a
+# macro name or a type. Measured on the first implementation of this rule, which read all four of
+# `vec![1, 0, 1]`, `String::from("x")`, `format!("x")` and `Vec::from([..])` as "a value this
+# port computed", so `assert_eq!(oracle, vec![1, 0, 1])` -- an oracle value against a literal,
+# the exact shape the rule exists to refuse -- counted as differential.
+#
+#  * a name followed by `!` is a macro invocation (`vec!`, `format!`, `assert!`);
+#  * a name followed by `::` is a path qualifier, and one preceded by `::` is a path tail
+#    (`String::from`, `Oracle::Built`), so neither end of a path is a value;
+#  * a turbofish's type argument (`collect::<String>()`) is removed before the scan, since its
+#    `<` hides the `::` that would otherwise disqualify it.
+# The trailing `\b` is load-bearing: without it the regex backtracks, so `vec!` matches as `ve`
+# (shorter, and no longer followed by `!`) and a macro reads as a value after all. Measured.
+VALUE_IDENT_RE = re.compile(r"(?<![\w.:])(?<!::)([A-Za-z_]\w*)\b(?!\s*(?:!|::))")
+TURBOFISH_RE = re.compile(r"::<[^<>]*>")
+
+
+def value_identifiers(text: str) -> list[str]:
+    """The plain value identifiers in `text` -- see `VALUE_IDENT_RE`."""
+    return VALUE_IDENT_RE.findall(TURBOFISH_RE.sub("", text))
 
 # Tokens that are a literal or a type, never a value the port computed: an argument made only of
 # these is a literal, which is what the rule rejects a lone oracle value being compared against.
@@ -222,11 +247,25 @@ LITERAL_WORD_TOKENS = {
     "u8", "u16", "u32", "u64", "u128", "usize",
     "f32", "f64", "bool", "char", "str", "String",
 }
+# Kept byte-for-byte in step with `crates/oracle-compare/src/stages.rs`'s own copy: the two
+# implementations of this rule must accept and reject the same bodies, and an entry in one list
+# and not the other is a divergence no fixture would catch.
 
-# A `let` binding's pattern, up to the `=`: a single name, or a tuple of names. Both forms are
-# taken, because a proof that pulls several values out of one oracle call writes the tuple form
-# (`crates/slic3r-printconfigconstants` did, measured).
-LET_BINDING_RE = re.compile(r"\blet\s+(?P<pattern>[^=;]+?)\s*=")
+# The two binding forms a proof pulls an oracle value out of. `let` covers a single name and a
+# tuple of names (a proof that takes several values from one oracle call writes the tuple form;
+# `crates/slic3r-printconfigconstants` does). `for <pattern> in <expr>` covers the element-wise
+# shape, which the first implementation of this rule did not taint at all -- so a proof written
+# as `for (got, want) in oracle.iter().zip(PORTED) { assert_eq!(got, want); }` was refused,
+# measured. `if let` and `while let` are the same shape as `for` and are read with it.
+#
+# Both are found by a depth-aware scan rather than by a regex over the pattern text, because a
+# pattern can carry a `;` (`let oracle: [i64; 3] = ...`) and an `=` inside brackets.
+BINDING_KEYWORDS = ("let", "for")
+
+# A fully-qualified call into an oracle, for a proof that writes the path at the call site
+# instead of importing it. Required to be the `::` path form, never the bare word, so a local
+# variable or function named `dumps` does not taint its own binding.
+ORACLE_PATH_CALL_RE = re.compile(r"\b(?:proof_units|dumps)::")
 
 # `mask_strings` fills a string or char literal with the letter 'x', preserving length, which is
 # what every other check in this file wants (positions do not shift). For the identifier scan
@@ -458,31 +497,68 @@ def tainted_identifiers(body: str, oracle: frozenset[str]) -> frozenset[str]:
         mask_strings("\n".join(li.code for li in classify_lines(body)))
     )
     tainted = set(oracle)
-    # Iterated to a small fixed point so the order of the `let` bindings in the body does not
-    # matter (a proof may bind its oracle value after the value it compares against).
+    bindings = _find_bindings(masked)
+    # Iterated to a small fixed point so the order of the bindings in the body does not matter
+    # (a proof may bind its oracle value after the value it compares against).
     for _ in range(4):
         before = set(tainted)
-        for m in LET_BINDING_RE.finditer(masked):
-            rhs_start = m.end()
-            depth = 0
-            i = rhs_start
-            while i < len(masked):
-                c = masked[i]
-                if c in "([{":
-                    depth += 1
-                elif c in ")]}":
-                    depth -= 1
-                elif c == ";" and depth <= 0:
-                    break
-                i += 1
-            rhs = masked[rhs_start:i]
-            if not any(name in tainted for name in IDENT_RE.findall(rhs)):
+        for pattern, rhs in bindings:
+            reaches_oracle = ORACLE_PATH_CALL_RE.search(rhs) is not None or any(
+                name in tainted for name in IDENT_RE.findall(rhs)
+            )
+            if not reaches_oracle:
                 continue
-            tainted.update(IDENT_RE.findall(m.group("pattern")))
+            tainted.update(IDENT_RE.findall(pattern))
         if tainted == before:
             break
     tainted.discard("mut")
+    tainted.discard("in")
     return frozenset(tainted)
+
+
+def _find_bindings(masked: str) -> list[tuple[str, str]]:
+    """Every `(pattern, right-hand side)` pair in `masked`: a `let <pattern> = <expr>;` and a
+    `for <pattern> in <expr>` (which `if let`/`while let` also match, since both write
+    `let <pattern> = <expr>`). Scanned with a bracket-depth counter rather than a regex, so a
+    `;` or an `=` inside the pattern's own brackets does not end it early."""
+    out: list[tuple[str, str]] = []
+    for m in re.finditer(r"\b(let|for)\s", masked):
+        keyword = m.group(1)
+        separator = "=" if keyword == "let" else " in "
+        i = m.end()
+        pattern_start = i
+        depth = 0
+        while i < len(masked):
+            c = masked[i]
+            if c in "([{<":
+                depth += 1
+            elif c in ")]}>":
+                depth -= 1
+            elif depth <= 0:
+                if keyword == "let" and c == "=" and masked[i : i + 2] != "==":
+                    break
+                if keyword == "for" and masked.startswith(separator, i):
+                    break
+                if c in ";{":
+                    break
+            i += 1
+        if i >= len(masked) or masked[i] in ";{":
+            continue
+        pattern = masked[pattern_start:i]
+        rhs_start = i + (1 if keyword == "let" else len(separator))
+        j = rhs_start
+        depth = 0
+        while j < len(masked):
+            c = masked[j]
+            if c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif depth <= 0 and (c == ";" or (keyword == "for" and c == "{")):
+                break
+            j += 1
+        out.append((pattern, masked[rhs_start:j]))
+    return out
 
 
 def has_differential_comparison(body: str, oracle: frozenset[str]) -> bool:
@@ -491,12 +567,18 @@ def has_differential_comparison(body: str, oracle: frozenset[str]) -> bool:
     module against literals transcribed by hand (docs/PORTING.md, "Decisions recorded on
     2026-11-25").
 
-    A comparison counts when its arguments, taken together, name both:
+    A comparison counts when it names an oracle-tainted identifier (`tainted_identifiers`) and a
+    value of its own -- a `value_identifiers` name that is neither oracle-tainted nor one of the
+    literal or type words -- and the two are **in different arguments**, or in one argument that
+    itself makes a call. Both halves of that last condition are load-bearing:
 
-    - an oracle-tainted identifier (`tainted_identifiers`), and
-    - a different identifier of its own -- not oracle-tainted, not one of the literal or type
-      words, and not a field or method name reached through a `.` (so `assert_eq!(dump.seam,
-      "psWipeTower")`, which names only `dump`, is not a comparison of two values).
+    - Different arguments is the ordinary shape (`assert_eq!(ported, oracle)`,
+      `compare_unit(row, oracle_kind, ported, oracle)`).
+    - One argument that makes a call covers `assert!(agrees(ported, oracle))`, a real
+      differential comparison written through a helper.
+    - Without the condition, `assert_eq!(oracle[index], 5)` would count, because the loop
+      variable `index` sits in the same argument as the oracle value and reads as a value of its
+      own. It is not a comparison of two values and does not count.
 
     **Stated limit, not worked around.** A named constant in the test's own scope is not
     mechanically distinguishable from the ported module's own `pub const`: comparing an oracle
@@ -508,18 +590,45 @@ def has_differential_comparison(body: str, oracle: frozenset[str]) -> bool:
     masked = blank_masked_literals(
         mask_strings("\n".join(li.code for li in classify_lines(body)))
     )
+    has_comparison = False
     for m in COMPARISON_CALL_RE.finditer(masked):
         args = split_call_arguments(masked, m.end() - 1)
-        idents: list[str] = []
-        for arg in args:
-            idents.extend(IDENT_RE.findall(arg))
-        oracle_side = {name for name in idents if name in tainted}
-        ported_side = {
-            name
-            for name in idents
-            if name not in tainted and name not in LITERAL_WORD_TOKENS
-        }
-        if oracle_side and ported_side:
+        oracle_args: list[int] = []
+        ported_args: list[int] = []
+        for index, arg in enumerate(args):
+            if any(name in tainted for name in IDENT_RE.findall(arg)):
+                oracle_args.append(index)
+            if any(
+                name not in tainted and name not in LITERAL_WORD_TOKENS
+                for name in value_identifiers(arg)
+            ):
+                ported_args.append(index)
+        for a in oracle_args:
+            for b in ported_args:
+                if a != b:
+                    return True
+                # Same argument: it counts only if that argument itself makes a call, which is
+                # what distinguishes `assert!(agrees(ported, oracle))` from
+                # `assert_eq!(oracle[index], 5)`.
+                if CALL_IN_ARGUMENT_RE.search(args[a]):
+                    return True
+        has_comparison = True
+    if not has_comparison:
+        return False
+    # The element-wise shape, where the pairing happens in the loop header rather than in the
+    # comparison: `for (got, want) in oracle.iter().zip(PORTED) { assert_eq!(got, want); }`.
+    # Both loop variables are oracle-tainted (the pattern is bound off a tainted expression), so
+    # the comparison above sees no ported side -- but the `for`'s own right-hand side names both
+    # an oracle value and a value this port computed, which is the comparison, one level up. It
+    # counts only together with a comparison call in the body, found above.
+    for pattern, rhs in _find_bindings(masked):
+        del pattern
+        if not any(name in tainted for name in IDENT_RE.findall(rhs)):
+            continue
+        if any(
+            name not in tainted and name not in LITERAL_WORD_TOKENS
+            for name in value_identifiers(rhs)
+        ):
             return True
     return False
 
@@ -633,6 +742,12 @@ def enclosing_row_error(
     - no `port/manifest.tsv` row has that `path`;
     - that row is itself out of scope (a unit cannot be proven through a unit the port never
       writes);
+    - that row is in a different `target crate`. R19's fallback is "proven through its
+      **enclosing file's** exported surface", and a unit in another crate is not that -- without
+      this, `enclosing: Technologies.hpp` on an unrelated row would derive `ported` with no
+      proof of any kind. Same-crate is the widest check a text rule can make here (the manifest
+      has no "this file includes that one" column), so it is a floor, not the whole of R19's
+      wording: a reviewer still reads whether the named unit's proof really exercises this one;
     - that row's own `proof path` is another `enclosing:` cell. A chain is refused outright
       rather than followed, which also makes a cycle impossible: R19's fallback is "proven
       through its enclosing file's exported surface", and a file whose own surface is proven
@@ -652,6 +767,14 @@ def enclosing_row_error(
         return (
             f"names {named!r}, whose own 'proof path' is another 'enclosing:' cell; a chain is "
             "refused, so the enclosing unit must carry a proof path of its own"
+        )
+    own_crate = row.get("target crate", "").strip()
+    target_crate = target.get("target crate", "").strip()
+    if own_crate and target_crate and own_crate != target_crate:
+        return (
+            f"names {named!r}, whose target crate is {target_crate!r} and not this row's own "
+            f"{own_crate!r}; a unit is proven through its *enclosing* file's exported surface, "
+            "which is in its own crate"
         )
     return None
 
@@ -1975,11 +2098,32 @@ def check_numeric_constants(path: str, lines: list[LineInfo], result: ScanResult
             for m in PORT_SRC_RE.finditer(comment_text):
                 markers.append((j, m.group("path"), int(m.group("line"))))
 
-        # An accepted external marker covers every literal on the line it covers, with no
-        # vendored lookup and no per-marker direction (there is no cited line to match a literal
-        # against). It never suppresses the rule for an unmarked literal -- a line with neither
-        # form of marker still fails below.
-        if external_covering:
+        # An accepted external marker covers the line's literal with no vendored lookup, because
+        # there is no vendored line to look one up in. Two things it deliberately does NOT do,
+        # each measured on the first implementation of this form and found wrong there:
+        #
+        #  * It does not cover MORE than one literal. There is no cited line to match a literal
+        #    against, so one external marker on a line carrying two or three literals would
+        #    legitimise all of them -- a per-line exemption in all but name. A line with an
+        #    external marker and more than one non-exempt literal is its own finding; the
+        #    constant goes on a line of its own.
+        #  * It does not suppress the vendored markers in the same comment block. Those are
+        #    checked below exactly as they would be without it: a `// PORT SRC:` naming a line
+        #    that does not exist at the pin is R16's own placeholder-constant failure, and an
+        #    external marker parked beside it must not make that failure go away.
+        if external_covering and len(literal_matches) > 1:
+            result.fail(
+                path,
+                i + 1,
+                "external-port-src-covers-many-literals",
+                f"this line carries {len(literal_matches)} non-exempt literals "
+                f"({', '.join(sorted({lm.group(0) for lm in literal_matches}))}) and a "
+                "'// PORT SRC: external:' marker, which names one origin and cannot be matched "
+                "against a cited line; put the externally defined constant on a line of its own "
+                "so the marker covers exactly it",
+            )
+
+        if external_covering and not markers:
             continue
 
         if not markers:
@@ -2014,6 +2158,11 @@ def check_numeric_constants(path: str, lines: list[LineInfo], result: ScanResult
         # would match a genuine transcription, so require a non-digit, non-dot boundary on both
         # sides -- the placeholder-constant case R16 exists to catch.
         for lm in literal_matches:
+            # An accepted external marker covers the line's single literal, so the per-literal
+            # direction does not apply to it -- the per-marker direction below still does, which
+            # is what keeps a false vendored citation beside it a finding.
+            if external_covering:
+                break
             normalized = normalize_literal(lm)
             if not any(
                 text is not None and _vendored_line_holds(normalized, text)
@@ -2589,6 +2738,8 @@ SELFTEST_FIXTURES: list[tuple[str, bool, str | None]] = [
     ("port-src-external-accepted", True, None),
     ("port-src-external-empty", False, "empty-external-port-src"),
     ("port-src-external-does-not-exempt", False, "missing-port-src"),
+    ("port-src-external-many-literals", False, "external-port-src-covers-many-literals"),
+    ("port-src-external-hides-no-bad-citation", False, "source-path-absent"),
     ("placeholder-constant", False, "placeholder-constant"),
     ("two-literals-one-marker", False, "placeholder-constant"),
     ("marker-matches-no-literal", False, "unmatched-port-src"),
@@ -2732,6 +2883,12 @@ def _check_enclosing_and_differential() -> list[str]:
             "its enclosing unit's own proof path is another 'enclosing:' cell",
         ),
         (
+            "enclosing-unit-other-crate",
+            "crates/slic3r-other/src/helper_mod.rs",
+            "drafted",
+            "its enclosing unit is in a different target crate",
+        ),
+        (
             "proof-not-differential",
             ported,
             "drafted",
@@ -2751,6 +2908,7 @@ def _check_enclosing_and_differential() -> list[str]:
         ("enclosing-unit-not-ported", []),
         ("enclosing-unit-missing", ["bad-enclosing-unit"]),
         ("enclosing-unit-chain", ["bad-enclosing-unit", "bad-enclosing-unit"]),
+        ("enclosing-unit-other-crate", ["bad-enclosing-unit"]),
         ("proof-not-differential", ["proof-marker-not-differential"]),
     ]:
         result, _gate, _docs = full_check(FIXTURES_ROOT / tree_name)
@@ -2779,12 +2937,54 @@ def _check_enclosing_and_differential() -> list[str]:
          "both sides inside one argument"),
         ("let oracle = dumps::sep();\nassert_eq!(oracle, '\\n');", False,
          "a char literal is blanked, so it does not read as a value"),
+        # The shapes a reviewer measured the first implementation accepting or refusing wrongly.
+        # Each is pinned here so neither implementation can regress to it.
+        ('let oracle = path1_flags();\nassert_eq!(oracle, vec![1, 0, 1]);', False,
+         "a macro name is not a value this port computed"),
+        ('let dump = dumps::read("x");\nassert_eq!(dump.seam, String::from("psWipeTower"));',
+         False, "neither end of a path is a value this port computed"),
+        ('let dump = dumps::read("x");\nassert_eq!(dump.seam, format!("psWipeTower"));', False,
+         "a macro name is not a value, however it is spelled"),
+        ('let oracle = path1_flags();\nassert_eq!(oracle, Vec::from([1, 0, 1]));', False,
+         "an associated function on a type is not a value either"),
+        ('let oracle = path1_flags();\nassert_eq!(oracle, [1, 0, 1].to_vec());', False,
+         "a method name reached through a dot is not a value"),
+        ('let oracle = path1_flags();\nassert_eq!(oracle[index], 5);', False,
+         "a loop variable in the same argument as the oracle value is not a second value"),
+        ('let oracle = path1_flags();\n'
+         'for (got, want) in oracle.iter().zip(PORTED_FLAGS) { assert_eq!(got, want); }', True,
+         "a `for` pattern off a tainted iterator carries the taint"),
+        ('let oracle = slic3r_proof::proof_units::u::f();\nassert_eq!(ported(), oracle);', True,
+         "a fully-qualified oracle path needs no `use` statement"),
+        ('let oracle: [i64; 3] = path1_flags();\nassert_eq!(oracle, PORTED);', True,
+         "a `;` inside the binding's own type does not end the pattern"),
+        ('let oracle = path1_flags();\nassert_eq!(oracle.iter().collect::<String>(), ported());',
+         True, "a turbofish type argument is not the ported side, but `ported()` is"),
     ]
     for body, want, why in shapes:
         got = has_differential_comparison(body, oracle)
         if got != want:
             failures.append(
                 f"has_differential_comparison({body!r}) expected {want} ({why}), got {got}"
+            )
+
+    # `oracle_names` itself: the bare words are not oracle names, only a `use` path or an
+    # `extern "C"` declaration is -- so a local merely named `dumps` taints nothing.
+    if oracle_names("let dumps = vec![1, 2];\nassert_eq!(dumps.len(), ported());"):
+        failures.append(
+            "oracle_names found an oracle entry point in a file with no `use` of one and no "
+            "extern \"C\" block; the bare words must not be oracle names"
+        )
+    found = oracle_names(
+        "use slic3r_proof::proof_units::object_id::{\n"
+        "    path1_wipe_tower_instance_id, path1_wipe_tower_object_id,\n"
+        "};\n"
+    )
+    for wanted in ("path1_wipe_tower_object_id", "path1_wipe_tower_instance_id", "object_id"):
+        if wanted not in found:
+            failures.append(
+                f"oracle_names missed {wanted!r} in a multi-line braced `use` -- the shape "
+                f"`cargo fmt` produces for a long import; got {sorted(found)!r}"
             )
 
     return failures
@@ -2836,6 +3036,32 @@ def _check_external_port_src_markers() -> list[str]:
         failures.append(
             "port-src-external-empty: expected an 'empty-external-port-src' finding, got "
             f"{[f.render() for f in empty.findings]}"
+        )
+
+    # F2's case: one marker, more than one literal on its line.
+    many = scan_tree(FIXTURES_ROOT / "port-src-external-many-literals")
+    rules = sorted(f.rule for f in many.findings)
+    if rules != ["external-port-src-covers-many-literals"]:
+        failures.append(
+            "port-src-external-many-literals: expected exactly one "
+            f"'external-port-src-covers-many-literals' finding, got "
+            f"{[f.render() for f in many.findings]}"
+        )
+
+    # F1's case: a false vendored citation in the same comment block is still a finding.
+    hidden = scan_tree(FIXTURES_ROOT / "port-src-external-hides-no-bad-citation")
+    rules = sorted(f.rule for f in hidden.findings)
+    if "source-path-absent" not in rules:
+        failures.append(
+            "port-src-external-hides-no-bad-citation: expected a 'source-path-absent' finding "
+            f"for the vendored marker beside the external one, got "
+            f"{[f.render() for f in hidden.findings]}"
+        )
+    if "placeholder-constant" in rules:
+        failures.append(
+            "port-src-external-hides-no-bad-citation: the per-literal direction must not fire "
+            "for a literal an accepted external marker covers, got "
+            f"{[f.render() for f in hidden.findings]}"
         )
 
     mixed = scan_tree(FIXTURES_ROOT / "port-src-external-does-not-exempt")
@@ -3160,8 +3386,10 @@ def run_selftest() -> int:
         click.echo(
             "self-test: port-src-external: OK (the accepted form is collected with its line and "
             "its text from both the comment-block and trailing-comment positions, the empty form "
-            "is a finding and adds no marker, and an accepted marker leaves an unmarked literal "
-            "on another line still failing)"
+            "is a finding and adds no marker, an accepted marker leaves an unmarked literal on "
+            "another line still failing, a marker over more than one literal on its own line is "
+            "a finding, and an accepted marker does not suppress a false vendored citation "
+            "beside it)"
         )
 
     manifest_shape_failures = _check_manifest_shape_guard()

@@ -5,11 +5,12 @@
 //! adds its unit by creating three new files and touching nothing that another port task also
 //! writes:
 //!
-//! | file it creates | what it is |
-//! |---|---|
-//! | `crates/slic3r-ffi/cxx/proof_units/<unit>.h` | the shim's C++ declarations; `#include`s its own `cxx`-generated header |
-//! | `crates/slic3r-ffi/cxx/proof_units/<unit>.cpp` | the shim's C++ definitions (proof path 1), or the translation unit that `#include`s the vendored `.cpp` (proof path 3) |
-//! | `crates/slic3r-ffi/src/proof_units/<unit>.rs` | one `#[cxx::bridge(namespace = "slic3r_ffi::proof_units::<unit>")]` |
+//! - `cxx/proof_units/<unit>.h` -- the shim's C++ declarations; `#include`s its own
+//!   `cxx`-generated header, `"slic3r-ffi/src/proof_units/<unit>.rs.h"`.
+//! - `cxx/proof_units/<unit>.cpp` -- the shim's C++ definitions (proof path 1), or the
+//!   translation unit that `#include`s the vendored `.cpp` whole (proof path 3).
+//! - `src/proof_units/<unit>.rs` -- one
+//!   `#[cxx::bridge(namespace = "slic3r_ffi::proof_units::<unit>")]`.
 //!
 //! `<unit>` is the unit's `port/manifest.tsv` `target module` file stem (`object_id` for
 //! `crates/slic3r-objectid/src/object_id.rs`), so the shim's name is derivable from the manifest
