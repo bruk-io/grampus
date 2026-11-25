@@ -335,14 +335,17 @@ def derive_row_status(row: dict[str, str], tree: Path, mod_reachable: frozenset[
 
     - `ported` -- a `mod` declaration reaches the target file, it holds no `todo!()` and no
       `unimplemented!()`, and its proof is present (`proof_present`).
-    - `drafted` -- the target file exists, and either (a) a `mod` declaration reaches it but its
-      proof is not yet present (Done-when: "a module with a `mod` line, no `todo!()` and no
-      `unimplemented!()` but no `// PROOF:` marker ... derives as `drafted` and not as
-      `ported`" -- this also covers a `mod`-reached file that still holds a live `todo!()` or
-      `unimplemented!()`, since that file is neither ported nor, in the literal reading of the
-      bullet rule, "no mod declaration reaches it"; see the pull request body for this reading),
-      or (b) no `mod` declaration reaches it but it carries a `PORT STATUS` trailer naming this
-      row's own vendored `path`.
+    - `drafted` -- the target file exists, and either (a) a `mod` declaration reaches it but it
+      is not `ported` (its proof is not yet present, which is Done-when's own tested case -- "a
+      module with a `mod` line, no `todo!()` and no `unimplemented!()` but no `// PROOF:` marker
+      ... derives as `drafted` and not as `ported`" -- or, untested by any Done-when line, it
+      still holds a live `todo!()`/`unimplemented!()`), or (b) no `mod` declaration reaches it
+      but it carries a `PORT STATUS` trailer naming this row's own vendored `path`. Judgement
+      call, named in the pull request body: task.md's bullet ties `drafted` strictly to "no
+      `mod` declaration reaches it", so a literal reading puts a `mod`-reached file that still
+      holds a live `todo!()` in `not-started` instead -- this script returns `drafted` for it,
+      because grouping a module that is already wired into the build with one that was never
+      begun would misreport the burn-down's own subject.
     - `not-started` -- anything else, including no `target module` cell or no file there at all.
     """
     target_module_cell = row.get("target module", "").strip()
@@ -431,12 +434,20 @@ DOCUMENT_SECTION_SPEC = [
 ]
 
 
-def check_document_sections(tree: Path, result: ScanResult) -> None:
+def check_document_sections(
+    tree: Path, result: ScanResult
+) -> list[tuple[str, int, int]]:
     """R29: fail, naming the exact missing heading text, unless `docs/PORTING.md` and
     `docs/WORKFLOW.md` (resolved under `tree`, so `--tree` and `--self-test` can exercise a
     fixture copy without touching the real documents) each carry every heading
     `DOCUMENT_SECTION_SPEC` lists, matched as a whole trimmed line -- reading headings, not
-    prose quality."""
+    prose quality.
+
+    Returns `[(doc_relpath, required_count, present_count), ...]` so `main` can print, per R12
+    and R13's own recorded proof ("exits 0 **and prints that** docs/PORTING.md holds the crate
+    map, type map, …"), that the document was actually read and found to hold its sections --
+    not just that the check happened to add no finding this run."""
+    summary: list[tuple[str, int, int]] = []
     for doc_relpath, headings in DOCUMENT_SECTION_SPEC:
         doc_path = tree / doc_relpath
         if not doc_path.is_file():
@@ -446,19 +457,25 @@ def check_document_sections(tree: Path, result: ScanResult) -> None:
                 "missing-document-section",
                 f"{doc_relpath} does not exist, so it carries none of its required headings",
             )
+            summary.append((doc_relpath, len(headings), 0))
             continue
         present = {
             line.strip()
             for line in doc_path.read_text(encoding="utf-8", errors="replace").splitlines()
         }
+        present_count = 0
         for heading in headings:
-            if heading not in present:
+            if heading in present:
+                present_count += 1
+            else:
                 result.fail(
                     doc_relpath,
                     1,
                     "missing-document-section",
                     f"{doc_relpath} is missing the required heading {heading!r}",
                 )
+        summary.append((doc_relpath, len(headings), present_count))
+    return summary
 
 
 def count_unknown_ownership_rows(tree: Path) -> int:
@@ -536,20 +553,25 @@ def compute_gate(
     return gate
 
 
-def full_check(tree: Path) -> tuple[ScanResult, GateResult]:
+def full_check(tree: Path) -> tuple[ScanResult, GateResult, list[tuple[str, int, int]]]:
     """This task's own seam: `scan_tree` (task 21's and task 23's per-module and per-marker
     checks, untouched) plus the required-fuzz-target check and the two document-section checks
     -- all four always active, in both modes (task.md's `--per-commit` subset) -- plus the gate
     counts, which only the no-argument mode fails on. Kept apart from `scan_tree` itself so
     `run_selftest`'s existing fixture loop (task 21, task 23) keeps exercising `scan_tree` alone,
-    unchanged, over fixture trees that carry no `docs/` directory of their own."""
+    unchanged, over fixture trees that carry no `docs/` directory of their own.
+
+    Returns `(result, gate, doc_summary)`; `doc_summary` is `check_document_sections`'s own
+    return value, carried through so `main` can print, per R12/R13's own recorded proof, that
+    each document was read and found to hold its sections -- not just that no finding came
+    back this run."""
     result = scan_tree(tree)
     manifest_rows = load_manifest(tree / "port" / "manifest.tsv")
     mod_reachable = compute_mod_reachable_files(tree / "crates")
     check_fuzz_targets(tree, manifest_rows, mod_reachable, result)
-    check_document_sections(tree, result)
+    doc_summary = check_document_sections(tree, result)
     gate = compute_gate(tree, manifest_rows, mod_reachable)
-    return result, gate
+    return result, gate, doc_summary
 
 
 def classify_comment_marker(text: str) -> tuple[str, str] | None:
@@ -1985,13 +2007,24 @@ def _check_status_derivation() -> list[str]:
         "crates/slic3r-status/src/ported_with_fuzz.rs": "ported",
         "crates/slic3r-status/src/outscope_mod.rs": "not-started",
     }
+    # Guards against this check silently passing over an empty or renamed fixture (the same
+    # shape of guard `_check_perf_row_shape` already uses for its own fixture): a loop that
+    # never runs its body is indistinguishable from one that ran and found no disagreement.
+    if len(rows) != len(expected):
+        return [
+            f"status-and-gate fixture: expected exactly {len(expected)} manifest row(s), "
+            f"got {len(rows)}: {[r.get('target module') for r in rows]!r}"
+        ]
+    seen = {row["target module"] for row in rows}
+    if seen != set(expected):
+        return [
+            f"status-and-gate fixture: expected rows for {sorted(expected)!r}, got "
+            f"{sorted(seen)!r}"
+        ]
     failures = []
     for row in rows:
         target = row["target module"]
-        want = expected.get(target)
-        if want is None:
-            failures.append(f"unexpected row in status-and-gate fixture: {target!r}")
-            continue
+        want = expected[target]
         got = derive_row_status(row, tree, mod_reachable)
         if got != want:
             failures.append(f"{target}: expected status {want!r}, got {got!r}")
@@ -2009,7 +2042,7 @@ def _check_status_and_gate_fixtures() -> list[str]:
     only at `ported` and only at the one exact path."""
     failures: list[str] = []
 
-    def run(tree_name: str) -> tuple[ScanResult, GateResult]:
+    def run(tree_name: str) -> tuple[ScanResult, GateResult, list[tuple[str, int, int]]]:
         return full_check(FIXTURES_ROOT / tree_name)
 
     # status-and-gate: one finding (the missing required fuzz target for ported_mod.rs), in
@@ -2017,7 +2050,7 @@ def _check_status_and_gate_fixtures() -> list[str]:
     # pass/fail verdict does, which main() applies on top); gated-out=1 (drafted_mod.rs); 3
     # in-scope rows remaining (drafted_mod, not_started_mod, no_proof_mod -- outscope_mod is out
     # of scope and never counted).
-    result, gate = run("status-and-gate")
+    result, gate, _docs = run("status-and-gate")
     rules = [f.rule for f in result.findings]
     if rules != ["missing-fuzz-target"]:
         failures.append(f"status-and-gate: expected exactly one 'missing-fuzz-target' finding, got {rules!r}")
@@ -2031,7 +2064,7 @@ def _check_status_and_gate_fixtures() -> list[str]:
     # status-per-commit-clean: no ported row at all (one drafted, one not-started, one out of
     # scope) -- --per-commit must pass clean (no findings), the bare gate must still fail, with
     # remaining_count=2 and gated_out_count=1.
-    result, gate = run("status-per-commit-clean")
+    result, gate, _docs = run("status-per-commit-clean")
     if result.findings:
         failures.append(
             f"status-per-commit-clean: expected 0 findings for --per-commit, got "
@@ -2046,7 +2079,7 @@ def _check_status_and_gate_fixtures() -> list[str]:
 
     # status-all-ported: the one in-scope row is ported, burn-down is all zero -- both modes
     # clean, and the remaining-rows count is exactly 0 (R26's "0 in-scope rows remaining").
-    result, gate = run("status-all-ported")
+    result, gate, _docs = run("status-all-ported")
     if result.findings:
         failures.append(
             f"status-all-ported: expected 0 findings, got {[f.render() for f in result.findings]}"
@@ -2059,12 +2092,38 @@ def _check_status_and_gate_fixtures() -> list[str]:
 
     # doc-sections-complete / doc-sections-missing: the two document-section checks (R12, R13,
     # R29), naming the exact missing heading text.
-    result, _gate = run("doc-sections-complete")
+    result, _gate, docs = run("doc-sections-complete")
     if result.findings:
         failures.append(
             f"doc-sections-complete: expected 0 findings, got {[f.render() for f in result.findings]}"
         )
-    result, _gate = run("doc-sections-missing")
+    expected_docs = {"docs/PORTING.md": 12, "docs/WORKFLOW.md": 6}
+    seen_docs = {d: required for d, required, _present in docs}
+    if seen_docs != expected_docs:
+        failures.append(
+            f"doc-sections-complete: expected doc_summary to name {expected_docs!r}, got "
+            f"{seen_docs!r}"
+        )
+    for doc_relpath, required_count, present_count in docs:
+        if present_count != required_count:
+            failures.append(
+                f"doc-sections-complete: {doc_relpath} expected {required_count} of "
+                f"{required_count} sections present, got {present_count}"
+            )
+    result, _gate, docs = run("doc-sections-missing")
+    if not docs:
+        failures.append("doc-sections-missing: expected check_document_sections to report both documents, got none")
+    present_by_doc = {d: present for d, _required, present in docs}
+    if present_by_doc.get("docs/PORTING.md") != 11:
+        failures.append(
+            f"doc-sections-missing: expected docs/PORTING.md to report 11 of 12 sections "
+            f"present, got {present_by_doc.get('docs/PORTING.md')!r}"
+        )
+    if present_by_doc.get("docs/WORKFLOW.md") != 5:
+        failures.append(
+            f"doc-sections-missing: expected docs/WORKFLOW.md to report 5 of 6 sections "
+            f"present, got {present_by_doc.get('docs/WORKFLOW.md')!r}"
+        )
     messages = [f.message for f in result.findings]
     if not any("### Rounding modes" in m for m in messages):
         failures.append(
@@ -2255,7 +2314,7 @@ def main(tree: Path | None, per_commit: bool, self_test: bool) -> None:
         sys.exit(run_selftest())
 
     tree_root = tree.resolve() if tree is not None else REPO_ROOT
-    result, gate = full_check(tree_root)
+    result, gate, doc_summary = full_check(tree_root)
 
     for finding in result.findings:
         click.echo(finding.render())
@@ -2266,6 +2325,17 @@ def main(tree: Path | None, per_commit: bool, self_test: bool) -> None:
         f"port-status ({mode}): {result.modules_scanned} module(s) scanned, "
         f"{len(result.findings)} finding(s); marker counts: {counts}"
     )
+    for doc_relpath, required_count, present_count in doc_summary:
+        if present_count == required_count:
+            click.echo(
+                f"port-status ({mode}): {doc_relpath} holds all {required_count} required "
+                "sections"
+            )
+        else:
+            click.echo(
+                f"port-status ({mode}): {doc_relpath} holds {present_count} of "
+                f"{required_count} required sections"
+            )
     click.echo(
         f"port-status ({mode}): burn-down: todo!()={gate.todo_count}, "
         f"unimplemented!()={gate.unimplemented_count}, "
