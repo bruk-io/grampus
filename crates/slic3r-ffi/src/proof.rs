@@ -33,7 +33,34 @@ mod ffi {
         /// `cxx/include_vendored.cpp` `#include`s that file and defines this forwarding wrapper
         /// in the same translation unit (see that file's header comment for the inclusion rule).
         fn path3_to_paths64(path: &Vec<ProofZPoint>) -> Vec<ProofZPoint>;
+
+        /// Proof path 1 (R19), task 54-foundation-objectid-clonable's
+        /// `PrintConfigConstants.hpp` row: the three `#define`s at
+        /// `src/libslic3r/PrintConfigConstants.hpp:5-7`, each returned at the C++ type its own
+        /// `PrintConfig.cpp` call site pins it to (`ConfigOptionFloat` wraps `double`,
+        /// `ConfigOptionInt` wraps `int`, `ConfigOptionBool` wraps `bool`;
+        /// `Config.hpp:824,1018,1907`). Appended at the end of this block, changing no line
+        /// above, so a sibling foundation task's append conflicts textually. See
+        /// `cxx/proof_shims.cpp`'s own append for why that task's crate proves the same header
+        /// through its own `build.rs` instead of calling these.
+        fn path1_initial_layer_height() -> f64;
+        fn path1_initial_raft_layers() -> i32;
+        fn path1_initial_reduce_crossing_wall() -> bool;
+
+        /// Proof path 1 (R19), task 54-foundation-objectid-clonable's `Technologies.hpp` row:
+        /// the header's eighteen `0`/`1` `#define`s, in its own declaration order.
+        fn path1_technologies_flags() -> Vec<i32>;
     }
 }
 
 pub use ffi::{path1_wipe_tower_object_id, path3_to_paths64, ProofZPoint};
+
+// Task 54-foundation-objectid-clonable's re-exports, appended as a second `pub use` statement
+// rather than added to the list above, so the line `31-proof-harness` committed is left
+// byte-identical and a sibling foundation task's own append conflicts textually. The blank line
+// above keeps the two statements in separate `use` runs, so `reorder_imports` sorts within each
+// and never moves the line above.
+pub use ffi::{
+    path1_initial_layer_height, path1_initial_raft_layers, path1_initial_reduce_crossing_wall,
+    path1_technologies_flags,
+};
