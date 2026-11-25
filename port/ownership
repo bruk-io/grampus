@@ -21,8 +21,9 @@ from the vendored tree on every run; ``class``, ``evidence`` and ``rust type`` a
 forward verbatim from whatever the committed file holds for the same
 (header path, line, declaring type, field) key, exactly as the manifest's own six judgement
 columns are (see ``port/inventory``'s "Judgement columns" section) -- a field this run sees for
-the first time gets a blank ``class``, which is accepted while step 12's classification tasks are
-still open.
+the first time gets a blank ``class``. ``just ownership`` still writes that blank for a newly seen
+field, but ``just ownership-check`` now fails any row whose ``class`` is blank: whoever moves the
+submodule pin and picks up a new raw-pointer field classifies it in the same pull request.
 
 **The alias trap.** A field whose declared type is an alias of a pointer or of a container of
 pointers (``typedef std::vector<ModelObject*> ModelObjectPtrs;``, or the ``using`` spelling) shows
@@ -90,7 +91,7 @@ HEADER = ["header path", "line", "declaring type", "field", "C++ type", "class",
 
 HEADER_EXTENSIONS = (".h", ".hpp")
 
-VALID_CLASSES = {"", "owned", "shared", "borrowed", "back-reference", "ffi", "unknown"}
+VALID_CLASSES = {"owned", "shared", "borrowed", "back-reference", "ffi", "unknown"}
 
 
 #
@@ -743,14 +744,15 @@ def validate_rows(rows: list[list[str]]) -> list[str]:
         cls, evidence, rust_type = row[cls_i], row[ev_i], row[rust_i]
         label = f"{header_path}:{line} {declaring_type}::{field}"
         if cls not in VALID_CLASSES:
-            problems.append(f"{label}: class {cls!r} is not one of {sorted(VALID_CLASSES - {''})}")
+            detail = " (a blank class is no longer accepted)" if cls == "" else ""
+            problems.append(f"{label}: class {cls!r} is not one of {sorted(VALID_CLASSES)}{detail}")
             continue
         if cls == "unknown":
             if not evidence:
                 problems.append(f"{label}: class is 'unknown' but evidence is empty")
             if not rust_type:
                 problems.append(f"{label}: class is 'unknown' but rust type is empty")
-        elif cls != "" and not evidence:
+        elif not evidence:
             problems.append(f"{label}: class is {cls!r} but evidence is empty")
     return problems
 
