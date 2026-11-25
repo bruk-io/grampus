@@ -61,6 +61,10 @@ port-check:
     # crates, or any other crate whose name merely contains one of these as a substring (e.g.
     # `qhull_rayon` naming itself, not `qhull`).
     ! grep -RnE '^[[:space:]]*\[[[:space:]]*.*dependencies\.({{substitute_names}})[[:space:]]*\]|^[[:space:]]*"?({{substitute_names}})"?(\.workspace)?[[:space:]]*=|package[[:space:]]*=[[:space:]]*"({{substitute_names}})"' crates/*/Cargo.toml
+    # R19, task 31-proof-harness: a file under crates/*/tests/, or a #[cfg(test)] module in a
+    # crate that holds a ported module, fails when it mocks the code under test or the oracle --
+    # see port/check-mocks's own module doc for the rule and why no allowlist exists.
+    ./port/check-mocks
 
 # the guard: this branch changes only what its documents on main allow
 guard *branch:

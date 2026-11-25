@@ -3,3 +3,7 @@ name = "slic3r-proof"
 version = "0.1.0"
 edition = "2021"
 publish = false
+
+[dependencies]
+# The harness's two proof paths call through this crate's `cxx` bridges (task 31-proof-harness).
+slic3r-ffi = { path = "../slic3r-ffi" }

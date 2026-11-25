@@ -1,0 +1,7 @@
+path	subsystem	lines	file-level include-DAG level	crate-level level	in scope or out with a reason	target crate	target module	pipeline stage or none	template-heavy	equality tier	tolerance	comparison function	proof path	fuzz target	status
+Fixture/ExactRow.cpp	root	1	0	0	in	fixture-crate	crates/fixture-crate/src/exact_row.rs	none	no	exact			1	n/a	not-started
+Fixture/FloatRow.cpp	root	1	0	0	in	fixture-crate	crates/fixture-crate/src/float_row.rs	none	no	float	0.01 mm; reason: fixture float jitter	abs	2	n/a	not-started
+Fixture/NoReason.cpp	root	1	0	0	in	fixture-crate	crates/fixture-crate/src/no_reason.rs	none	no	float	0.01 mm	abs	1	n/a	not-started
+Fixture/EmptyProofPath.cpp	root	1	0	0	in	fixture-crate	crates/fixture-crate/src/empty_proof_path.rs	none	no	exact				n/a	not-started
+Fixture/BadFunction.cpp	root	1	0	0	in	fixture-crate	crates/fixture-crate/src/bad_function.rs	none	no	float	0.01 mm; reason: fixture reason	rel	1	n/a	not-started
+Fixture/NoToleranceFloat.cpp	root	1	0	0	in	fixture-crate	crates/fixture-crate/src/no_tolerance_float.rs	none	no	float		abs	1	n/a	not-started

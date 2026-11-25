@@ -1850,6 +1850,9 @@ dependencies = [
 [[package]]
 name = "slic3r-proof"
 version = "0.1.0"
+dependencies = [
+ "slic3r-ffi",
+]
 
 [[package]]
 name = "slic3r-semver"
