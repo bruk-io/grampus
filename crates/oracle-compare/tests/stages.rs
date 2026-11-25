@@ -12,8 +12,14 @@
 //!   through [`stages::PortOutputs`] — the same struct `stages::run` fills from a real
 //!   `grampus-cli` subprocess. Those files are fixture *data* for the comparison, the way
 //!   `tests/data/identical/*.gcode` is fixture data for `levels.rs`. No test here invokes
-//!   anything in the port's place: `run`'s own subprocess half is exercised against the real
-//!   binary in `crates/grampus-cli/tests/dump_stages.rs`, and by `just compare-stages` itself.
+//!   anything in the port's place. `run`'s own subprocess half is covered without a stand-in
+//!   too, in two places that are not this file: `just compare-stages` drives the real
+//!   `grampus-cli` binary through `run` end to end (every stage reads `not ported`, exit 0 —
+//!   today's truthful state, recorded in this task's pull request body), and
+//!   `crates/grampus-cli/tests/dump_stages.rs` runs that same real binary directly to prove what
+//!   it does with `--dump-stages`: accepts the flag, exits at `Surface::build_model`, writes no
+//!   dump. That file does not call `run_port_binary`; what it pins down is the behaviour on the
+//!   far side of it.
 //!
 //! An earlier revision of this file reached `run`'s match/differ/fallback branches by spawning a
 //! committed shell script that parsed `grampus-cli`'s flags and wrote dumps in its place. That
