@@ -1,0 +1,2 @@
+path	in scope or out with a reason	target crate	target module	pipeline stage or none	tolerance	comparison function	proof path
+NotPorted/SeamB.cpp	in	fake-crate	crates/fake-crate/src/does_not_exist.rs	myNotPortedStage			proof/does_not_exist

@@ -1,0 +1,5 @@
+path	in scope or out with a reason	target crate	target module	pipeline stage or none	tolerance	comparison function	proof path
+Ported/SeamA.cpp	in	fake-crate	crates/fake-crate/src/ported_seam.rs	myDumpStage			proof/ported_seam
+NotPorted/SeamB.cpp	in	fake-crate	crates/fake-crate/src/does_not_exist.rs	myNotPortedStage			proof/does_not_exist
+MissingDump/SeamC.cpp	in	fake-crate	crates/fake-crate/src/ported_seam.rs	myMissingDumpStage			proof/ported_seam
+NoPortRun/SeamD.cpp	in	fake-crate	crates/fake-crate/src/ported_seam.rs	myNoPortDumpStage			proof/ported_seam

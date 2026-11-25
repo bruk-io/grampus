@@ -1,0 +1,9 @@
+; provenance
+;   oracle-commit: f92a7c065c5718b8ef1baac1cd704df2911238f4
+;   oracle: built (unrecorded)
+; seam: posSlice
+; object: 0
+field=print_z layer=0 region=- value=0x1.999999999999ap-3
+field=slice_z layer=0 region=- value=0x1.999999999999ap-4
+field=lslices layer=0 region=- count=1
+field=lslices layer=0 region=- poly=0 ring=contour n=4 pts=10000000,10000000 -10000000,10000000 -10000000,-10000000 10000000,-10000000
