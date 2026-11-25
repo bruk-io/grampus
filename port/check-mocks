@@ -1,0 +1,187 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Fails a test that mocks the code under test or the oracle (R19, plan step 18, task
+31-proof-harness) -- one of the two lines plan step 16 leaves in the ``port-check`` recipe for
+later steps (the other is task 29-ffi-bridge-core's ``-ffp-contract=off`` drift check; neither is
+written in terms of the other's line).
+
+The rule, written here rather than left to judgement: a file under ``crates/*/tests/``, or a
+``#[cfg(test)]`` module in a crate that holds a ported module -- a crate holding a file with a
+``PORT STATUS`` trailer -- fails when it declares or names an identifier matching ``mock``,
+``stub``, ``fake`` or ``dummy`` in any case. There is no allowlist, because the three proof paths
+``crates/slic3r-proof`` and ``crates/slic3r-ffi`` wire make a stand-in unnecessary.
+
+Like ``port/port-status`` this is text-based: it reads files as lines and never parses Rust,
+because it has to pass over a Phase A draft that is not valid Rust (plan step 14) just as
+correctly as over a finished module. The ``#[cfg(test)]`` scope below is therefore a line-based
+"from this attribute line to end of file" scan, not a brace-matched block -- the usual shape
+(one attribute guarding one trailing ``mod tests { ... }``) and good enough for a check whose
+whole point is that nothing legitimate should ever need the banned words in the first place.
+
+``--self-test`` runs every fixture under ``port/tests/check-mocks/`` and asserts its committed
+``EXPECT`` (``pass`` or ``fail``) against this script's own verdict for that fixture directory
+alone -- the same pattern ``port/audit-order --self-test`` uses for its own fixtures.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SELFTEST_ROOT = REPO_ROOT / "port" / "tests" / "check-mocks"
+TRAILER_HEADER = "// PORT STATUS"
+
+# Whole "identifier-like" words containing one of the four banned substrings, case-insensitively
+# -- not a bare substring scan (which would also flag a path containing "crates/stubborn-foo"
+# spelled from an unrelated word), but still just a regex over plain text, never a Rust token
+# scan: a `\w*` run on either side of the banned substring, matched anywhere on the line,
+# including inside a comment or a string literal -- there is no allowlist, so a comment that
+# merely discusses a banned word is caught exactly like code that declares one.
+BANNED_RE = re.compile(r"\b\w*(?:mock|stub|fake|dummy)\w*\b", re.IGNORECASE)
+
+
+def banned_matches(line: str) -> list[str]:
+    """Every banned-identifier match in `line`, left to right."""
+    return [m.group(0) for m in BANNED_RE.finditer(line)]
+
+
+def read_lines(path: Path) -> list[str]:
+    """Reads `path` as plain text lines. Never raises on a Phase A draft that is not valid Rust
+    -- this never parses Rust at all, only ``str.splitlines()``."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise SystemExit(f"check-mocks: {path} could not be read: {exc}") from exc
+    return text.splitlines()
+
+
+def carries_port_status_trailer(lines: list[str]) -> bool:
+    """True if `lines` has a line reading exactly ``// PORT STATUS`` -- ``port/port-status``'s
+    own definition of a file that ports a libslic3r module (``TRAILER_HEADER`` there)."""
+    return any(line.strip() == TRAILER_HEADER for line in lines)
+
+
+def crates_with_port_status(tree: Path) -> set[str]:
+    """Every crate name under ``<tree>/crates`` whose ``src/`` tree has a file carrying a
+    ``PORT STATUS`` trailer -- "a crate that holds a ported module", the task's own phrase.
+    Reachability through a `mod` line is irrelevant here (unlike `port/port-status`'s own
+    gating): a crate that holds a trailer-carrying file at all is in scope for this script,
+    which is what lets the fixture below prove this script tolerates an unreachable, invalid
+    draft."""
+    crates_root = tree / "crates"
+    found: set[str] = set()
+    if not crates_root.is_dir():
+        return found
+    for crate_dir in sorted(p for p in crates_root.iterdir() if p.is_dir()):
+        src_dir = crate_dir / "src"
+        if not src_dir.is_dir():
+            continue
+        for rs_path in sorted(src_dir.rglob("*.rs")):
+            if carries_port_status_trailer(read_lines(rs_path)):
+                found.add(crate_dir.name)
+                break
+    return found
+
+
+def cfg_test_starts(lines: list[str]) -> list[int]:
+    """Every line index (0-based) at a ``#[cfg(test)]`` attribute -- the scan below reads from
+    each such line to end of file, a crude but honest "the rest of this file is test code" scope
+    that never needs to find the matching closing brace."""
+    return [i for i, line in enumerate(lines) if line.strip().startswith("#[cfg(test)]")]
+
+
+def check_tree(tree: Path) -> list[str]:
+    """Every violation found under `tree`, as a human-readable ``path:line: ...`` message.
+    Empty means clean."""
+    problems: list[str] = []
+    crates_root = tree / "crates"
+    if not crates_root.is_dir():
+        return problems
+
+    for rs_path in sorted(crates_root.glob("*/tests/**/*.rs")):
+        rel = rs_path.relative_to(tree)
+        for lineno, line in enumerate(read_lines(rs_path), start=1):
+            for word in banned_matches(line):
+                problems.append(
+                    f"{rel}:{lineno}: banned identifier '{word}' under crates/*/tests/ "
+                    f"(no stand-ins allowed): {line.strip()}"
+                )
+
+    for crate_name in sorted(crates_with_port_status(tree)):
+        src_dir = crates_root / crate_name / "src"
+        for rs_path in sorted(src_dir.rglob("*.rs")):
+            lines = read_lines(rs_path)
+            rel = rs_path.relative_to(tree)
+            for start in cfg_test_starts(lines):
+                for offset, line in enumerate(lines[start:], start=start + 1):
+                    for word in banned_matches(line):
+                        problems.append(
+                            f"{rel}:{offset}: banned identifier '{word}' in a #[cfg(test)] "
+                            f"module of ported crate '{crate_name}': {line.strip()}"
+                        )
+    return problems
+
+
+def run_self_test() -> None:
+    if not SELFTEST_ROOT.is_dir():
+        raise SystemExit(f"check-mocks: no fixtures under {SELFTEST_ROOT}")
+    cases = sorted(p for p in SELFTEST_ROOT.iterdir() if p.is_dir())
+    if not cases:
+        raise SystemExit(f"check-mocks: no fixture directories under {SELFTEST_ROOT}")
+    failures: list[str] = []
+    for case_dir in cases:
+        expect_file = case_dir / "EXPECT"
+        if not expect_file.is_file():
+            failures.append(f"{case_dir.name}: no EXPECT file")
+            continue
+        expected = expect_file.read_text(encoding="utf-8").strip()
+        if expected not in ("pass", "fail"):
+            failures.append(f"{case_dir.name}: EXPECT must be 'pass' or 'fail', got {expected!r}")
+            continue
+        problems = check_tree(case_dir)
+        got = "fail" if problems else "pass"
+        if got != expected:
+            failures.append(
+                f"{case_dir.name}: expected {expected}, got {got} (problems: {problems})"
+            )
+    if failures:
+        for failure in failures:
+            click.echo(f"self-test: FAILED: {failure}", err=True)
+        raise SystemExit(f"check-mocks: self-test failed ({len(failures)}/{len(cases)})")
+    click.echo(f"self-test: OK ({len(cases)} fixture(s))")
+
+
+@click.command()
+@click.option(
+    "--self-test",
+    "self_test",
+    is_flag=True,
+    help="Run every fixture under port/tests/check-mocks/ and assert its expected result.",
+)
+def main(self_test: bool) -> None:
+    """Fails a crates/*/tests/ file, or a #[cfg(test)] module in a crate holding a ported
+    module, that declares or names an identifier matching mock, stub, fake or dummy in any case.
+    There is no allowlist."""
+    if self_test:
+        run_self_test()
+        return
+
+    problems = check_tree(REPO_ROOT)
+    if problems:
+        for problem in problems:
+            click.echo(problem, err=True)
+        raise SystemExit(f"check-mocks: {len(problems)} violation(s)")
+    click.echo("check-mocks: OK")
+
+
+if __name__ == "__main__":
+    main()
