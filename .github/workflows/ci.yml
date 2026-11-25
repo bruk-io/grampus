@@ -114,12 +114,17 @@ jobs:
   #
   # `just oracle-parity` is not covered by that move. Task 13 touched only the build; plan step
   # 10 and task 28-oracle-parity's own text both still name this job -- the one below, in this
-  # file -- as where `just oracle-parity` lands. What is genuinely open, and left open here
-  # rather than resolved by assertion: `just oracle-parity` needs a built libslic3r to compare
-  # against the release binary, and this job builds nothing today -- the build now lives in
-  # oracle.yml's own job. Where task 28 gets that built library from (this job also gains
-  # `oracle-build`, or `oracle-parity` reads oracle.yml's build tree some other way) is for that
-  # task to settle, not this comment.
+  # file -- as where `just oracle-parity` lands. That left one thing genuinely open, recorded
+  # here rather than resolved by assertion: `just oracle-parity` needs a built libslic3r to
+  # compare against the release binary, and this job built nothing, because the build now lives
+  # in oracle.yml's own job. **Settled by task 30-ffi-bridge-libraries, the task that first made
+  # it a hard requirement** rather than a nice-to-have: `crates/slic3r-ffi`'s libnest2d bridge
+  # links step 7's built libslic3r (its `build.rs` panics by design if the archive is absent),
+  # so `cargo test --workspace` below cannot run at all without that tree. This job takes the
+  # second of the two options the open question named -- it reads oracle.yml's build tree,
+  # through a restore-only cache step keyed verbatim from oracle.yml's own save (see that step's
+  # comment). It still builds no libslic3r: oracle.yml remains the only producer, and `just
+  # oracle-build` is still never a line here.
   oracle-checks:
     needs: changes
     # `!cancelled()` is load-bearing, not decorative: without it, GitHub skips this job whenever
@@ -180,9 +185,33 @@ jobs:
           key: oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
           restore-keys: |
             oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-
-      # No cache of vendor/OrcaSlicer/build/arm64 here: nothing in this job builds it, and it
-      # arrives with the `just oracle-build` step task 13-build-libslic3r added to oracle.yml,
-      # keyed there on the same pin and on that task's own CMake flags.
+      # The main project's build tree -- the one oracle.yml's `just oracle-build` step produces
+      # and saves (task 13-build-libslic3r), keyed there on the same pin and on that task's own
+      # CMake flags. Nothing in *this* job builds it, so this is restore-only, with nothing of
+      # this job's own to save.
+      #
+      # task 30-ffi-bridge-libraries: added here because this job stopped being able to run
+      # without it. `crates/slic3r-ffi`'s build.rs panics by design when
+      # `vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a` is absent -- the
+      # libnest2d bridge links step 7's built libslic3r rather than rebuilding it -- so the
+      # `cargo test --workspace` step below fails before compiling a single test. Measured, not
+      # anticipated: the first oracle-checks run ever to get a macos-15 runner for that task's
+      # branch died with exactly that panic (run 45645466718, `failed to run custom build
+      # command for slic3r-ffi`), after three earlier runs were cancelled for want of a runner
+      # and so never executed at all.
+      #
+      # `path` is oracle.yml's single-entry list, copied verbatim, *not* this job's two-path
+      # dependency list above: actions/cache resolves an entry by key AND by a version hash
+      # computed over the `path` list, so a differently-shaped list misses the save even on an
+      # identical key -- the same trap the step above documents having fallen into. The key and
+      # restore-keys are likewise verbatim from oracle.yml.
+      - name: Restore the main project's build tree
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/OrcaSlicer/build/arm64
+          key: oracle-build-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+          restore-keys: |
+            oracle-build-arm64-${{ steps.submodule.outputs.sha }}-
 
       # GH_TOKEN authenticates oracle/fetch-release's `gh release download` call: the first CI
       # run of this step, unauthenticated, hit OrcaSlicer/OrcaSlicer's public rate limit (HTTP
@@ -198,16 +227,20 @@ jobs:
       - name: Run the workspace's tests
         run: cargo test --workspace
 
-      # This job builds no libslic3r (see the job-level comment above): `just oracle-parity`
+      # This job still builds no libslic3r (see the job-level comment above): `just oracle-parity`
       # needs vendor/OrcaSlicer/build/arm64's archives, which only oracle.yml's own job produces
-      # and caches, under a two-path cache key (vendor/OrcaSlicer/deps/build/arm64 +
-      # vendor/OrcaSlicer/deps/DL_CACHE) this job's "Restore the dependency superbuild" step
-      # above cannot match (different path list, different actions/cache version -- its own
-      # comment explains why). Resolving that is a later task's job, not this one's: this step
-      # only checks whether the archives happen to be present (e.g. a self-hosted or
-      # pre-warmed runner) and, when they are not, skips the parity step with a clear note
-      # instead of failing the job -- so this pull request does not ship a permanently red
-      # required-looking check for every later task's PR.
+      # and caches. When task 28-oracle-parity wrote this gate, no step here restored that tree,
+      # so the gate's normal outcome was `built=false` and a skip with a note, deliberately,
+      # rather than a permanently red check on every later task's pull request.
+      #
+      # task 30-ffi-bridge-libraries: the "Restore the main project's build tree" step above now
+      # supplies that tree, so on a cache hit this gate reads `built=true` and `just
+      # oracle-parity` actually runs -- which is what task 28 wanted and what the job-level
+      # comment's open question asked a later task to arrange. The gate is kept exactly as it
+      # was rather than hard-wired to true: a cache miss (an evicted entry, or a pin whose
+      # oracle.yml run has not finished) must still skip with its note instead of failing the
+      # job, and `cargo test --workspace` above will have already failed loudly in that case, so
+      # nothing is being hidden by the skip.
       - name: Check whether the built libslic3r is available
         id: libslic3r-built
         run: |
