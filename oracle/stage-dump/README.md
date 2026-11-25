@@ -70,13 +70,19 @@ The two print-wide seams each read a named, narrower subset of their own field:
   `final_purge` are not read: they carry already-emitted G-code in unscaled millimetres, not
   `coord_t` geometry, and reading them would be a second, incompatible serialisation format
   inside the same file. See "Decisions" below.
-- `psSkirtBrim`: `Print::skirt()`, `Print::skirt_brim_groups()` (each group's own `skirt` and
-  each of its `brims`' own `brim`, in their stored order) and `PrintObject::object_skirt()` for
-  every print object (`Print::objects()` order) -- one `object_skirt` record per object always,
-  even when its own collection is empty.
+- `psSkirtBrim`: `Print::skirt()`; `Print::skirt_brim_groups()`, which gets its own
+  `field=skirt_brim_groups count=<n>` summary line always, even when the vector itself is empty
+  (a configuration with no skirt and no brim never calls the function that would have filled
+  it), then, for each group that exists, its own `skirt` and each of its `brims`' own `brim`, in
+  their stored order; and `PrintObject::object_skirt()` for every print object (`Print::objects()`
+  order) -- one `object_skirt` record per object always, even when its own collection is empty.
 
-**Record shapes.** Every record's first token is `field=<name>`, then `layer=<L>` and
-`region=<R>`, where `L`/`R` is a 0-based index into the collection named above, or the sentinel
+**Record shapes.** Every record's first token is `field=<name>`. Every geometry record (an
+`ExPolygons`, `SurfaceCollection` or `ExtrusionEntityCollection` field, and the
+`skirt_brim_groups` count line) then carries `layer=<L>` and `region=<R>`; a scalar field
+(`print_z`, `slice_z`, `height`, every `wipe_tower_*` field) carries `layer=<L>` only, since it
+has no region axis at all and saying so twice per line would add nothing a reader could use.
+`L`/`R` is a 0-based index into the collection named above, or the sentinel
 `-` where that axis does not apply (every print-wide field; `region` for a field that has no
 per-region structure, i.e. `lslices`, `support_islands`, `support_fills`, and the scalar
 per-layer fields). A support-layer field carries its own `support_layer=<S>` key alongside

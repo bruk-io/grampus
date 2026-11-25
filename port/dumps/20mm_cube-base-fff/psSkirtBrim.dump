@@ -11,4 +11,5 @@
 ; seam: psSkirtBrim
 ; object: print
 field=skirt layer=- region=- count=0
+field=skirt_brim_groups layer=- region=- count=0
 field=object_skirt layer=- region=- object=0 count=0

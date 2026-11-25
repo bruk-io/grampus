@@ -520,6 +520,15 @@ void dump_psSkirtBrim(std::ofstream &out, const Print &print) {
     write_extrusion_field(out, "skirt", -1, -1, "", print.skirt());
 
     const auto &groups = print.skirt_brim_groups();
+    // A summary line for the vector itself, always written (even when it is empty, as it is
+    // for a configuration with no skirt and no brim), so "Print::skirt_brim_groups()" is a
+    // field a reviewer can point to in the dump by name -- the per-group/per-brim lines below
+    // exist only when a group actually has one.
+    out << "field=skirt_brim_groups";
+    kv_idx(out, "layer", -1);
+    kv_idx(out, "region", -1);
+    kv(out, "count", static_cast<long long>(groups.size()));
+    out << "\n";
     for (size_t g = 0; g < groups.size(); ++g) {
         const std::string group_ctx = " group=" + std::to_string(g);
         write_extrusion_field(out, "skirt_brim_group_skirt", -1, -1, group_ctx, groups[g].skirt);
