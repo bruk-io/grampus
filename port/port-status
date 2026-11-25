@@ -1186,16 +1186,33 @@ def find_literals(code: str) -> list[re.Match[str]]:
 
 
 def check_marker_whitelist(path: str, lines: list[LineInfo], result: ScanResult) -> None:
-    """Judgement call recorded here and in the pull request body (22-port-status-gates): a
-    `// PROOF: <path>` line, the proof-presence convention this task adds, is not a port marker
-    R14 closes the whitelist over, so it is never counted and never whitelisted -- it is simply
-    not examined at all inside a `#[cfg(test)]` block (`info.exempt`), the same closed exempt
-    position the numeric-literal rule already carries (`--help`'s "Exempt positions"). One of
-    the convention's two sanctioned forms, a file under `crates/<crate>/tests/`, is never
-    reached by `scan_tree`'s own glob either, so both forms are invisible to this check and
-    neither widens the six-marker whitelist R14 states. Everywhere else in a ported module's
-    `src/` file, a stray `// PROOF:` is still an ordinary unrecognised-marker finding -- the
-    exemption is the position, not the spelling."""
+    """Judgement call recorded here, in `--help` (MARKER_WHITELIST_HELP) and in the pull request
+    body (22-port-status-gates): a `// PROOF: <path>` line, the proof-presence convention this
+    task adds, is not a port marker R14 closes the whitelist over, so rather than widen that
+    closed six-marker list to a seventh spelling, this check does not run at all on an exempt
+    line (`info.exempt`) -- inside a `#[cfg(test)]` module body, or on an attribute line, the
+    two positions `classify_lines` already marks exempt for the numeric-literal rule
+    (`--help`'s "Exempt positions").
+
+    The exemption is the position, not the spelling, so it is **wider than `// PROOF:`** in two
+    ways, disclosed here and in `--help` rather than narrowed: inside those positions a
+    near-miss spelling is not flagged either (`// TODO:` written in a `#[cfg(test)]` block is
+    not a finding -- measured), and a recognised marker there is not added to `marker_counts`
+    (`// PORT NOTE:` written there prints as `PORT NOTE=0` -- measured). The printed count
+    therefore excludes test-module markers, which is a narrowing of R14's "prints the count per
+    marker kind" that this task chose over widening R14's six-marker list. It is at least
+    consistent with the convention's other sanctioned form, a file under
+    `crates/<crate>/tests/`, which `scan_tree`'s own glob (`crates/*/src/**/*.rs`) never reads,
+    so markers there were never counted either.
+
+    The exemption is this check's alone and is **not** uniform across the script: `check_safety`
+    and `scan_markers`' well-formedness rules are exempt-unaware, so an `unsafe` block inside a
+    `#[cfg(test)]` module still needs its `// SAFETY:` comment and a malformed `// PERF(port):`
+    written there is still a finding (both measured), while the counts above print those same
+    markers as 0.
+
+    Everywhere else in a ported module's `src/` file, a stray `// PROOF:` is still an ordinary
+    unrecognised-marker finding, like any other near miss."""
     for i, info in enumerate(lines):
         if info.exempt:
             continue
@@ -1216,7 +1233,8 @@ def check_marker_whitelist(path: str, lines: list[LineInfo], result: ScanResult)
                     "unrecognized-marker",
                     f"'// {prefix}:' is not one of the six recognised markers "
                     f"({', '.join(sorted(MARKER_WHITELIST))}); no near-miss spelling is "
-                    "accepted and there is no per-file opt-out",
+                    "accepted and no marker, allowlist file or comment opts a file or a line "
+                    "out -- the only exemptions are positional (--help, 'Exempt positions')",
                 )
 
 
@@ -2526,12 +2544,29 @@ word, optionally "(port)", then a colon -- or, case-insensitively, the exact spe
 the six) but spells none of these six exactly is a finding -- e.g. "// TODO:", "// Todo(port):"
 or "// PORT-SRC:". Ordinary prose such as "// Returns:" is never a candidate and never flagged.
 \b
+Exempt positions (closed): this check does not run at all on a line inside a #[cfg(test)]
+module body, nor on an attribute line such as #[inline] -- the same two positions marked exempt
+for the numeric-literal rule above. Inside them nothing is examined, so the exemption is wider
+than the "// PROOF:" convention it exists for: a near-miss spelling written there is not
+flagged ("// TODO:" inside a #[cfg(test)] block is not a finding), and a recognised marker
+written there is not added to the per-marker counts printed above ("// PORT NOTE:" there prints
+as PORT NOTE=0). The printed count therefore excludes test-module markers, a deliberate
+narrowing of R14's "prints the count per marker kind" chosen over widening R14's closed
+six-marker list to a seventh spelling. It is consistent with the convention's other test
+position, a file under crates/<crate>/tests/, which this script's own glob
+(crates/*/src/**/*.rs) never reads and whose markers were never counted either.
+\b
+That exemption belongs to this check alone and is not uniform across the script: an "unsafe"
+block inside a #[cfg(test)] module still needs its "// SAFETY:" comment, and a malformed
+"// PERF(port):" or "// FIDELITY(port):" written there is still a finding (those rules are
+exempt-unaware), while the counts above print those same markers as 0.
+\b
 "// PROOF: <path>" (the proof-presence convention, see below) is not a port marker and is never
-whitelisted or counted; it is simply never examined by this check, because both of its
-sanctioned forms sit outside the check's reach -- a file under crates/<crate>/tests/, which
-scan_tree's own glob does not read, or a #[cfg(test)] module, an exempt position this check
-shares with the numeric-literal rule. Anywhere else in a ported module it is an ordinary
-unrecognised-marker finding like any other near miss.
+whitelisted or counted. Both of its sanctioned forms sit in the positions above -- a
+#[cfg(test)] module, exempt here, or a file under crates/<crate>/tests/, which this script
+never reads -- so neither form widens the six-marker whitelist R14 states. Anywhere else in a
+ported module it is an ordinary unrecognised-marker finding like any other near miss: the
+exemption is the position, not the spelling.
 """
 
 GATE_HELP = """\
