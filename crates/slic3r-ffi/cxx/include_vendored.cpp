@@ -33,11 +33,34 @@
 //
 // THE DUPLICATE-SYMBOL CONSTRAINT APPLIED TO THIS FILE'S OWN CHOICE: `ClipperZUtils.cpp` declares
 // two externally-linked functions, `Slic3r::ClipperZUtils::clip_zpaths` and `::area` (`to_paths64`
-// and `append_zpaths`, below, are both `static`). Measured empirically (fewest strong,
-// non-template externally-linked symbols of any in-scope `proof path` `3` candidate whose built
-// object this task could inspect -- see this task's pull request body), but not zero: including
-// this file here also defines `clip_zpaths` and `area` in this crate's own archive, alongside
-// `liblibslic3r.a`'s copy of the same two symbols. Nothing today needs either symbol resolved, so
+// and `append_zpaths`, below, are both `static`). Two is low, but it is NOT the minimum, and this
+// file is not chosen for being the minimum. The sweep, re-measured: every in-scope `proof path`
+// `3` `.cpp` row whose object this worktree's oracle build tree holds (92 objects, under both
+// `libslic3r.dir/Release/` and `libslic3r_cgal.dir/Release/`), counting per object the strong
+// (non-weak), *defined* (not undefined-reference) externally-linked `Slic3r::` symbols reported by
+// `nm -m`, demangled -- `MeshRepair.cpp` 1 (`Slic3r::repair_mesh`), `ClipperZUtils.cpp` 2,
+// `MutablePolygon.cpp` 5, `Algorithm/LineSplit.cpp` 6, `Time.cpp` 7, and up from there.
+// `MeshRepair.cpp`, not this file, is the minimum. No candidate has 0, so no choice of file
+// removes this constraint outright: it can only be made smaller, and it has to be documented
+// wherever it lands.
+//
+// WHY THIS FILE AND NOT `MeshRepair.cpp`, THE 1-SYMBOL MINIMUM: `MeshRepair.cpp` is 1215 lines
+// that pull CGAL into whatever translation unit includes them. Measured at this file's own flags
+// (`-std=c++17 -O0 -ffp-contract=off`, no `-DNDEBUG`, this crate's include set): a translation
+// unit that `#include`s `MeshRepair.cpp` compiles in 9.39s and emits exactly that one symbol,
+// against 1.50s for the `#include` of `ClipperZUtils.cpp` below -- a cost every consumer of
+// `slic3r-ffi` pays whenever this translation unit is rebuilt. Emitting `Slic3r::repair_mesh` here
+// would also drag CGAL/GMP/MPFR link dependencies, and CGAL's own live assertions, into exactly
+// the `-O0`/no-`NDEBUG` configuration the paragraph above warns every candidate must be checked
+// against. `MeshRepair.cpp` does carry one advantage this file does not: its manifest row is
+// `fuzz target` `n/a` where this file's is `required`, so the collision the next paragraph forbids
+// could not arise for it at all. So relocating the path-3 proof there is a real option for a
+// later task -- it compiles today -- declined here for the compile-cost and assertion reasons
+// above, and because the link as it stands is provably collision-free.
+//
+// THE COLLISION THIS FILE'S TWO SYMBOLS LEAVE STANDING: including this file here also defines
+// `clip_zpaths` and `area` in this crate's own archive, alongside `liblibslic3r.a`'s copy of the
+// same two symbols. Nothing today needs either symbol resolved, so
 // neither archive member is ever extracted and there is no collision (verified: see this task's
 // pull request body for the command and its output). A later task MUST NOT add, anywhere in
 // `crates/slic3r-ffi` or a crate that links it, a direct FFI binding that calls the oracle's
