@@ -105,14 +105,18 @@ not `HashMap`.
 - `InstanceLock.hpp:55` `m_slot` and `FlushVolPredictor.hpp:48` `predictor`: both point into a
   process-lifetime, never-freed static cache (`InstanceLock.cpp`'s leaked registry map;
   `FlushVolPredictor.cpp`'s static `predictor_instances`) -- `borrowed` with a `'static` lifetime
-  rather than a bounded `&'a`. `m_slot`'s pointee is mutated through the pointer
-  (`InstanceLock.cpp:152,160,166`: `++m_slot->depth`, `--m_slot->depth`, `m_slot->file_lock.reset()`)
-  and its own field is never `const`, so -- per this batch's own non-`const`-pointee default,
-  below -- it is `&'static mut Slot`, not a bare `&'static Slot`: an earlier draft of this cell
-  named the `'static` departure but silently dropped the `mut` the general rule would otherwise
-  give it. `Slot` already carries its own `std::recursive_mutex` member (`InstanceLock.cpp:71`),
-  so the Rust type does not additionally wrap it in a `Mutex`, which would guard the same state
-  twice. Its evidence cell now also cites the field's actual assignment, `InstanceLock.cpp:128`
+  rather than a bounded `&'a`. `m_slot` is a second, separate departure from the default
+  `borrowed`/non-`const`-pointee table: `slot_for()` (`InstanceLock.cpp:80-90`) hands the *same*
+  `Slot&` out of its registry to every `InstanceLock` guarding the same `lock_file_path`, and
+  `InstanceLock.cpp:152`'s `++m_slot->depth` under that `Slot`'s own `recursive_mutex`
+  (`InstanceLock.cpp:71`) exists precisely because more than one holder can reach it at once. A
+  Rust `&'static mut Slot` would be unique by construction and so could not be handed to two
+  holders at the same time, which is not what the C++ does; this classification pass keeps
+  `&'static Slot` (an earlier intermediate draft briefly changed this to `&'static mut Slot` under
+  the general non-`const`-pointee rule and was corrected back, because that rule assumes a unique
+  reference and this pointee's own mutex is what makes shared mutation through a shared reference
+  sound here -- the interior mutability lives inside `Slot`, not in the reference to it). Its
+  evidence cell now also cites the field's actual assignment, `InstanceLock.cpp:128`
   (`m_slot = &slot_for(lock_file_path);`), not only the registry internals inside `slot_for` that
   justify the `'static` lifetime.
 - `Print.hpp:1514` `m_print_regions`: the task's own "owning spine" paragraph groups this with

@@ -118,7 +118,7 @@ Geometry/VoronoiUtils.hpp	20	SegmentCellRange	edge_begin	const VoronoiDiagram::e
 Geometry/VoronoiUtils.hpp	21	SegmentCellRange	edge_end	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	35	PointCellRange	edge_begin	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	36	PointCellRange	edge_end	const VoronoiDiagram::edge_type *			
-InstanceLock.hpp	55	InstanceLock	m_slot	Slot *	borrowed	InstanceLock.cpp:128, InstanceLock.cpp:84, InstanceLock.cpp:89	&'static mut Slot
+InstanceLock.hpp	55	InstanceLock	m_slot	Slot *	borrowed	InstanceLock.cpp:128, InstanceLock.cpp:84, InstanceLock.cpp:89	&'static Slot
 Layer.hpp	133	LayerRegion	m_layer	Layer *	back-reference	Layer.hpp:129	usize
 Layer.hpp	134	LayerRegion	m_region	const PrintRegion *	borrowed	Layer.hpp:129	&'a PrintRegion
 Layer.hpp	146	Layer	upper_layer	Layer *	back-reference	PrintObjectSlice.cpp:100, Layer.hpp:146	usize
