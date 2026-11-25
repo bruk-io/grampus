@@ -263,3 +263,22 @@ oracle-parity:
 # nothing to it.
 pr-body-check file *args:
     ./port/port-status --pr-body {{file}} {{args}}
+
+# run one `crates/slic3r-ffi/fuzz` target (R19, plan step 18, task 32-proof-dumps-fuzz): *ARGS is
+# variadic so a caller bounds the run itself, e.g. `just fuzz slic3r-ffi_roundtrip --
+# -max_total_time=10` -- this recipe adds no bound of its own, the same shape `just compare`
+# forwards its own trailing flags through unchanged. `cargo-fuzz`'s instrumentation needs a
+# nightly rustc the pinned stable toolchain (rust-toolchain.toml, unchanged by this task) cannot
+# provide, so this recipe names `+nightly` explicitly rather than the fuzz crate (which has no
+# `rust-toolchain.toml` of its own) carrying a toolchain override. Where `cargo-fuzz` is not
+# installed for that toolchain, this recipe names the install command and exits non-zero rather
+# than installing it itself.
+fuzz target *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! cargo +nightly fuzz --help >/dev/null 2>&1; then
+      echo "just fuzz: cargo-fuzz is not installed for the nightly toolchain; install it with \`cargo +nightly install cargo-fuzz\`" >&2
+      exit 1
+    fi
+    cd crates/slic3r-ffi/fuzz
+    cargo +nightly fuzz run {{target}} -- {{ARGS}}
