@@ -35,10 +35,14 @@ port-check:
     # allowlist). The substitute list, one or more crates.io names per library, reviewed in this
     # task's pull request: Clipper2 -- geo-clipper, solidmesh-clipper; admesh -- meshrepair;
     # qhull -- qhull_rayon; libnest2d -- nfp; Boost.Polygon's Voronoi builder -- voronoi; NLopt --
-    # cobyla, bobyqa, slsqp. Anchored to the start of a manifest line (`name = `), not a bare
+    # cobyla, bobyqa, slsqp. Catches all three ways a Cargo.toml spells a dependency on one of
+    # these: the inline form (`name = "..."` or `name = { version = ... }`), the dotted
+    # workspace-inherited form (`name.workspace = true`), and the dependency's own table header
+    # (`[dependencies.name]`, `[dev-dependencies.name]`, `[build-dependencies.name]`) -- a bare
+    # `^name[[:space:]]*=` anchor alone misses the second and third. Still anchored, not a bare
     # substring, so it does not fire on `slic3r-clipperutils`/`slic3r-clipperzutils`, this
     # workspace's own ported crates, or any other crate whose name merely contains one of these.
-    ! grep -RnE '^(geo-clipper|solidmesh-clipper|meshrepair|qhull_rayon|nfp|voronoi|cobyla|bobyqa|slsqp)[[:space:]]*=' crates/*/Cargo.toml
+    ! grep -RnE '^(\[(dependencies|dev-dependencies|build-dependencies)\.(geo-clipper|solidmesh-clipper|meshrepair|qhull_rayon|nfp|voronoi|cobyla|bobyqa|slsqp)\]|(geo-clipper|solidmesh-clipper|meshrepair|qhull_rayon|nfp|voronoi|cobyla|bobyqa|slsqp)(\.workspace)?[[:space:]]*=)' crates/*/Cargo.toml
 
 # the guard: this branch changes only what its documents on main allow
 guard *branch:
