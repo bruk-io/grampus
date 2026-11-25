@@ -7,16 +7,19 @@
 # project from vendor/OrcaSlicer's own (configured and built into the gitignored
 # oracle/.cache/stage-dump/arm64, never into vendor/OrcaSlicer/): it links the two
 # already-built static libraries, liblibslic3r.a and liblibslic3r_cgal.a, plus every
-# library transitively needed to resolve them, by the exact link line
-# fff_print_tests -- the one upstream target that already links libslic3r with the GUI
-# off on this platform -- used in that same build tree (read from its own build.ninja,
-# never re-derived from a find_package call this standalone project has no CMake cache
-# to run): compiler DEFINES and FLAGS, and the include and link-library lists, copied
-# from that target's own compile and link edges so this binary is ABI-compatible with
-# the prebuilt .a files (same preprocessor macros deciding struct layout, same C++
-# standard and target triple). The one normative addition is -ffp-contract=off (C2's
-# decision), which is already first in the copied FLAGS because fff_print_tests carries
-# it too.
+# library transitively needed to resolve them, read from that same build tree's own
+# generated build.ninja (never re-derived from a find_package call this standalone
+# project has no CMake cache to run): compiler DEFINES, FLAGS and include paths are
+# copied verbatim from the libslic3r target's own Print.cpp compile edge -- the edge
+# whose macros decide this program's own struct layouts, since it includes the same
+# headers -- so this binary is ABI-compatible with the prebuilt .a files (same
+# preprocessor macros, same C++ standard, same target triple). The link-library list is
+# copied from fff_print_tests' own link edge instead: the one upstream target that
+# already links libslic3r with the GUI off on this platform, and so already resolves
+# every transitive library this program also needs (fff_print_tests does not compile
+# Print.cpp itself; the library it links was built from it). The one normative addition
+# is -ffp-contract=off (C2's decision), which is already first in the copied FLAGS
+# because the libslic3r target's own edge carries it too.
 
 cmake_minimum_required(VERSION 3.20)
 project(oracle_stage_dump CXX)
@@ -54,10 +57,13 @@ endif()
 
 add_executable(stage_dump dump_main.cpp dump_seams.cpp nanosvg_impl.cpp)
 
-# DEFINES and FLAGS below are copied verbatim from the fff_print_tests target's own
-# Print.cpp compile edge in vendor/OrcaSlicer/build/arm64's generated build.ninja, minus
-# the -Werror machinery (this is new code, not yet proven against upstream's warning
-# set) and the precompiled-header flags (this project has no PCH of its own). Every
+# DEFINES and FLAGS below are copied verbatim from the libslic3r target's own Print.cpp
+# compile edge in vendor/OrcaSlicer/build/arm64's generated build.ninja (not
+# fff_print_tests': that target has no Print.cpp compile edge of its own -- it links the
+# already-built liblibslic3r.a -- and its own source files compile with -fPIE and extra
+# test-only defines this program does not share), minus the -Werror machinery (this is
+# new code, not yet proven against upstream's warning set) and the precompiled-header
+# flags (this project has no PCH of its own). Every
 # define here decides a struct layout or a template instantiation in a header this
 # program includes, so dropping one silently would be an ABI mismatch against the
 # prebuilt .a files, not a compile error.
@@ -167,7 +173,11 @@ target_include_directories(stage_dump SYSTEM PRIVATE
 # 13-build-libslic3r) plus every library they transitively need, in the order
 # fff_print_tests links them (static-archive order matters to the linker). Catch2 and
 # Catch2Main are dropped -- this program is not a test binary and declares no
-# dependency on either.
+# dependency on either. The three entries fff_print_tests' own link edge spells as an
+# absolute path under one machine's Xcode.app SDK (libz.tbd twice, libiconv.tbd once)
+# are substituted here for -lz / -liconv, resolved through whichever SDK the active
+# toolchain reports rather than a path that does not exist on a Command-Line-Tools-only
+# install; this is the one deliberate departure from "copied verbatim".
 target_link_libraries(stage_dump PRIVATE
   ${ORCA_BUILD}/src/libslic3r/Release/liblibslic3r.a
   -liconv
@@ -184,7 +194,7 @@ target_link_libraries(stage_dump PRIVATE
   ${ORCA_DEPS_PREFIX}/lib/libpng.a
   "-framework AppKit"
   ${ORCA_DEPS_PREFIX}/lib/libassimp.a
-  "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libz.tbd"
+  -lz
   ${ORCA_DEPS_PREFIX}/lib/libexpat.a
   ${ORCA_DEPS_PREFIX}/lib/occt/libTKOffset.a
   ${ORCA_DEPS_PREFIX}/lib/occt/libTKFillet.a
@@ -230,7 +240,7 @@ target_link_libraries(stage_dump PRIVATE
   ${ORCA_DEPS_PREFIX}/lib/libboost_serialization.a
   ${ORCA_DEPS_PREFIX}/lib/libboost_locale.a
   ${ORCA_DEPS_PREFIX}/lib/libboost_thread.a
-  "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libiconv.tbd"
+  -liconv
   ${ORCA_DEPS_PREFIX}/lib/libboost_chrono.a
   ${ORCA_DEPS_PREFIX}/lib/libboost_atomic.a
   ${ORCA_DEPS_PREFIX}/lib/libboost_date_time.a
@@ -257,7 +267,7 @@ target_link_libraries(stage_dump PRIVATE
   ${ORCA_DEPS_PREFIX}/lib/libboost_random.a
   ${ORCA_DEPS_PREFIX}/lib/libHalf-2_5.a
   ${ORCA_DEPS_PREFIX}/lib/libblosc.a
-  "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libz.tbd"
+  -lz
   ${ORCA_DEPS_PREFIX}/lib/libslvs.a
   ${ORCA_DEPS_PREFIX}/lib/libtbb.a
   ${ORCA_DEPS_PREFIX}/lib/libnlopt.a

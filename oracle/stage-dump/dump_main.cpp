@@ -23,7 +23,11 @@
 // Two configuration-driver modes (C12's decision, see oracle/stage-dump/README.md). --set is the
 // default: with neither flag given, a run still takes the --set driver with no extra override of
 // its own, which is what makes the bare `stage_dump <fixture> <configuration> --out <dir>` a
-// valid run.
+// valid run. `just oracle-dump` (justfile) is a separate caller that, for that same bare case,
+// resolves and passes `--config port/goldens/configs/<configuration>.json` itself when that
+// golden exists, so the dumps it commits are the named configuration's actual presets rather
+// than full_print_config() with none of them applied; this program's own default is unaffected
+// and stays --set for anyone invoking the binary directly.
 //   --config <path>   the oracle's resolved configuration (an --export-settings JSON). Applied
 //                      over DynamicPrintConfig::full_print_config() and changed in nothing but
 //                      the arming key.

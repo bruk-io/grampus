@@ -10,6 +10,7 @@
 #include "libslic3r/Print.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -70,6 +71,19 @@ int object_index(const Print &print, const PrintObject *object) {
 void dump_seam(const std::string &out_dir, const std::string &provenance_header, Print &print,
                const PrintObject *object, SlicingPipelineStepPlugin step) {
     const std::string path = out_dir + "/" + seam_name(step) + ".dump";
+    // The filename is the seam name alone, with no object-index suffix (every committed
+    // fixture holds exactly one object, so it is unique within a run today -- see
+    // README.md's "Decisions"). A second object firing the same seam would silently
+    // overwrite the first object's dump instead of being caught, so refuse to proceed
+    // rather than lose one silently: a multi-object fixture has to fail loudly here
+    // until a later task gives the name an object component.
+    if (std::filesystem::exists(path)) {
+        std::cerr << "error: " << path
+                   << " already exists in this run -- a second object fired the same seam, "
+                      "which the single-object filename this task uses cannot name "
+                      "separately (see dump_seams.cpp's dump_seam)\n";
+        std::exit(1);
+    }
     std::ofstream out(path, std::ios::out | std::ios::trunc | std::ios::binary);
     if (!out) {
         std::cerr << "error: could not write " << path << "\n";

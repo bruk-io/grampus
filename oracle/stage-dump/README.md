@@ -24,6 +24,16 @@ with the state each seam leaves behind (`Layer::lslices`, `LayerRegion::slices`,
 `perimeters`, `thin_fills`, `fill_surfaces`, `fills`, `PrintObject::support_layers()`,
 `object_skirt()`), per R5 and this same plan step.
 
+**The provenance header's "Built oracle flags" field reads `unrecorded` on every dump this task
+writes.** `oracle/provenance --oracle built` (task `05-oracle-provenance`, not a file this task
+changes) locates a `docs/ORACLE.md` heading matching `Built[- ]oracle flags`; that heading does
+not exist yet (the closest is `## The locally built oracle`, prose rather than the committed
+flag list), so every `--oracle built` call -- this task is its first caller -- falls back to
+`unrecorded` and prints a warning naming the missing section. R6 and R7 want the built oracle's
+exact flags, including `-ffp-contract=off`, on record; `oracle/stage-dump/CMakeLists.txt` is
+where those flags actually live, but writing them into `docs/ORACLE.md` is outside this task's
+own file list. Not fixed here; see the pull request body.
+
 ## Building it directly
 
 ```
@@ -64,10 +74,27 @@ just oracle-dump <fixture> <configuration> --config <path>
 just oracle-dump <fixture> <configuration> --set <key>=<value> [--set <key>=<value> ...]
 ```
 
-`--set` is the default: with neither flag given (the bare first form), a run still takes the
+`--set` is `stage_dump`'s own default: with neither flag given, the binary itself still takes the
 `--set` driver described below with zero extra overrides of its own -- just
 `full_print_config()` plus `<configuration>`'s row's own `Overrides` cell, which for `base-fff`
-is itself `(none)`.
+is itself `(none)`. **The recipe does not pass the bare form through unchanged**: for that same
+case (no `--config` and no `--set` anywhere in its own arguments), `just oracle-dump` itself
+resolves `port/goldens/configs/<configuration>.json` and passes `--config` with that path when
+the file exists, falling back to the binary's bare `--set` default only when a configuration has
+no committed golden yet. Every row `docs/ORACLE.md` has today was constructed through the pinned
+CLI and therefore has one (C12's accepted fallback tries the CLI first), so in practice the
+recipe's bare form runs `--config` mode. This is so the dumps it commits under a configuration's
+name are that configuration's actual resolved presets and overrides -- which R7 requires the
+header to record -- rather than `full_print_config()` with none of them applied. Before this
+recipe-level resolution existed, a bare `just oracle-dump 20mm_cube base-fff` committed dumps
+whose provenance header asserted `base-fff`'s three presets (`oracle/provenance` fills that field
+from the named row, unconditionally) even though the `--set` driver that actually produced them
+had loaded none of those presets -- the header was not false about the pinned commit or the
+fixture, but it was false about which presets were applied. `oracle/provenance` itself has no way
+to be told which driver mode ran (it is called with only the fixture and the configuration name,
+task `05-oracle-provenance`'s own interface, which this task does not change), so a configuration
+with no committed golden and no `--config` run still carries that same mismatch; it is an
+accepted gap for that case, not fixed here.
 
 `<fixture>` is a frozen stem resolved against `fixtures/` the same way `oracle/slice` resolves
 it (task `11-fixture-set`): a bare name with no path separator and no extension gets `.stl`
@@ -76,11 +103,21 @@ appended, `20mm_cube` meaning `fixtures/20mm_cube.stl`. `<configuration>` names 
 
 **`--config <path>`** applies the oracle's resolved configuration -- the JSON an unarmed
 `--export-settings` run writes, which task `12-config-goldens` commits under
-`port/goldens/configs/` -- over `DynamicPrintConfig::full_print_config()`, and changes nothing
-but the arming key. The committed goldens carry a `"provenance"` object alongside their config
-keys; the library's own JSON loader logs one line to stderr for that one unrecognised key
-(`invalid json type for provenance`) and otherwise ignores it, which is expected and harmless --
-it is not this program's doing and not worth suppressing by hand-rolling a second JSON reader.
+`port/goldens/configs/` -- over `DynamicPrintConfig::full_print_config()`. This program sets no
+key beyond the arming key, but the library's own JSON loader is not a no-op on everything it
+reads: `ConfigBase::load_from_json` calls `handle_legacy_composite()`
+(`vendor/OrcaSlicer/src/libslic3r/Config.cpp:1152-1153`), which rewrites the `thumbnails` string
+by re-joining its comma-separated list with `", "` (`PrintConfig.cpp:10066-10073`), so a golden
+whose `thumbnails` value has no space after its comma (the plain `coString` default,
+`PrintConfig.cpp:8603`) comes back out of a `--config` run with one added. Measured against
+`port/goldens/configs/base-fff.json`: of the keys the two share, only `thumbnails` and
+`slicing_pipeline_plugin` (the arming key, which R4 already allows to differ for an armed run)
+differ -- a load-time rewrite the library performs, not this program's doing, and not corrected
+here; task `27-oracle-determinism` is where that normalisation gets decided. The committed
+goldens also carry a `"provenance"` object alongside their config keys; the library's own JSON
+loader logs one line to stderr for that one unrecognised key (`invalid json type for
+provenance`) and otherwise ignores it, which is expected and harmless -- it is not this
+program's doing and not worth suppressing by hand-rolling a second JSON reader.
 
 **`--set <key>=<value>`**, repeatable, applies `DynamicPrintConfig::full_print_config()` plus the
 `Overrides` cell of `docs/ORACLE.md`'s row named by `<configuration>` (its own `;`-separated
@@ -99,6 +136,20 @@ configuration it is given". `--config` mode derives it from the loaded config's 
 directly for that mode: every row of `docs/ORACLE.md`'s configuration table builds a Bambu
 printer's print, and `--set` mode constructs the configurations that table's `Machine` column
 would otherwise supply, not a different printer family.
+
+**`--set`-mode artifacts are therefore not reproducible from their own `settings.json` alone.**
+Its `printer_model` is `""` (never resolved), yet the run it was written from had
+`is_BBL_printer() == true`, forced from outside the config. That flag reaches further than the
+validate() check it exists for: it feeds `nozzle_diameter_for_filament()`
+(`PrintRegion.cpp:60`, `Flow.cpp:246,253,265,276`), bed-type gating (`Print.cpp:2817`),
+`GCodeProcessor::s_IsBBLPrinter` (`Print.cpp:5792,5842`, `GCode.cpp:2881`), and one emitted
+G-code line's shape (`GCode.cpp:6701`, `; Z_HEIGHT: %g` vs `;Z:%g`). None of that is exercised by
+a single-filament, single-nozzle `base-fff` run -- the L1 identity check holds regardless -- but a
+reader reconstructing a `--set`-mode run from its `settings.json` and a config loader alone would
+get a non-Bambu print, not the one that was actually sliced. Re-deriving `is_BBL_printer()` from
+`printer_model` in `--set` mode too, and feeding it a `printer_model` as part of the mode's own
+applied overrides, is left to whichever task next needs `--set` mode for a row the pinned CLI
+cannot construct (none does yet, C12's fallback not having been needed so far).
 
 `tree-support`'s own override, `support_type=tree(auto)`, is read straight out of
 `docs/ORACLE.md`'s table by this program's own file I/O, so `just oracle-dump <fixture>
@@ -119,6 +170,13 @@ the seam's enum value (`posSlice.dump`, `psWipeTower.dump`, ...); `just oracle-d
 into the committed `port/dumps/<fixture-stem>-<configuration>/` (the path task `05-oracle-provenance`
 fixes).
 
+Every run, in every driver mode, also prints one more libslic3r error line to stderr:
+`get_hrc_by_nozzle_type: parse info/nozzle_info.json got a nlohmann::detail::parse_error, ...`.
+That is the library's own resources lookup failing to find a file this standalone project's
+working directory has no reason to carry, not this program's doing; it does not affect any
+result (exit 0, every dump written, L1 identity held on every run observed), the same way the
+`invalid json type for provenance` line above does not.
+
 ## Decisions this task made where the task and spec were silent
 
 - **The hook's output directory and the `--unarmed` flag are this program's own options, not
@@ -137,4 +195,14 @@ fixes).
 - **The dump's filename is the seam name alone, with no object-index suffix.** Every committed
   fixture holds exactly one object (task `11-fixture-set`'s own invariant), so the seam name is
   already unique within a run; the object's identity still lives in the dump's body ("object: 0"
-  or "object: print"), not in its name.
+  or "object: print"), not in its name. Because that invariant is assumed rather than checked,
+  `dump_seam` refuses to overwrite a path that already exists in the run's output directory and
+  exits 1 naming it, so a future multi-object fixture fails loudly instead of silently losing a
+  dump to the next one that fires the same seam.
+- **`just oracle-dump`'s bare form (no `--config`, no `--set`) resolves a configuration's own
+  committed golden and passes it as `--config` when one exists**, documented above under
+  "Running it". This is a recipe-level decision, not `stage_dump`'s own: the binary's bare
+  default stays `--set` either way, and anyone invoking it directly (bypassing the recipe) still
+  gets that. The task names the two driver modes but not which one the bare recipe invocation
+  reaches; this choice is what keeps the provenance header's `preset-set` field (R7) describing
+  presets the run actually applied for the configurations that have a golden.

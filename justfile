@@ -123,6 +123,16 @@ perf-check:
 # the check a check, since without --require the comparator exits 0 at every level including
 # none. Copies the armed run's dumps to the committed port/dumps/<fixture-stem>-<configuration>/
 # (05-oracle-provenance's path) and prints their count.
+#
+# When ARGS names neither --config nor --set, this recipe (not stage_dump's own CLI default,
+# which stays --set per oracle/stage-dump/README.md) resolves <configuration>'s own committed
+# golden, port/goldens/configs/<configuration>.json, and passes it as --config when that file
+# exists -- so the dumps committed under a configuration's name are actually that
+# configuration's resolved presets and overrides, not full_print_config() with none of them
+# applied (--set mode resolves no preset at all, R11). C12's accepted fallback tries the pinned
+# CLI first and constructs in code only where it cannot; every row this table has today
+# constructed through the pinned CLI and therefore has a golden, so this is the common case.
+# Falls back to the bare --set driver only for a configuration with no golden yet.
 oracle-dump fixture configuration *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -136,11 +146,24 @@ oracle-dump fixture configuration *ARGS:
     mkdir -p "$run_root"
     armed_dir=$(mktemp -d "$run_root/armed-XXXXXX")
     unarmed_dir=$(mktemp -d "$run_root/unarmed-XXXXXX")
-    "$bin" "{{fixture}}" "{{configuration}}" --out "$armed_dir" {{ARGS}}
-    "$bin" "{{fixture}}" "{{configuration}}" --out "$unarmed_dir" --unarmed {{ARGS}}
+    golden_args=""
+    case " {{ARGS}} " in
+      *" --config "*|*" --set "*) ;;
+      *)
+        golden="port/goldens/configs/{{configuration}}.json"
+        if [ -f "$golden" ]; then
+          golden_args="--config $golden"
+        fi
+        ;;
+    esac
+    "$bin" "{{fixture}}" "{{configuration}}" --out "$armed_dir" $golden_args {{ARGS}}
+    "$bin" "{{fixture}}" "{{configuration}}" --out "$unarmed_dir" --unarmed $golden_args {{ARGS}}
     just compare "$armed_dir/plate_1.gcode" "$unarmed_dir/plate_1.gcode" --require L1
     echo "L1"
     mkdir -p "$pair_dir"
     rm -f "$pair_dir"/*.dump
     cp "$armed_dir"/*.dump "$pair_dir"/
     echo "copied $(ls "$pair_dir"/*.dump | wc -l | tr -d ' ') dump(s) to $pair_dir"
+    # Cleaned up only after a successful run reaches here; set -e leaves the two run
+    # directories in place on any earlier failure, where they are the evidence.
+    rm -rf "$armed_dir" "$unarmed_dir"
