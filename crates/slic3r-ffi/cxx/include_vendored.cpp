@@ -34,29 +34,69 @@
 // THE DUPLICATE-SYMBOL CONSTRAINT APPLIED TO THIS FILE'S OWN CHOICE: `ClipperZUtils.cpp` declares
 // two externally-linked functions, `Slic3r::ClipperZUtils::clip_zpaths` and `::area` (`to_paths64`
 // and `append_zpaths`, below, are both `static`). Two is low, but it is NOT the minimum, and this
-// file is not chosen for being the minimum. The sweep, re-measured: every in-scope `proof path`
-// `3` `.cpp` row whose object this worktree's oracle build tree holds (92 objects, under both
-// `libslic3r.dir/Release/` and `libslic3r_cgal.dir/Release/`), counting per object the strong
-// (non-weak), *defined* (not undefined-reference) externally-linked `Slic3r::` symbols reported by
-// `nm -m`, demangled -- `MeshRepair.cpp` 1 (`Slic3r::repair_mesh`), `ClipperZUtils.cpp` 2,
-// `MutablePolygon.cpp` 5, `Algorithm/LineSplit.cpp` 6, `Time.cpp` 7, and up from there.
-// `MeshRepair.cpp`, not this file, is the minimum. No candidate has 0, so no choice of file
-// removes this constraint outright: it can only be made smaller, and it has to be documented
-// wherever it lands.
+// file is not chosen for being the minimum. The sweep, re-measured for this comment: over every
+// in-scope `proof path` `3` `.cpp` manifest row -- 94 rows, each of which does have a built object
+// in this worktree's oracle build tree, under `libslic3r.dir/Release/` or
+// `libslic3r_cgal.dir/Release/` -- counting per object the strong (non-weak), *defined* (not
+// undefined-reference) externally-linked `Slic3r::` symbols reported by `nm -m`, demangled. Both
+// `weak external` and `weak private external` lines are excluded, being COMDAT template
+// instantiations and hidden-visibility copies, neither of which can produce a duplicate-symbol
+// error; counting `weak private external` as strong is what produced the inflated figures an
+// earlier revision of this comment carried, and the exact pipeline is quoted in this task's pull
+// request body. The result: FOUR files tie at the minimum of 1 -- `MeshRepair.cpp`,
+// `Algorithm/LineSplit.cpp`, `ContourZ.cpp` and `GCode/ElegooGCodeProcessorHelper.cpp`; this file
+// has 2, tied with `VariableWidth.cpp`; then one file at 3, ten at 4 (`MutablePolygon.cpp` among
+// them), and up from there (`Time.cpp` 7). No candidate has 0, so no choice of file removes this
+// constraint outright: it can only be made smaller, and it has to be documented wherever it lands.
 //
-// WHY THIS FILE AND NOT `MeshRepair.cpp`, THE 1-SYMBOL MINIMUM: `MeshRepair.cpp` is 1215 lines
-// that pull CGAL into whatever translation unit includes them. Measured at this file's own flags
-// (`-std=c++17 -O0 -ffp-contract=off`, no `-DNDEBUG`, this crate's include set): a translation
-// unit that `#include`s `MeshRepair.cpp` compiles in 9.39s and emits exactly that one symbol,
-// against 1.50s for the `#include` of `ClipperZUtils.cpp` below -- a cost every consumer of
-// `slic3r-ffi` pays whenever this translation unit is rebuilt. Emitting `Slic3r::repair_mesh` here
-// would also drag CGAL/GMP/MPFR link dependencies, and CGAL's own live assertions, into exactly
-// the `-O0`/no-`NDEBUG` configuration the paragraph above warns every candidate must be checked
-// against. `MeshRepair.cpp` does carry one advantage this file does not: its manifest row is
-// `fuzz target` `n/a` where this file's is `required`, so the collision the next paragraph forbids
-// could not arise for it at all. So relocating the path-3 proof there is a real option for a
-// later task -- it compiles today -- declined here for the compile-cost and assertion reasons
-// above, and because the link as it stands is provably collision-free.
+// WHY THIS FILE AND NOT ONE OF THE FIVE CANDIDATES AT OR BELOW ITS SYMBOL COUNT: all five were
+// checked, and each is declined for its own reason -- none of them the symbol count.
+//
+//   * `MeshRepair.cpp` (1 symbol, 1215 lines, `fuzz target` `n/a`): compiles clean here, but it
+//     pulls CGAL into whatever translation unit includes it. Measured at this file's own flags
+//     (`-std=c++17 -O0 -ffp-contract=off`, no `-DNDEBUG`, this crate's include set): 9.39s for a
+//     translation unit that `#include`s it, against 1.50s for the `#include` of
+//     `ClipperZUtils.cpp` below -- a cost every consumer of `slic3r-ffi` pays whenever this
+//     translation unit is rebuilt. Emitting `Slic3r::repair_mesh` here would also drag
+//     CGAL/GMP/MPFR link dependencies, and CGAL's own live assertions, into exactly the
+//     `-O0`/no-`NDEBUG` configuration the paragraph above warns every candidate must be checked
+//     against.
+//   * `Algorithm/LineSplit.cpp` (1 symbol, 322 lines, `fuzz target` `required`): the one genuine
+//     rival. Its internal-linkage helpers (`is_src`, `is_clip`, `is_new`, `to_src_idx`,
+//     `to_point`) are pure `ClipperZUtils::ZPoint` (int64 `coord_t`) functions, so they would fit
+//     an integer-only shim as well as `to_paths64` does. Declined because it carries the SAME
+//     `fuzz target` `required` collision trigger as this file, with no improvement on it: its one
+//     strong symbol, `Slic3r::Algorithm::do_split_line`, is the whole public surface a
+//     differential-fuzz proof path 1 for that file would call, so the "a later task must not bind
+//     to it" constraint below would bite harder there, not less. No alternative translation unit
+//     was compiled for it, so no compile-cost comparison is claimed either way.
+//   * `ContourZ.cpp` (1 symbol, 252 lines, `fuzz target` `n/a`): all eight of its
+//     internal-linkage functions were read (it declares no anonymous namespace). Six take a live
+//     `LayerRegion *` plus `const sla::IndexedMesh &` and an extrusion-entity type, which Rust
+//     cannot build through a shim carrying plain integer-coordinate data; the other two
+//     (`follow_slope_down`, `slope_from_normal`) are pure `double`/`Eigen::Vector3d`, which this
+//     task's shim rule forbids carrying (a coordinate travels as a 64-bit integer and never
+//     through an `f64`) and which would not exercise the `exact` integer-equality tier its own
+//     manifest row declares.
+//   * `GCode/ElegooGCodeProcessorHelper.cpp` (1 symbol, 193 lines, `fuzz target` `n/a`): all
+//     eight functions in its anonymous namespace (lines 14-137) were read. Seven return `float`
+//     time estimates, five of those taking a `GCodeReader::GCodeLine`; the eighth,
+//     `equals_case_insensitive`, compares two `std::string_view`s. The last is shimmable in
+//     principle, but neither shape is integer-coordinate data, so neither exercises the `exact`
+//     tier that row declares.
+//   * `VariableWidth.cpp` (2 symbols, 248 lines, `fuzz target` `n/a`): on the collision-risk axis
+//     alone this file is STRICTLY BETTER than the one chosen -- the same symbol count, but no
+//     `required` differential-fuzz target, so the collision the closing paragraph below forbids
+//     could not be triggered for it at all. It is declined on the other axis: its single `static`
+//     helper, `thick_polyline_to_extrusion_paths_2`, takes `const ThickPolyline&`,
+//     `ExtrusionRole`, `const Flow&` (float-carrying) and a `float`, and returns `ExtrusionPaths`
+//     -- four libslic3r types in and extrusion entities out, which no plain-integer shim carries.
+//
+// So this file is chosen as the smallest candidate whose internal-linkage helper is a pure
+// integer-coordinate function, NOT as the one with the fewest external symbols -- it is not that.
+// Relocating the path-3 proof to `Algorithm/LineSplit.cpp` or `MeshRepair.cpp`, both of which
+// compile here today, stays a real option for a later task, on the reasons above rather than on
+// any symbol count; this comment is the record of why it was not done at task `31-proof-harness`.
 //
 // THE COLLISION THIS FILE'S TWO SYMBOLS LEAVE STANDING: including this file here also defines
 // `clip_zpaths` and `area` in this crate's own archive, alongside `liblibslic3r.a`'s copy of the
