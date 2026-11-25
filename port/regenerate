@@ -6,15 +6,34 @@
 # ]
 # ///
 
-"""The one command that rewrites every generated report (task 18-divergences-regeneration).
+"""The one command that rewrites every generated report (task 18-divergences-regeneration; the
+perf-backlog half is task 23-perf-backlog).
 
 ``port/regenerate`` is the single seam a later pass invokes rather than each regeneration
-command being called separately and the set of them drifting apart. Today it runs
-``just audit-order`` (R18's three reports: ``port/reports/order-containers.md``,
-``port/reports/order-comparators.md`` and ``port/reports/divergences.md``) and nothing else.
-``23-perf-backlog`` (part 3 of step 14) adds the ``port/reports/perf-backlog.md`` regeneration
-to this same script, once the ``// PERF(port):`` markers ``21-port-status-markers`` defines
-exist to drive it; this task does not write that half.
+command being called separately and the set of them drifting apart. It runs ``just audit-order``
+(R18's three reports: ``port/reports/order-containers.md``, ``port/reports/order-comparators.md``
+and ``port/reports/divergences.md``), then rewrites ``port/reports/perf-backlog.md`` from every
+``// PERF(port):`` marker under ``crates/`` (R15), printing the marker count it found. Running it
+twice leaves every file byte-identical, since every report is fully derived from the tree on each
+run.
+
+``--check`` is the drift-detecting variant wired to ``just perf-check``. It regenerates **only**
+the perf-backlog half, in memory, and compares it against the committed
+``port/reports/perf-backlog.md`` -- never ``just audit-order``'s own three reports, which
+``just audit-check`` (``port/audit-order --check``) already covers on its own; running both from
+here would be the same CI work twice, for no file this command owns. It prints nothing and exits
+0 on a clean tree, and a diff on drift, same as ``audit-check``'s drift report. It never writes
+``port/reports/``.
+
+The marker scan and the row-building logic (``build_perf_backlog_rows``, ``render_perf_backlog``)
+live in ``port/port-status``, not here, because ``port/port-status --per-commit``'s own
+per-marker assertion has to derive the identical row shape to compare the committed file against
+the tree -- one implementation, imported here the way ``port/cut-tasks`` already imports
+``port/inventory`` (an extensionless PEP 723 script has no module name plain ``import`` can find,
+so ``importlib`` loads it from its path instead, running inside *this* script's own uv
+environment). This script's own ``dependencies`` block is kept a superset of
+``port/port-status``'s for exactly the reason ``port/cut-tasks`` documents: an import inside
+``port/port-status``'s module body must not raise ``ModuleNotFoundError`` here instead of there.
 
 ``just audit-order`` is invoked as a subprocess, exactly as a person would type it, rather than
 re-implemented here, so ``git diff port/audit-order`` and ``git diff justfile`` stay the only
@@ -23,20 +42,104 @@ places that script's own behaviour lives.
 
 from __future__ import annotations
 
+import difflib
+import importlib.machinery
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import click
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+PORT_STATUS_PATH = REPO_ROOT / "port" / "port-status"
+PERF_BACKLOG_REPORT = REPO_ROOT / "port" / "reports" / "perf-backlog.md"
+
+DIFF_LINE_LIMIT = 40
+
+
+def _load_port_status() -> ModuleType:
+    """Import ``port/port-status`` the way ``port/cut-tasks`` imports ``port/inventory``: it has
+    no file extension, so plain ``import`` cannot find it, and ``importlib`` loads it from its
+    path instead. Runs inside this script's own uv environment, not port-status's own.
+
+    The module is registered in ``sys.modules`` before its body runs, matching what a normal
+    ``import`` always does. ``port/port-status`` uses ``from __future__ import annotations`` and
+    defines ``@dataclass`` classes, and on Python 3.14 (this script's own declared floor)
+    ``dataclasses._process_class`` resolves a string-annotated field's type via
+    ``sys.modules.get(cls.__module__).__dict__``; with the module missing from ``sys.modules``
+    that lookup returns ``None`` and the import crashes with
+    ``AttributeError: 'NoneType' object has no attribute '__dict__'``. Python 3.15 does not hit
+    this path (``_process_class`` no longer calls ``_is_type``), which is why the bug is invisible
+    on an interpreter newer than the declared floor."""
+    loader = importlib.machinery.SourceFileLoader("port_port_status", str(PORT_STATUS_PATH))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+def run_check() -> None:
+    """``just perf-check``: regenerate the perf-backlog row set from the tree and compare it, in
+    memory, against the committed ``port/reports/perf-backlog.md``. Prints nothing and exits 0 on
+    a clean tree; prints a diff and exits 1 on drift. Never writes ``port/reports/``, and never
+    runs ``just audit-order`` or its own ``--check`` (``just audit-check`` already covers those
+    three reports on its own)."""
+    port_status = _load_port_status()
+    rows = port_status.build_perf_backlog_rows(REPO_ROOT)
+    fresh_text = port_status.render_perf_backlog(rows)
+    committed_text = (
+        PERF_BACKLOG_REPORT.read_text(encoding="utf-8") if PERF_BACKLOG_REPORT.is_file() else ""
+    )
+    if committed_text == fresh_text:
+        return
+
+    relpath = PERF_BACKLOG_REPORT.relative_to(REPO_ROOT)
+    print(f"perf-check: {relpath} has drifted from its regeneration:")
+    diff_lines = list(
+        difflib.unified_diff(
+            committed_text.splitlines(keepends=True),
+            fresh_text.splitlines(keepends=True),
+            fromfile=f"{relpath} (committed)",
+            tofile=f"{relpath} (regenerated)",
+        )
+    )
+    for line in diff_lines[:DIFF_LINE_LIMIT]:
+        print(f"  {line}", end="" if line.endswith("\n") else "\n")
+    if len(diff_lines) > DIFF_LINE_LIMIT:
+        print(f"  ... ({len(diff_lines) - DIFF_LINE_LIMIT} more diff lines omitted)")
+    sys.exit(1)
 
 
 @click.command()
-def main() -> None:
-    """Run every generated report's regeneration. Today: just audit-order."""
+@click.option(
+    "--check",
+    "check",
+    is_flag=True,
+    help="just perf-check: regenerate port/reports/perf-backlog.md in memory and fail, with a "
+    "diff, when it differs from the committed file. Never writes port/reports/, and never runs "
+    "just audit-order or its own --check.",
+)
+def main(check: bool) -> None:
+    """Run every generated report's regeneration: just audit-order, then the perf-backlog half."""
+    if check:
+        run_check()
+        return
+
     result = subprocess.run(["just", "audit-order"], cwd=REPO_ROOT)
-    sys.exit(result.returncode)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+    port_status = _load_port_status()
+    rows = port_status.build_perf_backlog_rows(REPO_ROOT)
+    PERF_BACKLOG_REPORT.parent.mkdir(parents=True, exist_ok=True)
+    PERF_BACKLOG_REPORT.write_text(port_status.render_perf_backlog(rows), encoding="utf-8")
+    click.echo(
+        f"regenerate: {len(rows)} '// PERF(port):' marker(s) found for "
+        f"{PERF_BACKLOG_REPORT.relative_to(REPO_ROOT)}"
+    )
 
 
 if __name__ == "__main__":

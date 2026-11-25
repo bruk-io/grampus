@@ -10,16 +10,25 @@
 
 Stage one is the dependency superbuild at ``vendor/OrcaSlicer/deps``: one CMake
 project, configured once, that fetches and builds the 21 large third-party
-libraries libslic3r links against into one install prefix. Tracked content
-under ``vendor/OrcaSlicer`` is never modified; the script only writes into
-``vendor/OrcaSlicer/deps/build/arm64`` and the vendored ``DL_CACHE``, both of
-which the vendored tree's own ``.gitignore`` already excludes.
+libraries libslic3r links against into one install prefix. Stage two is the
+main project at ``vendor/OrcaSlicer`` itself: libslic3r, its two upstream test
+suites, and nothing GUI-shaped. Tracked content under ``vendor/OrcaSlicer`` is
+never modified; the script only writes into ``vendor/OrcaSlicer/deps/build/arm64``,
+``vendor/OrcaSlicer/build/arm64`` and the vendored ``DL_CACHE``, all of which the
+vendored tree's own ``.gitignore`` already excludes.
 
-If a dependency cannot be built, this script reports which target failed, with
+Stage one takes no stage option: it always runs before stage two, and where its
+install prefix already holds stage one's output, its configure and build are a
+cheap no-op that Ninja resolves without rebuilding anything, so running this
+script again costs only stage two's own no-op check.
+
+If a stage cannot be made to work, this script reports which target failed, with
 its error, and stops. It never falls back to a system, Homebrew or MacPorts
 copy of a library, never substitutes a different version, and never drops a
-target from the list: a build that cannot be made to work is reported, not
-worked around.
+target from either stage's list: a build that cannot be made to work is
+reported, not worked around. The two upstream test suites stage two builds are
+run as evidence the library works, not as a gate: a suite failure is reported
+and logged, and does not fail this script or its exit code.
 """
 
 import os
@@ -34,6 +43,8 @@ import click
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# --- Stage one: the dependency superbuild -----------------------------------
+
 # The upstream default location. OCCT's patch step only applies while the
 # configure process sees itself inside a git work tree, which is decided by
 # where this directory sits relative to the vendored submodule's own .git —
@@ -42,7 +53,7 @@ DEPS_SOURCE = Path("vendor/OrcaSlicer/deps")
 DEPS_BUILD = Path("vendor/OrcaSlicer/deps/build/arm64")
 INSTALL_PREFIX = DEPS_BUILD / "OrcaSlicer_dep" / "usr" / "local"
 
-LOG_PATH = Path("oracle/.cache/build/deps-arm64.log")
+STAGE1_LOG_PATH = Path("oracle/.cache/build/deps-arm64.log")
 
 # Named individually rather than through the project's own aggregate target,
 # which also pulls in the desktop GUI's own libraries — none of which a
@@ -80,9 +91,49 @@ DEP_TARGETS = [
 # separate CMake invocation that only the environment variable reaches.
 CMAKE_POLICY_VERSION_MINIMUM = "3.10"
 
-# Keeps Homebrew and MacPorts libraries out of find_package resolution, so a
-# dependency this stage builds is never silently satisfied from outside it.
-CMAKE_IGNORE_PREFIX_PATH = "/opt/local;/usr/local;/opt/homebrew"
+# The host package-manager prefixes neither stage may resolve a library from, so
+# a dependency stage one builds is never silently satisfied from outside it and
+# stage two can satisfy every dependency stage one recorded.
+HOST_PREFIXES = ["/opt/local", "/usr/local", "/opt/homebrew"]
+
+# Stage two is a single CMake project, so it takes the list directly as a cache
+# entry, one quoted argument that nothing re-splits. Stage one cannot: see
+# STAGE1_TOOLCHAIN below.
+CMAKE_IGNORE_PREFIX_PATH = ";".join(HOST_PREFIXES)
+
+# Stage one delivers the same three prefixes through a toolchain file instead of
+# `-DCMAKE_IGNORE_PREFIX_PATH`, because the superbuild forwards that one cache
+# entry to each dependency's own CMake invocation *unquoted*
+# (`-DCMAKE_IGNORE_PREFIX_PATH:STRING=${CMAKE_IGNORE_PREFIX_PATH}` at
+# vendor/OrcaSlicer/deps/CMakeLists.txt:231 and :285), so a `;`-separated list
+# flattens into three argv words and each dependency ignores `/opt/local` alone.
+# Measured consequence, before this file existed: dep_Boost resolved
+# `/opt/homebrew/include/lzma.h`, enabled Boost.Iostreams' LZMA backend, and its
+# installed `boost_iostreams-config.cmake` therefore carries an unguarded
+# `find_dependency(LibLZMA)` that stage two — where the full list does apply, and
+# where the macOS SDK offers `liblzma.tbd` but no `lzma.h` — cannot satisfy:
+# `Could NOT find LibLZMA (missing: LIBLZMA_INCLUDE_DIR)`.
+#
+# Escaping the separators does not fix it. Measured in a scratch superbuild that
+# reproduces the forwarding verbatim: passing `-DCMAKE_IGNORE_PREFIX_PATH=` with
+# `\;` separators stores the backslashes literally, so the superbuild's own value
+# becomes a one-element list and the dependency still receives `/opt/local` alone.
+#
+# `CMAKE_TOOLCHAIN_FILE` is forwarded on the same lines
+# (vendor/OrcaSlicer/deps/CMakeLists.txt:238) but holds no list separator, so it
+# survives as one argument; CMake reads it before `project()` in every dependency's
+# own configure, and the normal variable it sets there shadows the truncated cache
+# entry. Measured in the same scratch superbuild: all three prefixes present in the
+# dependency, and `find_path(lzma.h)` NOTFOUND. Only the non-cross-compile branch
+# (`IS_CROSS_COMPILE` is FALSE at deps/CMakeLists.txt:123 for an arm64 build on
+# arm64, which is both hosts this runs on) forwards it; the cross-compile branch at
+# :285 forwards no toolchain file, so a cross build would still truncate the list.
+#
+# Generated rather than tracked, so HOST_PREFIXES above is the list's one
+# definition and so the CI cache key — which hashes this script — already covers
+# its content. It is rewritten only when that content changes, so an unchanged run
+# leaves CMake nothing to re-do.
+STAGE1_TOOLCHAIN = Path("oracle/.cache/build/ignore-host-prefixes.cmake")
 
 # Ninja 1.11+ prefixes the failed edge with a bracketed status code, e.g.
 # `FAILED: [code=1] vendor/.../dep_OCCT-prefix/src/dep_OCCT-stamp/dep_OCCT-build`
@@ -105,7 +156,7 @@ DEP_TARGET_RE = re.compile(r"dep_[A-Za-z0-9]+")
 # checked every run rather than only inferred from the log.
 OCCT_PATCHED_MARKER = "Select the correct pcurve of the seam-edge"
 OCCT_PATCHED_SOURCE = (
-    Path("vendor/OrcaSlicer/deps/build/arm64")
+    DEPS_BUILD
     / "dep_OCCT-prefix"
     / "src"
     / "dep_OCCT"
@@ -116,6 +167,57 @@ OCCT_PATCHED_SOURCE = (
     / "BRepMesh_ModelPreProcessor.cxx"
 )
 
+# Stage one's hermeticity is measured, not assumed, and reported with its summary:
+# a dependency that resolves a header or library under one of HOST_PREFIXES records
+# that path in its own cache, and — if it exports a CMake config — can record a
+# `find_dependency` on it that stage two, which really does ignore those prefixes,
+# then cannot satisfy. That is exactly how the LibLZMA failure happened. These two
+# scans are diagnostics, not gates: they describe what the prefix holds. Stage two's
+# own configure, seconds later in the same run, is what actually fails if stage one
+# recorded something it cannot satisfy.
+DEP_CACHE_GLOB = "dep_*-prefix/src/dep_*-build/CMakeCache.txt"
+CACHE_PATH_ENTRY_RE = re.compile(r"^([A-Za-z0-9_]+):(?:PATH|FILEPATH)=(.*)$", re.MULTILINE)
+
+# A cache entry holding a build tool rather than a header, library or package.
+# Ignoring a host prefix does not displace these, and should not: the ninja and
+# pkg-config this build runs are Homebrew's, and a tool's own path is not linked
+# into anything. Measured in the scratch superbuild: with all three prefixes
+# ignored, find_program still resolves ninja and pkg-config under /opt/homebrew
+# while find_path(lzma.h) no longer resolves the header there.
+TOOL_ENTRY_RE = re.compile(r"_(?:EXECUTABLE|PROGRAM|COMMAND|COMPILER)$")
+EXPORTED_CONFIG_GLOB = "lib/cmake/*/*-config.cmake"
+FIND_DEPENDENCY_RE = re.compile(r"^\s*find_dependency\(\s*([A-Za-z0-9_]+)", re.MULTILINE)
+
+# Present once dep_OpenSSL has installed into the prefix. Checked rather than assumed
+# because the OpenSSL-first phase below is only needed while the prefix is still cold.
+OPENSSL_INSTALLED_MARKER = INSTALL_PREFIX / "include" / "openssl" / "opensslv.h"
+
+# --- Stage two: the main project ---------------------------------------------
+
+MAIN_SOURCE = Path("vendor/OrcaSlicer")
+MAIN_BUILD = Path("vendor/OrcaSlicer/build/arm64")
+STAGE2_LOG_PATH = Path("oracle/.cache/build/libslic3r-arm64.log")
+
+# The flag C2's decision makes normative: without it the compiler fuses
+# multiply-add expressions that Rust never fuses, including the
+# two-dimensional cross product that decides orientation branches.
+# `29-ffi-bridge-core` checks that this spelling and `crates/slic3r-ffi/build.rs`
+# carry the same flag, so it stays exactly as written here and is passed
+# through CMAKE_CXX_FLAGS (see configure_cmd() below: "-DCMAKE_CXX_FLAGS={CXX_FLAGS}"),
+# where that check can find it.
+CXX_FLAGS = "-ffp-contract=off"
+
+# Named individually, never `all`: `tests/slic3rutils/CMakeLists.txt` links
+# `libslic3r_gui`, which does not exist with the GUI off, so `all` cannot be
+# built once SLIC3R_GUI=OFF.
+STAGE2_TARGETS = ["libslic3r", "libslic3r_tests", "fff_print_tests"]
+
+FFF_PRINT_TEST_DIR = MAIN_BUILD / "tests" / "fff_print"
+LIBSLIC3R_TEST_DIR = MAIN_BUILD / "tests" / "libslic3r"
+
+# See the comment beside ctest's own `--timeout` in run_stage_two().
+CTEST_TEST_TIMEOUT_SECONDS = 600
+
 
 def du_sh(path: Path) -> str:
     """Return `du -sh`'s on-disk size for a directory, or a placeholder if unavailable."""
@@ -123,8 +225,36 @@ def du_sh(path: Path) -> str:
         return "(not created)"
     result = subprocess.run(["du", "-sh", str(path)], capture_output=True, text=True)
     if result.returncode != 0:
-        return "(size unavailable: " + result.stderr.strip().splitlines()[-1] + ")"
+        stderr_lines = result.stderr.strip().splitlines()
+        detail = stderr_lines[-1] if stderr_lines else f"exit {result.returncode}, no stderr"
+        return f"(size unavailable: {detail})"
     return result.stdout.split("\t")[0].strip()
+
+
+def write_stage1_toolchain() -> str:
+    """Write stage one's toolchain file if its content changed; return its absolute path.
+
+    Absolute because the superbuild forwards the value verbatim to each dependency's
+    own CMake invocation, which runs in that dependency's own build directory.
+    """
+    quoted = " ".join(f'"{prefix}"' for prefix in HOST_PREFIXES)
+    content = (
+        "# Generated by oracle/build-libslic3r. Do not edit: edit HOST_PREFIXES there.\n"
+        "#\n"
+        "# Passed to stage one as CMAKE_TOOLCHAIN_FILE, which the superbuild forwards\n"
+        "# to every dependency's own CMake invocation intact, unlike the\n"
+        "# CMAKE_IGNORE_PREFIX_PATH cache entry it forwards unquoted. Setting the\n"
+        "# variable here, before project(), makes each dependency's find_package and\n"
+        "# find_path skip all three host prefixes rather than only the first.\n"
+        f"set(CMAKE_IGNORE_PREFIX_PATH {quoted})\n"
+    )
+    STAGE1_TOOLCHAIN.parent.mkdir(parents=True, exist_ok=True)
+    # Compared before writing: an unconditional write would bump the file's mtime,
+    # which CMake tracks as a configure dependency, and turn an otherwise-no-op run
+    # into a re-configure of the whole superbuild.
+    if not STAGE1_TOOLCHAIN.is_file() or STAGE1_TOOLCHAIN.read_text() != content:
+        STAGE1_TOOLCHAIN.write_text(content)
+    return str((REPO_ROOT / STAGE1_TOOLCHAIN).resolve())
 
 
 def occt_was_patched() -> bool:
@@ -177,14 +307,54 @@ def tail_failure(log_path: Path) -> tuple[str | None, list[str]]:
     return None, lines[-60:]
 
 
-@click.command()
-def main() -> None:
-    """Configure and build the vendored dependency superbuild for this platform."""
-    os.chdir(REPO_ROOT)
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+def stage_report_failure(
+    rc: int,
+    *,
+    log_path: Path,
+    commands: list[list[str]],
+    label: str,
+    patch_missing: bool = False,
+) -> None:
+    """Print a report naming the failing step and exit non-zero. Never falls back."""
+    click.echo(f"\n--- {label} failed ---", err=True)
+    if patch_missing:
+        click.echo(
+            "OCCT built successfully but was not patched — "
+            f"{OCCT_PATCHED_MARKER!r} is absent from "
+            f"{OCCT_PATCHED_SOURCE}. This is the silent failure mode "
+            "task.md warns about: it configures and compiles fine and "
+            "fails much later, in meshing, with no mention of a patch.",
+            err=True,
+        )
+    else:
+        target, context = tail_failure(log_path)
+        if target:
+            click.echo(f"Failing step: {target}", err=True)
+        click.echo("Error context (from the log):", err=True)
+        for line in context:
+            click.echo(f"  {line}", err=True)
+    click.echo("What was tried:", err=True)
+    for cmd in commands:
+        click.echo(f"  {shlex.join(cmd)}", err=True)
+    click.echo(f"\nFull output: {log_path}", err=True)
+    click.echo(
+        "Not falling back to a system, Homebrew or MacPorts copy, and not"
+        " dropping a target: report and stop.",
+        err=True,
+    )
+    sys.exit(rc or 1)
 
-    env = os.environ.copy()
-    env["CMAKE_POLICY_VERSION_MINIMUM"] = CMAKE_POLICY_VERSION_MINIMUM
+
+def run_stage_one(env: dict[str, str]) -> tuple[float, float, float, float]:
+    """Configure and build the dependency superbuild. Exits non-zero on failure.
+
+    Returns (total_elapsed, configure_elapsed, build_elapsed, openssl_elapsed), the
+    last being the OpenSSL-first phase inside build_elapsed. On a checkout
+    whose install prefix already holds stage one's output, both commands are
+    cheap no-ops that Ninja resolves without rebuilding anything.
+    """
+    STAGE1_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    toolchain = write_stage1_toolchain()
 
     configure_cmd = [
         "cmake",
@@ -197,8 +367,34 @@ def main() -> None:
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_OSX_ARCHITECTURES=arm64",
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0",
-        f"-DCMAKE_IGNORE_PREFIX_PATH={CMAKE_IGNORE_PREFIX_PATH}",
+        # The host prefixes arrive through the toolchain file rather than as
+        # -DCMAKE_IGNORE_PREFIX_PATH, which the superbuild truncates on the way to
+        # each dependency. STAGE1_TOOLCHAIN's comment has the measurements; the
+        # toolchain file sets the same variable, so this stage's own top-level
+        # configure ignores the same three prefixes it did before.
+        f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
         f"-DCMAKE_POLICY_VERSION_MINIMUM={CMAKE_POLICY_VERSION_MINIMUM}",
+    ]
+    # Built, and installed into the prefix, before the rest of the list is configured.
+    # dep_Boost calls find_package(OpenSSL) but Boost.cmake:61 declares only
+    # `DEP_Boost_DEPENDS ZLIB`, so nothing orders Boost after OpenSSL and ninja is free
+    # to configure Boost first. Measured both ways on two cold runs of this script: when
+    # the prefix already held OpenSSL, dep_Boost logged
+    # `Found OpenSSL: .../OrcaSlicer_dep/usr/local`; when it did not, FindOpenSSL's
+    # pkg-config hint resolved `/opt/homebrew/Cellar/openssl@4/4.1.0` instead and
+    # dep_Boost's cache recorded five Homebrew paths, including the
+    # `pkgcfg_lib__OPENSSL_*` entries that name the route. pkg-config does not read
+    # CMAKE_IGNORE_PREFIX_PATH, so no ignore list can close that path; giving OpenSSL to
+    # the prefix first does, because CMAKE_PREFIX_PATH is searched ahead of a find
+    # module's hints. Nothing under vendor/OrcaSlicer/ changes; this only fixes the
+    # order in which this script asks for the targets.
+    openssl_first_cmd = [
+        "cmake",
+        "--build",
+        str(DEPS_BUILD),
+        "--target",
+        "dep_OpenSSL",
+        "--verbose",
     ]
     build_cmd = [
         "cmake",
@@ -213,73 +409,354 @@ def main() -> None:
         "--verbose",
     ]
 
-    def fail(rc: int, *, patch_missing: bool = False) -> None:
-        click.echo("\n--- stage one failed ---", err=True)
-        if patch_missing:
-            click.echo(
-                "OCCT built successfully but was not patched — "
-                f"{OCCT_PATCHED_MARKER!r} is absent from "
-                f"{OCCT_PATCHED_SOURCE}. This is the silent failure mode "
-                "task.md warns about: it configures and compiles fine and "
-                "fails much later, in meshing, with no mention of a patch.",
-                err=True,
-            )
-        else:
-            target, context = tail_failure(LOG_PATH)
-            if target:
-                click.echo(f"Failing step: {target}", err=True)
-            click.echo("Error context (from the log):", err=True)
-            for line in context:
-                click.echo(f"  {line}", err=True)
-        click.echo("What was tried:", err=True)
-        click.echo(f"  {shlex.join(configure_cmd)}", err=True)
-        click.echo(f"  {shlex.join(build_cmd)}", err=True)
-        click.echo(f"\nFull output: {LOG_PATH}", err=True)
-        click.echo(
-            "Not falling back to a system, Homebrew or MacPorts copy, and not"
-            " dropping a target: report and stop.",
-            err=True,
-        )
-        sys.exit(rc or 1)
-
     start = time.monotonic()
-    with open(LOG_PATH, "w") as log:
+    with open(STAGE1_LOG_PATH, "w") as log:
         rc = run_logged(configure_cmd, env, log)
         configure_elapsed = time.monotonic() - start
         if rc != 0:
-            click.echo(f"\nConfigure failed (exit {rc}). See {LOG_PATH}.", err=True)
+            click.echo(f"\nConfigure failed (exit {rc}). See {STAGE1_LOG_PATH}.", err=True)
             sys.exit(rc)
 
         build_start = time.monotonic()
-        rc = run_logged(build_cmd, env, log)
+        # Skipped once the prefix already holds OpenSSL, because the phase exists only
+        # to get it there before anything else configures — and re-running it is not
+        # free on a restored tree. Measured on CI run 45488950281, whose build trees both
+        # came from the cache: this phase re-installed OpenSSL in 53.9s, which rewrote
+        # the prefix's openssl headers with fresh mtimes, and stage two then rebuilt from
+        # scratch (33m53s) instead of reusing the main build tree it had just restored.
+        if OPENSSL_INSTALLED_MARKER.is_file():
+            click.echo(
+                f"+ (skipping the dep_OpenSSL-first phase: {OPENSSL_INSTALLED_MARKER} "
+                "already installed, so nothing can resolve a host OpenSSL instead)"
+            )
+            log.write(f"+ (skipping the dep_OpenSSL-first phase: {OPENSSL_INSTALLED_MARKER} exists)\n")
+            rc = 0
+        else:
+            rc = run_logged(openssl_first_cmd, env, log)
+        # Reported separately in the summary, because this phase is the whole cost of
+        # the ordering fix above: it is the one part of stage one that cannot overlap
+        # with anything else.
+        openssl_elapsed = time.monotonic() - build_start
+        if rc == 0:
+            rc = run_logged(build_cmd, env, log)
         build_elapsed = time.monotonic() - build_start
     elapsed = time.monotonic() - start
 
     if rc != 0:
-        fail(rc)
+        stage_report_failure(
+            rc,
+            log_path=STAGE1_LOG_PATH,
+            commands=[configure_cmd, openssl_first_cmd, build_cmd],
+            label="stage one",
+        )
 
     if not occt_was_patched():
-        fail(1, patch_missing=True)
+        stage_report_failure(
+            1,
+            log_path=STAGE1_LOG_PATH,
+            commands=[configure_cmd, openssl_first_cmd, build_cmd],
+            label="stage one",
+            patch_missing=True,
+        )
+
+    return elapsed, configure_elapsed, build_elapsed, openssl_elapsed
+
+
+def host_resolved_cache_entries() -> tuple[list[str], list[str]]:
+    """Split dependency cache entries that point under a host prefix into
+    (headers/libraries/packages, build tools)."""
+    libraries: list[str] = []
+    tools: list[str] = []
+    for cache_path in sorted(DEPS_BUILD.glob(DEP_CACHE_GLOB)):
+        dep = cache_path.parents[2].name.removesuffix("-prefix")
+        for name, value in CACHE_PATH_ENTRY_RE.findall(cache_path.read_text(errors="replace")):
+            if not any(value == p or value.startswith(p + "/") for p in HOST_PREFIXES):
+                continue
+            (tools if TOOL_ENTRY_RE.search(name) else libraries).append(f"{dep}: {name}={value}")
+    return libraries, tools
+
+
+def exported_external_dependencies() -> list[str]:
+    """List the non-Boost-internal `find_dependency` calls the install prefix exports.
+
+    Each one is a package stage two has to find for itself, under its own ignore
+    list, while configuring against this prefix. `find_dependency(LibLZMA)` here is
+    what the pre-toolchain build recorded and stage two could not satisfy.
+    """
+    found = set()
+    for config in sorted((REPO_ROOT / INSTALL_PREFIX).glob(EXPORTED_CONFIG_GLOB)):
+        for package in FIND_DEPENDENCY_RE.findall(config.read_text(errors="replace")):
+            if not package.startswith("boost_"):
+                found.add(f"{package} (in {config.name})")
+    return sorted(found)
+
+
+def read_occt_libs(build_dir: Path) -> str:
+    """Read OCCT_LIBS out of a stage-two build's CMakeCache.txt, or '' if absent."""
+    cache_path = build_dir / "CMakeCache.txt"
+    if not cache_path.is_file():
+        return ""
+    match = re.search(r"^OCCT_LIBS:INTERNAL=(.*)$", cache_path.read_text(), re.MULTILINE)
+    return match.group(1) if match else ""
+
+
+def run_stage_two(env: dict[str, str]) -> dict[str, object]:
+    """Configure (twice), build and test the main project. Exits non-zero on a
+    configure or build failure; a test-suite failure is reported but does not
+    fail this stage, per task.md ("evidence, not a gate").
+
+    Returns a dict of the measurements and outcomes vendor/README.md's record
+    is built from.
+    """
+    STAGE2_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Resolved to an absolute path, not left as task.md's `DEPS=...` literal relative
+    # string. Verified empirically, mechanism not inspected further: passing the literal
+    # relative string as CMAKE_PREFIX_PATH makes this configure fail to find Boost at all
+    # ("Could not find a package configuration file provided by Boost"), while the
+    # resolved absolute path finds it correctly and proceeds. Same install prefix either
+    # way; only the string form passed to CMake differs.
+    deps_prefix = str((REPO_ROOT / INSTALL_PREFIX).resolve())
+
+    def configure_cmd() -> list[str]:
+        return [
+            "cmake",
+            "-S",
+            str(MAIN_SOURCE),
+            "-B",
+            str(MAIN_BUILD),
+            "-G",
+            "Ninja Multi-Config",
+            f"-DCMAKE_PREFIX_PATH={deps_prefix}",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_OSX_ARCHITECTURES=arm64",
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0",
+            f"-DCMAKE_IGNORE_PREFIX_PATH={CMAKE_IGNORE_PREFIX_PATH}",
+            f"-DCMAKE_POLICY_VERSION_MINIMUM={CMAKE_POLICY_VERSION_MINIMUM}",
+            # SLIC3R_GUI=OFF is this task's whole point (a headless oracle); SLIC3R_CAD
+            # stays ON rather than flipping it to OFF to dodge a configure problem,
+            # because OFF is a second axis no upstream build exercises either (the one
+            # upstream script that runs GUI-off at all keeps CAD on) and task.md forbids
+            # turning it off to make the configure succeed.
+            "-DSLIC3R_GUI=OFF",
+            "-DSLIC3R_CAD=ON",
+            "-DBUILD_TESTS=ON",
+            "-DSLIC3R_STATIC=1",
+            f"-DCMAKE_CXX_FLAGS={CXX_FLAGS}",
+            # task.md names only CMAKE_CXX_FLAGS; it is silent on C. mcut's
+            # deps_src/mcut/source/shewchuk.c carries the exact orientation/incircle
+            # predicates -ffp-contract=off exists to protect, and mcut links into both
+            # libslic3r (src/libslic3r/CMakeLists.txt:784) and libslic3r_cgal (:667), so
+            # the faithful reading is to pass it there too.
+            f"-DCMAKE_C_FLAGS={CXX_FLAGS}",
+        ]
+
+    build_cmd = [
+        "cmake",
+        "--build",
+        str(MAIN_BUILD),
+        "--config",
+        "Release",
+        "--target",
+        *STAGE2_TARGETS,
+        "--verbose",
+    ]
+
+    start = time.monotonic()
+    with open(STAGE2_LOG_PATH, "w") as log:
+        # Configured twice: src/libslic3r/CMakeLists.txt writes OCCT_LIBS to
+        # the cache at the end of its own directory's configure, which is too
+        # late for anything in the same configure pass that read it earlier.
+        # This is a cheap precaution, not a demonstrated fix on this platform:
+        # the only known consumer of the cached value outside that file is
+        # `orcaslicer_copy_dlls` (top-level CMakeLists.txt:1077, reading
+        # OCCT_LIBS at :1109 and :1117), whose call sites are inside
+        # `if (WIN32)` blocks (src/CMakeLists.txt:257, tests/CMakeLists.txt:42),
+        # and libslic3r's own link (src/libslic3r/CMakeLists.txt:776) uses the
+        # directory-scope value set at :698 and :735, not the late cache
+        # write. So on macOS arm64 the first configure is not demonstrably
+        # stale; the second configure is kept because it is cheap and because
+        # what the first configure linked is otherwise unrecorded. See
+        # vendor/README.md for what this run's two configures actually
+        # produced.
+        rc = run_logged(configure_cmd(), env, log)
+        configure1_elapsed = time.monotonic() - start
+        if rc != 0:
+            stage_report_failure(
+                rc,
+                log_path=STAGE2_LOG_PATH,
+                commands=[configure_cmd(), build_cmd],
+                label="stage two configure (first pass)",
+            )
+        occt_libs_pass1 = read_occt_libs(MAIN_BUILD)
+
+        configure2_start = time.monotonic()
+        rc = run_logged(configure_cmd(), env, log)
+        configure2_elapsed = time.monotonic() - configure2_start
+        if rc != 0:
+            stage_report_failure(
+                rc,
+                log_path=STAGE2_LOG_PATH,
+                commands=[configure_cmd(), build_cmd],
+                label="stage two configure (second pass)",
+            )
+        occt_libs_pass2 = read_occt_libs(MAIN_BUILD)
+
+        build_start = time.monotonic()
+        rc = run_logged(build_cmd, env, log)
+        build_elapsed = time.monotonic() - build_start
+        if rc != 0:
+            stage_report_failure(
+                rc,
+                log_path=STAGE2_LOG_PATH,
+                commands=[configure_cmd(), build_cmd],
+                label="stage two build",
+            )
+    build_elapsed_total = time.monotonic() - start
+    # Measured here, right after the build and before either ctest run, so the
+    # figure vendor/README.md records (and 24-port-check-ci reads for CI-cache
+    # sizing) is the build tree's own cost and never silently grows with test
+    # artifacts the two suites below may write under it.
+    build_dir_size = du_sh(MAIN_BUILD)
+
+    click.echo("\n--- stage two: libslic3r + test suites built ---")
+    click.echo(
+        f"OCCT_LIBS after configure #1: {occt_libs_pass1!r}\n"
+        f"OCCT_LIBS after configure #2: {occt_libs_pass2!r}\n"
+        f"Identical: {occt_libs_pass1 == occt_libs_pass2 and bool(occt_libs_pass1)}"
+    )
+
+    # Both suites run once here as evidence the library works, not as a gate:
+    # nobody upstream builds fff_print_tests with the GUI off, on any
+    # platform. A non-zero ctest exit is reported and logged, never retried,
+    # never patched around, and never turned into this script's own exit
+    # code.
+    suite_results: dict[str, tuple[int, float]] = {}
+    with open(STAGE2_LOG_PATH, "a") as log:
+        for name, test_dir in (
+            ("fff_print", FFF_PRINT_TEST_DIR),
+            ("libslic3r", LIBSLIC3R_TEST_DIR),
+        ):
+            ctest_cmd = [
+                "ctest",
+                "--test-dir",
+                str(test_dir),
+                # Not optional with a multi-config generator: ctest has to be told
+                # which of the generator's configurations to run, the same way the
+                # build above is told with cmake --build's own --config Release.
+                "-C",
+                "Release",
+                "--output-on-failure",
+                # A per-test bound, because one upstream test can deadlock rather than
+                # fail. Observed once here: `131 - Belt brim on an object layer precedes
+                # its perimeters, once` sat at 0% CPU for 22 minutes, and `sample`
+                # showed every thread parked in `name_tbb_thread_pool_threads_set_locale`
+                # (src/libslic3r/Thread.cpp), whose parallel_for over
+                # `tbb::this_task_arena::max_concurrency()` single-element chunks has each
+                # chunk wait on a condition variable until *all* of them have been
+                # entered — so it hangs whenever TBB does not schedule that many chunks
+                # concurrently, which is likelier on a loaded machine (this one was
+                # running other work) and on a runner with few cores. Upstream code, no
+                # relation to this configuration's flags; the suites are evidence and not
+                # a gate, so a deadlock has to be reported rather than left to hang the
+                # recipe and, in CI, burn the job's whole timeout. 600s is ~16x the
+                # slowest test measured here (37.1s of 657, with exactly one test over
+                # 10s), so it cannot fire on a healthy test even on a much slower runner.
+                "--timeout",
+                str(CTEST_TEST_TIMEOUT_SECONDS),
+            ]
+            click.echo(f"\n--- running {name} suite (evidence, not a gate) ---")
+            suite_start = time.monotonic()
+            rc = run_logged(ctest_cmd, env, log)
+            suite_elapsed = time.monotonic() - suite_start
+            suite_results[name] = (rc, suite_elapsed)
+            if rc != 0:
+                click.echo(
+                    f"--- {name} suite FAILED (exit {rc}); not a gate, see "
+                    f"{STAGE2_LOG_PATH} and vendor/README.md ---",
+                    err=True,
+                )
+            else:
+                click.echo(f"--- {name} suite passed ---")
+
+    return {
+        "build_elapsed": build_elapsed_total,
+        "configure1_elapsed": configure1_elapsed,
+        "configure2_elapsed": configure2_elapsed,
+        "build_only_elapsed": build_elapsed,
+        "occt_libs_pass1": occt_libs_pass1,
+        "occt_libs_pass2": occt_libs_pass2,
+        "suite_results": suite_results,
+        "build_dir_size": build_dir_size,
+    }
+
+
+@click.command()
+def main() -> None:
+    """Configure and build the vendored OrcaSlicer tree's two stages for this platform."""
+    os.chdir(REPO_ROOT)
+
+    env = os.environ.copy()
+    env["CMAKE_POLICY_VERSION_MINIMUM"] = CMAKE_POLICY_VERSION_MINIMUM
+
+    elapsed, configure_elapsed, build_elapsed, openssl_elapsed = run_stage_one(env)
 
     minutes, seconds = divmod(int(elapsed), 60)
     hours, minutes = divmod(minutes, 60)
-    summary_lines = [
+    host_libraries, host_tools = host_resolved_cache_entries()
+    stage1_summary = [
         "",
         "--- stage one: dependency superbuild ---",
         f"Wall-clock: {hours:d}:{minutes:02d}:{seconds:02d} ({elapsed:.1f}s)"
-        f"  [configure {configure_elapsed:.1f}s + build {build_elapsed:.1f}s]",
+        f"  [configure {configure_elapsed:.1f}s + build {build_elapsed:.1f}s,"
+        f" of which dep_OpenSSL alone {openssl_elapsed:.1f}s]",
         f"Build directory ({DEPS_BUILD}): {du_sh(DEPS_BUILD)}",
         f"Install prefix ({INSTALL_PREFIX}): {du_sh(INSTALL_PREFIX)}",
+        "Host prefixes ignored in every dependency's own configure: "
+        f"{' '.join(HOST_PREFIXES)} (via {STAGE1_TOOLCHAIN})",
+        "Headers, libraries and packages a dependency resolved under a host prefix: "
+        + ("none" if not host_libraries else str(len(host_libraries))),
+        *(f"  {entry}" for entry in host_libraries),
+        f"Build tools resolved under a host prefix (not displaced by the above, "
+        f"and not linked into anything): {len(host_tools)}",
+        "Packages the install prefix asks stage two to find for itself:",
+        *(f"  {package}" for package in exported_external_dependencies()),
     ]
-    for line in summary_lines:
+    for line in stage1_summary:
         click.echo(line)
     # Appended after the log is closed, so a size-measurement hiccup above
     # can never cost the timing; written into the log itself (rather than
     # left only on stdout) so the one artefact this script is asked to
     # produce stays self-contained even if a caller's own stdout capture is
     # lost.
-    with open(LOG_PATH, "a") as log:
-        log.write("\n".join(summary_lines) + "\n")
+    with open(STAGE1_LOG_PATH, "a") as log:
+        log.write("\n".join(stage1_summary) + "\n")
+
+    stage2 = run_stage_two(env)
+
+    minutes, seconds = divmod(int(stage2["build_elapsed"]), 60)
+    hours, minutes = divmod(minutes, 60)
+    suite_lines = []
+    for name, (rc, suite_elapsed) in stage2["suite_results"].items():
+        outcome = "passed" if rc == 0 else f"FAILED (exit {rc})"
+        suite_lines.append(f"  {name}: {outcome}, {suite_elapsed:.1f}s")
+    stage2_summary = [
+        "",
+        "--- stage two: main project (libslic3r, libslic3r_tests, fff_print_tests) ---",
+        f"Wall-clock (configure x2 + build, excludes ctest): "
+        f"{hours:d}:{minutes:02d}:{seconds:02d} ({stage2['build_elapsed']:.1f}s)"
+        f"  [configure#1 {stage2['configure1_elapsed']:.1f}s"
+        f" + configure#2 {stage2['configure2_elapsed']:.1f}s"
+        f" + build {stage2['build_only_elapsed']:.1f}s]",
+        # Taken right after the build, before either ctest run below, so this
+        # figure is the build tree's own cost, not inflated by test artifacts.
+        f"Build directory ({MAIN_BUILD}): {stage2['build_dir_size']}",
+        "Test suites (evidence, not a gate):",
+        *suite_lines,
+    ]
+    for line in stage2_summary:
+        click.echo(line)
+    with open(STAGE2_LOG_PATH, "a") as log:
+        log.write("\n".join(stage2_summary) + "\n")
 
 
 if __name__ == "__main__":
