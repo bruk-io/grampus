@@ -809,7 +809,10 @@ fn find_proof_match(text: &str, module_snake: &str, proof_path_cell: &str) -> bo
 /// name declared in an `extern "C"` block. Mirrors `port/port-status`'s `oracle_names`.
 fn oracle_names(text: &str) -> HashSet<String> {
     const ORACLE_PATH_SEGMENTS: [&str; 2] = ["proof_units", "dumps"];
-    let mut found: HashSet<String> = ORACLE_PATH_SEGMENTS.iter().map(|s| s.to_string()).collect();
+    // Deliberately NOT seeded with the two bare words: see `port/port-status`'s `oracle_names`
+    // for why (a local named `dumps` would otherwise taint its binding). A file that reaches an
+    // oracle names it in a `use` path, which the loop below collects.
+    let mut found: HashSet<String> = HashSet::new();
     for line in text.lines() {
         let trimmed = line.trim_start();
         let Some(rest) = trimmed.strip_prefix("use ") else {
@@ -945,7 +948,7 @@ fn blank_masked_literals(masked: &str) -> String {
     let chars: Vec<char> = masked.chars().collect();
     let mut out = String::new();
     let mut i = 0usize;
-    while i < chars.len() {
+    'scan: while i < chars.len() {
         if chars[i] == '"' {
             let mut j = i + 1;
             while j < chars.len() && chars[j] == 'x' {
@@ -954,10 +957,20 @@ fn blank_masked_literals(masked: &str) -> String {
             if j < chars.len() && chars[j] == '"' {
                 out.push_str("\"\"");
                 i = j + 1;
-                continue;
+                continue 'scan;
             }
         }
         if chars[i] == '\'' {
+            // Exactly what `mask_strings` produces for a char literal: one or two 'x's between
+            // single quotes (two for an escape such as `'\n'`). Labelled `continue` on a match,
+            // never a bare `break` out of the inner loop: an earlier revision broke only the
+            // `for` and fell through to `out.push(chars[i]); i += 1;`, which pushed the character
+            // *after* the literal and advanced past it. Traced rather than assumed: that
+            // fall-through happens to produce the same output for every input that is valid
+            // Rust, because the character after a char literal is never itself the start of
+            // another literal -- so this is a control-flow correction for clarity, not a
+            // behaviour change, and the char-literal case in this module's own tests pins the
+            // behaviour either way.
             for width in [1usize, 2] {
                 let close = i + 1 + width;
                 if close < chars.len()
@@ -966,11 +979,8 @@ fn blank_masked_literals(masked: &str) -> String {
                 {
                     out.push_str("''");
                     i = close + 1;
-                    break;
+                    continue 'scan;
                 }
-            }
-            if out.ends_with("''") && i > 0 && chars.get(i - 1) != Some(&'\'') {
-                continue;
             }
         }
         out.push(chars[i]);
@@ -2425,7 +2435,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let cases: [(&str, bool, &str); 5] = [
+        let cases: [(&str, bool, &str); 6] = [
             (
                 "let expected: u32 = 0b111;\nassert_eq!(actual, expected);",
                 false,
@@ -2450,6 +2460,11 @@ mod tests {
                 "let oracle = path1_flags();\nassert!(agrees(ported, oracle));",
                 true,
                 "both sides inside one argument",
+            ),
+            (
+                "let oracle = dumps::sep();\nassert_eq!(oracle, '\\n');",
+                false,
+                "a char literal is blanked, so it does not read as a value",
             ),
         ];
         for (body, want, why) in cases {

@@ -382,7 +382,12 @@ def oracle_names(text: str) -> frozenset[str]:
                     break
             i += 1
         found.update(EXTERN_C_FN_RE.findall(text[start : i + 1]))
-    found.update(ORACLE_PATH_SEGMENTS)
+    # Deliberately NOT seeded with `proof_units`/`dumps` unconditionally: a file that imports
+    # neither has no oracle entry point, and seeding the two bare words would make a local
+    # variable or function named `dumps` taint its binding -- an over-acceptance in the
+    # accept-a-weak-proof direction, and wider than `--help` says the rule is. A file that does
+    # reach an oracle names it in a `use` path, which the loop above collects (including the
+    # module name itself, from `use slic3r_proof::dumps;`).
     return frozenset(found)
 
 
@@ -2772,6 +2777,8 @@ def _check_enclosing_and_differential() -> list[str]:
          "a tuple binding off one oracle call"),
         ('let oracle = path1_flags();\nassert!(agrees(ported, oracle));', True,
          "both sides inside one argument"),
+        ("let oracle = dumps::sep();\nassert_eq!(oracle, '\\n');", False,
+         "a char literal is blanked, so it does not read as a value"),
     ]
     for body, want, why in shapes:
         got = has_differential_comparison(body, oracle)
