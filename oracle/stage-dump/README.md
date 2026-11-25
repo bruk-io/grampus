@@ -51,13 +51,27 @@ prefix at `vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep/usr/local` (task
 fails loudly, naming `just oracle-build` as the fix, rather than producing a confusing linker
 error -- that build is a precondition this CMakeLists.txt does not work around (C7's decision).
 
-`oracle/stage-dump/CMakeLists.txt`'s compiler defines, flags and link-library list are copied
-verbatim from `vendor/OrcaSlicer/build/arm64`'s own generated `build.ninja`, specifically from
-the `fff_print_tests` target's compile and link edges -- the one upstream target that already
-links `libslic3r` with the GUI off on this platform. This keeps the dumper ABI-compatible with
-the prebuilt archives (same preprocessor macros deciding struct layout, same C++ standard, same
-target triple) without re-deriving a `find_package` graph this standalone project has no CMake
-cache to run. `oracle/stage-dump/nanosvg_impl.cpp` exists because two members of `liblibslic3r.a`
+`oracle/stage-dump/CMakeLists.txt`'s compiler defines, flags and include paths are copied from the
+`libslic3r` target's own `Print.cpp` compile edge in
+`vendor/OrcaSlicer/build/arm64/CMakeFiles/impl-Release.ninja` -- the edge whose macros decide the
+struct layouts this program shares with the prebuilt archives, since it includes the same headers.
+Only the **link-library list** comes from `fff_print_tests`' own link edge, in that same
+`impl-Release.ninja`: that is the one upstream target which already links `libslic3r` with the GUI
+off on this platform, so it already resolves every transitive library this program also needs.
+`fff_print_tests` has no `Print.cpp` compile edge of its own -- it links the already-built
+`liblibslic3r.a`, and compiles its own sources with `-fPIE` and test-only defines this program does
+not carry -- so taking the defines and flags from it would be wrong. Neither edge lives in the
+top-level `build.ninja`, which holds only a phony for that target; re-deriving either list means
+reading `CMakeFiles/impl-Release.ninja`. The copy is deliberately not quite verbatim, and
+`CMakeLists.txt` names each departure at the point it makes it: the `libz.tbd`/`libiconv.tbd`
+absolute Xcode SDK paths substituted for `-lz`/`-liconv` (see its `target_link_libraries`
+comment), the dropped `Catch2`/`Catch2Main` entries (this is not a test binary), and the dropped
+`-Werror` machinery and precompiled-header flags. This keeps the dumper ABI-compatible with the
+prebuilt archives (same preprocessor macros deciding struct layout, same C++ standard, same target
+triple) without re-deriving a `find_package` graph this standalone project has no CMake cache to
+run.
+
+`oracle/stage-dump/nanosvg_impl.cpp` exists because two members of `liblibslic3r.a`
 (`NSVGUtils.cpp.o`, `svg.cpp.o`) are pulled in whole for other symbols this program's call graph
 needs, and their `nsvgParse`/`nsvgParseFromFile`/`nsvgDelete` calls are otherwise unresolved: the
 one place upstream defines nanosvg's implementation is a GUI file

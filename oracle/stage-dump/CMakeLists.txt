@@ -8,7 +8,8 @@
 # oracle/.cache/stage-dump/arm64, never into vendor/OrcaSlicer/): it links the two
 # already-built static libraries, liblibslic3r.a and liblibslic3r_cgal.a, plus every
 # library transitively needed to resolve them, read from that same build tree's own
-# generated build.ninja (never re-derived from a find_package call this standalone
+# generated CMakeFiles/impl-Release.ninja (the top-level build.ninja holds only phonies;
+# never re-derived from a find_package call this standalone
 # project has no CMake cache to run): compiler DEFINES, FLAGS and include paths are
 # copied verbatim from the libslic3r target's own Print.cpp compile edge -- the edge
 # whose macros decide this program's own struct layouts, since it includes the same
@@ -58,7 +59,7 @@ endif()
 add_executable(stage_dump dump_main.cpp dump_seams.cpp nanosvg_impl.cpp)
 
 # DEFINES and FLAGS below are copied verbatim from the libslic3r target's own Print.cpp
-# compile edge in vendor/OrcaSlicer/build/arm64's generated build.ninja (not
+# compile edge in vendor/OrcaSlicer/build/arm64/CMakeFiles/impl-Release.ninja (not
 # fff_print_tests': that target has no Print.cpp compile edge of its own -- it links the
 # already-built liblibslic3r.a -- and its own source files compile with -fPIE and extra
 # test-only defines this program does not share), minus the -Werror machinery (this is
@@ -177,7 +178,8 @@ target_include_directories(stage_dump SYSTEM PRIVATE
 # absolute path under one machine's Xcode.app SDK (libz.tbd twice, libiconv.tbd once)
 # are substituted here for -lz / -liconv, resolved through whichever SDK the active
 # toolchain reports rather than a path that does not exist on a Command-Line-Tools-only
-# install; this is the one deliberate departure from "copied verbatim".
+# install; this is the second deliberate departure from "copied verbatim", after the
+# dropped Catch2 entries above.
 target_link_libraries(stage_dump PRIVATE
   ${ORCA_BUILD}/src/libslic3r/Release/liblibslic3r.a
   -liconv
