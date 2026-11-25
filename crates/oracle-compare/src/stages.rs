@@ -1787,17 +1787,18 @@ mod tests {
     }
 
     #[test]
-    fn fallback_under_a_declared_tolerance_is_anchored_at_l3_not_l4() {
-        // `small_drift`: a per-move numeric drift small enough for L3/L4 to pass at a loose
-        // enough declared tolerance; anchoring at L3 (not the old "nothing passed" reading, and
-        // not L4) is what this test actually distinguishes from the pre-fix behaviour -- both
-        // read this pair as "not differing" once the tolerance is loose enough, so the real
-        // regression coverage is `fallback_differs_under_exact_tier_when_l0_fails_even_though
-        // _l4_passes` above; this test instead pins the `Declared` branch's anchor level so a
-        // future edit cannot silently move it back to `strongest_evaluated_pass`.
-        let (a, b) = read_gcode_pair("small_drift");
+    fn fallback_under_a_declared_tolerance_differs_when_l3_fails_even_though_l4_passes() {
+        // `inserted_move` at a declared tolerance of 10.0: side `b` has one extra move than
+        // side `a` (a genuine structural difference `b`'s own doc comment there confirms), so
+        // L3 (per-move comparison) fails regardless of tolerance -- but every L4 aggregate
+        // (move count 2 vs 3, bounding box, extruded length) is well within 10.0, so L4 passes.
+        // `strongest_evaluated_pass` is therefore `Some(L4)`: this is the exact shape the old
+        // anchor (`strongest_evaluated_pass.is_none()`) got wrong for a `Declared` tolerance too
+        // -- it would read this pair as "not differing" because *something* passed, when the
+        // level the tolerance actually applies to (L3) genuinely failed.
+        let (a, b) = read_gcode_pair("inserted_move");
         let loose = Tolerance::Declared {
-            value: 1.0,
+            value: 10.0,
             unit: None,
             reason: "test".to_string(),
             comparison_function: tolerance::ComparisonFunction::Abs,
@@ -1806,8 +1807,17 @@ mod tests {
                 row: "y".to_string(),
             },
         };
-        let outcome = evaluate_fallback(&a, &b, loose.clone());
-        assert_eq!(outcome.differs, !outcome.report.passed(Level::L3));
+        let outcome = evaluate_fallback(&a, &b, loose);
+        assert_eq!(outcome.report.strongest_evaluated_pass, Some(Level::L4));
+        assert!(
+            !outcome.report.passed(Level::L3),
+            "L3 must fail on this pair"
+        );
+        assert!(
+            outcome.differs,
+            "L3 failing must read as differing even though L4 (a looser, aggregate level) \
+             passes"
+        );
     }
 
     // --- The uncovered-oracle-dump warning (R5's four not-yet-assigned seams) -----------------
