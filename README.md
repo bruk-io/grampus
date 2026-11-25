@@ -21,7 +21,7 @@ is laid out, and how to change the pin.
 | `LICENSE` | AGPL-3.0 text. |
 | `intent/` | asdlc documents: intents, specs, plans and tasks. Created by the first intent. |
 | `.asdlc/checks` | The commands a task has to pass. |
-| `justfile` | `just check` and `just guard`. |
+| `justfile` | `just check`, `just port-check` and `just guard`. |
 
 ## How work happens
 
@@ -31,10 +31,17 @@ added by a pull request and accepted when a person merges it.
 
 - **Plugin:** `.claude/settings.json` enables the asdlc Claude Code plugin for this project. It
   lints a document when Claude writes it and guards a branch before Claude pushes it.
-- **Checks:** `.asdlc/checks` lists what a task has to pass. Today that is `just check`, which
-  lints the asdlc documents. Code checks get added to the `check` recipe as code arrives.
-- **CI:** `.github/workflows/ci.yml` runs `just check` on every push and pull request, and the
-  guard on pull requests.
+- **Checks:** `.asdlc/checks` lists what a task has to pass: `just check`, which lints the asdlc
+  documents, and `just port-check`, the code checks a port task passes that need neither the
+  oracle binary nor a built libslic3r. Checks that need either run in CI only, in a separate job.
+- **CI:** `.github/workflows/ci.yml` has an ubuntu job that runs `just check` and
+  `just port-check` on every push and pull request, with a Rust toolchain step and a shallow
+  submodule checkout ahead of them, and the guard on pull requests; and a macOS arm64 job for
+  the checks that need the oracle binary or a built libslic3r, which is skipped for a pull
+  request that changes only a document and otherwise runs on its own path filter (unconditionally
+  on a push to `main`). `.github/workflows/oracle.yml` builds the vendored libslic3r itself, on
+  its own narrower path filter, since that build costs on the order of an hour and a half of
+  macOS runner time.
 - **Merging:** pull requests are merged with a merge commit. asdlc reads task state from merge
   commits, so squash and rebase merges are turned off on GitHub.
 

@@ -1,2 +1,3 @@
 # What a task has to pass before its pull request is marked ready. One command to a line.
 just check
+just port-check

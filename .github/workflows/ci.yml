@@ -9,11 +9,35 @@ permissions:
   contents: read
 
 jobs:
+  # Computes whether this push or pull request touches anything the macOS job's checks read,
+  # so that job's `if` can skip it for a document-only change (R23) without a workflow-level
+  # `on.pull_request.paths`, which would also skip this file's ubuntu job and the guard.
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      oracle: ${{ steps.filter.outputs.oracle }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            oracle:
+              - 'crates/**'
+              - 'oracle/**'
+              - 'port/**'
+              - 'fixtures/**'
+              - 'justfile'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/ci.yml'
+
   check:
     runs-on: ubuntu-24.04
     steps:
       # Full history, because the guard compares the branch with main. The OrcaSlicer
-      # submodule is not checked out: nothing here reads it.
+      # submodule is checked out further down, shallowly, for the checks that read it.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref || github.ref_name }}
@@ -23,9 +47,134 @@ jobs:
 
       - uses: extractions/setup-just@v3
 
+      # `toolchain:` is a required input for this action (confirmed empirically: omitting it,
+      # on the assumption the action would fall back to reading rust-toolchain.toml itself,
+      # failed this job's first CI run with "'toolchain' is a required input"). So the version
+      # is spelled out here, matching rust-toolchain.toml's channel; it is not derived from that
+      # file, and the two must be kept in sync by hand.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: rustfmt
+
+      - name: Check out the OrcaSlicer submodule
+        run: git submodule update --init --depth 1 vendor/OrcaSlicer
+
       - name: Checks
         run: just check
+
+      - name: Port checks
+        run: just port-check
 
       - name: Guard the branch
         if: github.event_name == 'pull_request'
         run: just guard "$GITHUB_HEAD_REF"
+
+  # Everything that needs the oracle binary, a local libslic3r build, or a comparison against
+  # either (R23) — none of the document checks above wait on this job. Only `just oracle-fetch`
+  # and `cargo test --workspace` are its lines today; every other line is added by the task that
+  # makes it pass, named below so each adds its own line and no one writes this job twice:
+  #
+  #   - `just oracle-build`                                        -- task 13-build-libslic3r
+  #   - `just oracle-parity`                                       -- task 28-oracle-parity
+  #   - `just port-status` (without `--per-commit`)                -- plan step 23's last task
+  #   - `just compare-stages`                                      -- task 40-compare-stages-ci
+  #   - `just compare-benchy`                                      -- task 41-compare-benchy
+  #   - `just compare-fixtures`                                    -- task 42-compare-fixtures
+  #   - `just compare-configurations`                               -- task 43-compare-configurations
+  #
+  # `just pr-body-check` is the eighth later line and is NOT one of these: it reads the pull
+  # request and needs no build, so plan step 21 (task 36-pr-body-check) adds it to the `check`
+  # job above instead.
+  #
+  # The fallback this step's task.md records -- if the first cold build's wall-clock or disk
+  # cost exceeds the runner's or the cache's limit, `just oracle-build` and `just oracle-parity`
+  # move to `main` only, and this job keeps just the two lines below -- has been taken for the
+  # build alone: task 13-build-libslic3r measured a cold build at 46m12s (stage one) + 35m08s
+  # (stage two) on a hosted macos-15 runner (vendor/README.md), and moved `just oracle-build`
+  # into its own `.github/workflows/oracle.yml`, which runs on `workflow_dispatch`, on push to
+  # `main`, and on a pull request that touches `oracle/build-libslic3r`, that workflow or the
+  # submodule pin -- paths far narrower than this job's own filter below, because almost no
+  # change in this repository can affect that build. So `just oracle-build` is never a line in
+  # *this* job; it stays where task 13 put it.
+  #
+  # `just oracle-parity` is not covered by that move. Task 13 touched only the build; plan step
+  # 10 and task 28-oracle-parity's own text both still name this job -- the one below, in this
+  # file -- as where `just oracle-parity` lands. What is genuinely open, and left open here
+  # rather than resolved by assertion: `just oracle-parity` needs a built libslic3r to compare
+  # against the release binary, and this job builds nothing today -- the build now lives in
+  # oracle.yml's own job. Where task 28 gets that built library from (this job also gains
+  # `oracle-build`, or `oracle-parity` reads oracle.yml's build tree some other way) is for that
+  # task to settle, not this comment.
+  oracle-checks:
+    needs: changes
+    # `!cancelled()` is load-bearing, not decorative: without it, GitHub skips this job whenever
+    # `changes` fails or is cancelled, before this expression is even evaluated -- which is
+    # exactly the trap this step's task.md names, because it would silently take the
+    # unconditional push-to-main case away along with the filter. `!cancelled()` rather than
+    # `always()`: it still runs on a failed or skipped filter job, but not on a cancelled
+    # workflow run (e.g. superseded by a newer push), which `always()` would also start a macOS
+    # runner for.
+    if: "!cancelled() && (github.event_name == 'push' || (needs.changes.result == 'success' && needs.changes.outputs.oracle == 'true'))"
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Check out the OrcaSlicer submodule
+        run: git submodule update --init --depth 1 vendor/OrcaSlicer
+
+      - uses: astral-sh/setup-uv@v7
+
+      - uses: extractions/setup-just@v3
+
+      # Same explicit toolchain as the ubuntu job's step, and the same reason (see its comment).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+
+      # Reads the gitlink directly, matching .github/workflows/oracle.yml's own step, so the
+      # cache key below is stable before the submodule checkout above and if that step is ever
+      # reordered.
+      - name: Resolve the submodule pin for the cache key
+        id: submodule
+        run: echo "sha=$(git rev-parse HEAD:vendor/OrcaSlicer)" >> "$GITHUB_OUTPUT"
+
+      # The dependency superbuild's install prefix -- the only part oracle.yml's own workflow
+      # keeps. Restore-only: nothing this job runs fills that tree, so there is nothing of this
+      # job's own to save.
+      #
+      # This cannot hit oracle.yml's cache entry today, even though the key prefix below matches
+      # it exactly: actions/cache resolves an entry by key AND by a version hash computed over
+      # the `path` list, and oracle.yml saves two paths (`vendor/OrcaSlicer/deps/build/arm64` and
+      # `vendor/OrcaSlicer/deps/DL_CACHE`) where this restores one, a child of the first.
+      # Different path lists mean different versions, so an identical key still misses. This
+      # step is kept anyway because task.md's Done-when names this exact path as the one this
+      # task caches; it starts hitting only once a later change makes the two path lists agree
+      # -- either by widening this restore to oracle.yml's two-entry list, or by oracle.yml
+      # adding a save under this narrower path.
+      - name: Restore the dependency superbuild
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep
+          key: oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
+          restore-keys: |
+            oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-
+      # No cache of vendor/OrcaSlicer/build/arm64 here: nothing in this job builds it, and it
+      # arrives with the `just oracle-build` step task 13-build-libslic3r added to oracle.yml,
+      # keyed there on the same pin and on that task's own CMake flags.
+
+      # GH_TOKEN authenticates oracle/fetch-release's `gh release download` call: the first CI
+      # run of this step, unauthenticated, hit OrcaSlicer/OrcaSlicer's public rate limit (HTTP
+      # 403, "API rate limit exceeded for <runner IP>") on its very first request, because a
+      # hosted runner's IP is shared and anonymous GitHub API access is capped at 60/hour. An
+      # authenticated request is a much higher limit regardless of which repo's public release
+      # asset is being read.
+      - name: Fetch the pinned oracle release binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: just oracle-fetch
+
+      - name: Run the workspace's tests
+        run: cargo test --workspace
