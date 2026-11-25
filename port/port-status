@@ -171,6 +171,79 @@ TEST_ATTR_RE = re.compile(r"^\s*#\s*\[\s*test\s*\]\s*$")
 PROOF_FN_DECL_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)")
 PROOF_LINE_RE = re.compile(r"^\s*//\s*PROOF:\s*(?P<path>.*?)\s*$")
 
+# --------------------------------------------------------------------------------------------
+# The "enclosing unit" proof-path form, and the differential-comparison rule (R19's "Where even
+# that is not possible the row says so and the helper is proven through its enclosing file's
+# exported surface"; docs/PORTING.md, "Decisions recorded on 2026-11-25").
+# --------------------------------------------------------------------------------------------
+
+# A `proof path` cell declaring that this unit has no independently provable behaviour, naming
+# the in-scope unit whose own proof exercises it, by that unit's `port/manifest.tsv` `path` cell:
+#
+#     enclosing: Config.hpp
+#
+# The cell lives in the manifest's existing `proof path` column, which `port/inventory` carries
+# forward verbatim and `just inventory-check` does not diff -- so it is set by a regeneration or
+# amendment pull request, never by a port task, which may not write `port/manifest.tsv` at all.
+PROOF_PATH_ENCLOSING_RE = re.compile(r"^enclosing:\s*(?P<path>.+?)\s*$")
+
+# The comparison calls a proof may make. `compare_unit`/`compare_unit_at` are the harness's own
+# API; the assertion macros are what a unit comparing more than one value per call uses (every
+# proof on `main` does, measured). Matched as a call/macro name followed by `(`, on the test
+# body's masked text, so a mention inside a string or a comment is never one.
+COMPARISON_CALL_RE = re.compile(
+    r"\b(?:compare_unit|compare_unit_at|assert_eq|assert_ne|assert|debug_assert|"
+    r"debug_assert_eq|debug_assert_ne)\s*!?\s*\("
+)
+
+# A `use` path that reaches an oracle: the per-unit proof bridges re-exported by `slic3r-proof`
+# (the one sanctioned route a ported unit reaches the built library by), or the committed stage
+# dumps (`slic3r_proof::dumps`, proof path 2). Both leaf names and a module import are collected
+# -- a test may call `path1_flags()` after importing the function, or `dumps::read_dump_default`
+# after importing the module.
+ORACLE_USE_RE = re.compile(r"^\s*use\s+(?P<path>[^;]+);", re.MULTILINE)
+ORACLE_PATH_SEGMENTS = ("proof_units", "dumps")
+
+# A hand-written `extern "C" { fn NAME ... }` declaration. Decision 1 removed every one of these
+# from a port crate, but the rule stays aware of the shape: a declaration of an externally linked
+# oracle symbol is an oracle entry point wherever it legitimately appears.
+EXTERN_C_FN_RE = re.compile(r"\bfn\s+([A-Za-z_]\w*)\s*\(")
+
+# An identifier token, and the same token when it is a field or method name (preceded by `.`).
+# The second is excluded wherever the rule asks for "an identifier of its own", because
+# `dump.seam` must not read as naming something other than `dump`.
+IDENT_RE = re.compile(r"(?<![\w.])([A-Za-z_]\w*)")
+
+# Tokens that are a literal or a type, never a value the port computed: an argument made only of
+# these is a literal, which is what the rule rejects a lone oracle value being compared against.
+LITERAL_WORD_TOKENS = {
+    "true", "false", "as", "None", "Some", "Ok", "Err",
+    "i8", "i16", "i32", "i64", "i128", "isize",
+    "u8", "u16", "u32", "u64", "u128", "usize",
+    "f32", "f64", "bool", "char", "str", "String",
+}
+
+# A `let` binding's pattern, up to the `=`: a single name, or a tuple of names. Both forms are
+# taken, because a proof that pulls several values out of one oracle call writes the tuple form
+# (`crates/slic3r-printconfigconstants` did, measured).
+LET_BINDING_RE = re.compile(r"\blet\s+(?P<pattern>[^=;]+?)\s*=")
+
+# `mask_strings` fills a string or char literal with the letter 'x', preserving length, which is
+# what every other check in this file wants (positions do not shift). For the identifier scan
+# below it is wrong: a masked literal reads as an identifier made of 'x's, and a comparison
+# against a string literal would then look like a comparison against a value. These two patterns
+# match exactly what `mask_strings` produces -- never a lifetime such as `&'a T`, which it does
+# not mask -- so blanking them cannot eat real code.
+MASKED_STRING_RE = re.compile(r'"x*"')
+MASKED_CHAR_RE = re.compile(r"'x{1,2}'")
+
+
+def blank_masked_literals(masked: str) -> str:
+    """`masked` (already through `mask_strings`) with every masked string and char literal
+    emptied, so the identifier scan never reads one as a value. Length is not preserved, which
+    is fine: this view is only ever scanned for identifiers, never indexed into."""
+    return MASKED_CHAR_RE.sub("''", MASKED_STRING_RE.sub('""', masked))
+
 # The manifest's scope cell (task.md: "in scope or out with a reason") is "in", or "in: <reason>"
 # -- never a bare prefix match against anything else, since the only other value this column
 # takes is "out" / "out: <reason>" (port/inventory's own `compute_scope`).
@@ -267,12 +340,196 @@ def extract_cfg_test_text(text: str) -> str:
     return "\n".join(out_lines)
 
 
-def find_proof_match(text: str, module_snake: str, proof_path_cell: str) -> bool:
-    """True if `text` carries a `#[test]`-attributed function whose name contains
-    `module_snake` and which carries, beside it (see `PROOF_LINE_RE`'s own comment for the
-    window), the literal line `// PROOF: <proof_path_cell>`."""
+def oracle_names(text: str) -> frozenset[str]:
+    """Every name in `text` that reaches an oracle: the leaf names (and the module name) of each
+    `use` path naming `proof_units` or `dumps`, plus every name declared in an `extern "C"`
+    block. These are the entry points a proof's own output has to come from -- the per-unit
+    bridges `slic3r-proof` re-exports (proof paths 1 and 3) and the committed stage dumps (proof
+    path 2) -- and a value derived from one of them is what makes a comparison differential.
+
+    Collected from `use` paths rather than from call text, because a proof that imports its
+    bridge function calls it by its bare name (`path1_flags()`), with nothing in the call itself
+    naming the bridge."""
+    found: set[str] = set()
+    for m in ORACLE_USE_RE.finditer(text):
+        path = m.group("path")
+        if not any(seg in path for seg in ORACLE_PATH_SEGMENTS):
+            continue
+        # `use a::b::{c, d};` -> c, d, plus every path segment, so both an imported function and
+        # an imported module (`use slic3r_proof::dumps;` -> `dumps`) are collected.
+        brace = path.find("{")
+        if brace != -1:
+            head, _, tail = path.partition("{")
+            names = [n.strip() for n in tail.rstrip("}").split(",")]
+            found.update(n.rsplit("::", 1)[-1] for n in names if n)
+            path = head
+        for segment in path.replace("{", " ").replace("}", " ").split("::"):
+            segment = segment.strip()
+            if segment and re.fullmatch(r"[A-Za-z_]\w*", segment):
+                found.add(segment)
+    # `extern "C" { ... }`: every `fn NAME(` inside one. Found by locating the block and reading
+    # its own text, so an ordinary `fn` elsewhere in the file is not collected.
+    for m in re.finditer(r'extern\s+"C"\s*\{', text):
+        depth = 0
+        i = m.end() - 1
+        start = i
+        while i < len(text):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        found.update(EXTERN_C_FN_RE.findall(text[start : i + 1]))
+    found.update(ORACLE_PATH_SEGMENTS)
+    return frozenset(found)
+
+
+def function_body(lines: list[str], fn_line_idx: int) -> str:
+    """The text of the function whose signature starts at `lines[fn_line_idx]`, from that line
+    to its matching closing brace, found by brace counting on the code-only, string-masked view
+    (so a brace inside a string literal or a comment never moves the depth). Returns the rest of
+    the file if the braces never balance, which is the fail-open direction only for *finding*
+    the body -- the rules applied to it are what fail closed."""
+    depth = 0
+    seen_open = False
+    out: list[str] = []
+    for line in lines[fn_line_idx:]:
+        out.append(line)
+        code, _comment = split_code_comment(strip_block_comments(line))
+        masked = mask_strings(code)
+        opens = masked.count("{")
+        closes = masked.count("}")
+        if opens:
+            seen_open = True
+        depth += opens - closes
+        if seen_open and depth <= 0:
+            break
+    return "\n".join(out)
+
+
+def split_call_arguments(text: str, open_paren_idx: int) -> list[str]:
+    """The comma-separated top-level arguments of the call whose `(` is at `open_paren_idx`, on
+    already-masked text. Nested parentheses, brackets and braces do not split, so
+    `assert_eq!(f(a, b), c)` is two arguments, not three."""
+    depth = 0
+    args: list[str] = []
+    current: list[str] = []
+    i = open_paren_idx
+    while i < len(text):
+        c = text[i]
+        if c in "([{":
+            depth += 1
+            if depth == 1:
+                i += 1
+                continue
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                args.append("".join(current))
+                return args
+        if depth == 1 and c == ",":
+            args.append("".join(current))
+            current = []
+            i += 1
+            continue
+        current.append(c)
+        i += 1
+    args.append("".join(current))
+    return args
+
+
+def tainted_identifiers(body: str, oracle: frozenset[str]) -> frozenset[str]:
+    """Every identifier in `body` that holds a value the oracle produced: a name bound by a `let`
+    whose right-hand side calls an oracle entry point, plus the oracle names themselves.
+
+    One level deep, deliberately: a proof that launders its oracle value through two bindings
+    before comparing it is not a shape any proof on `main` uses, and a deeper trace would start
+    to approximate a Rust compiler rather than a text scan. Where this rule cannot tell, it
+    errs towards *not* seeing a comparison as differential, which refuses a marker rather than
+    accepting a weak one."""
+    masked = blank_masked_literals(
+        mask_strings("\n".join(li.code for li in classify_lines(body)))
+    )
+    tainted = set(oracle)
+    # Iterated to a small fixed point so the order of the `let` bindings in the body does not
+    # matter (a proof may bind its oracle value after the value it compares against).
+    for _ in range(4):
+        before = set(tainted)
+        for m in LET_BINDING_RE.finditer(masked):
+            rhs_start = m.end()
+            depth = 0
+            i = rhs_start
+            while i < len(masked):
+                c = masked[i]
+                if c in "([{":
+                    depth += 1
+                elif c in ")]}":
+                    depth -= 1
+                elif c == ";" and depth <= 0:
+                    break
+                i += 1
+            rhs = masked[rhs_start:i]
+            if not any(name in tainted for name in IDENT_RE.findall(rhs)):
+                continue
+            tainted.update(IDENT_RE.findall(m.group("pattern")))
+        if tainted == before:
+            break
+    tainted.discard("mut")
+    return frozenset(tainted)
+
+
+def has_differential_comparison(body: str, oracle: frozenset[str]) -> bool:
+    """True if `body` compares a value the oracle produced against a value this port computed --
+    the rule that keeps a `// PROOF:` marker from counting over a test that only compares a
+    module against literals transcribed by hand (docs/PORTING.md, "Decisions recorded on
+    2026-11-25").
+
+    A comparison counts when its arguments, taken together, name both:
+
+    - an oracle-tainted identifier (`tainted_identifiers`), and
+    - a different identifier of its own -- not oracle-tainted, not one of the literal or type
+      words, and not a field or method name reached through a `.` (so `assert_eq!(dump.seam,
+      "psWipeTower")`, which names only `dump`, is not a comparison of two values).
+
+    **Stated limit, not worked around.** A named constant in the test's own scope is not
+    mechanically distinguishable from the ported module's own `pub const`: comparing an oracle
+    value against a hand-transcribed `const` in the test module therefore still counts here, and
+    remains a reviewer's judgement. What this rule does catch is a test that reaches no oracle at
+    all, and one that compares an oracle value only against a literal -- the two shapes the first
+    port attempts actually produced."""
+    tainted = tainted_identifiers(body, oracle)
+    masked = blank_masked_literals(
+        mask_strings("\n".join(li.code for li in classify_lines(body)))
+    )
+    for m in COMPARISON_CALL_RE.finditer(masked):
+        args = split_call_arguments(masked, m.end() - 1)
+        idents: list[str] = []
+        for arg in args:
+            idents.extend(IDENT_RE.findall(arg))
+        oracle_side = {name for name in idents if name in tainted}
+        ported_side = {
+            name
+            for name in idents
+            if name not in tainted and name not in LITERAL_WORD_TOKENS
+        }
+        if oracle_side and ported_side:
+            return True
+    return False
+
+
+def proof_marked_tests(
+    text: str, module_snake: str, proof_path_cell: str
+) -> list[tuple[int, str, str]]:
+    """Every `(line number, test function name, body text)` in `text` that `find_proof_match`
+    considers: a `#[test]`-attributed function whose name contains `module_snake`, carrying the
+    literal line `// PROOF: <proof_path_cell>` beside it. Factored out so the derivation
+    (`find_proof_match`) and the finding that names a non-differential marker read the same set
+    of tests, rather than two slightly different ones."""
+    out: list[tuple[int, str, str]] = []
     if not proof_path_cell:
-        return False
+        return out
     wanted = proof_path_cell.strip()
     lines = text.splitlines()
     for i, line in enumerate(lines):
@@ -295,8 +552,23 @@ def find_proof_match(text: str, module_snake: str, proof_path_cell: str) -> bool
         for li in range(window_start, window_end + 1):
             pm = PROOF_LINE_RE.match(lines[li])
             if pm and pm.group("path") == wanted:
-                return True
-    return False
+                out.append((j + 1, m.group(1), function_body(lines, j)))
+                break
+    return out
+
+
+def find_proof_match(text: str, module_snake: str, proof_path_cell: str) -> bool:
+    """True if `text` carries a `#[test]`-attributed function whose name contains
+    `module_snake`, which carries beside it (see `PROOF_LINE_RE`'s own comment for the window)
+    the literal line `// PROOF: <proof_path_cell>`, **and** whose body compares a value the
+    oracle produced against a value this port computed (`has_differential_comparison`)."""
+    if not proof_path_cell:
+        return False
+    oracle = oracle_names(text)
+    return any(
+        has_differential_comparison(body, oracle)
+        for _line, _name, body in proof_marked_tests(text, module_snake, proof_path_cell)
+    )
 
 
 def proof_present(row: dict[str, str], target_path: Path, tree: Path) -> bool:
@@ -339,7 +611,52 @@ def proof_present(row: dict[str, str], target_path: Path, tree: Path) -> bool:
     return False
 
 
-def derive_row_status(row: dict[str, str], tree: Path, mod_reachable: frozenset[Path]) -> str:
+def enclosing_unit_of(row: dict[str, str]) -> str | None:
+    """The `port/manifest.tsv` `path` cell this row names as its enclosing unit, if its `proof
+    path` cell takes the `enclosing: <path>` form, else None."""
+    m = PROOF_PATH_ENCLOSING_RE.match(row.get("proof path", "").strip())
+    return m.group("path") if m else None
+
+
+def enclosing_row_error(
+    row: dict[str, str], rows_by_path: dict[str, dict[str, str]]
+) -> str | None:
+    """Why this row's `enclosing: <path>` cell cannot be honoured, or None if it can.
+
+    Three ways it cannot, each failing closed rather than reading as `ported`:
+
+    - no `port/manifest.tsv` row has that `path`;
+    - that row is itself out of scope (a unit cannot be proven through a unit the port never
+      writes);
+    - that row's own `proof path` is another `enclosing:` cell. A chain is refused outright
+      rather than followed, which also makes a cycle impossible: R19's fallback is "proven
+      through its enclosing file's exported surface", and a file whose own surface is proven
+      only through a third file's is not that.
+    """
+    named = enclosing_unit_of(row)
+    if named is None:
+        return None
+    if named == row.get("path", "").strip():
+        return f"names itself ({named!r}) as its enclosing unit"
+    target = rows_by_path.get(named)
+    if target is None:
+        return f"names {named!r}, which is not a 'path' cell of port/manifest.tsv"
+    if not is_in_scope(target):
+        return f"names {named!r}, whose own row is out of scope"
+    if enclosing_unit_of(target) is not None:
+        return (
+            f"names {named!r}, whose own 'proof path' is another 'enclosing:' cell; a chain is "
+            "refused, so the enclosing unit must carry a proof path of its own"
+        )
+    return None
+
+
+def derive_row_status(
+    row: dict[str, str],
+    tree: Path,
+    mod_reachable: frozenset[Path],
+    rows_by_path: dict[str, dict[str, str]] | None = None,
+) -> str:
     """Derive one `port/manifest.tsv` row's status from the Rust tree alone (task.md's status
     rule), never reading the row's own `status` cell:
 
@@ -378,6 +695,19 @@ def derive_row_status(row: dict[str, str], tree: Path, mod_reachable: frozenset[
     if reached:
         if has_todo_or_unimpl:
             return "not-started"
+        # The `enclosing: <path>` form (R19's own fallback; docs/PORTING.md, "Decisions recorded
+        # on 2026-11-25"): this unit declares that it has no independently provable behaviour and
+        # names the in-scope unit whose proof exercises it. It then needs no `// PROOF:` marker
+        # of its own, and derives `ported` only once the named row does. A malformed or
+        # unhonourable cell derives `drafted`, never `ported`.
+        if enclosing_unit_of(row) is not None:
+            by_path = rows_by_path or {}
+            if enclosing_row_error(row, by_path) is not None:
+                return "drafted"
+            enclosing = by_path[enclosing_unit_of(row)]
+            if derive_row_status(enclosing, tree, mod_reachable, by_path) == "ported":
+                return "ported"
+            return "drafted"
         if proof_present(row, target_path, tree):
             return "ported"
         return "drafted"
@@ -412,10 +742,11 @@ def check_fuzz_targets(
     the same `required_fuzz_target_relpath`; reported once per distinct path, not once per row,
     so a module missing its fuzz target is not double-counted."""
     reported: set[str] = set()
+    rows_by_path = index_manifest(manifest_rows)
     for row in manifest_rows:
         if row.get("fuzz target", "").strip() != "required":
             continue
-        if derive_row_status(row, tree, mod_reachable) != "ported":
+        if derive_row_status(row, tree, mod_reachable, rows_by_path) != "ported":
             continue
         target_relpath = required_fuzz_target_relpath(row)
         if target_relpath in reported:
@@ -428,6 +759,107 @@ def check_fuzz_targets(
                 "missing-fuzz-target",
                 f"this row's 'fuzz target' is 'required' and its derived status is 'ported', "
                 f"but {target_relpath} does not exist",
+            )
+
+
+def proof_claim_sites(
+    row: dict[str, str], target_path: Path, tree: Path
+) -> list[tuple[str, int, str, bool]]:
+    """Every `(file, line, test name, is differential)` a row's `// PROOF: <cell>` marker is
+    claimed at, over both sanctioned positions (`crates/<crate>/tests/` and a `#[cfg(test)]`
+    module in the module file itself) -- the same two `proof_present` reads."""
+    proof_path_cell = row.get("proof path", "").strip()
+    if not proof_path_cell:
+        return []
+    module_snake = target_path.stem
+    sites: list[tuple[str, int, str, bool]] = []
+
+    def collect(relpath: str, text: str) -> None:
+        oracle = oracle_names(text)
+        for line, name, body in proof_marked_tests(text, module_snake, proof_path_cell):
+            sites.append((relpath, line, name, has_differential_comparison(body, oracle)))
+
+    crate = row.get("target crate", "").strip()
+    if crate:
+        tests_dir = tree / "crates" / crate / "tests"
+        if tests_dir.is_dir():
+            for f in sorted(tests_dir.rglob("*.rs")):
+                try:
+                    text = f.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                collect(f.relative_to(tree).as_posix(), text)
+    try:
+        module_text = target_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return sites
+    cfg_test_text = extract_cfg_test_text(module_text)
+    if cfg_test_text:
+        # Line numbers inside the extracted `#[cfg(test)]` text do not correspond to the module
+        # file's own, so the module file itself is named without one.
+        oracle = oracle_names(cfg_test_text)
+        for _line, name, body in proof_marked_tests(cfg_test_text, module_snake, proof_path_cell):
+            sites.append(
+                (
+                    target_path.relative_to(tree).as_posix(),
+                    1,
+                    name,
+                    has_differential_comparison(body, oracle),
+                )
+            )
+    return sites
+
+
+def check_proof_claims(
+    tree: Path,
+    manifest_rows: list[dict[str, str]],
+    result: ScanResult,
+) -> None:
+    """The two findings decision 4 adds (docs/PORTING.md, "Decisions recorded on 2026-11-25"),
+    both in either mode:
+
+    - `bad-enclosing-unit`: an in-scope row whose `proof path` takes the `enclosing: <path>`
+      form that cannot be honoured (see `enclosing_row_error`). Such a row derives `drafted`
+      rather than `ported`, but that alone is silent, and a cell naming a row that does not
+      exist is a defect in the manifest rather than work still to do.
+    - `proof-marker-not-differential`: a `// PROOF:` marker on a test that compares nothing the
+      oracle produced against anything this port computed. The marker claims a proof the test
+      does not give, which is the same kind of false statement the placeholder-constant rule
+      (R16) exists to catch, so it is a finding and not merely a row that stays `drafted`.
+    """
+    rows_by_path = index_manifest(manifest_rows)
+    for row in manifest_rows:
+        if not is_in_scope(row):
+            continue
+        error = enclosing_row_error(row, rows_by_path)
+        if error is not None:
+            result.fail(
+                row.get("path", "") or row.get("target module", ""),
+                1,
+                "bad-enclosing-unit",
+                f"this row's 'proof path' is {row.get('proof path', '').strip()!r}, which "
+                f"{error}",
+            )
+            continue
+        target_module_cell = row.get("target module", "").strip()
+        if not target_module_cell:
+            continue
+        target_path = tree / target_module_cell
+        if not target_path.is_file():
+            continue
+        sites = proof_claim_sites(row, target_path, tree)
+        if not sites or any(differential for _f, _l, _n, differential in sites):
+            continue
+        for relpath, line, name, _differential in sites:
+            result.fail(
+                relpath,
+                line,
+                "proof-marker-not-differential",
+                f"'{name}' carries this row's '// PROOF: "
+                f"{row.get('proof path', '').strip()}' marker, but its body compares nothing "
+                "the oracle produced against anything this port computed -- a test that only "
+                "checks a module against literals transcribed by hand is not a proof against "
+                "the oracle (R19)",
             )
 
 
@@ -606,8 +1038,11 @@ def compute_gate(
             if rs_path not in mod_reachable and carries_port_status_trailer(text):
                 gate.gated_out_count += 1
     in_scope_rows = [r for r in manifest_rows if is_in_scope(r)]
+    rows_by_path = index_manifest(manifest_rows)
     gate.remaining_count = sum(
-        1 for r in in_scope_rows if derive_row_status(r, tree, mod_reachable) != "ported"
+        1
+        for r in in_scope_rows
+        if derive_row_status(r, tree, mod_reachable, rows_by_path) != "ported"
     )
     gate.unknown_ownership_count = count_unknown_ownership_rows(tree)
     return gate
@@ -629,6 +1064,7 @@ def full_check(tree: Path) -> tuple[ScanResult, GateResult, list[tuple[str, int,
     manifest_rows = load_manifest(tree / "port" / "manifest.tsv")
     mod_reachable = compute_mod_reachable_files(tree / "crates")
     check_fuzz_targets(tree, manifest_rows, mod_reachable, result)
+    check_proof_claims(tree, manifest_rows, result)
     doc_summary = check_document_sections(tree, result)
     gate = compute_gate(tree, manifest_rows, mod_reachable)
     return result, gate, doc_summary
@@ -2244,6 +2680,109 @@ def _check_perf_reason_excludes_doc_comment() -> list[str]:
     return []
 
 
+def _check_enclosing_and_differential() -> list[str]:
+    """Decision 4 (docs/PORTING.md, "Decisions recorded on 2026-11-25"), checked through
+    `derive_row_status` itself rather than only through exit codes: the `enclosing: <path>`
+    proof-path form, and the rule that a `// PROOF:` marker counts only over a test comparing
+    something the oracle produced against something this port computed."""
+    failures: list[str] = []
+
+    def status_of(tree_name: str, target_module: str) -> str:
+        tree = FIXTURES_ROOT / tree_name
+        rows = load_manifest(tree / "port" / "manifest.tsv")
+        mod_reachable = compute_mod_reachable_files(tree / "crates")
+        rows_by_path = index_manifest(rows)
+        matching = [r for r in rows if r.get("target module") == target_module]
+        if len(matching) != 1:
+            failures.append(
+                f"{tree_name}: expected exactly one row naming {target_module!r}, got "
+                f"{len(matching)}"
+            )
+            return "<no row>"
+        return derive_row_status(matching[0], tree, mod_reachable, rows_by_path)
+
+    helper = "crates/slic3r-status/src/helper_mod.rs"
+    ported = "crates/slic3r-status/src/ported_mod.rs"
+
+    cases = [
+        # (fixture, target module, expected status, why)
+        ("enclosing-unit-ported", helper, "ported", "its enclosing unit's row is ported"),
+        ("enclosing-unit-ported", ported, "ported", "it carries its own differential proof"),
+        (
+            "enclosing-unit-not-ported",
+            helper,
+            "drafted",
+            "its enclosing unit's row is not ported (no proof is present for it)",
+        ),
+        (
+            "enclosing-unit-missing",
+            helper,
+            "drafted",
+            "its 'enclosing:' cell names a path no manifest row carries",
+        ),
+        (
+            "enclosing-unit-chain",
+            helper,
+            "drafted",
+            "its enclosing unit's own proof path is another 'enclosing:' cell",
+        ),
+        (
+            "proof-not-differential",
+            ported,
+            "drafted",
+            "its '// PROOF:' marker sits on a test that compares nothing the oracle produced",
+        ),
+    ]
+    for tree_name, target, want, why in cases:
+        got = status_of(tree_name, target)
+        if got != want:
+            failures.append(
+                f"{tree_name}: expected {target} to derive {want!r} ({why}), got {got!r}"
+            )
+
+    # The findings, through `full_check`, so the rules are checked where they actually run.
+    for tree_name, expected_rules in [
+        ("enclosing-unit-ported", []),
+        ("enclosing-unit-not-ported", []),
+        ("enclosing-unit-missing", ["bad-enclosing-unit"]),
+        ("enclosing-unit-chain", ["bad-enclosing-unit", "bad-enclosing-unit"]),
+        ("proof-not-differential", ["proof-marker-not-differential"]),
+    ]:
+        result, _gate, _docs = full_check(FIXTURES_ROOT / tree_name)
+        got_rules = sorted(f.rule for f in result.findings)
+        if got_rules != sorted(expected_rules):
+            failures.append(
+                f"{tree_name}: expected findings {sorted(expected_rules)!r}, got "
+                f"{[f.render() for f in result.findings]}"
+            )
+
+    # `has_differential_comparison` itself, against the two shapes the first port attempts
+    # produced and the three the proofs on `main` use -- a direct check, so a change that made
+    # the predicate vacuously true (or false) is caught here and not only through a fixture.
+    oracle = frozenset({"dumps", "proof_units", "path1_flags", "oracle_call"})
+    shapes = [
+        # (body, expected, why)
+        ('let expected: u32 = 0b111;\nassert_eq!(actual, expected);', False,
+         "no oracle value is read at all (PR #57's enum_bitmask proof)"),
+        ('let dump = dumps::read("x");\nassert_eq!(dump.seam, "psWipeTower");', False,
+         "the oracle value is compared only against a literal (PR #54's lifecycle proof)"),
+        ('let oracle = path1_flags();\nassert_eq!(oracle.len(), PORTED_FLAGS.len());', True,
+         "an oracle value against a value the module computed"),
+        ('let (a, b) = oracle_call();\nassert_eq!(PORTED, a);\nassert_eq!(OTHER, b);', True,
+         "a tuple binding off one oracle call"),
+        ('let oracle = path1_flags();\nassert!(agrees(ported, oracle));', True,
+         "both sides inside one argument"),
+    ]
+    for body, want, why in shapes:
+        got = has_differential_comparison(body, oracle)
+        if got != want:
+            failures.append(
+                f"has_differential_comparison({body!r}) expected {want} ({why}), got {got}"
+            )
+
+    return failures
+
+
 def _check_external_port_src_markers() -> list[str]:
     """The `// PORT SRC: external:` form, checked for what it actually *collects* rather than
     only for the absence of findings (docs/PORTING.md, "Decisions recorded on 2026-11-25"): the
@@ -2593,6 +3132,19 @@ def run_selftest() -> int:
     for failure in doc_comment_failures:
         click.echo(f"self-test: perf-backlog reason/doc-comment check FAILED: {failure}")
 
+    enclosing_failures = _check_enclosing_and_differential()
+    if enclosing_failures:
+        for failure in enclosing_failures:
+            click.echo(f"self-test: enclosing/differential check FAILED: {failure}")
+    else:
+        click.echo(
+            "self-test: enclosing-and-differential: OK (an 'enclosing: <path>' row derives "
+            "ported only once the named row does, a cell naming no row or naming another "
+            "'enclosing:' row is a bad-enclosing-unit finding and derives drafted, and a "
+            "'// PROOF:' marker over a test that compares nothing the oracle produced is a "
+            "proof-marker-not-differential finding and derives drafted)"
+        )
+
     external_marker_failures = _check_external_port_src_markers()
     if external_marker_failures:
         for failure in external_marker_failures:
@@ -2657,6 +3209,7 @@ def run_selftest() -> int:
         not regex_failures
         and not perf_row_failures
         and not doc_comment_failures
+        and not enclosing_failures
         and not external_marker_failures
         and not manifest_shape_failures
         and not status_derivation_failures
@@ -3186,7 +3739,34 @@ status is derived from the Rust tree, never read from its own "status" cell -- "
 mod declaration reaching the target file, no todo!()/unimplemented!(), and a "// PROOF: <proof
 path>" marker beside a #[test] naming the module; "drafted" is everything short of that with
 either a PORT STATUS trailer (no mod line yet) or a mod line with no proof; anything else is
-"not-started". --per-commit runs every check above plus the required-fuzz-target check (a
+"not-started".
+\b
+A "// PROOF:" marker counts only over a test that compares a value the ORACLE produced against a
+value this port computed (docs/PORTING.md, "Decisions recorded on 2026-11-25"). The oracle's own
+entry points are the per-unit proof bridges slic3r-proof re-exports and the committed stage
+dumps (slic3r_proof::proof_units::..., slic3r_proof::dumps), plus an extern "C" declaration; a
+comparison counts when its arguments name both a value bound from one of those and a different
+identifier of its own that is neither a literal nor a field or method name. A marker over a test
+that reaches no oracle, or that compares an oracle value only against a literal, is a
+`proof-marker-not-differential` finding and its row stays "drafted". Stated limit: a
+hand-transcribed named constant in the test's own scope is not mechanically distinguishable from
+the ported module's own `pub const`, so that case still counts here and remains a reviewer's
+judgement.
+\b
+A row whose `proof path` cell reads "enclosing: <path>" declares that its unit has no
+independently provable behaviour and names the in-scope unit whose proof exercises it, by that
+unit's own port/manifest.tsv `path` cell (R19's "Where even that is not possible the row says so
+and the helper is proven through its enclosing file's exported surface"). Such a row needs no
+"// PROOF:" marker of its own and derives "ported" only when its module exists, a mod line
+reaches it, it holds no todo!()/unimplemented!(), AND the named row is itself "ported". A cell
+naming no manifest row, naming an out-of-scope row, naming itself, or naming a row whose own
+proof path is another "enclosing:" cell (a chain, which is refused, so a cycle is impossible) is
+a `bad-enclosing-unit` finding and derives "drafted", never "ported". The cell lives in the
+manifest's existing `proof path` column, which port/inventory carries forward verbatim, so only
+a regeneration or amendment pull request sets it -- never a port task, which may not write
+port/manifest.tsv.
+\b
+--per-commit runs every check above plus the required-fuzz-target check (a
 "required" row that is "ported" needs crates/slic3r-ffi/fuzz/fuzz_targets/<crate>_<module>.rs,
 that exact path) and the two document-section checks (R12/R13/R29, docs/PORTING.md and
 docs/WORKFLOW.md's exact headings) -- and passes while a row is "not-started" or "drafted". Only

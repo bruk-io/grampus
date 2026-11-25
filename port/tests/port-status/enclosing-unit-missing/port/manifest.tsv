@@ -1,0 +1,2 @@
+path	target crate	target module	in scope or out with a reason	equality tier	proof path	fuzz target
+Geometry/Circle.hpp	slic3r-status	crates/slic3r-status/src/helper_mod.rs	in	exact	enclosing: NoSuchFile.hpp	n/a

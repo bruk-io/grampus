@@ -1,0 +1,3 @@
+path	target crate	target module	in scope or out with a reason	equality tier	proof path	fuzz target
+Geometry.hpp	slic3r-status	crates/slic3r-status/src/ported_mod.rs	in	exact	3	n/a
+Geometry/Circle.hpp	slic3r-status	crates/slic3r-status/src/helper_mod.rs	in	exact	enclosing: Geometry.hpp	n/a

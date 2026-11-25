@@ -14,10 +14,14 @@ fn compute() -> i32 {
 
 #[cfg(test)]
 mod tests {
+    use super::compute;
+    use slic3r_proof::proof_units::ported_mod::path3_compute;
+
     // PROOF: 3
     #[test]
     fn ported_mod_matches_oracle() {
-        assert_eq!(1 + 1, 2);
+        let oracle = path3_compute();
+        assert_eq!(compute(), oracle);
     }
 }
 
