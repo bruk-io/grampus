@@ -681,6 +681,19 @@ def classify_comment_marker(text: str) -> tuple[str, str] | None:
 # PORT SRC: <vendored path>:<line>
 PORT_SRC_RE = re.compile(r"PORT SRC:\s*(?P<path>\S+):(?P<line>\d+)")
 
+# The second sanctioned form of the `// PORT SRC:` marker (docs/PORTING.md, "Decisions recorded
+# on 2026-11-25"): a constant whose origin is outside the vendored tree, where there is no
+# vendored line to cite. The text after "external:" names what defines the value -- the C
+# standard clause, or a named linked library and version with file and line under the superbuild
+# -- and is NOT looked up: it is audited by a reviewer, which is why every external marker is
+# counted and printed separately below.
+#
+# Matched BEFORE `PORT_SRC_RE` and never in addition to it, because an external marker's own
+# prose can contain a `name:digits` pair that `PORT_SRC_RE` would otherwise read as a vendored
+# path and line (an ISO standard reference such as "ISO/IEC 9899:2018" is exactly that shape),
+# and the resulting lookup would fail on a marker that is correctly written.
+PORT_SRC_EXTERNAL_RE = re.compile(r"PORT SRC:\s*external:(?P<what>.*)$")
+
 TRAILER_HEADER = "// PORT STATUS"
 TRAILER_KEY_RE = re.compile(r"^//\s*(?P<key>source|confidence|tier|oracle):\s*(?P<value>.*)$")
 # The order the trailer's non-'source:' keys must appear in, after any 'source:' lines.
@@ -729,11 +742,24 @@ class Finding:
         return f"{self.path}:{self.line}: {self.rule}: {self.message}"
 
 
+@dataclass(frozen=True)
+class ExternalMarker:
+    """One accepted `// PORT SRC: external: <what>` marker (docs/PORTING.md, "Decisions recorded
+    on 2026-11-25"): where it is, and what it says defines the constant. Collected and printed
+    separately from the per-marker counts because nothing checks the text -- a reviewer checks
+    every one of these against the source it cites, and cannot do that without a list."""
+
+    path: str
+    line: int
+    what: str
+
+
 @dataclass
 class ScanResult:
     findings: list[Finding] = field(default_factory=list)
     marker_counts: dict[str, int] = field(default_factory=lambda: dict.fromkeys(MARKER_WHITELIST, 0))
     modules_scanned: int = 0
+    external_markers: list[ExternalMarker] = field(default_factory=list)
 
     def fail(self, path: str, line: int, rule: str, message: str) -> None:
         self.findings.append(Finding(path, line, rule, message))
@@ -1480,10 +1506,40 @@ def check_numeric_constants(path: str, lines: list[LineInfo], result: ScanResult
 
         covering_idx = contiguous_comment_block_above(lines, i) + ([i] if info.comment else [])
         markers: list[tuple[int, str, int]] = []  # (line_idx, path, line_no)
+        # The external form (docs/PORTING.md, "Decisions recorded on 2026-11-25"): one entry per
+        # covering comment line that carries `// PORT SRC: external: <what>`. A line matching it
+        # is never also read by PORT_SRC_RE -- see PORT_SRC_EXTERNAL_RE's own comment -- so the
+        # two forms cannot be parsed out of the same marker two different ways.
+        external_covering = 0
         for j in covering_idx:
             comment_text = lines[j].comment if j == i else lines[j].raw
+            external = PORT_SRC_EXTERNAL_RE.search(comment_text)
+            if external is not None:
+                what = external.group("what").strip()
+                if not what:
+                    result.fail(
+                        path,
+                        j + 1,
+                        "empty-external-port-src",
+                        "'// PORT SRC: external:' names nothing after the colon; the external "
+                        "form must say specifically what defines the constant (the standard "
+                        "clause, or a named linked library and version with its file and line "
+                        "under the superbuild), because a reviewer audits that text and nothing "
+                        "looks it up",
+                    )
+                    continue
+                external_covering += 1
+                result.external_markers.append(ExternalMarker(path, j + 1, what))
+                continue
             for m in PORT_SRC_RE.finditer(comment_text):
                 markers.append((j, m.group("path"), int(m.group("line"))))
+
+        # An accepted external marker covers every literal on the line it covers, with no
+        # vendored lookup and no per-marker direction (there is no cited line to match a literal
+        # against). It never suppresses the rule for an unmarked literal -- a line with neither
+        # form of marker still fails below.
+        if external_covering:
+            continue
 
         if not markers:
             for lm in literal_matches:
@@ -2086,6 +2142,12 @@ SELFTEST_FIXTURES: list[tuple[str, bool, str | None]] = [
     # misspelled row is a manifest defect, not a trailer defect. See the fixture's own comment.
     ("manifest-row-typo-no-trailer", True, None),
     ("missing-port-src", False, "missing-port-src"),
+    # The `// PORT SRC: external:` form (docs/PORTING.md, "Decisions recorded on 2026-11-25"):
+    # the accepted form in both of the vendored form's own positions, the empty form, and a file
+    # where an accepted external marker leaves an unmarked literal on another line still failing.
+    ("port-src-external-accepted", True, None),
+    ("port-src-external-empty", False, "empty-external-port-src"),
+    ("port-src-external-does-not-exempt", False, "missing-port-src"),
     ("placeholder-constant", False, "placeholder-constant"),
     ("two-literals-one-marker", False, "placeholder-constant"),
     ("marker-matches-no-literal", False, "unmatched-port-src"),
@@ -2180,6 +2242,86 @@ def _check_perf_reason_excludes_doc_comment() -> list[str]:
     if reason != expected:
         return [f"expected reason {expected!r} (doc comment excluded), got {reason!r}"]
     return []
+
+
+def _check_external_port_src_markers() -> list[str]:
+    """The `// PORT SRC: external:` form, checked for what it actually *collects* rather than
+    only for the absence of findings (docs/PORTING.md, "Decisions recorded on 2026-11-25"): the
+    accepted fixture must yield exactly its two markers, with their line numbers and their text,
+    so a bug that silently treated the line as an exempt position -- which would also produce no
+    finding -- fails here. The empty form must add no marker at all, and the non-exemption
+    fixture must still report its unmarked literal while collecting its one good marker."""
+    failures: list[str] = []
+
+    accepted = scan_tree(FIXTURES_ROOT / "port-src-external-accepted")
+    got = [
+        (m.path, m.line, m.what)
+        for m in sorted(accepted.external_markers, key=lambda m: (m.path, m.line))
+    ]
+    want = [
+        (
+            "crates/slic3r-circle/src/circle.rs",
+            5,
+            "ISO/IEC 9899:2018 7.21.6.1 p8 -- %g renders in scientific notation when",
+        ),
+        (
+            "crates/slic3r-circle/src/circle.rs",
+            11,
+            "C17 7.21.6.1 p8 -- the default precision of %g",
+        ),
+        (
+            "crates/slic3r-circle/src/circle.rs",
+            17,
+            "9899:2018 7.21.6.1 p8 -- the same clause, spelled with no space",
+        ),
+    ]
+    if got != want:
+        failures.append(
+            f"port-src-external-accepted: expected the external markers {want!r}, got {got!r}"
+        )
+
+    empty = scan_tree(FIXTURES_ROOT / "port-src-external-empty")
+    if empty.external_markers:
+        failures.append(
+            "port-src-external-empty: expected no accepted external marker, got "
+            f"{empty.external_markers!r}"
+        )
+    if not any(f.rule == "empty-external-port-src" for f in empty.findings):
+        failures.append(
+            "port-src-external-empty: expected an 'empty-external-port-src' finding, got "
+            f"{[f.render() for f in empty.findings]}"
+        )
+
+    mixed = scan_tree(FIXTURES_ROOT / "port-src-external-does-not-exempt")
+    if len(mixed.external_markers) != 1:
+        failures.append(
+            "port-src-external-does-not-exempt: expected exactly 1 accepted external marker, "
+            f"got {mixed.external_markers!r}"
+        )
+    unmarked = [f for f in mixed.findings if f.rule == "missing-port-src"]
+    if len(unmarked) != 1 or "0.0125" not in unmarked[0].message:
+        failures.append(
+            "port-src-external-does-not-exempt: expected exactly one 'missing-port-src' finding "
+            f"naming 0.0125, got {[f.render() for f in mixed.findings]}"
+        )
+
+    # The whole reason the external form is matched first, pinned directly against the two
+    # regexes as well as end-to-end by the fixture's third marker above: an external marker's own
+    # text can be a `<something>:<digits>` pair, which the vendored form would read as a path and
+    # a line and then fail to find at the pin. Measured rather than assumed: the ordinary
+    # spelling, with a space after "external:", does NOT collide (the vendored form requires
+    # `\\S+:\\d+` immediately after "PORT SRC:"), so the one spelling that does is asserted here.
+    colliding = "PORT SRC: external:9899:2018 7.21.6.1 p8 -- the same clause"
+    if PORT_SRC_RE.search(colliding) is None:
+        failures.append(
+            "the vendored-form regex no longer reads a vendored path and line out of "
+            f"{colliding!r}, so the match-external-first ordering this check exists to pin is no "
+            "longer load-bearing; re-derive it rather than deleting this assertion"
+        )
+    if PORT_SRC_EXTERNAL_RE.search(colliding) is None:
+        failures.append(f"the external form no longer matches {colliding!r}")
+
+    return failures
 
 
 def _check_manifest_shape_guard() -> list[str]:
@@ -2451,6 +2593,18 @@ def run_selftest() -> int:
     for failure in doc_comment_failures:
         click.echo(f"self-test: perf-backlog reason/doc-comment check FAILED: {failure}")
 
+    external_marker_failures = _check_external_port_src_markers()
+    if external_marker_failures:
+        for failure in external_marker_failures:
+            click.echo(f"self-test: external '// PORT SRC: external:' check FAILED: {failure}")
+    else:
+        click.echo(
+            "self-test: port-src-external: OK (the accepted form is collected with its line and "
+            "its text from both the comment-block and trailing-comment positions, the empty form "
+            "is a finding and adds no marker, and an accepted marker leaves an unmarked literal "
+            "on another line still failing)"
+        )
+
     manifest_shape_failures = _check_manifest_shape_guard()
     if manifest_shape_failures:
         for failure in manifest_shape_failures:
@@ -2503,6 +2657,7 @@ def run_selftest() -> int:
         not regex_failures
         and not perf_row_failures
         and not doc_comment_failures
+        and not external_marker_failures
         and not manifest_shape_failures
         and not status_derivation_failures
         and not status_gate_failures
@@ -2959,6 +3114,24 @@ contiguous comment line immediately above), or every literal on the line is exem
 one marker may cover a line; each marker must match at least one literal on the line it covers,
 and every non-exempt literal must be matched by at least one covering marker's cited line.
 \b
+"Immediately above" means with NO BLANK LINE between the marker and the literal's line: a
+contiguous run of "//" comment lines, ending on the line before the literal. A marker separated
+from its literal by a blank line does not cover it.
+\b
+The marker's second sanctioned form, for a constant whose origin is OUTSIDE the vendored tree
+(docs/PORTING.md, "Decisions recorded on 2026-11-25"):
+\b
+    // PORT SRC: external: <what defines it, specifically>
+\b
+e.g. "// PORT SRC: external: C17 7.21.6.1 p8 -- %g uses scientific notation when the exponent
+is less than -4". It covers every literal on its line with no vendored-line lookup, because
+there is no vendored line to look up; the text after "external:" must be non-empty (an empty one
+is an `empty-external-port-src` finding), and nothing checks what it says. Every accepted
+external marker is counted AND listed, separately from the per-marker counts, so a reviewer can
+audit each against the source it cites -- which docs/WORKFLOW.md requires them to do. It does
+not widen the exempt literal set and it suppresses nothing: a literal with no marker of either
+form still fails.
+\b
 Exempt literal set (closed): the integers 0, 1 and 2 and their negatives -- structural indices,
 arities and strides, not transcribed constants. Every other literal, including every float,
 needs a marker.
@@ -3146,6 +3319,18 @@ def main(
         f"port-status ({mode}): {result.modules_scanned} module(s) scanned, "
         f"{len(result.findings)} finding(s); marker counts: {counts}"
     )
+    # Printed separately from the per-marker counts, and listed in full, because nothing checks
+    # an external marker's text: a reviewer is required to check every one of these against the
+    # source it cites (docs/WORKFLOW.md, "Decisions that govern over a task's file list"), and
+    # cannot do that from a count alone.
+    click.echo(
+        f"port-status ({mode}): {len(result.external_markers)} external '// PORT SRC: external:' "
+        "marker(s), each to be checked by a reviewer against the source it cites"
+    )
+    for marker in sorted(result.external_markers, key=lambda m: (m.path, m.line)):
+        click.echo(
+            f"port-status ({mode}): external marker {marker.path}:{marker.line}: {marker.what}"
+        )
     for doc_relpath, required_count, present_count in doc_summary:
         if present_count == required_count:
             click.echo(
