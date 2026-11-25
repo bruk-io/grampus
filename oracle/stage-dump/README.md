@@ -77,31 +77,31 @@ The two print-wide seams each read a named, narrower subset of their own field:
   their stored order; and `PrintObject::object_skirt()` for every print object (`Print::objects()`
   order) -- one `object_skirt` record per object always, even when its own collection is empty.
 
-**Record shapes.** Every record's first token is `field=<name>`. Every geometry record (an
-`ExPolygons`, `SurfaceCollection` or `ExtrusionEntityCollection` field, and the
-`skirt_brim_groups` count line) then carries `layer=<L>` and `region=<R>`; a scalar field
-(`print_z`, `slice_z`, `height`, every `wipe_tower_*` field) carries `layer=<L>` only, since it
-has no region axis at all and saying so twice per line would add nothing a reader could use.
-`L`/`R` is a 0-based index into the collection named above, or the sentinel
-`-` where that axis does not apply (every print-wide field; `region` for a field that has no
-per-region structure, i.e. `lslices`, `support_islands`, `support_fills`, and the scalar
-per-layer fields). A support-layer field carries its own `support_layer=<S>` key alongside
-`layer=-`, since it indexes a different collection (`support_layers()`) than `layer` does
-(`layers()`) and the two must never be read as the same axis. `psSkirtBrim`'s own
-`skirt_brim_group_*` and `object_skirt` records carry an additional `group=<g>` /
-`brim=<b> filament_id=<f>` / `object=<o>` key for the same reason -- so a record names everything
-needed to place it without depending on which dump or which line it came from.
+**Record shapes.** Every record's first token is `field=<name>`, and every record -- with no
+exception -- then carries both `layer=<L>` and `region=<R>` (task.md's own wording: "Each record
+names the field it came from and the layer and region index it belongs to"). `L`/`R` is a
+0-based index into the collection named above, or the sentinel `-` where that axis does not
+apply: every print-wide field carries `layer=-` and `region=-`; a per-layer scalar
+(`print_z`/`slice_z`/`height`) carries its real `layer` but `region=-`, since it has no
+per-region structure; `lslices`, `support_islands` and `support_fills` carry `region=-` for the
+same reason. A support-layer field carries its own `support_layer=<S>` key alongside `layer=-`,
+since it indexes a different collection (`support_layers()`) than `layer` does (`layers()`) and
+the two must never be read as the same axis. `psSkirtBrim`'s own `skirt_brim_group_*` and
+`object_skirt` records carry an additional `group=<g>` / `brim=<b> filament_id=<f>` /
+`object=<o>` key for the same reason -- so a record names everything needed to place it without
+depending on which dump or which line it came from.
 
 - A scalar field (`print_z`, `slice_z`, `height`, each `wipe_tower_*` field): one line,
-  `field=... layer=<L|-> value=<v>`. A `coordf_t`/`double` or `float` value is written with C's
-  `%a` conversion -- a hexadecimal floating-point literal, exact for the value held (a `float` is
-  promoted to `double` for the formatter and never narrowed back). This is the one floating-point
-  form this program ever writes; a `coord_t` coordinate is never written this way, and no field
-  this program writes is ever formatted as a plain decimal float. `wipe_tower_number_of_toolchanges`
-  is an `int`, written as a plain decimal integer, same as a coordinate. `wipe_tower_bbx` and
-  `wipe_tower_rib_offset` are two-line exceptions with `min=`/`max=`/`value=` holding a
-  comma-separated pair of `%a` values, since a bounding box and a 2D offset are each two scalars,
-  not one.
+  `field=... layer=<L|-> region=- value=<v>`. A `coordf_t`/`double` or `float` value is written
+  with C's `%a` conversion -- a hexadecimal floating-point literal, exact for the value held (a
+  `float` is promoted to `double` for the formatter and never narrowed back). This is the one
+  floating-point form this program ever writes; a `coord_t` coordinate is never written this way,
+  and no field this program writes is ever formatted as a plain decimal float.
+  `wipe_tower_number_of_toolchanges` is an `int`, written as a plain decimal integer (same as a
+  coordinate) with the same `layer=- region=-` prefix as every other `wipe_tower_*` field.
+  `wipe_tower_bbx` and `wipe_tower_rib_offset` are two-line exceptions, also carrying that same
+  prefix, with `min=`/`max=`/`value=` holding a comma-separated pair of `%a` values, since a
+  bounding box and a 2D offset are each two scalars, not one.
 - An `ExPolygons` field (`lslices`, `raw_slices`, `support_islands`): one summary line,
   `... count=<n>` (the polygon count), then, for each polygon in its stored order (never
   sorted), one line per ring -- the contour, then each hole in `ExPolygon::holes`' own order --
@@ -116,21 +116,41 @@ needed to place it without depending on which dump or which line it came from.
 - An `ExtrusionEntityCollection` field (`thin_fills`, `perimeters`, `fills`, `support_fills`,
   `skirt`, `skirt_brim_group_skirt`, `skirt_brim_group_brim`, `object_skirt`): one summary line,
   `... count=<n>` (the collection's own total leaf-path count, defined next), then one line per
-  leaf path, `... path=<p> role=<ExtrusionRole> loop=<0|1> n=<k> pts=<k space-separated "x,y,z"
+  leaf path, `... path=<p> role=<ExtrusionRole> loop=<L|-> n=<k> pts=<k space-separated "x,y,z"
   triples>`. The walk that produces this descends into a nested `ExtrusionEntityCollection` in
   place (a grouping collection contributes no record of its own, only its leaves) and, for an
-  `ExtrusionLoop` or an `ExtrusionMultiPath`, visits each of its own `paths` in turn -- both hold
-  an `ExtrusionPaths` vector and own no geometry beyond it. `path` is a running counter over the
-  whole top-level collection, assigned in this same walk order (the library's own stored order,
-  never sorted), so it names a path without depending on which container held it. `role` is
-  `ExtrusionEntity::role_to_string`'s own name for the leaf path's `ExtrusionRole` (e.g.
-  `Inner wall`, `Bottom surface`, `Skirt`, `Brim`). `loop` is `1` when the path's nearest ancestor
-  was an `ExtrusionLoop` (closed) and `0` when it was a bare `ExtrusionPath` or an
-  `ExtrusionMultiPath` (open) -- a fact about the path's own shape, not a coordinate, so it is
-  written as a plain `0`/`1`, never through `%a`. `x`/`y`/`z` are the path's `Polyline3`'s own
-  `Point3` coordinates (three `coord_t` per point, `z` usually `0` outside Z-contouring), written
-  as plain decimal integers in stored order. A path's own `width`/`height`/`mm3_per_mm`/
-  `overhang_degree`/`smooth_speed` are not written; see "Decisions".
+  `ExtrusionLoop` or an `ExtrusionMultiPath`, visits each of its own `paths` in turn -- an
+  `ExtrusionPath` holds the `ExtrusionPaths` vector both read, and neither `ExtrusionLoop` nor
+  `ExtrusionMultiPath` itself adds further points to it, which is everything this program reads
+  (see "Decisions" for the two vendored subclasses that do own more geometry, and why neither is
+  reachable here). `path` is a running counter over the whole top-level collection, assigned in
+  this same walk order (the library's own stored order, never sorted), so it names a path
+  without depending on which container held it. `role` is `ExtrusionEntity::role_to_string`'s own
+  name for the leaf path's `ExtrusionRole`, with every space replaced by `_` (e.g. `Inner_wall`,
+  `Bottom_surface`, `Skirt`, `Brim`) so a value never spans more than one whitespace-delimited
+  token -- see "Decisions". `loop` is the 0-based index of the `ExtrusionLoop` this path's
+  nearest ancestor was, assigned in walk order (a new index at each loop boundary, shared by
+  every path of that same loop), or the sentinel `-` when the nearest ancestor was a bare
+  `ExtrusionPath` or an `ExtrusionMultiPath` (open) -- a fact about the path's own shape, not a
+  coordinate, so it is written through the same `-` sentinel as `layer`/`region`, never through
+  `%a`. `x`/`y`/`z` are the path's `Polyline3`'s own `Point3` coordinates (three `coord_t` per
+  point, `z` usually `0` outside Z-contouring), written as plain decimal integers in stored
+  order. A path's own `width`/`height`/`mm3_per_mm`/`overhang_degree`/`smooth_speed` are not
+  written; see "Decisions". Note also that this walk's own flattening of nested collections
+  drops `ExtrusionEntityCollection::no_sort`, `ExtrusionLoop::loop_role()` and `ExtrusionLoop::
+  print_after_infill` -- see "Decisions" for what that means for a consumer comparing stages.
+
+**What the committed corpus covers.** `port/dumps/20mm_cube-base-fff/` holds one dump per seam
+that fired for that fixture and configuration -- 10 files, not all 11 of R5's seams:
+`posContouring` does not fire for `20mm_cube` (a non-belt fixture; Z-contouring is belt-printer
+only), and `posEstimateCurledExtrusions` never fires for a sliced object at all (R5's own
+account). Neither the `support_islands`/`support_fills` fields nor `20mm_cube`'s own
+`posSupportMaterial.dump` carry a `support_layer=` record, because `base-fff` has no support
+material enabled; a fixture built with `enable_support=1` is what would exercise those two
+fields. This is not a gap in this task -- `20mm_cube base-fff` is task `11-fixture-set`'s own
+frozen fixture and configuration, and this task's own file list and "Done when" do not ask for a
+second corpus -- but a consumer reading this corpus as proof that every field this format can
+write has been exercised at least once would be wrong, so it is recorded here.
 
 **The "did not fire" roster**, separate from any one dump file: `dump_seams.cpp` itself tracks
 which of R5's eleven seams, plus `posEstimateCurledExtrusions` (reported as not fired rather than
@@ -406,3 +426,76 @@ Task `26-stage-dump-seams`'s own decisions, filling `dump_seams.cpp`'s body:
   targeted it; a `std::to_chars(double)` shortest-decimal path is a newer, less uniformly
   available piece of `libc++` across toolchains, and the task's own wording allows either form
   as long as `README.md` names which: this is that naming.
+- **An `ExtrusionLoop` or `ExtrusionMultiPath` is read as owning no geometry beyond its own
+  `paths` vector, which is true of every one this program observes but not true of every
+  vendored subclass.** `ExtrusionLoopSloped : public ExtrusionLoop` adds its own `starts`/`ends`
+  vectors of `ExtrusionPathSloped`, which `get_all_paths()` returns alongside `paths` and which
+  this program's walk would silently drop; `ExtrusionPathContoured : public ExtrusionPath` adds
+  its own `z_diffs`. Checked, not assumed: `ExtrusionLoopSloped` is constructed only as a
+  G-code-time local inside `GCode.cpp`, and `ContourZ.cpp` throws on encountering one, so it
+  never reaches any of these eleven seams; `ExtrusionPaths` is `std::vector<ExtrusionPath>` by
+  value, so no subclass can hide inside a loop's own `paths` either. `z_diffs` is reachable only
+  through `posContouring`, which does not fire for the non-belt `20mm_cube` fixture this task's
+  own corpus uses. Neither gap is live today; a belt-printer fixture would need this walk widened
+  first.
+- **Every record carries both `layer=` and `region=`, even a scalar or print-wide field that has
+  no such axis (sentinel `-`).** An earlier revision of this file let a scalar field (`print_z`,
+  `slice_z`, `height`, every `wipe_tower_*` field) carry `layer=` alone, on the reasoning that a
+  field with no region axis gains nothing from saying so. Task.md's own wording for this task is
+  unconditional -- "Each record names the field it came from and the layer and region index it
+  belongs to" -- and its "Done when" repeats it ("each record naming the field, the layer index
+  and the region index it came from"), with no carve-out for a scalar. `kv_idx`'s `-` sentinel
+  already existed for exactly this case, so the carve-out bought nothing but a second rule for a
+  reader to remember; `write_double_field`, `write_int_field` and the `wipe_tower_bbx`/
+  `rib_offset` records now all write `region=-` (or `layer=-` and `region=-` for a print-wide
+  field) uniformly with every other record in the file.
+- **A leaf path's `role=` value has every space replaced with `_`.**
+  `ExtrusionEntity::role_to_string`'s own display names are one to three words long depending on
+  the `ExtrusionRole` (`Inner wall`, `Internal solid infill`, `Internal Bridge`), and an
+  unescaped space inside a `key=value` token breaks a reader that recovers a line's fields by
+  splitting on whitespace -- which this format's own "self-describing, find a value by its key"
+  claim otherwise invites. The substitution is mechanical and reversible (no role name contains
+  an underscore of its own) and stays derived from the library's own table rather than a second,
+  hand-maintained name list this file would have to keep in step with `ExtrusionEntity::
+  role_to_string`.
+- **`loop=` is the 0-based index of the `ExtrusionLoop` a path's nearest ancestor was, not a
+  `0`/`1` flag for whether it had one.** The flag this task originally wrote could not tell one
+  `ExtrusionLoop` of four paths from four `ExtrusionLoop`s of one path each -- both serialise as
+  four `loop=1` lines -- even though which of the two actually happened is part of the library's
+  real state at that seam. Assigning each loop its own index at the point the walk enters it
+  (shared by every path of that same loop, reset by nothing a nested collection does) recovers
+  that distinction at the cost of one key already in the record; a bare `ExtrusionPath` or an
+  `ExtrusionMultiPath`'s own path still gets the `-` sentinel, since neither groups its paths
+  into anything a loop index would mean.
+- **The walk still flattens a collection's own nesting, and still does not write
+  `ExtrusionEntityCollection::no_sort`, `ExtrusionLoop::loop_role()` or `ExtrusionLoop::
+  print_after_infill`.** Widening the `loop=` key (above) closes the one gap a reviewer
+  demonstrated concretely -- a single-loop-of-many-paths collection serialising identically to
+  a many-loops-of-one-path collection -- without changing the record shape. The remaining gap is
+  real and is left open on purpose: a port whose perimeter grouping, sort order or G-code
+  emission order diverges from the oracle's, while producing the same leaf paths in the same
+  walk order, would still serialise identically here. R5 and this task's own "the state each
+  seam reads" name the containing collections (`perimeters`, `fills`, `thin_fills`,
+  `support_fills`) and not their internal grouping, `no_sort` flag or loop role, so adding those
+  is out of this task's own field list; a dump equality here is therefore evidence the leaf
+  geometry and role match, not evidence the grouping or emission order does too. Whichever task
+  compares stages (`39-compare-stages`) or proves dumps against the port (`32-proof-dumps-fuzz`)
+  should read this as a known limit of this format, not read a stage match as proof of full
+  structural equality.
+- **The "did not fire" roster prints nothing, rather than naming every seam, for a run where
+  arming itself silently failed.** Registration of the `std::atexit` roster handler is lazy (on
+  the first successful `dump_seam` call), which is correct for the `--unarmed` comparison run
+  `just oracle-dump` also makes, since that run never calls `dump_seam` at all and should print
+  no roster. The same laziness means a run that was meant to be armed but, for some reason this
+  task did not reproduce, never fires a single seam also prints no roster -- "did not fire: X"
+  for every X -- rather than naming the gap. Fixing this needs `dump_main.cpp` (to register the
+  roster from the armed path directly, independent of whether any seam fired) or a print in that
+  file when arming is known but the fired set stays empty; both are out of this task's own file
+  list (`dump_main.cpp` is frozen by task `25-stage-dumper`'s "Done when"). Left as a carried note
+  for whichever task next touches `dump_main.cpp`.
+- **`docs/ORACLE.md`'s missing "Built oracle flags" section is a carried gap, not fixed here.**
+  See this file's "What it proves and what it does not" section above. Once that section exists
+  (R6/R7's own ask, `-ffp-contract=off` included) and `oracle/provenance --oracle built` can
+  resolve it, the ten dumps this task commits should be regenerated so their `oracle:` header
+  line stops reading `unrecorded`; nothing in this task's own "Done when" depends on that header
+  field, so it is not blocking here.

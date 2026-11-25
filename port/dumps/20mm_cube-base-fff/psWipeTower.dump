@@ -10,10 +10,10 @@
 ;   transform: identity
 ; seam: psWipeTower
 ; object: print
-field=wipe_tower_depth layer=- value=0x0p+0
-field=wipe_tower_width layer=- value=0x0p+0
-field=wipe_tower_height layer=- value=0x0p+0
-field=wipe_tower_brim_width layer=- value=0x0p+0
-field=wipe_tower_number_of_toolchanges value=-1
-field=wipe_tower_bbx defined=0 min=0x0p+0,0x0p+0 max=0x0p+0,0x0p+0
-field=wipe_tower_rib_offset value=0x0p+0,0x0p+0
+field=wipe_tower_depth layer=- region=- value=0x0p+0
+field=wipe_tower_width layer=- region=- value=0x0p+0
+field=wipe_tower_height layer=- region=- value=0x0p+0
+field=wipe_tower_brim_width layer=- region=- value=0x0p+0
+field=wipe_tower_number_of_toolchanges layer=- region=- value=-1
+field=wipe_tower_bbx layer=- region=- defined=0 min=0x0p+0,0x0p+0 max=0x0p+0,0x0p+0
+field=wipe_tower_rib_offset layer=- region=- value=0x0p+0,0x0p+0

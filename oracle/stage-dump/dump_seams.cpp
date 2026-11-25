@@ -9,8 +9,11 @@
 // Record format (documented in full in README.md's "Dump format" section): every line after
 // the header is self-describing -- "field=<name> layer=<L|-> region=<R|-> ..." plus whatever
 // extra keys that field needs (object=, group=, brim=, filament_id=, surface=, poly=, path=,
-// ring=) -- so a reader finds a value without depending on file order. "-" is the sentinel for
-// "not applicable" (e.g. a print-wide field's layer, or a field with no per-region structure).
+// role=, loop=, ring=) -- so a reader finds a value without depending on file order. Every
+// record carries both layer= and region=, never just one: "-" is the sentinel for "not
+// applicable" (a print-wide field's layer and region, a per-layer scalar's region, a field with
+// no per-region structure). A role= value has every space replaced with "_", so a line can be
+// tokenised on whitespace with no value spanning more than one token.
 // Integer coord_t coordinates are written as plain decimal integers, never through unscale,
 // unscale_, unscaled or any other float/double conversion. A field that is genuinely
 // floating-point in the library (print_z, slice_z, height, the wipe tower's scalar fields) is
@@ -295,15 +298,26 @@ void write_surfaces_field(std::ofstream &out, const char *field, long layer_idx,
 // integer coordinates per point -- this program never reads ExtrusionPath::width/height/
 // mm3_per_mm/overhang_degree/smooth_speed, since R5 names the containing collections
 // (perimeters, fills, thin_fills, support_fills) and not their per-path flow metadata; see
-// README.md's Decisions section). `loop` records whether this path's nearest ancestor was an
-// ExtrusionLoop (closed) rather than a bare ExtrusionPath or an ExtrusionMultiPath (open) -- a
-// fact about the path's own shape, not a coordinate, so it is written as 0/1, never hex.
+// README.md's Decisions section). `loop_idx` is the index of the ExtrusionLoop this path's
+// nearest ancestor was (assigned in walk order, a new index at each loop boundary), or the
+// sentinel `-1` for a path whose ancestor was a bare ExtrusionPath or an ExtrusionMultiPath
+// (open) -- a fact about the path's own shape, not a coordinate, so it is written through
+// kv_idx's own sentinel, never through hexfloat. `role` is written with every space replaced by
+// `_`: ExtrusionEntity::role_to_string's display name is one to three words long depending on
+// the enumerator, and an unescaped space inside a value would break a reader that tokenises the
+// line on whitespace, which the rest of this format's key=value contract otherwise supports (see
+// README.md's "Dump format" section).
 void write_path_record(std::ofstream &out, const char *field, long layer_idx, long region_idx,
-                        const std::string &ctx, size_t path_idx, const ExtrusionPath &path, bool loop) {
+                        const std::string &ctx, size_t path_idx, const ExtrusionPath &path,
+                        long loop_idx) {
     write_prefix(out, field, layer_idx, region_idx, ctx);
     kv(out, "path", static_cast<long long>(path_idx));
-    kv(out, "role", ExtrusionEntity::role_to_string(path.role()));
-    kv(out, "loop", loop ? 1LL : 0LL);
+    std::string role = ExtrusionEntity::role_to_string(path.role());
+    for (char &c : role)
+        if (c == ' ')
+            c = '_';
+    kv(out, "role", role);
+    kv_idx(out, "loop", loop_idx);
     kv(out, "n", static_cast<long long>(path.polyline.points.size()));
     out << " pts=";
     for (size_t i = 0; i < path.polyline.points.size(); ++i) {
@@ -342,28 +356,47 @@ size_t count_entity_paths(const ExtrusionEntitiesPtr &entities) {
 // never deduplicated -- descending into a nested collection in place (so a grouping
 // collection contributes no record of its own, only its leaves), and writing one record per
 // leaf ExtrusionPath: a bare ExtrusionPath directly, or each of an ExtrusionLoop's or an
-// ExtrusionMultiPath's own `paths` in turn (both hold an ExtrusionPaths vector; the loop/
-// multipath object itself owns no geometry beyond that vector, so its own first/last-point
-// bookkeeping is not duplicated here). `path_idx` is a running counter over the whole
-// top-level collection, assigned in this same walk order, so it names a path without
-// depending on which container held it.
+// ExtrusionMultiPath's own `paths` in turn (an ExtrusionPath base holds an ExtrusionPaths
+// vector; ExtrusionLoop and ExtrusionMultiPath themselves add no further points to it, which is
+// everything this program reads -- see README.md's Decisions section for the two vendored
+// subclasses, ExtrusionLoopSloped and ExtrusionPathContoured, that do own more and why neither
+// is reachable at any of these eleven seams for the fixtures this program runs). `path_idx` is a
+// running counter over the whole top-level collection, assigned in this same walk order, so it
+// names a path without depending on which container held it. `loop_counter` assigns each
+// ExtrusionLoop its own index at the point this walk enters it (not reset by a nested
+// collection), so write_path_record's `loop` key can tell two paths that belong to the same loop
+// from two that belong to different ones; a path under a bare ExtrusionMultiPath or no container
+// at all gets no loop index at all (the sentinel `-1`).
+//
+// This walk flattens the collection's own nesting (an ExtrusionEntityCollection contributes no
+// record of its own) and does not write ExtrusionEntityCollection::no_sort, ExtrusionLoop::
+// loop_role() or ExtrusionLoop::print_after_infill. R5's and this task's own "the state each
+// seam reads" name only the containing collections (perimeters, fills, thin_fills,
+// support_fills), not their internal grouping or G-code emission order, so two libslic3r states
+// that group or order the same leaf paths differently can serialise identically here; see
+// README.md's Decisions section for why this is left as a known limitation rather than widened
+// in this task.
 void walk_entity_paths(std::ofstream &out, const char *field, long layer_idx, long region_idx,
-                        const std::string &ctx, const ExtrusionEntitiesPtr &entities, size_t &path_idx) {
+                        const std::string &ctx, const ExtrusionEntitiesPtr &entities, size_t &path_idx,
+                        long &loop_counter) {
     for (const ExtrusionEntity *e : entities) {
         if (e->is_collection()) {
             const auto *coll = dynamic_cast<const ExtrusionEntityCollection *>(e);
             if (coll)
-                walk_entity_paths(out, field, layer_idx, region_idx, ctx, coll->entities, path_idx);
+                walk_entity_paths(out, field, layer_idx, region_idx, ctx, coll->entities, path_idx,
+                                   loop_counter);
         } else if (e->is_loop()) {
             const auto *loop = dynamic_cast<const ExtrusionLoop *>(e);
-            if (loop)
+            if (loop) {
+                const long this_loop = loop_counter++;
                 for (const ExtrusionPath &p : loop->paths)
-                    write_path_record(out, field, layer_idx, region_idx, ctx, path_idx++, p, true);
+                    write_path_record(out, field, layer_idx, region_idx, ctx, path_idx++, p, this_loop);
+            }
         } else if (const auto *multi = dynamic_cast<const ExtrusionMultiPath *>(e)) {
             for (const ExtrusionPath &p : multi->paths)
-                write_path_record(out, field, layer_idx, region_idx, ctx, path_idx++, p, false);
+                write_path_record(out, field, layer_idx, region_idx, ctx, path_idx++, p, -1);
         } else if (const auto *p = dynamic_cast<const ExtrusionPath *>(e)) {
-            write_path_record(out, field, layer_idx, region_idx, ctx, path_idx++, *p, false);
+            write_path_record(out, field, layer_idx, region_idx, ctx, path_idx++, *p, -1);
         }
         // No other ExtrusionEntity subclass exists in the vendored tree at the pin; an
         // entity matching none of the above is silently skipped rather than guessed at.
@@ -383,21 +416,33 @@ void write_extrusion_field(std::ofstream &out, const char *field, long layer_idx
     kv(out, "count", static_cast<long long>(count_entity_paths(collection.entities)));
     out << "\n";
     size_t path_idx = 0;
-    walk_entity_paths(out, field, layer_idx, region_idx, ctx, collection.entities, path_idx);
+    long loop_counter = 0;
+    walk_entity_paths(out, field, layer_idx, region_idx, ctx, collection.entities, path_idx,
+                       loop_counter);
 }
 
 // A single scalar floating-point field (a layer's print_z/slice_z/height, one of the wipe
-// tower's scalar fields): one line, no layer/region prefix is written for a wipe-tower field
-// (layer_idx < 0), and `layer` is the owning layer's index for the three per-layer ones.
+// tower's scalar fields): one line, `layer` is the owning layer's index for the three per-layer
+// ones and the sentinel `-` for a wipe-tower field (layer_idx < 0); `region` is always the
+// sentinel `-`, since no scalar field this program writes has a per-region axis -- written
+// anyway, rather than omitted, so every record in the file names both of the task's two indices
+// (task.md: "Each record names the field it came from and the layer and region index it belongs
+// to") and a reader never has to special-case a scalar field to find them.
 void write_double_field(std::ofstream &out, const char *field, long layer_idx, double value) {
     out << "field=" << field;
     kv_idx(out, "layer", layer_idx);
+    kv_idx(out, "region", -1);
     kv(out, "value", hexfloat(value));
     out << "\n";
 }
 
+// wipe_tower_number_of_toolchanges is print-wide, like every other wipe_tower_* field: `layer`
+// and `region` are always the sentinel `-`, for the same reason write_double_field always writes
+// both.
 void write_int_field(std::ofstream &out, const char *field, long long value) {
     out << "field=" << field;
+    kv_idx(out, "layer", -1);
+    kv_idx(out, "region", -1);
     kv(out, "value", value);
     out << "\n";
 }
@@ -499,12 +544,12 @@ void dump_psWipeTower(std::ofstream &out, const Print &print) {
     write_double_field(out, "wipe_tower_brim_width", -1, wtd.brim_width);
     write_int_field(out, "wipe_tower_number_of_toolchanges",
                     static_cast<long long>(wtd.number_of_toolchanges));
-    out << "field=wipe_tower_bbx";
+    write_prefix(out, "wipe_tower_bbx", -1, -1, "");
     kv(out, "defined", wtd.bbx.defined ? 1LL : 0LL);
     kv(out, "min", hexfloat(wtd.bbx.min.x()) + "," + hexfloat(wtd.bbx.min.y()));
     kv(out, "max", hexfloat(wtd.bbx.max.x()) + "," + hexfloat(wtd.bbx.max.y()));
     out << "\n";
-    out << "field=wipe_tower_rib_offset";
+    write_prefix(out, "wipe_tower_rib_offset", -1, -1, "");
     kv(out, "value", hexfloat(double(wtd.rib_offset.x())) + "," + hexfloat(double(wtd.rib_offset.y())));
     out << "\n";
 }
@@ -620,6 +665,7 @@ void dump_seam(const std::string &out_dir, const std::string &provenance_header,
         break;
     }
 
+    out.flush();
     if (!out) {
         std::cerr << "error: write failed for " << path << "\n";
         std::exit(1);
