@@ -148,7 +148,15 @@ jobs:
       # arrives with the `just oracle-build` step task 13-build-libslic3r added to oracle.yml,
       # keyed there on the same pin and on that task's own CMake flags.
 
+      # GH_TOKEN authenticates oracle/fetch-release's `gh release download` call: the first CI
+      # run of this step, unauthenticated, hit OrcaSlicer/OrcaSlicer's public rate limit (HTTP
+      # 403, "API rate limit exceeded for <runner IP>") on its very first request, because a
+      # hosted runner's IP is shared and anonymous GitHub API access is capped at 60/hour. An
+      # authenticated request is a much higher limit regardless of which repo's public release
+      # asset is being read.
       - name: Fetch the pinned oracle release binary
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: just oracle-fetch
 
       - name: Run the workspace's tests
