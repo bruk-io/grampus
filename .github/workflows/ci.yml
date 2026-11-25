@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # Computes whether this push or pull request touches anything the macOS job's checks read,
@@ -69,6 +70,19 @@ jobs:
       - name: Guard the branch
         if: github.event_name == 'pull_request'
         run: just guard "$GITHUB_HEAD_REF"
+
+      # R28, task 36-pr-body-check: reads the pull request itself, so it cannot live in
+      # .asdlc/checks, which a task also runs locally -- and needs no oracle binary or
+      # libslic3r build, so it runs here rather than in the oracle-checks job below.
+      - name: Check the pull request body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p oracle/.cache/tmp
+          gh pr view "$PR" --json body --jq .body > oracle/.cache/tmp/pr-body.txt
+          just pr-body-check oracle/.cache/tmp/pr-body.txt
 
   # Everything that needs the oracle binary, a local libslic3r build, or a comparison against
   # either (R23) — none of the document checks above wait on this job. Only `just oracle-fetch`
@@ -183,3 +197,29 @@ jobs:
 
       - name: Run the workspace's tests
         run: cargo test --workspace
+
+      # This job builds no libslic3r (see the job-level comment above): `just oracle-parity`
+      # needs vendor/OrcaSlicer/build/arm64's archives, which only oracle.yml's own job produces
+      # and caches, under a two-path cache key (vendor/OrcaSlicer/deps/build/arm64 +
+      # vendor/OrcaSlicer/deps/DL_CACHE) this job's "Restore the dependency superbuild" step
+      # above cannot match (different path list, different actions/cache version -- its own
+      # comment explains why). Resolving that is a later task's job, not this one's: this step
+      # only checks whether the archives happen to be present (e.g. a self-hosted or
+      # pre-warmed runner) and, when they are not, skips the parity step with a clear note
+      # instead of failing the job -- so this pull request does not ship a permanently red
+      # required-looking check for every later task's PR.
+      - name: Check whether the built libslic3r is available
+        id: libslic3r-built
+        run: |
+          a=vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a
+          b=vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r_cgal.a
+          if [ -f "$a" ] && [ -f "$b" ]; then
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "built=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::skipping just oracle-parity: this job builds no libslic3r and $a is absent. See this job's own comment above (oracle.yml owns that build); a later task must either cache-restore it here or source it another way."
+          fi
+
+      - name: Report whether the two oracles agree
+        if: steps.libslic3r-built.outputs.built == 'true'
+        run: just oracle-parity

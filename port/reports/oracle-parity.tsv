@@ -1,0 +1,13 @@
+configuration	fixture	artifact	level reached	normative oracle
+base-fff	frog_legs.stl	gcode	none	built
+base-fff	frog_legs.stl	settings-json	none	built
+base-fff	frog_legs.stl	statistics-json	none	built
+tree-support	frog_legs.stl	gcode	none	built
+tree-support	frog_legs.stl	settings-json	none	built
+tree-support	frog_legs.stl	statistics-json	none	built
+wipe-tower-multi-filament	frog_legs.stl	gcode	none	built
+wipe-tower-multi-filament	frog_legs.stl	settings-json	none	built
+wipe-tower-multi-filament	frog_legs.stl	statistics-json	none	built
+fuzzy-skin	frog_legs.stl	gcode	none	built
+fuzzy-skin	frog_legs.stl	settings-json	none	built
+fuzzy-skin	frog_legs.stl	statistics-json	none	built

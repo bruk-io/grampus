@@ -239,3 +239,23 @@ oracle-dump fixture configuration *ARGS:
 # scratch output lands under oracle/.cache/determinism/ (git-ignored, left behind for inspection).
 oracle-determinism:
     ./oracle/determinism
+
+# report whether the two oracles agree (R6, plan step 10, task 28-oracle-parity): for every row
+# of docs/ORACLE.md's configuration table and every fixture it names, slices with the pinned
+# release binary (oracle/slice) and with the locally built library (oracle/stage-dump's export
+# path, unarmed, the hook never registered), compares the G-code and both JSON artifacts through
+# just compare ... --format json, and regenerates port/reports/oracle-parity.tsv and
+# port/reports/oracle-parity.md from the measurement. Builds oracle/stage-dump fresh into the
+# git-ignored oracle/.cache/stage-dump/arm64 against the already-built vendor/OrcaSlicer/build/arm64
+# (just oracle-build's own output; never rebuilt here). Scratch output lands under
+# oracle/.cache/parity/ (git-ignored, left behind for inspection).
+oracle-parity:
+    ./oracle/parity
+# the one spelling a port unit's pull request is held to (R28, plan step 21, task
+# 36-pr-body-check): fails unless <file> (the pull request body) records both review verdicts
+# the loop in docs/WORKFLOW.md states and names an existing port/manifest.tsv row, skipped --
+# from the diff alone, never from the body -- for a pull request that adds no module. See
+# `./port/port-status --help`'s own --pr-body section. `just port-status` (no argument) forwards
+# nothing to it.
+pr-body-check file *args:
+    ./port/port-status --pr-body {{file}} {{args}}
