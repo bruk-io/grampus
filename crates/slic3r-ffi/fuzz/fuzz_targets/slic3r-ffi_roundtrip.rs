@@ -83,6 +83,11 @@ impl<'a> Arbitrary<'a> for ArbExPolygon {
 }
 
 fuzz_target!(|polygon: ArbPolygon| {
+    // Checked, not only argued by ArbPolygon::arbitrary's construction (which always builds
+    // three mandatory points plus an arbitrary tail): a generated polygon must hold at least
+    // three points, the task's own "Done when" line.
+    assert!(polygon.points.len() >= 3, "ArbPolygon must generate at least three points");
+
     let path: Vec<ProofZPoint> = polygon
         .points
         .iter()

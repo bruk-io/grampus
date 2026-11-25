@@ -28,7 +28,7 @@ fn ex_polygon_lslices_at_pos_slice_proves_path_2() {
     assert_eq!(dump.object, "0");
 
     let actual: Vec<i64> = dump
-        .points_at("lslices", Some(0))
+        .points_at("lslices", Some(0), None)
         .expect("layer 0 must carry an 'lslices' record");
     let expected: Vec<i64> = vec![
         10_000_000,
@@ -133,6 +133,34 @@ fn read_dump_takes_the_directory_as_an_argument() {
     std::fs::remove_file(&dump_path).ok();
 }
 
+/// `points_at` matches `region` as well as `layer` -- the committed corpus has only one region
+/// per layer (`20mm_cube-base-fff` carries a single filament/region), so this cannot be shown by
+/// a real multi-region dump yet, but the filter itself is exercised directly either way: the real
+/// `slices` field (an `ExPolygons`-shaped field with a genuine region axis, unlike `lslices`)
+/// is found at its real `region=0`, and a region that does not exist in this dump at all
+/// (`region=5`) is refused with `FieldNotFound` rather than silently matched by `layer` alone --
+/// proving the region key actually narrows the match, not merely that it is accepted syntactically.
+#[test]
+fn points_at_matches_region_not_only_layer() {
+    let dump =
+        dumps::read_dump_default("20mm_cube-base-fff", "posSlice").expect("read posSlice.dump");
+
+    let at_real_region = dump
+        .points_at("slices", Some(0), Some(0))
+        .expect("layer 0, region 0 must carry a 'slices' record");
+    assert_eq!(
+        at_real_region.len(),
+        8,
+        "layer 0's one slice is a 4-point square"
+    );
+
+    let err = dump.points_at("slices", Some(0), Some(5)).expect_err(
+        "region 5 does not exist in this dump; a region-blind filter would wrongly \
+                      return layer 0's real region-0 points instead of refusing",
+    );
+    assert!(matches!(err, DumpError::FieldNotFound { .. }), "{err}");
+}
+
 /// A malformed manifest row (bypassing `compare_unit`'s env-var default) still reaches
 /// `tiers::TierError` correctly when fed a dump-derived value -- exercises `compare_unit_at`
 /// directly against the shared fixture `tests/manifest_validation.rs` already commits, proving
@@ -143,7 +171,7 @@ fn dump_derived_vec_compares_through_compare_unit_at() {
     let dump =
         dumps::read_dump_default("20mm_cube-base-fff", "posSlice").expect("read posSlice.dump");
     let actual = dump
-        .points_at("lslices", Some(1))
+        .points_at("lslices", Some(1), None)
         .expect("layer 1 must carry lslices");
     compare_unit_at(
         &fixture,

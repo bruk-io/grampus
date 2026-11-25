@@ -191,6 +191,11 @@ pub struct Record {
     /// `ExtrusionEntityCollection` leaf path), every component parsed with
     /// [`str::parse::<i64>`] and never through a float.
     pub points: Vec<Vec<i64>>,
+    /// This record's 1-based line number in the file `parse_records` read it from -- `text`'s own
+    /// `str::lines()` index, header lines included, so it is the line a reader would actually
+    /// find by opening the file, not an index into [`Dump::records`] (which holds body records
+    /// only, since the header is never pushed into it).
+    pub line: usize,
 }
 
 impl Record {
@@ -203,9 +208,9 @@ impl Record {
     /// Reads `key` as a plain decimal integer (the shape every index key -- `layer`, `region`,
     /// `support_layer`, `poly`, `surface`, `path`, `loop`, `group`, `brim`, `filament_id`,
     /// `object` -- uses). `Ok(None)` for an absent key or the `-` sentinel; `Err` for a key
-    /// present with a value that is not a valid integer, named by file and line so a malformed
-    /// index is refused rather than silently read as `None`.
-    pub fn key_i64(&self, path: &Path, line: usize, key: &str) -> Result<Option<i64>, DumpError> {
+    /// present with a value that is not a valid integer, named by file and this record's own
+    /// [`Record::line`] so a malformed index is refused rather than silently read as `None`.
+    pub fn key_i64(&self, path: &Path, key: &str) -> Result<Option<i64>, DumpError> {
         match self.get(key) {
             None => Ok(None),
             Some(v) => v
@@ -213,7 +218,7 @@ impl Record {
                 .map(Some)
                 .map_err(|e| DumpError::MalformedInteger {
                     path: path.to_path_buf(),
-                    line,
+                    line: self.line,
                     token: format!("{key}={v}"),
                     detail: e.to_string(),
                 }),
@@ -222,18 +227,25 @@ impl Record {
 
     /// `layer=<L|->`, carried by every record (the README's own rule: "every record -- with no
     /// exception -- then carries both `layer=<L>` and `region=<R>`").
-    pub fn layer(&self, path: &Path, line: usize) -> Result<Option<i64>, DumpError> {
-        self.key_i64(path, line, "layer")
+    pub fn layer(&self, path: &Path) -> Result<Option<i64>, DumpError> {
+        self.key_i64(path, "layer")
     }
 
     /// `region=<R|->`, carried by every record alongside `layer`.
-    pub fn region(&self, path: &Path, line: usize) -> Result<Option<i64>, DumpError> {
-        self.key_i64(path, line, "region")
+    pub fn region(&self, path: &Path) -> Result<Option<i64>, DumpError> {
+        self.key_i64(path, "region")
+    }
+
+    /// `support_layer=<S|->`, carried alongside `layer=-` by a support-layer field
+    /// (`support_islands`, `support_fills`) -- a separate index from `layer` (`support_layers()`
+    /// vs `layers()`), never read as the same axis.
+    pub fn support_layer(&self, path: &Path) -> Result<Option<i64>, DumpError> {
+        self.key_i64(path, "support_layer")
     }
 
     /// `count=<n>`, the summary line every `ExPolygons`/`SurfaceCollection`/
     /// `ExtrusionEntityCollection` field carries once, before its per-element lines.
-    pub fn count(&self, path: &Path, line: usize) -> Result<Option<u64>, DumpError> {
+    pub fn count(&self, path: &Path) -> Result<Option<u64>, DumpError> {
         match self.get("count") {
             None => Ok(None),
             Some(v) => v
@@ -241,7 +253,7 @@ impl Record {
                 .map(Some)
                 .map_err(|e| DumpError::MalformedInteger {
                     path: path.to_path_buf(),
-                    line,
+                    line: self.line,
                     token: format!("count={v}"),
                     detail: e.to_string(),
                 }),
@@ -252,10 +264,10 @@ impl Record {
     /// hex float (every other scalar field -- `print_z`, `slice_z`, `height`, each
     /// `wipe_tower_*` field). Dispatches on whether the token looks like a hex float (`0x`/`-0x`
     /// prefix) -- never a coordinate, so this is never used for a `pts=` component.
-    pub fn value_f64(&self, path: &Path, line: usize) -> Result<Option<f64>, DumpError> {
+    pub fn value_f64(&self, path: &Path) -> Result<Option<f64>, DumpError> {
         match self.get("value") {
             None => Ok(None),
-            Some(v) => parse_scalar(v, path, line).map(Some),
+            Some(v) => parse_scalar(v, path, self.line).map(Some),
         }
     }
 }
@@ -354,21 +366,33 @@ impl Dump {
         self.records.iter().filter(move |r| r.field == field)
     }
 
-    /// The flattened coordinates of every point `field`'s records carry at `layer` (an
+    /// The flattened coordinates of every point `field`'s records carry at `(layer, region)` (an
     /// `ExPolygons`/`SurfaceCollection` field summary record contributes no points of its own, so
-    /// concatenating every matching record's `points` is exactly the field's full point list for
-    /// that layer, in stored order). `Err(DumpError::FieldNotFound)` when no record matches at
-    /// all -- refused rather than silently returning an empty `Vec` indistinguishable from "this
-    /// polygon has zero points".
-    pub fn points_at(&self, field: &str, layer: Option<i64>) -> Result<Vec<i64>, DumpError> {
+    /// concatenating every matching record's `points` is exactly the field's full point list at
+    /// that layer and region, in stored order). Both keys are matched -- a field with more than
+    /// one region per layer (`slices`, `raw_slices`, `thin_fills`, `fill_surfaces`, `perimeters`,
+    /// `fills`) would otherwise have every region's points silently merged into one list and
+    /// compared as if it were a single polygon, a false pass this harness exists to prevent.
+    /// Pass `region: None` for a field with no region axis at all (`lslices`; every print-wide
+    /// field). `Err(DumpError::FieldNotFound)` when no record matches at all -- refused rather
+    /// than silently returning an empty `Vec` indistinguishable from "this polygon has zero
+    /// points".
+    pub fn points_at(
+        &self,
+        field: &str,
+        layer: Option<i64>,
+        region: Option<i64>,
+    ) -> Result<Vec<i64>, DumpError> {
         let mut matched_any = false;
         let mut out = Vec::new();
-        for (idx, record) in self.records.iter().enumerate() {
+        for record in &self.records {
             if record.field != field {
                 continue;
             }
-            let line = idx + 1;
-            if record.layer(&self.path, line)? != layer {
+            if record.layer(&self.path)? != layer {
+                continue;
+            }
+            if record.region(&self.path)? != region {
                 continue;
             }
             matched_any = true;
@@ -380,7 +404,40 @@ impl Dump {
             return Err(DumpError::FieldNotFound {
                 path: self.path.clone(),
                 field: field.to_string(),
-                detail: format!("no record at layer={layer:?}"),
+                detail: format!("no record at layer={layer:?} region={region:?}"),
+            });
+        }
+        Ok(out)
+    }
+
+    /// The support-layer counterpart to [`Dump::points_at`]: a support-layer field
+    /// (`support_islands`, `support_fills`) carries `layer=-` and indexes by `support_layer=<S>`
+    /// instead -- a separate collection (`PrintObject::support_layers()`) from `layers()`, so
+    /// matching it through `points_at`'s `layer` parameter would silently compare the wrong axis.
+    pub fn points_at_support_layer(
+        &self,
+        field: &str,
+        support_layer: Option<i64>,
+    ) -> Result<Vec<i64>, DumpError> {
+        let mut matched_any = false;
+        let mut out = Vec::new();
+        for record in &self.records {
+            if record.field != field {
+                continue;
+            }
+            if record.support_layer(&self.path)? != support_layer {
+                continue;
+            }
+            matched_any = true;
+            for point in &record.points {
+                out.extend(point.iter().copied());
+            }
+        }
+        if !matched_any {
+            return Err(DumpError::FieldNotFound {
+                path: self.path.clone(),
+                field: field.to_string(),
+                detail: format!("no record at support_layer={support_layer:?}"),
             });
         }
         Ok(out)
@@ -425,7 +482,12 @@ fn parse_record_line(line_text: &str, lineno: usize, path: &Path) -> Result<Reco
         }
     }
 
-    Ok(Record { field, raw, points })
+    Ok(Record {
+        field,
+        raw,
+        points,
+        line: lineno,
+    })
 }
 
 /// Parses one `x,y` or `x,y,z` coordinate tuple -- every component through [`str::parse::<i64>`],
