@@ -43,8 +43,10 @@ and `port/foundation.tsv` itself). Of the 33 foundation batches, 0 are merged: f
 `52-foundation-common-defs`, `53-foundation-int128-queue`, `54-foundation-objectid-clonable` and
 `55-foundation-libslic3r-execution` (`foundation-01` through `foundation-04`: `CommonDefs`/
 `Exception`/`I18N`, `Int128`/`MutablePriorityQueue`, `ObjectID`/`clonable_ptr`,
-`libslic3r.h`/`Execution`) — have draft branches with only a `Start task` commit each, no real
-type content reachable from `origin/main`; the other 29, including `56-foundation-point`
+`libslic3r.h`/`Execution`) — have open draft branches, three of them (`52`, `54`, `55`) now
+carrying real ported type commits and `53` still a `Start task` commit only, but **none of the four
+is reachable from `origin/main`**, so none of their types is on `main` for a module here to compile
+against; the other 29, including `56-foundation-point`
 (`foundation-05`: `Point.cpp`/`Point.hpp`, among others), have **no branch at all**. None of the
 four started batches is the one that designs `Point`, `Polygon`, `ExPolygon` or `Config` — those
 are `56-foundation-point` (`foundation-05`), `62-foundation-polygon` (`foundation-11`),
@@ -106,24 +108,51 @@ claims, for:
 ### Step 3: Stop here and report rather than force a match
 - delivers: R28
 
-This plan does not invent a fixed-point unit against an unlanded `Point` type, does not fabricate
-a tolerance reason for a unit that does no floating-point arithmetic, and does not fabricate the
-two adversarial review verdicts `docs/WORKFLOW.md`'s trial-run record requires (no subagent tool
-was available in the session that built this branch; see this task's pull request for the note —
-this is a property of that session, not a claim that the workflow's two-reviewer loop needs new
-tooling in general, since the loop's reviewers are supplied by the orchestration around a task's
-builder rather than by an in-session tool). The plan at this point is the honest state: of the
-three legs, exactly one — the throw/non-const-ref-out-param leg, on `InstanceLock` — is honestly
+This plan does not invent a fixed-point unit against an unlanded `Point` type and does not
+fabricate a tolerance reason for a unit that does no floating-point arithmetic. The honest state
+is: of the three legs, exactly one — the throw/non-const-ref-out-param leg, on `InstanceLock` — is
 buildable today; the fixed-point leg is blocked on `56-foundation-point` (`Point.cpp`/`Point.hpp`,
 `port/foundation.tsv` row `foundation-05`), and the float leg has no candidate that both performs
-floating-point arithmetic and is free of an unlanded foundation dependency. One buildable leg does
-not let this task make its one comparison against a single revision of `docs/PORTING.md` across
-all three equality tiers, so the decision below is still to build nothing — but the leg that is
-blocked and the leg that is clear were swapped in the first version of this plan, and that is
-corrected here rather than carried forward. If a reader wants this task carried further once
-`56-foundation-point` (and a foundation-independent, arithmetic float candidate, if one exists
-among rows not yet searched for that specific property) lands on `main`, that is a follow-on to
-this trial, not a silent substitution here.
+floating-point arithmetic and is free of an unlanded foundation dependency. The leg that is blocked
+and the leg that is clear were swapped in the first version of this plan, and that is corrected
+here rather than carried forward.
+
+**Why the one buildable leg is still not built.** Not because one leg of three is untidy, but
+because building it moves no "Done when" line from unmet to met and spends a one-time write:
+
+- Every unit-bearing "Done when" line is written over *three* units ("Three units are ported…",
+  "Each of the three modules…", "`just port-status --per-commit` reports the derived status of all
+  three as `ported`"). One ported module satisfies none of them as written.
+- `docs/PORTING.md`'s correction — this task's actual output — comes from comparing three equality
+  tiers against **one** revision of that document ("Why it is one task and not three"). One tier
+  yields no comparison, so a one-leg run cannot produce the corrections the task exists to make.
+- The float row's `equality tier`, `tolerance` and `comparison function` cells are the write task
+  `14-manifest-columns` names this task as the filler of. Filling them needs a float unit; there is
+  none today, and `InstanceLock`'s row is already `exact` and needs no cell changed, so a one-leg
+  run would leave a follow-on reconciling judgement cells chosen under a partial trial instead of
+  choosing them freely.
+- `docs/WORKFLOW.md`'s trial-run record has a required shape — all three units, both verdicts each.
+  A one-leg record filed under that heading would read as a trial that happened.
+
+**What is measured about the blocked-but-ready leg, so a follow-on need not re-litigate it.**
+`InstanceLock`'s row (`port/manifest.tsv:348`) names proof path 1 — FFI to the library built from
+the pin — and that path does work for it: `nm -gjU
+vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a | grep -i instancelock` lists
+`InstanceLock.cpp.o` with `__ZN6Slic3r12InstanceLock14open_lock_fileERNS0_4SlotERKNSt3__1...` and
+`__ZN6Slic3r12InstanceLock5deferERNS0_4SlotERKNSt3__1...` among its exported symbols, so the two
+out-param functions are linkable from the GUI-off archive despite being `private:` in the header.
+One nuance a follow-on should carry into its own loop rather than discover late: the out-params are
+the header's private statics (`InstanceLock.hpp:52-53`) while the throws are in `NativeFileLock`, a
+helper class defined inside the `.cpp` (`InstanceLock.cpp:42`, `:52`), and `open_lock_file`
+*catches* them (`InstanceLock.cpp:101-120`), converting a `std::system_error` into `false` plus a
+`defer` cool-down. The unit therefore exercises the contract's error-set rule in its sharpest form
+— the Rust port must not widen that swallowed error into a `Result` — rather than a plain
+propagating `throw`.
+
+If a reader wants this task carried further once `56-foundation-point` (and a
+foundation-independent, arithmetic float candidate, if one exists among rows not yet searched for
+that specific property) lands on `main`, that is a follow-on to this trial, not a silent
+substitution here.
 
 ## Risks
 
@@ -146,12 +175,12 @@ cannot fully validate `docs/PORTING.md` against all three equality tiers and the
 rule the throw/out-param leg exists to exercise; a one-leg record would be a partial trial, not the
 full one plan step 21 describes, so none is built and none is reported as a trial.
 
-**Process risk:** the loop calls for two adversarial reviewers in separate contexts. The session
-that built this branch had no tool to spawn an isolated reviewing agent; the pull request says
-exactly how review was actually done for whatever is built, rather than recording a verdict no
-real review produced. This is a property of that session, not of the workflow: the loop's two
-reviewers are roles the orchestration around a task's builder supplies, not an in-session tool a
-builder must have of its own.
+**Not a risk, withdrawn:** an earlier version of this plan recorded "no tool to run a reviewer in a
+genuinely separate context" as a second blocker on the trial. That was wrong and is withdrawn.
+`docs/WORKFLOW.md:95`'s two adversarial reviewers are roles the orchestration around a task's
+builder supplies, not an in-session tool the builder has to carry; two reviewers did review this
+pull request in separate contexts and their verdicts are recorded in its body. The foundation
+dependency is the only blocker on this trial, and it is enough on its own.
 
 **If a chosen unit's manifest `proof path` turns out not to work for it** (task `35-trial-run`'s
 "What to build"): the row's `proof path` column names one of three mechanisms — FFI to the
@@ -186,6 +215,9 @@ sentence.
 - `vendor/OrcaSlicer/src/libslic3r/MaterialType.cpp:13-168`, `SlicingAdaptive.hpp`/`.cpp` and
   `InstanceLock.hpp`/`.cpp` (source:line citations in Step 2 above) are the proof for which leg is
   actually buildable, quoted in the pull request.
+- `nm -gjU vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a | grep -i instancelock`
+  is the proof that the throw/out-param leg's row would have a working proof path 1 (Step 3), run
+  and quoted rather than assumed from the header's `private:`.
 - `just port-status --per-commit`, `just port-check`, `just inventory-check`, `just guard` and
   `cargo build --workspace` / `cargo test --workspace`, run and quoted in the pull request with
   their real output, not asserted without running them.
