@@ -178,3 +178,6 @@ jobs:
 
       - name: Run the workspace's tests
         run: cargo test --workspace
+
+      - name: Report whether the two oracles agree
+        run: just oracle-parity
