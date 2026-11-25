@@ -16,13 +16,14 @@ export G-code that is identical at L1 (`crates/oracle-compare`'s comparator; L1 
 byte, because arming adds a `slicing_pipeline_plugin` line to the exported config block). `just
 oracle-dump` runs both and fails the check with `just compare ... --require L1` if they disagree.
 
-This task (`25-stage-dumper`) builds the program, the hook, the identity check and the
-configuration driver, and gives `dump_seams.cpp` its seam entry point -- but that entry point
-reads no per-seam state yet. Every dump this task writes carries only the provenance header, the
-seam's name and the object's identity. Part 2, task `26-stage-dump-seams`, fills `dump_seams.cpp`
-with the state each seam leaves behind (`Layer::lslices`, `LayerRegion::slices`, `raw_slices`,
-`perimeters`, `thin_fills`, `fill_surfaces`, `fills`, `PrintObject::support_layers()`,
-`object_skirt()`), per R5 and this same plan step.
+Task `25-stage-dumper` built the program, the hook, the identity check and the configuration
+driver, and gave `dump_seams.cpp` its seam entry point, with no per-seam state read yet -- every
+dump it wrote carried only the provenance header, the seam's name and the object's identity.
+This task, `26-stage-dump-seams`, fills `dump_seams.cpp`'s body with the state each seam leaves
+behind (`Layer::lslices`, `LayerRegion::slices`, `raw_slices`, `perimeters`, `thin_fills`,
+`fill_surfaces`, `fills`, `PrintObject::support_layers()`, `object_skirt()`), per R5 and this same
+plan step. See "Dump format" below for the record shape every dump now carries, and the next
+section down from it for a precise list of what this task read.
 
 **The provenance header's "Built oracle flags" field reads `unrecorded` on every dump this task
 writes.** `oracle/provenance --oracle built` (task `05-oracle-provenance`, not a file this task
@@ -33,6 +34,104 @@ flag list), so every `--oracle built` call -- this task is its first caller -- f
 exact flags, including `-ffp-contract=off`, on record; `oracle/stage-dump/CMakeLists.txt` is
 where those flags actually live, but writing them into `docs/ORACLE.md` is outside this task's
 own file list. Not fixed here; see the pull request body.
+
+## Dump format
+
+A dump is a line-oriented text file: the provenance header (`oracle/provenance --syntax gcode`,
+unchanged from task `25-stage-dumper`), then `; seam: <name>` and `; object: <print object index
+or "print">` (also unchanged), then the body this task adds. Every body line is self-describing
+-- a reader finds a value by its key, never by counting lines or knowing the writing order.
+
+**Which seams write what.** R5 (`intent/libslic3r-rust-port/spec.md`) is the one place the eleven
+seams and the reason each fires are enumerated; this file does not restate it. What follows is
+only the field list and the record shape, not the reasons.
+
+The nine per-object seams (`posSlice` through `posSimplifyPath`) all call the same
+`dump_object_state`, documented at the top of `dump_seams.cpp`: each of these nine steps only
+ever adds to or refines one growing body of state, so writing the same full field set at every
+one of them is accurate at each point in the pipeline -- a field a later step has not reached yet
+is simply still empty, not fabricated. That state is, per object:
+
+- per layer (`PrintObject::layers()`, 0-based, in that order): `print_z`, `slice_z`, `height`
+  (each a `coordf_t` i.e. a C++ `double`), and `lslices` (`ExPolygons`).
+- per region of that layer (`Layer::regions()`, 0-based, in that order): `slices`
+  (`SurfaceCollection`), `raw_slices` (`ExPolygons`), `thin_fills` (`ExtrusionEntityCollection`),
+  `fill_surfaces` (`SurfaceCollection`), `perimeters` (`ExtrusionEntityCollection`), `fills`
+  (`ExtrusionEntityCollection`).
+- per support layer (`PrintObject::support_layers()`, 0-based, in that order, a separate index
+  from the layer index above): `support_islands` (`ExPolygons`), `support_fills`
+  (`ExtrusionEntityCollection`).
+
+The two print-wide seams each read a named, narrower subset of their own field:
+
+- `psWipeTower`: `Print::wipe_tower_data()`'s own scalar geometry fields only -- `depth`, `width`,
+  `height`, `brim_width` (each a C++ `float`), `bbx` (a `BoundingBoxf`: `defined`, `min`, `max`),
+  `rib_offset` (a `Vec2f`) and `number_of_toolchanges` (an `int`). `priming`, `tool_changes` and
+  `final_purge` are not read: they carry already-emitted G-code in unscaled millimetres, not
+  `coord_t` geometry, and reading them would be a second, incompatible serialisation format
+  inside the same file. See "Decisions" below.
+- `psSkirtBrim`: `Print::skirt()`, `Print::skirt_brim_groups()` (each group's own `skirt` and
+  each of its `brims`' own `brim`, in their stored order) and `PrintObject::object_skirt()` for
+  every print object (`Print::objects()` order) -- one `object_skirt` record per object always,
+  even when its own collection is empty.
+
+**Record shapes.** Every record's first token is `field=<name>`, then `layer=<L>` and
+`region=<R>`, where `L`/`R` is a 0-based index into the collection named above, or the sentinel
+`-` where that axis does not apply (every print-wide field; `region` for a field that has no
+per-region structure, i.e. `lslices`, `support_islands`, `support_fills`, and the scalar
+per-layer fields). A support-layer field carries its own `support_layer=<S>` key alongside
+`layer=-`, since it indexes a different collection (`support_layers()`) than `layer` does
+(`layers()`) and the two must never be read as the same axis. `psSkirtBrim`'s own
+`skirt_brim_group_*` and `object_skirt` records carry an additional `group=<g>` /
+`brim=<b> filament_id=<f>` / `object=<o>` key for the same reason -- so a record names everything
+needed to place it without depending on which dump or which line it came from.
+
+- A scalar field (`print_z`, `slice_z`, `height`, each `wipe_tower_*` field): one line,
+  `field=... layer=<L|-> value=<v>`. A `coordf_t`/`double` or `float` value is written with C's
+  `%a` conversion -- a hexadecimal floating-point literal, exact for the value held (a `float` is
+  promoted to `double` for the formatter and never narrowed back). This is the one floating-point
+  form this program ever writes; a `coord_t` coordinate is never written this way, and no field
+  this program writes is ever formatted as a plain decimal float. `wipe_tower_number_of_toolchanges`
+  is an `int`, written as a plain decimal integer, same as a coordinate. `wipe_tower_bbx` and
+  `wipe_tower_rib_offset` are two-line exceptions with `min=`/`max=`/`value=` holding a
+  comma-separated pair of `%a` values, since a bounding box and a 2D offset are each two scalars,
+  not one.
+- An `ExPolygons` field (`lslices`, `raw_slices`, `support_islands`): one summary line,
+  `... count=<n>` (the polygon count), then, for each polygon in its stored order (never
+  sorted), one line per ring -- the contour, then each hole in `ExPolygon::holes`' own order --
+  `... poly=<p> ring=contour|hole:<h> n=<k> pts=<k space-separated "x,y" pairs>`. `x`/`y` are
+  `coord_t` (`int64_t` at this pin), written as plain decimal integers in their stored order,
+  never through `unscale`/`unscale_`/`unscaled` and never through a `float` or `double`.
+- A `SurfaceCollection` field (`slices`, `fill_surfaces`): the same shape as an `ExPolygons`
+  field, except the per-polygon index key is `surface=<s>` (one `Surface`, not a bare polygon)
+  and each of its ring lines also carries `type=<SurfaceType>` (e.g. `stTop`, `stInternal`), read
+  off the enum by name. A `Surface`'s other fields (`thickness`, `thickness_layers`,
+  `bridge_angle`, `extra_perimeters`) are not written; see "Decisions".
+- An `ExtrusionEntityCollection` field (`thin_fills`, `perimeters`, `fills`, `support_fills`,
+  `skirt`, `skirt_brim_group_skirt`, `skirt_brim_group_brim`, `object_skirt`): one summary line,
+  `... count=<n>` (the collection's own total leaf-path count, defined next), then one line per
+  leaf path, `... path=<p> role=<ExtrusionRole> loop=<0|1> n=<k> pts=<k space-separated "x,y,z"
+  triples>`. The walk that produces this descends into a nested `ExtrusionEntityCollection` in
+  place (a grouping collection contributes no record of its own, only its leaves) and, for an
+  `ExtrusionLoop` or an `ExtrusionMultiPath`, visits each of its own `paths` in turn -- both hold
+  an `ExtrusionPaths` vector and own no geometry beyond it. `path` is a running counter over the
+  whole top-level collection, assigned in this same walk order (the library's own stored order,
+  never sorted), so it names a path without depending on which container held it. `role` is
+  `ExtrusionEntity::role_to_string`'s own name for the leaf path's `ExtrusionRole` (e.g.
+  `Inner wall`, `Bottom surface`, `Skirt`, `Brim`). `loop` is `1` when the path's nearest ancestor
+  was an `ExtrusionLoop` (closed) and `0` when it was a bare `ExtrusionPath` or an
+  `ExtrusionMultiPath` (open) -- a fact about the path's own shape, not a coordinate, so it is
+  written as a plain `0`/`1`, never through `%a`. `x`/`y`/`z` are the path's `Polyline3`'s own
+  `Point3` coordinates (three `coord_t` per point, `z` usually `0` outside Z-contouring), written
+  as plain decimal integers in stored order. A path's own `width`/`height`/`mm3_per_mm`/
+  `overhang_degree`/`smooth_speed` are not written; see "Decisions".
+
+**The "did not fire" roster**, separate from any one dump file: `dump_seams.cpp` itself tracks
+which of R5's eleven seams, plus `posEstimateCurledExtrusions` (reported as not fired rather than
+as missing -- R5's own account of why), actually ran `dump_seam`, and prints `did not fire:
+<name>` to stdout once per missing one when the program exits, provided at least one seam did
+fire this run (so the `--unarmed` comparison run, which never calls `dump_seam` at all, prints
+nothing). See "Decisions" for why this lives in `dump_seams.cpp` rather than `dump_main.cpp`.
 
 ## Building it directly
 
@@ -220,3 +319,84 @@ result (exit 0, every dump written, L1 identity held on every run observed), the
   gets that. The task names the two driver modes but not which one the bare recipe invocation
   reaches; this choice is what keeps the provenance header's `preset-set` field (R7) describing
   presets the run actually applied for the configurations that have a golden.
+
+Task `26-stage-dump-seams`'s own decisions, filling `dump_seams.cpp`'s body:
+
+- **One shared `dump_object_state` for all nine per-object seams**, rather than nine functions
+  each reading a different subset of the growing state. Documented at the top of
+  `dump_seams.cpp` and under "Dump format" above: every one of these nine steps only ever adds
+  to or refines the same state, so a field a later step has not reached yet is simply still
+  empty at an earlier seam's dump -- an accurate snapshot, not a fabricated one. Each seam still
+  gets its own one-line wrapper function, named in its own comment, so "a reviewer greps the
+  file for each seam's enumerator name and finds one" (this task's own "Done when") holds for a
+  reviewer who has not read this decision.
+- **The "did not fire" roster lives in `dump_seams.cpp`, not `dump_main.cpp` or the justfile.**
+  This task's own "Done when" requires `just oracle-dump 20mm_cube base-fff` to name every seam
+  that did not fire, but `dump_main.cpp` and `CMakeLists.txt` are frozen by that same "Done
+  when" list, and the task's own file list does not include the justfile. `dump_seams.cpp`
+  tracks which seam names `dump_seam` was actually called with in a file-local `std::set`, and
+  registers an `std::atexit` handler the first time `dump_seam` runs (not unconditionally): `just
+  oracle-dump` runs this same binary a second time with `--unarmed` for the L1 identity check,
+  and that run never calls `dump_seam` at all, so an unconditional roster would print "every seam
+  did not fire" for a run where arming, and so every seam, was deliberately off. Measured:
+  `./oracle/.cache/stage-dump/arm64/stage_dump 20mm_cube base-fff --out <dir>` (armed) prints
+  `dumps: 10` then `did not fire: posEstimateCurledExtrusions` and `did not fire: posContouring`
+  -- the fixture is not a belt printer, so Z-contouring never runs, and
+  `posEstimateCurledExtrusions` never fires for a sliced object for the reason R5 gives.
+- **`psWipeTower` reads only `WipeTowerData`'s scalar geometry fields**, not `priming`,
+  `tool_changes` or `final_purge`. Those three carry `WipeTower::ToolChangeResult`, which holds
+  already-emitted G-code text in unscaled millimetres -- a different unit and a different format
+  entirely from every other field this program writes, and reading it would mean inventing a
+  second serialisation inside the same file for state R5 does not name a reason to read. The
+  task's own account of which fields are "genuinely floating-point in the library" names only
+  "the wipe tower's depth" as an example from this seam, which this reading matches.
+  `wipe_tower_data()` is called with its default `filaments_cnt=0`; read before writing this
+  call, `Print::wipe_tower_data` (`Print.cpp`) takes that default argument's early-return branch
+  whenever `is_step_done(psWipeTower)` is already true, which it always is by the time this hook
+  fires (`Print::process` calls `set_done(psWipeTower)` immediately before firing the hook), so
+  this read never takes the branch that estimates and mutates `m_wipe_tower_data` -- the one
+  path that could have put the L1 identity check at risk.
+- **`object_skirt()` was found to be permanently empty at this pin, for every configuration.**
+  The task's own account of this field (and this task's "Done when") describes
+  `PrintObject::m_skirt` as filled by skirt generation "when `skirt_type` is `stPerObject`"
+  (`Brim.cpp:63`). Measured against the vendored tree at the pinned commit: every reference to
+  `m_skirt` (a plain, non-word-boundary-sensitive search) across the whole of
+  `src/libslic3r/` is either a read through `object_skirt()`/`skirt()` or a `.clear()` call
+  (`Print.cpp:3704`, `Print.cpp:4222`, and the constructor-site clears each group's own skirt
+  before rebuilding it); the one place a skirt collection is actually appended to
+  (`Print.cpp:4485`, inside the function that builds `skirt_brim_groups()`) appends into
+  `Print::m_skirt` -- the print-wide member sharing the name `object_skirt()`'s own class
+  declares at `Print.hpp:716` -- never into any `PrintObject::m_skirt`. Confirmed empirically,
+  not just by reading: `stage_dump 20mm_cube base-fff --set skirt_loops=1 --set
+  skirt_type=perobject` (and separately `--set brim_width=3 --set brim_type=outer_only`, and
+  `--set skirt_loops=2` with the default combined skirt type) each produced real, non-empty
+  `skirt` and `skirt_brim_group_skirt`/`skirt_brim_group_brim` records -- proving this program's
+  own read and serialisation of those fields is correct -- while `object_skirt`'s own record
+  stayed `count=0` in every one of those runs. This program still writes one `object_skirt`
+  record per print object on every `psSkirtBrim` dump, exactly as the task specifies and exactly
+  as it would need to if a future configuration or a future libslic3r version does populate it;
+  the finding above is reported here because a dump that always reads `count=0` for a field is
+  something a reviewer of this pull request should be able to see was checked, not assumed.
+- **A leaf extrusion path's own `width`/`height`/`mm3_per_mm`/`overhang_degree`/`smooth_speed`
+  are not written**, only its geometry (`polyline`) and its `role()`. R5 and this task's own
+  "the state each seam reads" name the containing collections (`perimeters`, `fills`,
+  `thin_fills`, `support_fills`) and never a per-path flow field; this phase's proof is geometry
+  (R19's integer-`coord_t` comparison), and adding five more floating-point fields per path -- a
+  second, much larger floating-point surface alongside the handful of per-layer and per-tower
+  scalars this task's own field list already names -- is out of scope until a task that actually
+  compares flow or timing needs it.
+- **A `Surface`'s `thickness`/`thickness_layers`/`bridge_angle`/`extra_perimeters` are not
+  written**, only its `expolygon` and `surface_type`. The same reasoning as the extrusion-path
+  fields above: R5 names `LayerRegion::slices` and `fill_surfaces` as fields to read, not their
+  per-surface bookkeeping, and `surface_type` is the one piece of that bookkeeping a reader
+  needs to tell a `slices` ring from, say, a `stInternalSolid` one apart from a `stTop` one.
+- **A `SkirtBrimGroup`'s and a `Brim`'s own `instances` (`std::vector<ObjectInstanceID>`) are not
+  written**, only `filament_id` for a `Brim`. An `ObjectInstanceID` is an internal identity, not
+  a coordinate or a count the oracle's own output depends on for comparison, and R5 names
+  `Print::skirt_brim_groups()` as a field to read, not its own internal instance bookkeeping.
+- **Hexadecimal floating-point (`%a`), not a shortest-round-tripping-decimal library call, for
+  every floating-point field.** `%a` is exact for the `double` or `float` it is given and has
+  been part of C since C99 and of this toolchain's `libc` for as long as this project has
+  targeted it; a `std::to_chars(double)` shortest-decimal path is a newer, less uniformly
+  available piece of `libc++` across toolchains, and the task's own wording allows either form
+  as long as `README.md` names which: this is that naming.
