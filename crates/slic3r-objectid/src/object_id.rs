@@ -4,12 +4,19 @@
 //! back end and to key the Undo/Redo stack.
 //!
 //! **Inheritance.** `ObjectWithTimestamp` and `CutObjectBase` inherit `ObjectBase` in the
-//! vendored source and override its virtual `timestamp()`/none respectively; Rust has no
-//! inheritance, so each is its own struct here that embeds an [`ObjectBase`] and forwards to its
-//! methods (the idiom map's "a method on a class -> a method on the corresponding Rust type").
-//! `ObjectBase::timestamp()` always returns `0` (`:74`); it is not a trait with an overridable
-//! default, because no in-scope caller needs virtual dispatch across the three types through one
-//! interface today -- see this task's pull request body.
+//! vendored source; Rust has no inheritance, so each is its own struct here that embeds an
+//! [`ObjectBase`] and forwards to its methods (the idiom map's "a method on a class -> a method
+//! on the corresponding Rust type").
+//!
+//! **Virtual dispatch.** `ObjectBase` declares two virtual methods, `timestamp()` (`:74`) and
+//! `assign_new_unique_ids_recursive()` (`:95`). Both are overridden beyond the three types this
+//! module ports: `timestamp()` by `ModelConfigObject` (`vendor/OrcaSlicer/src/libslic3r/
+//! Model.hpp:106`, `public ObjectBase, public ModelConfig`), and
+//! `assign_new_unique_ids_recursive()` by `ModelObject`/`ModelVolume`
+//! (`Model.hpp:595`, `:1176`), dispatched through a base pointer at `Model.cpp:213`/`:215`. The
+//! idiom map assigns a hierarchy's dispatch mechanism to its foundation design -- this task -- so
+//! it is chosen once, here, as the [`ObjectBaseDispatch`] trait below, rather than left for
+//! `slic3r-model` to invent on its own.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
@@ -28,6 +35,13 @@ use std::sync::OnceLock;
 /// invalid/default value (`:27`, `:36-37`). All six comparison operators (`:29-34`) compare only
 /// `id`, so deriving `PartialEq`/`Eq`/`PartialOrd`/`Ord` on the one field reproduces each of them
 /// exactly.
+//
+// FIDELITY(port): ObjectID.hpp:33 (`operator<=`) is `port/reports/order-comparators.md`'s
+// `non_strict` row for this header, whose prescribed port's choice is "the strict form of the
+// same relation". `#[derive(PartialOrd, Ord)]` derives exactly that: one total order over `id`,
+// with `<=`/`>=` given by the derived `PartialOrd` default methods in terms of it, rather than a
+// separately transcribed `operator<=` body -- there is no second, independently-stated
+// non-strict relation here for the derive to diverge from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct ObjectID {
     pub id: usize,
@@ -120,7 +134,9 @@ impl ObjectBase {
         self.m_id
     }
 
-    /// `timestamp()` (`:74`): `ObjectBase`'s own default always returns `0`.
+    /// `timestamp()` (`:74`): `ObjectBase`'s own default always returns `0`. See
+    /// [`ObjectBaseDispatch::timestamp`] for the trait a type overriding this dispatches
+    /// through.
     pub fn timestamp(&self) -> Timestamp {
         0
     }
@@ -143,14 +159,57 @@ impl ObjectBase {
     /// `assign_new_unique_ids_recursive()` (`:95`): `ObjectBase`'s own body only reassigns its
     /// own id; a derived type that owns other `ObjectBase`-derived instances overrides this to
     /// recurse into them (no such override exists in this module -- see the module doc comment).
+    /// See [`ObjectBaseDispatch::assign_new_unique_ids_recursive`] for the trait a type
+    /// overriding this dispatches through.
     pub fn assign_new_unique_ids_recursive(&mut self) {
         self.set_new_unique_id();
     }
 }
 
+/// `ObjectBase()` (`:79`) is a `protected` constructor in the vendored source -- callable only
+/// by a derived class. Rust has no inheritance and no `protected`, and [`ObjectBase::new`] is
+/// already `pub` for exactly that reason (see this module's own doc comment); this `Default`
+/// impl adds no capability beyond that already-`pub`, already side-effecting constructor. It is
+/// recorded here because `Default::default()` can also be reached *implicitly* (`mem::take`,
+/// `Vec::resize_with`, a derived `Default` on a containing struct), a path the vendored
+/// `protected` constructor has no equivalent of -- see this task's pull request body.
 impl Default for ObjectBase {
     fn default() -> Self {
         ObjectBase::new()
+    }
+}
+
+/// Dispatch mechanism for `ObjectBase`'s two virtual methods (`ObjectID.hpp:74`, `:95`), chosen
+/// here per the idiom map's rule that a hierarchy's dispatch mechanism is the foundation
+/// design's own call, not a fan-out task's one to invent (see this module's own doc comment for
+/// the overriding sites outside this crate). A type that embeds an [`ObjectBase`] implements
+/// this trait; `object_base`/`object_base_mut` are also the one path a type whose own base field
+/// is private (like [`ObjectWithTimestamp`] below) exposes to that base's own mutators.
+pub trait ObjectBaseDispatch {
+    /// The embedded base (`self`, for [`ObjectBase`] itself).
+    fn object_base(&self) -> &ObjectBase;
+    /// The embedded base, mutably.
+    fn object_base_mut(&mut self) -> &mut ObjectBase;
+
+    /// `timestamp()` (`:74`): `ObjectBase`'s own default always returns `0`.
+    fn timestamp(&self) -> Timestamp {
+        0
+    }
+
+    /// `assign_new_unique_ids_recursive()` (`:95`): `ObjectBase`'s own body only reassigns its
+    /// own id; an implementor that owns other dispatch-trait instances overrides this to recurse
+    /// into them.
+    fn assign_new_unique_ids_recursive(&mut self) {
+        self.object_base_mut().set_new_unique_id();
+    }
+}
+
+impl ObjectBaseDispatch for ObjectBase {
+    fn object_base(&self) -> &ObjectBase {
+        self
+    }
+    fn object_base_mut(&mut self) -> &mut ObjectBase {
+        self
     }
 }
 
@@ -191,7 +250,31 @@ impl ObjectWithTimestamp {
         self.base.id()
     }
 
-    /// `timestamp()` (`:132`): overrides [`ObjectBase::timestamp`]'s always-`0` default.
+    /// `set_new_unique_id()` (inherited from [`ObjectBase::set_new_unique_id`], `:89`): the
+    /// embedded `base` field is private, so this forwarder is the only path a caller outside
+    /// this module has to it -- the vendored method is `protected`, reached by the two in-scope
+    /// derived types (`LayerHeightProfile`, `FacetsAnnotation`, `Model.hpp:218,758`) through
+    /// inheritance and, for `ModelObject`/`ModelVolume`, friendship (`Model.hpp:253`); see this
+    /// task's pull request body for the opposite-direction widening this forwarding makes `pub`
+    /// rather than `protected`-equivalent.
+    pub fn set_new_unique_id(&mut self) {
+        self.base.set_new_unique_id();
+    }
+
+    /// `set_invalid_id()` (inherited from [`ObjectBase::set_invalid_id`], `:90`); see
+    /// [`Self::set_new_unique_id`]'s own doc comment for why this is a forwarder.
+    pub fn set_invalid_id(&mut self) {
+        self.base.set_invalid_id();
+    }
+
+    /// `copy_id(const ObjectBase &rhs)` (inherited from [`ObjectBase::copy_id`], `:92`); see
+    /// [`Self::set_new_unique_id`]'s own doc comment for why this is a forwarder.
+    pub fn copy_id(&mut self, rhs: &ObjectWithTimestamp) {
+        self.base.copy_id(&rhs.base);
+    }
+
+    /// `timestamp()` (`:132`): overrides [`ObjectBase::timestamp`]'s always-`0` default. See
+    /// [`ObjectBaseDispatch::timestamp`] for the trait this override dispatches through.
     pub fn timestamp(&self) -> Timestamp {
         self.m_timestamp
     }
@@ -218,9 +301,26 @@ impl ObjectWithTimestamp {
     }
 }
 
+/// `ObjectWithTimestamp()` (`:117`) is `protected`; see [`ObjectBase`]'s own `Default` impl doc
+/// comment for why recording that gap here, rather than removing this impl, is this module's
+/// choice -- [`ObjectWithTimestamp::new`] is already `pub` and already side-effecting.
 impl Default for ObjectWithTimestamp {
     fn default() -> Self {
         ObjectWithTimestamp::new()
+    }
+}
+
+impl ObjectBaseDispatch for ObjectWithTimestamp {
+    fn object_base(&self) -> &ObjectBase {
+        &self.base
+    }
+    fn object_base_mut(&mut self) -> &mut ObjectBase {
+        &mut self.base
+    }
+
+    /// `timestamp()` (`:132`): overrides the trait's always-`0` default.
+    fn timestamp(&self) -> Timestamp {
+        self.m_timestamp
     }
 }
 
@@ -318,6 +418,15 @@ impl CutObjectBase {
 impl Default for CutObjectBase {
     fn default() -> Self {
         CutObjectBase::new()
+    }
+}
+
+impl ObjectBaseDispatch for CutObjectBase {
+    fn object_base(&self) -> &ObjectBase {
+        &self.base
+    }
+    fn object_base_mut(&mut self) -> &mut ObjectBase {
+        &mut self.base
     }
 }
 

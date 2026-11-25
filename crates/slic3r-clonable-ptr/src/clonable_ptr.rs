@@ -22,6 +22,15 @@
 /// nullptr`). Blanket-implemented for every [`Clone`] type below, so an ordinary value type needs
 /// nothing extra; a future `dyn`-dispatched hierarchy (the idiom map's virtual-dispatch rule)
 /// implements it by hand instead of relying on the blanket impl.
+///
+/// **Not dyn-compatible as a supertrait.** `clone_boxed`'s return type references `Self`, so
+/// `trait SomeConfigOptionTrait: ClonableInner` cannot itself be made into a `dyn
+/// SomeConfigOptionTrait` (`E0038`). A `dyn`-dispatched hierarchy instead gives `dyn
+/// SomeConfigOptionTrait` a standalone `impl ClonableInner for dyn SomeConfigOptionTrait`
+/// (its `clone_boxed` dispatching through whatever boxed-clone method the hierarchy's own trait
+/// declares), which does compile and does not collide with the blanket impl below -- recorded
+/// here so `slic3r-config` (`foundation-08`, not yet built) does not reach for the supertrait
+/// form first.
 pub trait ClonableInner {
     fn clone_boxed(&self) -> Box<Self>;
 }
@@ -70,7 +79,11 @@ impl<T: ?Sized> ClonablePtr<T> {
         if let Some(existing) = &self.px {
             // The vendored assert at clonable_ptr.hpp:84 is `assert((nullptr == p) || (px !=
             // p)); // auto-reset not allowed` -- not a numeric-constant transcription, so no
-            // `// PORT SRC:` marker applies here.
+            // `// PORT SRC:` marker applies here. Unlike the vendored raw pointer `p`, this
+            // method's own `p: Box<T>` is taken by value, so it cannot already alias `existing`
+            // (two distinct `Box<T>`s can never point at the same allocation in safe Rust): the
+            // check below can never fail. It is transcribed anyway, as a faithful but inert
+            // record of the vendored precondition, not because it can catch anything here.
             debug_assert!(
                 !std::ptr::eq(existing.as_ref(), p.as_ref()),
                 "clonable_ptr: auto-reset not allowed"
@@ -84,10 +97,39 @@ impl<T: ?Sized> ClonablePtr<T> {
         std::mem::swap(&mut self.px, &mut rhs.px);
     }
 
+    /// `operator*()`/`operator->()` (`:110-119`): both `assert(nullptr != px)` (compiled out in
+    /// release -- `### Error sets`), then dereference unconditionally, so calling either on an
+    /// empty `clonable_ptr` is undefined behaviour in a release build of the oracle. Rust's safe
+    /// `Deref` trait carries a stronger promise than a C++ operator ever did: any safe caller may
+    /// invoke a safe trait method with no `unsafe` anywhere at the call site, so putting this
+    /// behind `Deref` would place that same UB behind a safe interface -- not a faithful
+    /// rendering of the original's own precondition, which a C++ caller could at least in
+    /// principle be held to by a `static_assert`-adjacent review, but a new, Rust-specific
+    /// soundness hole. This crate keeps the method `unsafe fn` instead: the caller's `unsafe`
+    /// block is where the precondition the vendored `assert` states (and release mode drops)
+    /// now lives, the same place C++'s own lack of a safe/unsafe split put it by default.
+    ///
+    /// # Safety
+    /// `self` must hold a value (`self.is_some()`). Calling this on an empty `ClonablePtr` is
+    /// undefined behaviour, exactly as calling `operator*`/`operator->` on a null `clonable_ptr`
+    /// is in a release build of the oracle, where its own `assert` is compiled out.
+    // SAFETY: the `unsafe` on this function's own signature carries the precondition stated in
+    // its doc comment above -- `self` holds a value -- onto its caller, the same precondition
+    // the vendored `assert(nullptr != px)` states and a release build drops.
+    pub unsafe fn deref_unchecked(&self) -> &T {
+        debug_assert!(self.px.is_some(), "clonable_ptr: dereferenced while empty");
+        // SAFETY: forwarded verbatim from this function's own safety contract above.
+        unsafe { self.px.as_deref().unwrap_unchecked() }
+    }
+
     /// `release()` (`:98-101`): "release the ownership of the px pointer without destroying the
-    /// object!" -- a deliberate leak (the comment's own words), not a drop. `mem::forget` is the
-    /// faithful translation: setting `px` to `None` without it would free the box, which is
-    /// exactly the behaviour the original method exists to avoid.
+    /// object!" -- in C++ this is a hand-off, not a leak: the caller already holds the raw
+    /// pointer from a prior `get()`/`operator T*()` and now owns it outright. `get()` here
+    /// returns `Option<&T>`, a borrow, so there is no recipient for the ownership this method
+    /// gives up; `mem::forget` is the closest faithful rendering (setting `px` to `None` without
+    /// it would free the box, exactly what the original method exists to avoid), but the result
+    /// is an unrecoverable leak rather than a hand-off -- a divergence with no Rust counterpart
+    /// at the pin's own call sites (`release()` is never called anywhere in the vendored tree).
     pub fn release(&mut self) {
         if let Some(b) = self.px.take() {
             std::mem::forget(b);
@@ -110,33 +152,19 @@ impl<T: ?Sized + ClonableInner> Clone for ClonablePtr<T> {
     }
 }
 
-impl<T: ?Sized> std::ops::Deref for ClonablePtr<T> {
-    type Target = T;
-
-    /// `operator*()`/`operator->()` (`:110-119`): both `assert(nullptr != px)` (compiled out in
-    /// release -- `### Error sets`), then dereference unconditionally. `debug_assert!` mirrors
-    /// the debug-only check; dereferencing an empty `ClonablePtr` through this method is then
-    /// exactly as undefined in a release build as the vendored operators are, which this does
-    /// not widen into a live panic.
-    fn deref(&self) -> &T {
-        debug_assert!(self.px.is_some(), "clonable_ptr: dereferenced while empty");
-        // SAFETY: this function's precondition, mirroring the vendored `assert(nullptr != px)`,
-        // is that `self` holds a value; a caller dereferencing an empty `ClonablePtr` here is
-        // exactly as undefined as a caller of `*px`/`px->` on a null `clonable_ptr` is in a
-        // release build, where the assert above is compiled out.
-        unsafe { self.px.as_deref().unwrap_unchecked() }
-    }
-}
-
 /// `operator==`/`operator!=`/`operator<=`/`operator<`/`operator>=`/`operator>` (`:145-168`):
 /// every one compares `l.get()`/`r.get()` -- the raw pointer *addresses*, never the pointees --
 /// so two `ClonablePtr`s holding separately-allocated but equal-by-value pointees are unequal
 /// here, matching the vendored pointer comparison exactly rather than a value comparison.
+/// `std::ptr::addr_eq` (address-only), not `std::ptr::eq` (address **and** vtable/length
+/// metadata for a `?Sized` `T`), because the vendored comparison is of `T*`, a thin pointer with
+/// no metadata to begin with; two `ClonablePtr<dyn Trait>`s reaching one object through
+/// different vtables compare equal here, as the pin's own `T*` comparison would.
 impl<T: ?Sized> PartialEq for ClonablePtr<T> {
     fn eq(&self, other: &Self) -> bool {
         match (&self.px, &other.px) {
             (None, None) => true,
-            (Some(a), Some(b)) => std::ptr::eq(a.as_ref(), b.as_ref()),
+            (Some(a), Some(b)) => std::ptr::addr_eq(a.as_ref(), b.as_ref()),
             _ => false,
         }
     }
@@ -146,6 +174,13 @@ impl<T: ?Sized> Eq for ClonablePtr<T> {}
 /// The four ordering operators (`<=`,`<`,`>=`,`>`) compare pointer addresses too, which is only
 /// well-ordered for a `Sized` pointee (a fat pointer's address ordering is not meaningful); the
 /// pin's one instantiation, `clonable_ptr<const ConfigOption>`, is `Sized`.
+//
+// FIDELITY(port): clonable_ptr.hpp:154 (`operator<=`) is `port/reports/order-comparators.md`'s
+// `non_strict` row for this header, whose prescribed port's choice is "the strict form of the
+// same relation". This `Ord` impl, plus the derived `PartialOrd` default methods above it in
+// terms of `cmp`, is exactly that: one total order over the pointer address, with `<=`/`>=`
+// given by `PartialOrd`'s own default methods rather than a separately transcribed
+// `operator<=` body.
 impl<T: Sized> PartialOrd for ClonablePtr<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
