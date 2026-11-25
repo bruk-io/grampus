@@ -1,0 +1,14 @@
+[package]
+name = "slic3r-ffi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Safe Rust/C++ interop for the cxx bridges in src/*.rs (task 29-ffi-bridge-core, R17).
+cxx = "1.0.205"
+
+[build-dependencies]
+# Same release as the `cxx` dependency above: build.rs's cxx_build::bridge() must match the
+# bridge macro version it compiles against.
+cxx-build = "1.0.205"
