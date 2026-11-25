@@ -2447,6 +2447,20 @@ def run_selftest() -> int:
             "verdicts in both modes, and remaining-rows wording)"
         )
 
+    pr_body_failures = _check_pr_body_shapes()
+    if pr_body_failures:
+        for failure in pr_body_failures:
+            click.echo(f"self-test: pr-body shape check FAILED: {failure}")
+    else:
+        click.echo(
+            "self-test: pr-body-shapes: OK (parse_verdicts counts two distinctly-labelled "
+            "citation-bearing blocks as two verdicts, does not let a heading with no citation "
+            "of its own swallow them into one, and does not let one reviewer's repeated label "
+            "count as a second reviewer; find_named_manifest_row accepts the manifest-row "
+            "line's plain, backtick, bold, bulleted, src/libslic3r/-prefixed and trailing-prose "
+            "spellings, and rejects an absent line and a line naming a nonexistent path)"
+        )
+
     ok = (
         not regex_failures
         and not perf_row_failures
@@ -2454,6 +2468,7 @@ def run_selftest() -> int:
         and not manifest_shape_failures
         and not status_derivation_failures
         and not status_gate_failures
+        and not pr_body_failures
     )
     for name, expect_pass, must_contain in SELFTEST_FIXTURES:
         fixture_dir = FIXTURES_ROOT / name
@@ -2490,6 +2505,390 @@ def run_selftest() -> int:
                 f"{[f.render() for f in result.findings]})"
             )
     return 0 if ok else 1
+
+
+# --------------------------------------------------------------------------------------------
+# --pr-body (task 36-pr-body-check, R28): a port unit's pull request records both review
+# verdicts from the loop docs/WORKFLOW.md states and names an existing manifest row, skipped
+# only for a pull request whose diff adds no module -- decided from the diff, never from the
+# body. The trial-run record docs/WORKFLOW.md's own "Trial-run record" section will carry
+# (task 35-trial-run) fixes the exact body shape; that section reads "This section is filled by
+# 35-trial-run" today, so nothing here is copied from a worked example -- the shape below is
+# read from "The loop"'s own words ("two adversarial reviewers in separate contexts ... cites
+# every divergence as source:line against module:line") and is deliberately the loosest text
+# shape that still fails closed. Documented as a judgement call in the pull request body:
+# whichever of this task and 35-trial-run lands second reconciles the pattern with the other.
+# --------------------------------------------------------------------------------------------
+
+
+class PrBodyGitError(Exception):
+    """A `git` invocation needed to decide whether the diff adds a module failed."""
+
+
+# A file whose diff this check inspects for the skip rule: any `.rs` file under a crate's
+# `src/` tree (not `crates/*/tests/`, which this path never matches), the same tree
+# `scan_tree`'s own glob reads from (`crates/*/src/**/*.rs`).
+CRATES_SRC_RS_RE = re.compile(r"^crates/[^/]+/src/.*\.rs$")
+
+# "two adversarial reviewers in separate contexts": a label line introducing one reviewer's
+# verdict. Matched generously -- a heading, a bullet (`-`/`*`/`+`) or a bold line, "Review" or
+# "Reviewer", any suffix (a number, a letter, a name) -- because docs/WORKFLOW.md fixes the loop,
+# not a heading spelling, and task 35-trial-run's own record (not yet written) is what may
+# correct this. Matching the line alone is not enough to tell two reviewers apart from one
+# reviewer's two paragraphs: `parse_verdicts` below also requires two blocks whose labels read
+# differently once markers and case are stripped.
+VERDICT_LABEL_RE = re.compile(
+    r"^\s{0,3}[-*+]?\s*#{0,6}\s*\**\s*review(?:er)?\b.*$", re.IGNORECASE | re.MULTILINE
+)
+
+# "cites every divergence as source:line against module:line" -- read literally, with optional
+# backticks around either side (a citation written as inline code is the natural Markdown form).
+CITATION_RE = re.compile(
+    r"`?(?P<source>[^\s`]+:\d+)`?\s+against\s+`?(?P<module>[^\s`]+:\d+)`?", re.IGNORECASE
+)
+
+# R28 names two things in a unit's pull request body: both review verdicts (above), "together
+# with" (docs/WORKFLOW.md) -- a third, separate thing -- "the module's manifest row". A body
+# whose citations merely happen to cite a real vendored path does not, on its own, "name" the
+# manifest row the way R28 states it; that is a `source:line` from a divergence, not the row
+# itself. So this is matched as its own labelled line, the same shape VERDICT_LABEL_RE reads a
+# reviewer label with (heading, bullet or bold, and now bold wrapping either side of the colon),
+# naming the row by the exact value of port/manifest.tsv's own `path` column (e.g. "AABBMesh.cpp",
+# or "Geometry/Circle.cpp") -- or, since every citation and trailer in this repository spells a
+# vendored path with the `src/libslic3r/` prefix, that same path with the prefix still on it;
+# `find_named_manifest_row` below strips it before the lookup, the same way `resolve_vendored`
+# does for a trailer's `source:` line. The path is read as the first non-blank token after the
+# colon rather than the rest of the line, so trailing prose, a trailing backtick, or more columns
+# pasted after it do not stop the match.
+MANIFEST_ROW_LINE_RE = re.compile(
+    r"^\s{0,3}[-*+]?\s*#{0,6}\s*\**\s*manifest\s+row\s*\**\s*:\s*\**\s*`?(?P<path>[^\s`]+)`?",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """One labelled block of the pull request body and the citations found inside it."""
+
+    label: str
+    citations: list[tuple[str, str]]
+
+
+def git_diff_name_only(repo_root: Path, base_ref: str) -> list[str]:
+    """`git diff --name-only <base_ref>...HEAD`, run against `repo_root` (always the real
+    repository root, never `--tree` -- this mode takes no `--tree`). Raises `PrBodyGitError` on
+    failure rather than reading a failed diff as "no paths changed", which would silently widen
+    the skip path the task forbids ("it is skipped only from the diff, never from the body")."""
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "diff", "--name-only", f"{base_ref}...HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise PrBodyGitError(
+            f"git -C {repo_root} diff --name-only {base_ref}...HEAD failed: "
+            f"{proc.stderr.strip()}"
+        )
+    return [line for line in proc.stdout.splitlines() if line]
+
+
+def lib_rs_diff_adds_mod_line(repo_root: Path, base_ref: str, relpath: str) -> bool:
+    """True if any line the diff of `relpath` (a `crates/*/src/lib.rs`) *adds* is a `mod name;`
+    declaration, read with the same `MOD_DECL_RE` `compute_mod_reachable_files` reads a `mod`
+    line with. Reads the unified diff's own `+` lines, never the file's current content, which
+    is what "a Phase B pull request ... adds its mod line" (task.md) means: a lib.rs that
+    already held the line before this diff does not retrigger the check on every later commit
+    that merely touches the file."""
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "diff", f"{base_ref}...HEAD", "--", relpath],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise PrBodyGitError(
+            f"git -C {repo_root} diff {base_ref}...HEAD -- {relpath} failed: "
+            f"{proc.stderr.strip()}"
+        )
+    for line in proc.stdout.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+") and MOD_DECL_RE.match(line[1:]):
+            return True
+    return False
+
+
+def _manifest_target_crate_dirs(repo_root: Path) -> set[str]:
+    """The `target crate` column of every row of `port/manifest.tsv`, as a set of crate
+    directory names -- the crates `pr_body_diff_adds_module` is allowed to decide the skip rule
+    from. This excludes an unrelated hand-written tool crate such as `crates/oracle-compare/`
+    the same way `scan_tree`'s own module scan does (see that function's docstring): no manifest
+    row claims it, so a change under its `src/` tree -- e.g. the `pub mod gcode;` line
+    `crates/oracle-compare/src/lib.rs` carries -- is not a port unit's pull request and must not
+    be able to trip the "adds a module" skip rule, on pain of forcing an honest tool-crate pull
+    request to fabricate review verdicts and a manifest row to pass.
+
+    Raises `PrBodyGitError` if `port/manifest.tsv` cannot be read or names no crate at all: a
+    silently empty set would make every pull request's diff look like it adds no module, which
+    is exactly the fail-open "it is skipped only from the diff, never from the body" (task.md)
+    forbids, so an unreadable manifest is reported as an error here rather than read as a skip.
+    """
+    manifest_path = repo_root / "port" / "manifest.tsv"
+    if not manifest_path.is_file():
+        raise PrBodyGitError(f"{manifest_path} does not exist")
+    rows = load_manifest(manifest_path)
+    crates = {row["target crate"].strip() for row in rows if row.get("target crate", "").strip()}
+    if not crates:
+        raise PrBodyGitError(f"{manifest_path} names no 'target crate' value")
+    return crates
+
+
+def pr_body_diff_adds_module(repo_root: Path, base_ref: str) -> bool:
+    """task.md's skip rule: true if the changed-path list holds a `crates/*/src/*.rs` file that
+    currently carries a `PORT STATUS` trailer (a Phase A pull request, which adds the module
+    file whole), or a `crates/*/src/lib.rs` whose diff adds a `mod` line (a Phase B pull
+    request, which changes an existing draft). Both forms are checked for every matching path,
+    so a `lib.rs` that happened to carry a trailer of its own would also trip the first form --
+    an edge case neither rule excludes, matching the task's own "both forms matter" wording
+    rather than narrowing it.
+
+    Narrowed one way beyond that literal wording, stated here and in the pull request body as
+    the judgement call it is: a path only counts when its crate directory is one
+    `_manifest_target_crate_dirs` names. Read with no narrowing at all, `crates/*/src/lib.rs`
+    also matches the hand-written `crates/oracle-compare/` tool crate, which carries no manifest
+    row and whose own `pub mod` lines are not a port unit at all -- see that function's
+    docstring."""
+    target_crate_dirs = _manifest_target_crate_dirs(repo_root)
+    for relpath in git_diff_name_only(repo_root, base_ref):
+        if not CRATES_SRC_RS_RE.match(relpath):
+            continue
+        crate_dir = relpath.split("/", 2)[1]
+        if crate_dir not in target_crate_dirs:
+            continue
+        if relpath.rsplit("/", 1)[-1] == "lib.rs" and lib_rs_diff_adds_mod_line(
+            repo_root, base_ref, relpath
+        ):
+            return True
+        abs_path = repo_root / relpath
+        if abs_path.is_file():
+            try:
+                text = abs_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if carries_port_status_trailer(text):
+                return True
+    return False
+
+
+def _normalize_verdict_label(raw_label: str) -> str:
+    """Collapse a verdict label line to the text that names the reviewer, for the distinctness
+    check `parse_verdicts` needs: two citation-bearing blocks are "both" verdicts only if their
+    labels read as two different reviewers, not a heading above them (which carries no citation
+    of its own and is dropped before this ever runs) and not one reviewer's own second paragraph
+    restating the same label. Strips a leading bullet/heading marker, then emphasis asterisks or
+    underscores, keeps only the text before the first `:` (a label's own name, not what a
+    reviewer writes after it), lowercases and collapses whitespace -- so "## Reviewer 1:",
+    "- **Reviewer 1:**" and "### Reviewer 1" all normalize to "reviewer 1", while two lines that
+    both read "Reviewer note:" normalize to the same key and so count as one reviewer, not two."""
+    text = raw_label.split(":", 1)[0]
+    text = re.sub(r"^[\s#*_+-]+", "", text)
+    text = re.sub(r"[*_]+", "", text)
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def parse_verdicts(body: str) -> list[Verdict]:
+    """Every distinctly-labelled block of `body` (introduced by a `VERDICT_LABEL_RE` line,
+    running to the next such line or the end of the body) that carries at least one
+    `source:line against module:line` citation. A label line with no citation in its block is
+    not a verdict -- it fails the "each citing at least one divergence" half of the rule rather
+    than counting towards "both" -- and is dropped before a heading can swallow the citations
+    that follow it into its own, empty block.
+
+    "Both" review verdicts means two blocks whose labels name two different reviewers, not two
+    paragraphs from the same one: blocks are grouped by `_normalize_verdict_label`, and a label
+    repeated under a second heading (or without any heading at all) is one group, so it can
+    supply only one verdict no matter how many citation-bearing lines it carries. A later block
+    that repeats an earlier group's label is merged into it (its citations are added, not
+    counted as a second verdict), so the result holds at most one `Verdict` per distinct label,
+    in first-appearance order."""
+    lines = body.splitlines()
+    label_indices = [i for i, line in enumerate(lines) if VERDICT_LABEL_RE.match(line)]
+    grouped: dict[str, Verdict] = {}
+    order: list[str] = []
+    for pos, start in enumerate(label_indices):
+        end = label_indices[pos + 1] if pos + 1 < len(label_indices) else len(lines)
+        block_text = "\n".join(lines[start:end])
+        citations = [
+            (m.group("source"), m.group("module")) for m in CITATION_RE.finditer(block_text)
+        ]
+        if not citations:
+            continue
+        key = _normalize_verdict_label(lines[start].strip())
+        if key in grouped:
+            grouped[key] = Verdict(
+                label=grouped[key].label, citations=grouped[key].citations + citations
+            )
+        else:
+            grouped[key] = Verdict(label=lines[start].strip(), citations=citations)
+            order.append(key)
+    return [grouped[key] for key in order]
+
+
+def find_named_manifest_row(tree_root: Path, body: str) -> str | None:
+    """"names a manifest row that exists, meaning a path in the body's recorded row matches the
+    path column of a row of port/manifest.tsv" (task.md) -- R28's "and names the module's
+    manifest row", a thing the body records **in addition to** the two verdicts above, not a
+    by-product of a citation's source path (a citation cites a divergence; it does not, on its
+    own, name the row). Reads every `MANIFEST_ROW_LINE_RE` line in `body`, in order, and returns
+    the first one whose path is exactly a `port/manifest.tsv` `path`-column value, or -- failing
+    that -- the same path with a leading `src/libslic3r/` stripped, since every citation and
+    trailer in this repository spells a vendored path with that prefix and a porter who writes
+    the row the way the rest of the repository writes a vendored path should not fail where one
+    who drops the prefix passes (the same resolution `resolve_vendored` gives a trailer's
+    `source:` line). Returns `None` if the body records no such line, or every one it does
+    record names no existing row, which this function deliberately does not distinguish
+    (task.md: "a body with no manifest row" and "a body naming a manifest row that does not
+    exist" are both failures of this one check)."""
+    manifest_rows = load_manifest(tree_root / "port" / "manifest.tsv")
+    manifest_paths = {row["path"].strip() for row in manifest_rows if row.get("path")}
+    for m in MANIFEST_ROW_LINE_RE.finditer(body):
+        path = m.group("path").strip()
+        if path in manifest_paths:
+            return path
+        if path.startswith(VENDOR_SRC_PREFIX):
+            vendored_spelling = path[len(VENDOR_SRC_PREFIX) :]
+            if vendored_spelling in manifest_paths:
+                return vendored_spelling
+    return None
+
+
+def _check_pr_body_shapes() -> list[str]:
+    """`parse_verdicts` and `find_named_manifest_row`, checked directly the way
+    `_check_manifest_shape_guard` checks `check_manifest_shape`: no git state and no fixture
+    tree beyond the committed `status-and-gate` fixture's own manifest, which already names
+    `Geometry/Circle.cpp` for other checks in this file to reuse. The 230-odd lines `--pr-body`
+    added had no self-test coverage of their own (task 36-pr-body-check's own review found
+    this); these fixed in-memory bodies and row-line spellings are the fixture."""
+    failures: list[str] = []
+
+    two_reviewer_body = (
+        "## Review verdicts\n\n"
+        "- **Reviewer 1:** `src/libslic3r/AABBMesh.cpp:112` against "
+        "`crates/slic3r-aabbmesh/src/aabb_mesh.rs:88`\n"
+        "- **Reviewer 2:** `src/libslic3r/AABBMesh.cpp:201` against "
+        "`crates/slic3r-aabbmesh/src/aabb_mesh.rs:140`\n"
+    )
+    verdicts = parse_verdicts(two_reviewer_body)
+    if len(verdicts) != 2:
+        failures.append(
+            "two-reviewer-bullets-under-a-heading: expected parse_verdicts to find 2 "
+            f"verdicts (a heading with no citation of its own must not swallow the two "
+            f"bulleted reviewer blocks below it), got {len(verdicts)}: {verdicts!r}"
+        )
+
+    label_with_no_citation = "## Review\n\nOnly one reviewer ran, with nothing to cite yet.\n"
+    verdicts = parse_verdicts(label_with_no_citation)
+    if verdicts:
+        failures.append(
+            f"label-with-no-citation: expected parse_verdicts to find 0 verdicts, got "
+            f"{len(verdicts)}: {verdicts!r}"
+        )
+
+    same_reviewer_twice_body = (
+        "## Review by the single implementer (no second reviewer ever ran)\n\n"
+        "Reviewer note: `src/libslic3r/AABBMesh.cpp:112` against "
+        "`crates/slic3r-aabbmesh/src/aabb_mesh.rs:88`\n"
+        "Reviewer note: `src/libslic3r/AABBMesh.cpp:201` against "
+        "`crates/slic3r-aabbmesh/src/aabb_mesh.rs:140`\n"
+    )
+    verdicts = parse_verdicts(same_reviewer_twice_body)
+    if len(verdicts) != 1:
+        failures.append(
+            "repeated-label-is-one-reviewer-not-two: expected parse_verdicts to find 1 "
+            f"distinct verdict (the same label twice is one reviewer, not two), got "
+            f"{len(verdicts)}: {verdicts!r}"
+        )
+
+    manifest_tree = FIXTURES_ROOT / "status-and-gate"
+    accepted_row_lines = {
+        "Manifest row: Geometry/Circle.cpp": "Geometry/Circle.cpp",
+        "Manifest row: `Geometry/Circle.cpp`": "Geometry/Circle.cpp",
+        "**Manifest row**: Geometry/Circle.cpp": "Geometry/Circle.cpp",
+        "- Manifest row: Geometry/Circle.cpp": "Geometry/Circle.cpp",
+        "**Manifest row:** Geometry/Circle.cpp": "Geometry/Circle.cpp",
+        "Manifest row: src/libslic3r/Geometry/Circle.cpp": "Geometry/Circle.cpp",
+        "Manifest row: Geometry/Circle.cpp (slic3r-status, exact, tier 1)": "Geometry/Circle.cpp",
+    }
+    for line, expected in accepted_row_lines.items():
+        found = find_named_manifest_row(manifest_tree, line)
+        if found != expected:
+            failures.append(
+                f"manifest-row-shape {line!r}: expected {expected!r}, got {found!r}"
+            )
+
+    if find_named_manifest_row(manifest_tree, "no manifest row line is present here") is not None:
+        failures.append("manifest-row-absent: expected None when the body names no row")
+
+    if find_named_manifest_row(manifest_tree, "Manifest row: made/up/path.cpp") is not None:
+        failures.append("manifest-row-nonexistent: expected None for a path with no row")
+
+    return failures
+
+
+def run_pr_body_check(body_path: Path, base_ref: str) -> int:
+    """`port/port-status --pr-body <file> [--base <ref>]` (task.md). Order matters: the skip
+    decision is made, and acted on, before the body file is even opened -- "it is skipped only
+    from the diff, never from the body" means a body that would otherwise fail (or an absent
+    file) must not be able to fail a pull request whose diff adds no module."""
+    try:
+        adds_module = pr_body_diff_adds_module(REPO_ROOT, base_ref)
+    except PrBodyGitError as exc:
+        click.echo(f"error: {exc}", err=True)
+        return 1
+
+    if not adds_module:
+        click.echo(
+            "port-status (pr-body): skipped -- the diff against "
+            f"{base_ref} adds no module"
+        )
+        return 0
+
+    if not body_path.is_file():
+        click.echo(f"error: {body_path} does not exist", err=True)
+        return 1
+    body = body_path.read_text(encoding="utf-8", errors="replace")
+    if not body.strip():
+        click.echo(f"error: {body_path} is empty", err=True)
+        return 1
+
+    verdicts = parse_verdicts(body)
+    if len(verdicts) < 2:
+        click.echo(
+            f"error: {body_path} records {len(verdicts)} review verdict(s) with a "
+            "source:line against module:line citation; both review verdicts from the loop "
+            "docs/WORKFLOW.md states are required",
+            err=True,
+        )
+        return 1
+
+    manifest_key = find_named_manifest_row(REPO_ROOT, body)
+    if manifest_key is None:
+        click.echo(
+            f"error: {body_path} names no manifest row that exists -- no 'Manifest row: "
+            "<path>' line in it names an existing path-column value of port/manifest.tsv",
+            err=True,
+        )
+        return 1
+
+    for i, verdict in enumerate(verdicts[:2], start=1):
+        source, module = verdict.citations[0]
+        click.echo(
+            f"port-status (pr-body): verdict {i} ({verdict.label}): {source} against {module}"
+        )
+    click.echo(f"port-status (pr-body): manifest row found: {manifest_key}")
+    click.echo(f"port-status (pr-body): {body_path} ok")
+    return 0
 
 
 # --------------------------------------------------------------------------------------------
@@ -2590,9 +2989,30 @@ missing or its header lacks a column status derivation or the gate reads, since 
 rows derived from a broken manifest must never read as the port being complete.
 """
 
+PR_BODY_HELP = """\
+\b
+--pr-body <file> (R28, task 36-pr-body-check): fails a port unit's pull request unless <file>
+(its body) records both review verdicts the loop above states -- two DISTINCTLY labelled
+reviewers (a label line starting with "Review" or "Reviewer", a heading, bullet or bold line),
+each citing at least one divergence as "source:line against module:line"; a second block whose
+label reads the same as an earlier one (ignoring markers and case) is the same reviewer, not a
+second one -- and, separately, names the module's manifest row on its own "Manifest row: <path>"
+line, <path> being an exact port/manifest.tsv `path`-column value (e.g. "AABBMesh.cpp") or that
+value with a leading "src/libslic3r/" still on it. An empty or absent body, one verdict, no
+"Manifest row:" line, or one naming a path with no such row each fail closed -- there is no
+allowlist. Skipped, printing so and exiting 0, only for a pull request whose diff (--base <ref>,
+default origin/main; `git diff --name-only <base>...HEAD`) adds no module: no changed
+crates/*/src/*.rs file in a crate port/manifest.tsv names carries a PORT STATUS trailer, and no
+changed crates/*/src/lib.rs diff in such a crate adds a mod line (a change confined to the
+hand-written crates/oracle-compare/ tool crate, which no manifest row claims, is not a module
+add). That decision is made from the diff alone, before the body is even read, so a body can
+never switch the check off. Needs no --tree, no oracle binary and no libslic3r build, and takes
+none of --tree, --per-commit or --self-test alongside it.
+"""
+
 FULL_HELP = (
     "Check every ported module's PORT STATUS trailer and port markers (R14, R15, R16, R19, R26, "
-    "R29, R30).\n\n"
+    "R28, R29, R30).\n\n"
     + TRAILER_HELP
     + "\n"
     + NUMERIC_RULE_HELP
@@ -2600,6 +3020,8 @@ FULL_HELP = (
     + MARKER_WHITELIST_HELP
     + "\n"
     + GATE_HELP
+    + "\n"
+    + PR_BODY_HELP
 )
 
 
@@ -2622,7 +3044,45 @@ FULL_HELP = (
     "fail on them -- only the no-argument (default) mode, the completion gate, does.",
 )
 @click.option("--self-test", "self_test", is_flag=True, help="Run every fixture under port/tests/port-status/ and assert its expected result.")
-def main(tree: Path | None, per_commit: bool, self_test: bool) -> None:
+@click.option(
+    "--pr-body",
+    "pr_body",
+    type=click.Path(path_type=Path, dir_okay=False),
+    default=None,
+    help="Check a pull request body file for R28 (see --help's own --pr-body section). Takes "
+    "no --tree: always reads the real repository's crates/, port/manifest.tsv and git history.",
+)
+@click.option(
+    "--base",
+    "base_ref",
+    default="origin/main",
+    show_default=True,
+    help="The ref --pr-body diffs HEAD against to decide whether a module was added. Ignored "
+    "without --pr-body.",
+)
+def main(
+    tree: Path | None,
+    per_commit: bool,
+    self_test: bool,
+    pr_body: Path | None,
+    base_ref: str,
+) -> None:
+    if pr_body is not None:
+        conflicting = [
+            flag
+            for flag, given in (("--tree", tree is not None), ("--per-commit", per_commit), ("--self-test", self_test))
+            if given
+        ]
+        if conflicting:
+            click.echo(
+                "error: --pr-body takes no " + ", ".join(conflicting) + " -- it always reads "
+                "the real repository's crates/, port/manifest.tsv and git history, never "
+                "--tree, and runs no other mode in the same invocation",
+                err=True,
+            )
+            sys.exit(1)
+        sys.exit(run_pr_body_check(pr_body, base_ref))
+
     pin_error = check_pin()
     if pin_error:
         click.echo(f"error: {pin_error}", err=True)
