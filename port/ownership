@@ -21,8 +21,9 @@ from the vendored tree on every run; ``class``, ``evidence`` and ``rust type`` a
 forward verbatim from whatever the committed file holds for the same
 (header path, line, declaring type, field) key, exactly as the manifest's own six judgement
 columns are (see ``port/inventory``'s "Judgement columns" section) -- a field this run sees for
-the first time gets a blank ``class``, which is accepted while step 12's classification tasks are
-still open.
+the first time gets a blank ``class``. ``just ownership`` still writes that blank for a newly seen
+field, but ``just ownership-check`` now fails any row whose ``class`` is blank: whoever moves the
+submodule pin and picks up a new raw-pointer field classifies it in the same pull request.
 
 **The alias trap.** A field whose declared type is an alias of a pointer or of a container of
 pointers (``typedef std::vector<ModelObject*> ModelObjectPtrs;``, or the ``using`` spelling) shows
@@ -66,10 +67,11 @@ regenerated list there too (``ownership.tsv``, next to the always-empty stdout l
 it against the committed file as an ordered, duplicate-sensitive list -- not a byte diff, but not a
 set either, so neither a reordered nor a duplicated committed row passes. It additionally validates
 every row's own class/evidence rule (not caught by that comparison, since those three cells are
-carried forward and so would compare equal even when individually invalid): a ``class`` other than
-``unknown`` with no evidence fails, and an ``unknown`` row missing either its evidence ``path:line``
-or its Rust type fails. ``just ownership-check`` prints the committed file's own row count on
-success -- the plan's recorded proof line for R30.
+carried forward and so would compare equal even when individually invalid): a ``class`` that is
+not one of the six valid values -- a blank cell among them -- fails; a class other than
+``unknown`` with no evidence fails; and an ``unknown`` row missing either its evidence
+``path:line`` or its Rust type fails. ``just ownership-check`` prints the committed file's own row
+count on success -- the plan's recorded proof line for R30.
 """
 
 from __future__ import annotations
@@ -90,7 +92,7 @@ HEADER = ["header path", "line", "declaring type", "field", "C++ type", "class",
 
 HEADER_EXTENSIONS = (".h", ".hpp")
 
-VALID_CLASSES = {"", "owned", "shared", "borrowed", "back-reference", "ffi", "unknown"}
+VALID_CLASSES = {"owned", "shared", "borrowed", "back-reference", "ffi", "unknown"}
 
 
 #
@@ -731,11 +733,11 @@ def generate(pointer_aliases: frozenset[str] | None = None) -> list[list[str]]:
 
 
 def validate_rows(rows: list[list[str]]) -> list[str]:
-    """Return every rule violation in rows (empty if none): an invalid class value, a non-blank,
-    non-unknown class with no evidence, or an unknown row missing its evidence path:line or its
-    Rust type. This is independent of (and not caught by) a diff against the committed file,
-    because class/evidence/rust type are carried forward verbatim -- a byte-identical
-    regeneration still carries a badly-filled-in cell unchanged."""
+    """Return every rule violation in rows (empty if none): an invalid class value (a blank class
+    among them), a non-``unknown`` class with no evidence, or an unknown row missing its evidence
+    path:line or its Rust type. This is independent of (and not caught by) a diff against the
+    committed file, because class/evidence/rust type are carried forward verbatim -- a
+    byte-identical regeneration still carries a badly-filled-in cell unchanged."""
     cls_i, ev_i, rust_i = HEADER.index("class"), HEADER.index("evidence"), HEADER.index("rust type")
     problems = []
     for row in rows:
@@ -743,14 +745,15 @@ def validate_rows(rows: list[list[str]]) -> list[str]:
         cls, evidence, rust_type = row[cls_i], row[ev_i], row[rust_i]
         label = f"{header_path}:{line} {declaring_type}::{field}"
         if cls not in VALID_CLASSES:
-            problems.append(f"{label}: class {cls!r} is not one of {sorted(VALID_CLASSES - {''})}")
+            detail = " (a blank class is no longer accepted)" if cls == "" else ""
+            problems.append(f"{label}: class {cls!r} is not one of {sorted(VALID_CLASSES)}{detail}")
             continue
         if cls == "unknown":
             if not evidence:
                 problems.append(f"{label}: class is 'unknown' but evidence is empty")
             if not rust_type:
                 problems.append(f"{label}: class is 'unknown' but rust type is empty")
-        elif cls != "" and not evidence:
+        elif not evidence:
             problems.append(f"{label}: class is {cls!r} but evidence is empty")
     return problems
 
