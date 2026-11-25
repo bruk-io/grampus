@@ -29,26 +29,34 @@ kind: plan
 ### Step 1: Confirm the dependency state before choosing units
 - delivers: R28
 
-Before choosing the three rows, check whether `port/foundation.tsv`'s tasks — the hand-designed
-foundation types (`Point`, `Polygon`, `ExPolygon`, `Config`, and the rest plan step 20 cut as
-`34-foundation-spike`'s batches, started as tasks `52`–`55` and onward) — are actually on `main`
-with real content, not only crate skeletons. The task names this as a hard wait ("it also waits
-for the foundation tasks cut from `port/foundation.tsv`"), not a preference, because an ordinary
-file-unit's module needs the foundation types' shape to compile when its vendored source names
-them.
+Before choosing the three rows, check whether `port/foundation.tsv`'s 33 batches — the
+hand-designed foundation types (`Point`, `Polygon`, `ExPolygon`, `Config`, and the rest plan step
+20 cut as `34-foundation-spike`'s batches, one task per row: `52-foundation-common-defs` through
+`84-foundation-precise-seam`) — are actually on `main` with real content, not only crate
+skeletons. The task names this as a hard wait ("it also waits for the foundation tasks cut from
+`port/foundation.tsv`"), not a preference, because an ordinary file-unit's module needs the
+foundation types' shape to compile when its vendored source names them.
 
 **Risk, found during this step, carried into every step after it:** at the time this plan is
 written, `git log origin/main` shows only task `34-foundation-spike` merged (the crate skeletons
-and `port/foundation.tsv` itself); every foundation task branch (`52-foundation-common-defs`,
-`53-foundation-int128-queue`, `54-foundation-objectid-clonable`,
-`55-foundation-libslic3r-execution`, and the rest `foundation.tsv` names) has only a `Start task`
-commit, with no real type content, anywhere reachable from `origin/main`. Every crate skeleton
-sampled (`slic3r-point`, `slic3r-boundingbox`, `slic3r-line`) holds nothing but the doc-comment
-skeleton `34-foundation-spike` wrote. In particular, **no Rust `Point` type exists on `main`**, and
-the fixed-point unit this task must choose is explicitly described as one "whose ported surface
+and `port/foundation.tsv` itself). Of the 33 foundation batches, 0 are merged: four —
+`52-foundation-common-defs`, `53-foundation-int128-queue`, `54-foundation-objectid-clonable` and
+`55-foundation-libslic3r-execution` (`foundation-01` through `foundation-04`: `CommonDefs`/
+`Exception`/`I18N`, `Int128`/`MutablePriorityQueue`, `ObjectID`/`clonable_ptr`,
+`libslic3r.h`/`Execution`) — have draft branches with only a `Start task` commit each, no real
+type content reachable from `origin/main`; the other 29, including `56-foundation-point`
+(`foundation-05`: `Point.cpp`/`Point.hpp`, among others), have **no branch at all**. None of the
+four started batches is the one that designs `Point`, `Polygon`, `ExPolygon` or `Config` — those
+are `56-foundation-point` (`foundation-05`), `62-foundation-polygon` (`foundation-11`),
+`65-foundation-expolygon-flow` (`foundation-14`) and `59-foundation-config` (`foundation-08`),
+none of which has even a branch yet. Every crate skeleton sampled (`slic3r-point`,
+`slic3r-boundingbox`, `slic3r-line`) holds nothing but the doc-comment skeleton
+`34-foundation-spike` wrote. In particular, **no Rust `Point` type exists on `main`**, and the
+fixed-point unit this task must choose is explicitly described as one "whose ported surface
 returns integer-coordinate output" — which is a `Point`-shaped surface in every candidate this plan
 found among the non-foundation, non-template-heavy rows of `port/manifest.tsv`. That requirement
-cannot be met honestly without `Point` (or an equivalent coordinate type) existing on `main` first.
+cannot be met honestly without `Point` (or an equivalent coordinate type) existing on `main` first,
+which is to say without `56-foundation-point` landing.
 
 This plan does not route around that by porting `Point`, `Polygon` or any other foundation type
 itself: that is `34-foundation-spike`'s hand-design, cut into the `foundation-*` tasks this task
