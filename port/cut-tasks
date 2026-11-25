@@ -273,11 +273,38 @@ def generate_foundation(header: list[str], rows: list[list[str]]) -> tuple[list[
     A single unit already over FOUNDATION_MAX_LINES (Config.hpp alone, 3,154 lines, is the one
     case in the committed manifest) still becomes a batch of its own: there is no smaller row to
     split it into, the same fallback phase-a's own rule states explicitly ("a unit of more than
-    2,500 lines is a task on its own")."""
+    2,500 lines is a task on its own").
+
+    task 34-foundation-spike's own "What to build" adds one more rule on top of the generic
+    `group_units` selection `group_units`'s own docstring describes (a row the selector drops
+    never pulls in its same-stem sibling): "A template-heavy: yes header whose same-stem .cpp is
+    in scope brings that .cpp row into the same foundation unit" -- because 07-crate-cut gives a
+    .cpp and its same-stem .hpp one target module, so a .cpp left to Phase A would draft over a
+    hand-designed foundation module at that same path. `template-heavy` itself never seeds "yes"
+    for a .cpp row (port/inventory's `seed_judgement_cells`: "it never fires for ... a .cpp/.mm
+    row, both of which always seed 'no'"), so that pairing cannot be read off the .cpp row's own
+    cell the way `group_units`'s generic selector reads every other phase's rows; it has to be
+    computed here, from the sibling header's cell, as foundation's own selector."""
     template_heavy_i = column_index(header, "template-heavy")
+    path_i = column_index(header, "path")
+
+    yes_header_stems = {
+        os.path.splitext(row[path_i])[0]
+        for row in rows
+        if is_in_scope(header, row)
+        and row[path_i].endswith((".h", ".hpp"))
+        and row[template_heavy_i] == "yes"
+    }
 
     def selector(row: list[str]) -> bool:
-        return is_in_scope(header, row) and row[template_heavy_i] == "yes"
+        if not is_in_scope(header, row):
+            return False
+        if row[template_heavy_i] == "yes":
+            return True
+        # Not itself template-heavy (true of every .cpp row by construction) -- still selected
+        # when it is the same-stem .cpp of a yes-marked header, so group_units pairs them.
+        p = row[path_i]
+        return p.endswith(".cpp") and os.path.splitext(p)[0] in yes_header_stems
 
     units = group_units(header, rows, selector)
     units.sort(key=lambda unit: (unit["crate_level"], unit["stem"]))
