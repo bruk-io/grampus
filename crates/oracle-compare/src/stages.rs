@@ -35,7 +35,12 @@
 //! (`is_fallback_stage`, `FALLBACK_STAGES`): `psGCodeExport` and `psConflictCheck` have no R5
 //! seam, so this command never has a per-seam dump for them and instead compares the port's and
 //! the built oracle's exported G-code the same way `just compare` already does, saying so in its
-//! output rather than naming `psSkirtBrim` (the last seam) as their first difference.
+//! output rather than naming whichever ordinary seam happens to print immediately above them as
+//! their first difference (an earlier draft of this comment said "`psSkirtBrim`, the last seam"
+//! — wrong on both counts: `stage_names_in_order`'s printed order is manifest order, not firing
+//! order, so the preceding line is not reliably `psSkirtBrim`, and `posSimplifyPath`, not
+//! `psSkirtBrim`, is the seam that actually fires last — see `crates/grampus-cli/src/surface.rs`'s
+//! `STAGE_DUMP_SEAMS` doc comment).
 
 use std::collections::HashSet;
 use std::fs;
@@ -43,7 +48,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::tolerance::{self, Tolerance};
-use crate::{compare_with_tolerance, Report};
+use crate::{compare_with_tolerance, Level, Report};
 
 /// The two pipeline steps with no value in `SlicingPipelineStepPlugin` and therefore no R5 seam
 /// at all (spec.md R5, R20; C11). Named here, literally, because this command has to recognise
@@ -138,6 +143,18 @@ pub fn load_manifest_rows(tsv_path: &Path) -> Result<Vec<ManifestRow>, String> {
 /// this task makes, not a fact read off the manifest: the column carries no ordering of its own,
 /// and putting the two seamless stages last keeps "the first stage that differs" from ever
 /// naming one of them ahead of a seam it did not actually run against.
+///
+/// **This printed order is manifest row order, not `Print::process()`'s own firing order**
+/// (`vendor/OrcaSlicer/src/libslic3r/Print.cpp:3300` and following) — this module reads the
+/// stage list from `port/manifest.tsv` and names no seam list of its own (a Done-when line a
+/// reviewer checks by grepping this file for the status column and finding nothing; restating
+/// the firing order here would be the same kind of restatement), so "the first stage that
+/// differs" among the ordinary (non-fallback) stages is the first of them *by manifest row
+/// order*, which can print and therefore name a stage that fires *later* in the real pipeline
+/// than another differing stage printed after it (e.g. `psWipeTower`, print-wide and firing
+/// late, can appear before several per-object seams that fire earlier). Only the two fallback
+/// stages are special-cased to the end, for the reason above; every other stage's position is
+/// manifest order, unexamined against firing order.
 pub fn stage_names_in_order(rows: &[ManifestRow]) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut ordinary = Vec::new();
@@ -911,10 +928,14 @@ pub fn stage_tolerance(manifest_path: &Path, rows: &[&ManifestRow]) -> Result<To
 // --- Dump records --------------------------------------------------------------------------
 
 /// Reads `path` as the dump format `oracle/stage-dump/dump_seams.cpp` writes, keeping only the
-/// data records (every line after the `;`-comment provenance header and any other `;`-prefixed
-/// or blank line), each right-trimmed. Comment lines are never compared: they carry
-/// machine-specific provenance (`os:`, `arch:`, `compiler:`, ...) the two sides are not expected
-/// to agree on, and R5 states the header separately from the record shape this parses.
+/// data records: every line after the `;`-comment provenance header, with every other
+/// `;`-prefixed line (including the dumper's own `; seam:` and `; object:` separators, not only
+/// its machine-specific `os:`/`arch:`/`compiler:` provenance block) and every blank line dropped
+/// too, each remaining line right-trimmed. Dropping `; object:` means a difference in object
+/// count or ordering between the two sides is only caught indirectly, by the record stream
+/// shifting, never directly by an object index; this module does not carry the current object
+/// into each record's key. See [`dump_seam_header`] for the one check this module does make
+/// against a dropped `; seam:` line.
 pub fn read_dump_records(path: &Path) -> Result<Vec<String>, String> {
     let content = fs::read_to_string(path)
         .map_err(|e| format!("cannot read dump '{}': {e}", path.display()))?;
@@ -927,6 +948,22 @@ pub fn read_dump_records(path: &Path) -> Result<Vec<String>, String> {
         })
         .map(|s| s.to_string())
         .collect())
+}
+
+/// The value of a dump's own `; seam: <name>` header line, read straight from `path` (not from
+/// [`read_dump_records`], which drops it) — `None` if the file carries no such line at all. A
+/// dump read from the wrong file, or a stage-dump emitter that gets a seam's own filename wrong,
+/// is otherwise invisible: nothing about `read_dump_records`'s output names which stage it came
+/// from. `run` calls this on both the oracle's and the port's dump for the stage it is about to
+/// compare and refuses to compare them if either disagrees with the stage it was read as.
+pub fn dump_seam_header(path: &Path) -> Result<Option<String>, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("cannot read dump '{}': {e}", path.display()))?;
+    Ok(content.lines().find_map(|l| {
+        l.trim_start()
+            .strip_prefix("; seam:")
+            .map(|rest| rest.trim().to_string())
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -982,8 +1019,17 @@ fn parse_hex_float(s: &str) -> Option<f64> {
 }
 
 /// Splits a dump record line into its whitespace-separated `key=value` tokens (R5's own format:
-/// "a role= value has every space replaced with `_`, so a line can be tokenised on whitespace
-/// with no value spanning more than one token").
+/// a `role=` value has every space replaced with `_`, so *that* field never spans more than one
+/// token). This underscore rule is scoped to `role=` alone (`oracle/stage-dump/README.md`'s own
+/// "a leaf path's `role=` value"); it does not extend to `pts=`, whose value is itself k
+/// space-separated `x,y` pairs (`dump_seams.cpp`'s `write_points`), so a `pts=` field tokenises
+/// into several `(key, value)` pairs sharing one logical key — `records_equal`'s `Declared`-tier
+/// branch therefore compares a multi-point `pts=` list positionally, token for token, and never
+/// applies the declared tolerance inside it (each trailing point token's own `=`-split key is
+/// just that token, not `pts`). This is sound only because dump coordinates are integer
+/// `coord_t` (R5), never float, so no stage declares a non-`exact` tier over a `pts=` field
+/// today; a future float-tiered stage whose dump carries `pts=` would need this function changed
+/// first.
 fn tokenize_record(line: &str) -> Vec<(&str, &str)> {
     line.split_whitespace()
         .map(|tok| tok.split_once('=').unwrap_or((tok, "")))
@@ -1061,11 +1107,19 @@ pub fn compare_dump_records(
 // --- The fallback (exported G-code, L0-L4) --------------------------------------------------
 
 /// `psGCodeExport`/`psConflictCheck`'s outcome: the full L0-L4 report R4's comparator already
-/// computes, `differs` set from whether *any* level passed (`report.strongest_evaluated_pass`) —
-/// a report with nothing evaluated as a pass is the fallback's reading of "this stage differs";
-/// one with at least L4 passing is read as not differing, the same loosest-confirmed-level
-/// reading `Report`'s own doc comment gives `strongest_evaluated_pass` for every other consumer
-/// of this struct.
+/// computes, `differs` anchored at the level the stage's declared tier actually holds it to —
+/// **not** `report.strongest_evaluated_pass`, which names the *loosest* passing level and so
+/// reads a pair that fails every level up to L3 but happens to pass the L4 aggregate statistics
+/// as "not differing". That is exactly the anchor-direction mistake `Report`'s own doc comment
+/// records (`strongest_evaluated_pass` extended to a stricter use once already "silently
+/// swallowed an L0 failure" — see `lib.rs` and `tests/levels.rs`'s
+/// `generated_by_pair_fails_l0_only_and_names_l4_strongest`). The level `evaluate_fallback` holds
+/// the pair to instead: `Tolerance::Exact` carries no allowed deviation at all, so nothing short
+/// of the raw bytes matching (L0) counts as a non-difference; a `Declared` tolerance is the
+/// comparator's own float-aware per-move level, L3 — `compare_with_tolerance`'s `tolerance_value`
+/// only ever reaches L3 and L4 (`lib.rs`), and L4 is an aggregate statistic that can still pass
+/// when individual moves genuinely differ, so L3 is the tightest level a declared tolerance is
+/// meant to hold a pair to.
 #[derive(Debug)]
 pub struct FallbackOutcome {
     pub report: Report,
@@ -1077,8 +1131,12 @@ pub fn evaluate_fallback(
     port_gcode: &[u8],
     tolerance: Tolerance,
 ) -> FallbackOutcome {
+    let held_level = match &tolerance {
+        Tolerance::Exact => Level::L0,
+        Tolerance::Declared { .. } => Level::L3,
+    };
     let report = compare_with_tolerance(oracle_gcode, port_gcode, tolerance);
-    let differs = report.strongest_evaluated_pass.is_none();
+    let differs = !report.passed(held_level);
     FallbackOutcome { report, differs }
 }
 
@@ -1088,15 +1146,17 @@ pub fn evaluate_fallback(
 /// stage dumps it can already produce under `dump_dir`. A non-zero exit is expected and normal
 /// until Phase B lands every stage (`grampus-cli`'s own "not yet ported" error) and does not
 /// fail this function — only a stage this run derives as fully ported and still finds no dump
-/// for, in the caller, does. Failing to even start the binary (a bad `--port-bin` path) is this
-/// function's only `Err`.
+/// for, in the caller, does, and the caller needs this process's exit status and stderr to say
+/// *why* when it does (`describe_port_output`). Failing to even start the binary (a bad
+/// `--port-bin` path) is this function's only `Err`.
 pub fn run_port_binary(
     port_bin: &Path,
     fixture: &Path,
     config: &Path,
     gcode_dir: &Path,
     dump_dir: &Path,
-) -> Result<(), String> {
+    extra_env: &[(&str, &str)],
+) -> Result<std::process::Output, String> {
     fs::create_dir_all(gcode_dir)
         .map_err(|e| format!("cannot create '{}': {e}", gcode_dir.display()))?;
     fs::create_dir_all(dump_dir)
@@ -1109,9 +1169,45 @@ pub fn run_port_binary(
         .arg(gcode_dir)
         .arg("--dump-stages")
         .arg(dump_dir)
+        .envs(extra_env.iter().copied())
         .output()
-        .map_err(|e| format!("cannot run port binary '{}': {e}", port_bin.display()))?;
-    Ok(())
+        .map_err(|e| format!("cannot run port binary '{}': {e}", port_bin.display()))
+}
+
+/// Whether `dir` holds at least one entry — used to tell "the port never writes here at all"
+/// (a structural gap: nothing behind this call site is ported yet) from "the port wrote some
+/// files here but not this one" (a genuine inconsistency between the status derivation and the
+/// port's own `Surface`). An unreadable or absent directory reads as empty.
+fn dir_has_any_entry(dir: &Path) -> bool {
+    fs::read_dir(dir)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
+}
+
+/// A short, human-readable tail of the port subprocess's own exit status and stderr, appended to
+/// an error so a real crash or a real "not yet ported" message is distinguishable from the port
+/// having simply run and written nothing (`run_port_binary` discards neither any more — see its
+/// own doc comment and task 39-compare-stages's pull request body on why this was previously
+/// thrown away).
+fn describe_port_output(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let tail: Vec<&str> = stderr
+        .lines()
+        .rev()
+        .take(5)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if tail.is_empty() {
+        format!(" (port exited {})", output.status)
+    } else {
+        format!(
+            " (port exited {}; stderr tail:\n{})",
+            output.status,
+            tail.join("\n")
+        )
+    }
 }
 
 // --- Dispatch and rendering ------------------------------------------------------------------
@@ -1124,6 +1220,14 @@ pub struct StagesConfig<'a> {
     pub fixture: &'a Path,
     pub config: &'a Path,
     pub scratch_dir: &'a Path,
+    /// Extra environment variables passed to the port subprocess, beyond whatever it inherits
+    /// from this process's own environment. `just compare-stages` always passes `&[]` — nothing
+    /// about driving the real `grampus-cli` binary needs this. It exists so this crate's own
+    /// tests can steer a committed stand-in port binary
+    /// (`tests/data/stages/fake_port.sh`) through `Command::envs` rather than through
+    /// `std::env::set_var`, which would mutate the *test process's* own environment and race
+    /// across the concurrently-run tests `cargo test` executes in one binary.
+    pub port_env: &'a [(&'a str, &'a str)],
 }
 
 #[derive(Debug)]
@@ -1149,22 +1253,49 @@ pub struct StageLine {
 pub struct StagesReport {
     pub lines: Vec<StageLine>,
     pub first_differing_stage: Option<String>,
+    /// Every `.dump` file committed under `--oracle-dumps` whose stem names no stage
+    /// `port/manifest.tsv`'s own `pipeline stage or none` column carries at all — today, the
+    /// four R5 seams `06-manifest-scope` has not yet assigned to any row
+    /// (`posIroning`, `posSupportMaterial`, `posDetectOverhangsForLift`, `posSimplifyPath`).
+    /// This command cannot compare them and cannot fix the manifest (this task's own "must not
+    /// touch" list), but it does not have to stay silent about the gap either — see
+    /// `render_text`.
+    pub uncovered_oracle_dumps: Vec<String>,
 }
 
 /// The one named error this module's `run` can return: a bad manifest, a refused tolerance, a
 /// missing oracle dump or oracle G-code for a stage this run derives as fully ported (task.md's
-/// own "exits non-zero, naming `just oracle-dump 3DBenchy base-fff`"), or an internal
-/// inconsistency where a stage this run derives as fully ported has no matching output from the
-/// port's own `--dump-stages` run (which cannot happen on the tree this task lands on, since no
-/// stage is fully ported yet, but is checked rather than silently read as a pass).
+/// own "exits non-zero, naming `just oracle-dump 3DBenchy base-fff`"), a dump whose own
+/// `; seam:` header disagrees with the stage it was read as, or one of two port-side problems
+/// for a stage this run derives as fully ported: the port writes *no* output of the kind this
+/// stage needs at all (`crates/grampus-cli/src/surface.rs`'s `emit_stage_dump` — or,
+/// for the fallback stages, `Surface::export_gcode` — is a documented no-op until a module
+/// behind it is ported; this is the state every stage is in on the tree this task lands on, and
+/// is expected to keep firing, loudly, until Phase B gives that call site real state to write),
+/// or the port writes *some* output but not this stage's own file (a genuine inconsistency
+/// between the status derivation and the port's `Surface` — this one really cannot happen on
+/// the tree this task lands on, since nothing is ported, but is checked rather than silently
+/// read as a pass). Both port-side cases keep this command failing shut rather than reporting a
+/// stage this run cannot actually compare as if it had passed.
 pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
     let rows = load_manifest_rows(cfg.manifest_path)?;
     let stages = stage_names_in_order(&rows);
+    let known_stages: HashSet<String> = stages.iter().cloned().collect();
+    let uncovered_oracle_dumps = uncovered_oracle_dumps(cfg.oracle_dumps_dir, &known_stages);
     let mod_reachable = mod_reachable_files(cfg.tree);
 
     let gcode_dir = cfg.scratch_dir.join("gcode");
     let dump_dir = cfg.scratch_dir.join("dump-stages");
-    run_port_binary(cfg.port_bin, cfg.fixture, cfg.config, &gcode_dir, &dump_dir)?;
+    let port_output = run_port_binary(
+        cfg.port_bin,
+        cfg.fixture,
+        cfg.config,
+        &gcode_dir,
+        &dump_dir,
+        cfg.port_env,
+    )?;
+    let port_wrote_no_dumps_at_all = !dir_has_any_entry(&dump_dir);
+    let port_wrote_no_gcode_at_all = !dir_has_any_entry(&gcode_dir);
 
     let mut lines = Vec::new();
     let mut first_differing_stage: Option<String> = None;
@@ -1186,19 +1317,37 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
             let oracle_gcode_path = cfg.oracle_dumps_dir.join("plate_1.gcode");
             if !oracle_gcode_path.is_file() {
                 return Err(format!(
-                    "stage '{stage}' is fully ported but '{}' does not exist; run `just \
-                     oracle-dump 3DBenchy base-fff` to produce it",
+                    "stage '{stage}' is fully ported but '{}' does not exist, and no command \
+                     in this repository commits it there yet: `just oracle-dump 3DBenchy \
+                     base-fff` (justfile) writes the per-seam oracle dumps this command reads, \
+                     but its own recipe deletes the run directory that held the exported \
+                     G-code once it has copied out the per-seam dump files, so running it does \
+                     not produce this file. Extending that recipe to also copy `plate_1.gcode` into \
+                     the oracle-dumps directory (and `oracle/provenance --check`'s dump glob to \
+                     cover it), or naming the command that should, is a follow-up this task \
+                     leaves open -- see its pull request body",
                     oracle_gcode_path.display()
                 ));
             }
             let port_gcode_path = gcode_dir.join("plate_1.gcode");
             if !port_gcode_path.is_file() {
-                return Err(format!(
-                    "stage '{stage}' is fully ported but the port's own run wrote no '{}' \
-                     (internal inconsistency between port-status derivation and the port's \
-                     Surface)",
-                    port_gcode_path.display()
-                ));
+                return Err(if port_wrote_no_gcode_at_all {
+                    format!(
+                        "stage '{stage}' is fully ported but the port wrote no G-code at all: \
+                         `Surface::export_gcode` (crates/grampus-cli/src/surface.rs) is still a \
+                         documented not-yet-ported stub, which this command cannot compare \
+                         against -- exiting non-zero rather than reading this as a pass{}",
+                        describe_port_output(&port_output)
+                    )
+                } else {
+                    format!(
+                        "stage '{stage}' is fully ported but the port's own run wrote no '{}', \
+                         even though it wrote other output (internal inconsistency between \
+                         port-status derivation and the port's Surface){}",
+                        port_gcode_path.display(),
+                        describe_port_output(&port_output)
+                    )
+                });
             }
             let oracle_bytes = fs::read(&oracle_gcode_path)
                 .map_err(|e| format!("cannot read '{}': {e}", oracle_gcode_path.display()))?;
@@ -1223,12 +1372,37 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
             }
             let port_dump_path = dump_dir.join(format!("{stage}.dump"));
             if !port_dump_path.is_file() {
-                return Err(format!(
-                    "stage '{stage}' is fully ported but the port's own run wrote no '{}' \
-                     (internal inconsistency between port-status derivation and the port's \
-                     Surface)",
-                    port_dump_path.display()
-                ));
+                return Err(if port_wrote_no_dumps_at_all {
+                    format!(
+                        "stage '{stage}' is fully ported but the port wrote no stage dump at \
+                         all: `emit_stage_dump` (crates/grampus-cli/src/surface.rs) is still a \
+                         documented no-op at every seam, with no per-object/per-layer state yet \
+                         to serialise -- exiting non-zero rather than reading this as a pass; \
+                         see task 39-compare-stages's pull request body for which task is \
+                         expected to give it a real writer once Phase B lands state behind this \
+                         seam{}",
+                        describe_port_output(&port_output)
+                    )
+                } else {
+                    format!(
+                        "stage '{stage}' is fully ported but the port's own run wrote no '{}', \
+                         even though it wrote other stage dumps (internal inconsistency between \
+                         port-status derivation and the port's Surface){}",
+                        port_dump_path.display(),
+                        describe_port_output(&port_output)
+                    )
+                });
+            }
+            for (label, path) in [("oracle", &oracle_dump_path), ("port", &port_dump_path)] {
+                if let Some(seam) = dump_seam_header(path)? {
+                    if seam != stage {
+                        return Err(format!(
+                            "{label} dump '{}' carries '; seam: {seam}' but was read as stage \
+                             '{stage}' -- refusing to compare a dump against the wrong stage",
+                            path.display()
+                        ));
+                    }
+                }
             }
             let oracle_records = read_dump_records(&oracle_dump_path)?;
             let port_records = read_dump_records(&port_dump_path)?;
@@ -1246,7 +1420,34 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
     Ok(StagesReport {
         lines,
         first_differing_stage,
+        uncovered_oracle_dumps,
     })
+}
+
+/// Every `.dump` file in `oracle_dumps_dir` whose stem (the file name with `.dump` removed, R5's
+/// own one-file-per-stage naming) is not one of `known_stages` — the manifest's own stage list,
+/// which this function never second-guesses or restates, only compares a committed file name
+/// against. An unreadable or absent `oracle_dumps_dir` reports no gap (that is `run`'s own
+/// missing-oracle-dump error's job, once a stage this run derives as fully ported actually needs
+/// a file from it).
+fn uncovered_oracle_dumps(oracle_dumps_dir: &Path, known_stages: &HashSet<String>) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(oracle_dumps_dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("dump"))
+        .filter_map(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+        })
+        .filter(|stem| !known_stages.contains(stem))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 fn opt_record(r: &Option<String>) -> &str {
@@ -1254,9 +1455,19 @@ fn opt_record(r: &Option<String>) -> &str {
 }
 
 /// Renders a [`StagesReport`] as the one-line-per-stage table task.md's "Done when" describes,
-/// plus a closing line naming the first differing stage (or that none differed).
+/// plus a closing line naming the first differing stage (or that none differed). The closing
+/// line's "none" case distinguishes "every compared stage matched" from "nothing was actually
+/// compared" (every stage read `not ported`) — otherwise the two read identically, which is the
+/// most misleading rendering of a run that proved nothing a reader could be handed: a nine-stage
+/// `not ported` run and a nine-stage clean comparison must not look the same on the last line.
 pub fn render_text(report: &StagesReport) -> String {
     let mut out = String::new();
+    let total = report.lines.len();
+    let not_ported = report
+        .lines
+        .iter()
+        .filter(|l| matches!(l.result, StageResult::NotPorted))
+        .count();
     for line in &report.lines {
         match &line.result {
             StageResult::NotPorted => {
@@ -1294,7 +1505,18 @@ pub fn render_text(report: &StagesReport) -> String {
     }
     match &report.first_differing_stage {
         Some(s) => out.push_str(&format!("first differing stage: {s}\n")),
-        None => out.push_str("first differing stage: none\n"),
+        None => out.push_str(&format!(
+            "first differing stage: none ({} of {total} stage{} compared; {not_ported} not \
+             ported)\n",
+            total - not_ported,
+            if total == 1 { "" } else { "s" },
+        )),
+    }
+    for stage in &report.uncovered_oracle_dumps {
+        out.push_str(&format!(
+            "{stage}: no manifest row names this stage (oracle dump committed, never \
+             compared)\n"
+        ));
     }
     out
 }
@@ -1524,5 +1746,176 @@ mod tests {
         assert_eq!(stricter(Tolerance::Exact, declared(0.01)).value(), 0.0);
         assert_eq!(stricter(declared(0.01), declared(0.02)).value(), 0.01);
         assert_eq!(stricter(declared(0.02), declared(0.01)).value(), 0.01);
+    }
+
+    // --- The fallback's `differs` anchor (R20; the mistake this crate's own `lib.rs` doc
+    // comment already records once "silently swallowed an L0 failure") ------------------------
+
+    fn read_gcode_pair(dir: &str) -> (Vec<u8>, Vec<u8>) {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data")
+            .join(dir);
+        (
+            fs::read(base.join("a.gcode")).unwrap_or_else(|e| panic!("{dir}/a.gcode: {e}")),
+            fs::read(base.join("b.gcode")).unwrap_or_else(|e| panic!("{dir}/b.gcode: {e}")),
+        )
+    }
+
+    #[test]
+    fn fallback_differs_under_exact_tier_when_l0_fails_even_though_l4_passes() {
+        // `generated_by`: the only difference is an attribution comment L1 strips, so L0 fails
+        // (a byte-for-byte difference) while L1 through L4 all pass -- `report
+        // .strongest_evaluated_pass` (the *loosest* passing level) is `Some(Level::L4)` for this
+        // pair, which is exactly the shape that made the old anchor
+        // (`strongest_evaluated_pass.is_none()`) read this pair as "not differing". An `exact`
+        // tier means no allowed deviation at all, so this pair must read as differing.
+        let (a, b) = read_gcode_pair("generated_by");
+        let outcome = evaluate_fallback(&a, &b, Tolerance::Exact);
+        assert_eq!(outcome.report.strongest_evaluated_pass, Some(Level::L4));
+        assert!(
+            outcome.differs,
+            "an L0 failure must read as differing under an exact tier even when every looser \
+             level passes"
+        );
+    }
+
+    #[test]
+    fn fallback_does_not_differ_on_a_byte_identical_pair() {
+        let (a, b) = read_gcode_pair("identical");
+        let outcome = evaluate_fallback(&a, &b, Tolerance::Exact);
+        assert!(!outcome.differs);
+    }
+
+    #[test]
+    fn fallback_under_a_declared_tolerance_is_anchored_at_l3_not_l4() {
+        // `small_drift`: a per-move numeric drift small enough for L3/L4 to pass at a loose
+        // enough declared tolerance; anchoring at L3 (not the old "nothing passed" reading, and
+        // not L4) is what this test actually distinguishes from the pre-fix behaviour -- both
+        // read this pair as "not differing" once the tolerance is loose enough, so the real
+        // regression coverage is `fallback_differs_under_exact_tier_when_l0_fails_even_though
+        // _l4_passes` above; this test instead pins the `Declared` branch's anchor level so a
+        // future edit cannot silently move it back to `strongest_evaluated_pass`.
+        let (a, b) = read_gcode_pair("small_drift");
+        let loose = Tolerance::Declared {
+            value: 1.0,
+            unit: None,
+            reason: "test".to_string(),
+            comparison_function: tolerance::ComparisonFunction::Abs,
+            source: tolerance::ToleranceSource::Manifest {
+                tsv_path: "x".to_string(),
+                row: "y".to_string(),
+            },
+        };
+        let outcome = evaluate_fallback(&a, &b, loose.clone());
+        assert_eq!(outcome.differs, !outcome.report.passed(Level::L3));
+    }
+
+    // --- The uncovered-oracle-dump warning (R5's four not-yet-assigned seams) -----------------
+
+    #[test]
+    fn uncovered_oracle_dumps_names_a_dump_with_no_matching_stage_and_ignores_known_ones() {
+        let dir = tempdir_for_test("uncovered-dumps-unit");
+        write_test_dump(&dir.join("posIroning.dump"));
+        write_test_dump(&dir.join("posSlice.dump"));
+        write_test_dump(&dir.join("not-a-dump.txt"));
+        let known: HashSet<String> = ["posSlice".to_string()].into_iter().collect();
+        assert_eq!(
+            uncovered_oracle_dumps(&dir, &known),
+            vec!["posIroning".to_string()]
+        );
+    }
+
+    fn tempdir_for_test(name: &str) -> PathBuf {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap()
+            .join("oracle/.cache/tmp/oracle-compare-stages-unit-test")
+            .join(format!("{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_test_dump(path: &Path) {
+        fs::write(path, "; seam: x\nfield=a value=0x1p0\n").unwrap();
+    }
+
+    // --- The `; seam:` header check (R5's own per-seam one-file-per-stage convention) --------
+
+    #[test]
+    fn dump_seam_header_reads_the_seam_line() {
+        let dir = tempdir_for_test("seam-header-unit");
+        let path = dir.join("x.dump");
+        fs::write(
+            &path,
+            "; provenance\n; seam: posSlice\nfield=a value=0x1p0\n",
+        )
+        .unwrap();
+        assert_eq!(
+            dump_seam_header(&path).unwrap(),
+            Some("posSlice".to_string())
+        );
+    }
+
+    #[test]
+    fn dump_seam_header_is_none_with_no_such_line() {
+        let dir = tempdir_for_test("seam-header-unit-none");
+        let path = dir.join("x.dump");
+        fs::write(&path, "; provenance\nfield=a value=0x1p0\n").unwrap();
+        assert_eq!(dump_seam_header(&path).unwrap(), None);
+    }
+
+    // --- `row_is_ported` against the shapes `port/port-status`'s own `derive_row_status`
+    // actually has to get right, not only the single flat-file-reached-from-`lib.rs` shape
+    // `manifest.tsv`'s own rows exercise -------------------------------------------------------
+
+    fn fixture_tree_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/stages/fixture_tree")
+    }
+
+    #[test]
+    fn row_is_ported_follows_a_directory_mod_rs_chain() {
+        let tree = fixture_tree_dir();
+        let mod_reachable = mod_reachable_files(&tree);
+        let mut r = row("myModChainStage", true);
+        r.target_crate = "fake-crate".to_string();
+        r.target_module = "crates/fake-crate/src/mod_chain/leaf.rs".to_string();
+        r.proof_path = "proof/mod_chain_leaf".to_string();
+        assert!(
+            row_is_ported(&r, &tree, &mod_reachable),
+            "a module reached only through lib.rs -> mod_chain/mod.rs -> leaf.rs must derive \
+             ported"
+        );
+    }
+
+    #[test]
+    fn row_is_ported_finds_a_proof_under_the_crate_s_own_tests_directory() {
+        let tree = fixture_tree_dir();
+        let mod_reachable = mod_reachable_files(&tree);
+        let mut r = row("myExternalProofStage", true);
+        r.target_crate = "fake-crate".to_string();
+        r.target_module = "crates/fake-crate/src/tested_externally.rs".to_string();
+        r.proof_path = "proof/tested_externally".to_string();
+        assert!(
+            row_is_ported(&r, &tree, &mod_reachable),
+            "a proof living under crates/fake-crate/tests/ (not an inline #[cfg(test)] module) \
+             must still be found"
+        );
+    }
+
+    #[test]
+    fn row_is_ported_is_false_with_no_proof_path_cell_at_all() {
+        // `tested_externally`'s own module *is* mod-reachable and holds no live todo!()/
+        // unimplemented!() -- an empty `proof path` cell is the one remaining way a row over it
+        // can fail to derive ported, and `proof_present` refuses to search for an empty wanted
+        // string rather than matching the first marker it finds.
+        let tree = fixture_tree_dir();
+        let mod_reachable = mod_reachable_files(&tree);
+        let mut r = row("myExternalProofStage", true);
+        r.target_crate = "fake-crate".to_string();
+        r.target_module = "crates/fake-crate/src/tested_externally.rs".to_string();
+        r.proof_path = String::new();
+        assert!(!row_is_ported(&r, &tree, &mod_reachable));
     }
 }

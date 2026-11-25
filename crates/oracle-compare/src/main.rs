@@ -314,6 +314,15 @@ fn run_json(args: &Args) -> Result<ExitCode, String> {
 /// `--stages`'s own argument shape (task `39-compare-stages`), entirely separate from the G-code/
 /// JSON modes above: no positional `a`/`b`, no `--require`, no `--tolerance-from-*` (each stage's
 /// tolerance comes from its own manifest rows, read by `stages::stage_tolerance`).
+///
+/// Exit status: 0 when every stage this run derives as fully ported either prints `not ported`
+/// or actually matches its oracle at its declared tier; non-zero, naming the first differing
+/// stage (already printed in the table above it), the moment any compared stage differs
+/// (`report.first_differing_stage.is_some()`) — `not ported` alone is never the reason this
+/// exits non-zero (task.md's own "Done when": "run on a tree where no stage is fully ported, it
+/// exits 0"). A bad manifest, a refused tolerance, a missing committed oracle artifact or the
+/// internal-inconsistency case are `stages::run`'s own `Err`s and exit non-zero before any table
+/// is printed at all (see `stages.rs`'s doc comment on its one named error).
 struct StagesArgs {
     manifest: PathBuf,
     tree: PathBuf,
@@ -413,12 +422,21 @@ fn run_stages() -> Result<ExitCode, String> {
         fixture: &args.fixture,
         config: &args.config,
         scratch_dir: &args.scratch,
+        port_env: &[],
     };
 
     let report = stages::run(&cfg)?;
     print!("{}", stages::render_text(&report));
 
-    Ok(ExitCode::SUCCESS)
+    // A real per-stage divergence must fail the command, not just print a line: task 40's CI
+    // line (`just compare-stages`) has to be able to fail on a mismatch, and "not ported" alone
+    // is explicitly not a failure (task.md's own "Done when"), so the table is always printed
+    // first and only `first_differing_stage` decides the exit code.
+    Ok(if report.first_differing_stage.is_some() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 fn main() -> ExitCode {

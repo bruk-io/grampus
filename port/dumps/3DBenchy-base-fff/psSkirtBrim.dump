@@ -1,0 +1,20 @@
+; provenance
+;   oracle-commit: f92a7c065c5718b8ef1baac1cd704df2911238f4
+;   oracle: built (unrecorded)
+;   os: macOS 27.0.1
+;   arch: arm64
+;   compiler: Apple clang version 21.0.0 (clang-2100.3.34.2)
+;   scaling-factor: 0.000001
+;   preset-set: machine=machine/Bambu Lab X1 Carbon 0.4 nozzle.json; process=process/0.20mm Standard @BBL X1C.json; filaments=filament/Bambu PLA Basic @BBL X1C.json; overrides=(none)
+;   fixture: 3DBenchy.stl
+;   transform: identity
+; seam: psSkirtBrim
+; object: print
+field=skirt layer=- region=- count=0
+field=skirt_brim_groups layer=- region=- count=1
+field=skirt_brim_group_skirt layer=- region=- group=0 count=0
+field=skirt_brim_group_brim layer=- region=- group=0 brim=0 filament_id=0 count=3
+field=skirt_brim_group_brim layer=- region=- group=0 brim=0 filament_id=0 path=0 role=Brim loop=0 n=9 pts=120122208,125733350,0 120331544,125733921,0 120129367,125789500,0 120040805,125839072,0 119924293,125944226,0 119860014,126043406,0 119820217,126166161,0 119797153,125725194,0 120122208,125733350,0
+field=skirt_brim_group_brim layer=- region=- group=0 brim=0 filament_id=0 path=1 role=Brim loop=1 n=8 pts=119827241,129768704,0 119915908,129944003,0 120010738,130053065,0 120117902,130135421,0 120266447,130193154,0 119799893,130209018,0 119813894,129720591,0 119827241,129768704,0
+field=skirt_brim_group_brim layer=- region=- group=0 brim=0 filament_id=0 path=2 role=Brim loop=2 n=17 pts=124906198,130086200,0 125003616,130158947,0 125063116,130265504,0 125078383,130377923,0 125051956,130493938,0 124979507,130592835,0 124883417,130651551,0 124732912,130674302,0 124620724,130638871,0 124527919,130562705,0 124469397,130454782,0 124459275,130340801,0 124503702,130203212,0 124571180,130124694,0 124675063,130066277,0 124798490,130054878,0 124906198,130086200,0
+field=object_skirt layer=- region=- object=0 count=0

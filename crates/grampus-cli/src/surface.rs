@@ -48,12 +48,21 @@ use std::path::{Path, PathBuf};
 
 use crate::resolved_config::ResolvedConfig;
 
-/// The R5 per-object and print-wide seams, in the order `Print.hpp`'s
-/// `SlicingPipelineStepPlugin` enum (and `oracle/stage-dump/dump_seams.cpp`'s own `seam_name`)
-/// fires them, named here because task `39-compare-stages` asks this module for "the emission
-/// call sites ... at the same eleven seams" — unlike `crates/oracle-compare/src/stages.rs`,
-/// which reads the stage list from `port/manifest.tsv` and names none of them, this module *is*
-/// where the eleven seams are named, the same way `dump_seams.cpp`'s own `seam_name` names them.
+/// The R5 per-object and print-wide seams, in `Print.hpp`'s `SlicingPipelineStepPlugin` enum's
+/// own **declaration** order (`:133-134`) — named here because task `39-compare-stages` asks
+/// this module for "the emission call sites ... at the same eleven seams" — unlike
+/// `crates/oracle-compare/src/stages.rs`, which reads the stage list from `port/manifest.tsv`
+/// and names none of them, this module *is* where the eleven seams are named, the same way
+/// `dump_seams.cpp`'s own `seam_name` names them.
+///
+/// **This is not the firing order.** `Print::process()` (`Print.cpp:3300`) calls
+/// `posSimplifyPath` *last* of the eleven, after `psSkirtBrim` — not ninth, where it sits in
+/// this list and in the enum's own declaration. `psSkirtBrim` is marked done at
+/// `Print.cpp:3958`, inside `Print::process()`'s main per-object/per-print sequence; the
+/// `simplify_extrusion_path()` loop that marks `posSimplifyPath` done (`Print.cpp:3971,
+/// 3979-3980`) runs afterwards, as a separate pass over every object. A reader placing a real
+/// emission call site "at" `posSimplifyPath" by this list's position would put it in the wrong
+/// place; place it after the `psSkirtBrim` call site instead.
 pub const STAGE_DUMP_SEAMS: [&str; 11] = [
     "posSlice",
     "posPerimeters",
