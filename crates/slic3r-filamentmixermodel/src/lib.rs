@@ -2,3 +2,6 @@
 //! tree into (plan step 20, task 34-foundation-spike). This skeleton carries no `mod`
 //! line yet: Phase B (plan step 23) adds one per ported module, in alphabetical order,
 //! as docs/WORKFLOW.md states.
+
+mod filament_mixer_model;
+pub use filament_mixer_model::{lerp, Rgb};
