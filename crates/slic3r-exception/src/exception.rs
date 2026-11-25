@@ -112,6 +112,33 @@ pub enum Exception {
 }
 
 impl Exception {
+    /// `SlicingErrors(std::string const &msg)`, via the inherited `using Exception::Exception;`
+    /// (`:45`): `errors` keeps its in-class default, empty (`:48` has no initialiser, so
+    /// `std::vector`'s own default-constructed, empty state).
+    ///
+    /// **Review finding, fixed here:** the adversarial review of this unit found that exposing
+    /// `SlicingErrors { message, errors }`'s fields directly (both `pub`, as every other
+    /// variant's payload is) lets a caller build a combination neither of the vendored class's
+    /// two constructors can produce -- a non-`"Errors"` message paired with a non-empty
+    /// `errors`, or vice versa. These two functions are the two real constructors; a caller
+    /// building the enum variant literal directly can still violate the invariant, but every
+    /// call site this task itself writes (its own test) now goes through one of these two.
+    pub fn new_slicing_errors_with_message(message: impl Into<String>) -> Self {
+        Exception::SlicingErrors {
+            message: message.into(),
+            errors: Vec::new(),
+        }
+    }
+
+    /// `SlicingErrors(const std::vector<SlicingError> &errors)` (`:46`): `message` is always the
+    /// literal `"Errors"` (`:46`'s own `Exception("Errors")`), never a caller-supplied string.
+    pub fn new_slicing_errors(errors: Vec<SlicingError>) -> Self {
+        Exception::SlicingErrors {
+            message: "Errors".to_string(),
+            errors,
+        }
+    }
+
     /// `std::runtime_error::what()`, inherited unchanged by every variant here (`Exception.hpp`
     /// adds no variant that overrides it).
     pub fn message(&self) -> &str {
@@ -225,11 +252,10 @@ mod tests {
         let default_object_id = SlicingError::new("no object id given");
         assert_eq!(default_object_id.object_id(), 0);
 
-        let errors = Exception::SlicingErrors {
-            message: "Errors".to_string(),
-            errors: vec![SlicingError::with_object_id("first", 1)],
-        };
+        let errors = Exception::new_slicing_errors(vec![SlicingError::with_object_id("first", 1)]);
         assert_eq!(errors.message(), "Errors");
+        let errors_with_message = Exception::new_slicing_errors_with_message("custom message");
+        assert_eq!(errors_with_message.message(), "custom message");
         assert!(!errors.is_critical_exception());
     }
 

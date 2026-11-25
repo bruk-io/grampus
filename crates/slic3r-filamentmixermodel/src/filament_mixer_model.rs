@@ -885,6 +885,16 @@ pub fn lerp(r1: u8, g1: u8, b1: u8, r2: u8, g2: u8, b2: u8, t: f32) -> Rgb {
 // `slic3r-geometry-dir`, `slic3r-gcode`, ... checked: none of their committed `Cargo.toml`s
 // depend on `slic3r-ffi` either), so this is not specific to this unit's own design -- it is a
 // gap in `34-foundation-spike`'s crate-skeleton generation that a later task owning that
+//
+// **Second adversarial reviewer's finding, carried into the trailer below:** with the oracle
+// shim unreachable from here, this branch's only oracle-verified data point for `lerp`'s full
+// arithmetic (the polynomial features, the summation, the cast-and-clamp) is the one measured
+// above, plus the module's own table-shape test and the two clamp-boundary cases (which return
+// before the arithmetic runs at all). `POWERS`/`COEF`/`INTERCEPT` are independently re-verified
+// byte-for-byte against the vendored source (this task's pull request body has the method and
+// output), and `compute_poly_features`/`lerp` are a direct line-by-line transcription, but one
+// oracle-matched input is not the breadth a `confidence: high` row elsewhere in this task carries
+// -- the trailer below records `medium` for exactly this reason, not `high`.
 // regeneration should close. This module therefore carries no `// PROOF:` marker;
 // `port/port-status` derives it as `drafted`, not `ported`.
 
@@ -942,6 +952,6 @@ mod tests {
 
 // PORT STATUS
 // source: src/libslic3r/FilamentMixerModel.hpp
-// confidence: high
+// confidence: medium
 // tier: exact
 // oracle: built
