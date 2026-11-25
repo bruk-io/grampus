@@ -424,6 +424,77 @@ fn nest2d_edge_cache_short_contours_return_zero_without_crashing() {
     assert_eq!(stats.circumference, 0.0, "single-point contour: {stats:?}");
 }
 
+/// The same closed square, read at a `distance` that is neither 0.0 nor a cumulative-distance
+/// boundary, so the whole of `coords`'s arithmetic actually runs: 0.375 of 400 is `d = 150`,
+/// which `coords`'s `std::lower_bound` over the cumulative distances `[100, 200, 300, 400]`
+/// (`nfpplacer.hpp:258-260`) resolves to edge index 1 -- the square's right-hand side, from
+/// `(100, 0)` to `(100, 100)` -- leaving `ed = 150 - 100 = 50` to walk along it (`:263`). The
+/// values below are what `EdgeCache::coords` returned when this test was run against this build,
+/// not ones computed on this side of the bridge.
+#[test]
+fn nest2d_edge_cache_reads_a_point_part_way_along_a_later_edge() {
+    let contour = vec![
+        NestPoint { x: 0, y: 0 },
+        NestPoint { x: 100, y: 0 },
+        NestPoint { x: 100, y: 100 },
+        NestPoint { x: 0, y: 100 },
+        NestPoint { x: 0, y: 0 },
+    ];
+
+    let stats = edge_cache_stats(&contour, 0.375);
+    assert_eq!(stats.circumference, 400.0, "closed perimeter: {stats:?}");
+    assert_eq!(
+        stats.point_at_distance,
+        NestPoint { x: 100, y: 50 },
+        "half way up the square's second edge: {stats:?}"
+    );
+}
+
+/// `EdgeCache::coords(double)`'s `<0.0, 1.0>` contract (`nfpplacer.hpp:294-302`) is enforced in
+/// the vendored header by `assert(distance >= .0 && distance <= 1.0)` (`:247`), which runs ahead
+/// of every other check in that function. This crate compiles without `-DNDEBUG` (see
+/// `build.rs`), so that assert is live -- `nm -u` on this crate's `libnest2d_glue.o` lists an
+/// undefined `___assert_rtn` and `strings` on it contains that exact condition. An `assert()`
+/// firing is `abort()`, not a Rust panic, so no `catch_unwind` could contain it and this process
+/// would die. The glue therefore range-checks `distance` itself and returns zeroed stats; this
+/// case fails (by aborting the whole test binary) without that guard.
+///
+/// The one in-scope caller never violates the contract -- `TreeSupport.cpp:3836-3842` walks
+/// `distance` up from 0 under `while (distance < 1)` -- so the guard is this bridge's own, the
+/// same way the short-contour guard above is.
+#[test]
+fn nest2d_edge_cache_out_of_range_distance_returns_zero_without_aborting() {
+    let contour = vec![
+        NestPoint { x: 0, y: 0 },
+        NestPoint { x: 100, y: 0 },
+        NestPoint { x: 100, y: 100 },
+        NestPoint { x: 0, y: 100 },
+        NestPoint { x: 0, y: 0 },
+    ];
+
+    for distance in [2.0_f64, 1.000_001, -1.0, f64::NAN, f64::INFINITY] {
+        let stats = edge_cache_stats(&contour, distance);
+        assert_eq!(
+            stats.circumference, 0.0,
+            "distance {distance} is outside <0.0, 1.0> and is refused: {stats:?}"
+        );
+        assert_eq!(
+            stats.point_at_distance,
+            NestPoint { x: 0, y: 0 },
+            "distance {distance} is outside <0.0, 1.0> and is refused: {stats:?}"
+        );
+    }
+
+    // The boundaries themselves are inside the contract and still reach `EdgeCache`.
+    for distance in [0.0_f64, 1.0] {
+        let stats = edge_cache_stats(&contour, distance);
+        assert_eq!(
+            stats.circumference, 400.0,
+            "distance {distance} is within <0.0, 1.0>: {stats:?}"
+        );
+    }
+}
+
 /// `boost::polygon::construct_voronoi` (`boost/polygon/voronoi.hpp`) over the three segments of
 /// a closed right-triangle contour, each pair sharing an endpoint with the next. Boost's segment
 /// builder gives each of the three segments its own cell *and* contributes extra cells and

@@ -61,10 +61,13 @@ mod ffi {
         /// Builds a single-contour `Slic3r::ExPolygon` from `contour`, constructs
         /// `libnest2d::placers::EdgeCache<ExPolygon>` over it (`nfpplacer.hpp:286`), and reads
         /// back its circumference and the point at `distance` along it -- values `EdgeCache`
-        /// computed by walking the polygon's own edges, not ones restated here. `distance` is
-        /// expected in `<0.0, 1.0>` (`nfpplacer.hpp:303`'s own doc comment); a contour of fewer
-        /// than two points returns zeroed stats rather than reaching `EdgeCache` at all (see
-        /// `libnest2d_glue.cc`).
+        /// computed by walking the polygon's own edges, not ones restated here.
+        ///
+        /// Two inputs are refused with zeroed stats before `EdgeCache` is reached at all, both
+        /// guards this bridge owns rather than the vendored header's (see `libnest2d_glue.cc`
+        /// for the full reasoning): a contour of fewer than two points, and a `distance`
+        /// outside `<0.0, 1.0>` (`nfpplacer.hpp:294-302`'s own doc comment), which
+        /// `nfpplacer.hpp:247` enforces with a live `assert()` that would abort the process.
         fn libnest2d_edge_cache_stats(contour: &Vec<CPoint>, distance: f64) -> CEdgeCacheStats;
     }
 }
@@ -73,6 +76,10 @@ pub use ffi::{CEdgeCacheStats, CPoint};
 
 /// `EdgeCache<ExPolygon>`'s circumference and the point at `distance` along the closed contour
 /// `points` describes (`distance` in `<0.0, 1.0>`, 0.0 being the first vertex).
+///
+/// Fewer than two points, or a `distance` outside `<0.0, 1.0>` (NaN included), returns
+/// `CEdgeCacheStats` zeroed rather than calling into `EdgeCache` -- so this is a safe fn in the
+/// full sense, with no input that aborts the process. See the bridge declaration above.
 pub fn edge_cache_stats(points: &[CPoint], distance: f64) -> CEdgeCacheStats {
     ffi::libnest2d_edge_cache_stats(&points.to_vec(), distance)
 }

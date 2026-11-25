@@ -70,6 +70,20 @@ const ADMESH_VENDORED_SOURCES: &[&str] = &[
 /// it), and no `Done when` line in this task asks for NDEBUG parity -- only the four
 /// `LIBNEST2D_*` defines below are named. Left as a recorded hazard, not silently accepted; see
 /// the pull request body.
+///
+/// **What the bridge does do about it.** The divergence above is about the whole header-only
+/// body of `libnest2d.hpp`, most of which no safe fn in this crate can reach. The part that is
+/// reachable is handled instead of merely recorded: `nfpplacer.hpp:247`'s
+/// `assert(distance >= .0 && distance <= 1.0)` sits on `EdgeCache::coords(double)`, which
+/// `cxx/libnest2d_glue.cc` binds, so that file range-checks `distance` itself and refuses
+/// out-of-range input before reaching the assert. That is the only input-domain precondition
+/// assert reachable from this crate's bound surface: `strings` over each of the four
+/// `*_glue.o` objects this build produces finds that one condition and, beyond it, only
+/// Eigen's and libc++'s own internal invariants (`dst.rows() == dstRows`,
+/// `index >= 0 && index < size()`, `s != nullptr || count == 0`), none of which is
+/// parameterized by bridge input. So no safe fn in this crate aborts on ordinary input, while
+/// NDEBUG parity with the oracle's command line is still absent -- the two statements are
+/// about different things and both hold.
 const LIBNEST2D_VENDORED_SOURCE: &str = "vendor/OrcaSlicer/deps_src/libnest2d/src/libnest2d.cpp";
 
 /// The four compile definitions the vendored target makes `PUBLIC`

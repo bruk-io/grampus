@@ -12,13 +12,36 @@ namespace nest2d {
 // `TreeSupport.cpp` itself against this binding, this one just proves it compiles and runs
 // against this crate's build of `libnest2d.cpp`.
 //
-// Guard this bridge owns, not the vendored header: `EdgeCache::createCache`
-// (`nfpplacer.hpp:173-186`) takes `next = std::next(first)` before checking `first != endit`, so
-// a contour of fewer than two points walks `next` past `endit` with no bounds check. No in-scope
-// caller constructs an `EdgeCache` over such a contour, but this fn is a safe Rust entry point,
-// so it refuses the input itself rather than relying on that.
+// Two guards this bridge owns, not the vendored header. Both exist because this fn is a safe
+// Rust entry point over header-only template code whose preconditions are `assert()`s, and this
+// crate compiles without `-DNDEBUG` (the divergence `build.rs` records), so those asserts are
+// live here: `__assert_rtn` aborts the process, which no Rust `catch_unwind` can turn back into
+// an error. Measured, not assumed: `nm -u` on this file's compiled object lists one undefined
+// `___assert_rtn`, and `strings` on it contains the literal `distance >= .0 && distance <= 1.0`.
+// Neither guard's input is reachable from the one in-scope caller
+// (`src/libslic3r/Support/TreeSupport.cpp:3827-3842` closes its contour first and walks
+// `while (distance < 1)` up from `distance = 0`), so both are this bridge's own, not a
+// vendored-code fix.
+//
+//  1. Contour length. `EdgeCache::createCache` (`nfpplacer.hpp:173-186`) takes
+//     `next = std::next(first)` before checking `first != endit`, so a contour of fewer than two
+//     points walks `next` past `endit` with no bounds check.
+//
+//  2. `distance` range. `EdgeCache::coords(double)` (`nfpplacer.hpp:303`) delegates to the
+//     private `coords(cache, distance)` (`:246`), whose first statement is
+//     `assert(distance >= .0 && distance <= 1.0)` (`:247`) -- ahead of every other check in that
+//     function, including the `cache.distances.empty()` early return at `:248`. The vendored
+//     header documents the `<0.0, 1.0>` contract (`:294-302`) but enforces it only by that
+//     assert; with `-DNDEBUG` it would instead `std::fmod` a distance above 1.0 (`:249`) and
+//     silently extrapolate backwards along the first edge for a negative one. This bridge
+//     refuses out-of-range input rather than emulating either, so its behaviour does not depend
+//     on whether the translation unit was built with `-DNDEBUG`.
+//
+// Both refusals return zeroed stats, the one refusal shape this bridge has.
 CEdgeCacheStats libnest2d_edge_cache_stats(const rust::Vec<CPoint> &contour, double distance) {
     if (contour.size() < 2)
+        return CEdgeCacheStats{};
+    if (!(distance >= 0.0 && distance <= 1.0)) // also refuses NaN, which the assert rejects too
         return CEdgeCacheStats{};
 
     Slic3r::ExPolygon expoly;
