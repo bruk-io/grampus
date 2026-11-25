@@ -50,9 +50,23 @@ use crate::resolved_config::ResolvedConfig;
 
 /// Which of the five calls `Surface` has reached. Tracked so an out-of-order call is caught
 /// mechanically (`require`) rather than relying on every caller reading this module's doc
-/// comment. A stage advances as soon as its call's ordering precondition holds, even though the
-/// call then returns [`SurfaceError::NotYetPorted`] — nothing underneath actually runs yet, but
-/// the *position* in the sequence is real, which is what the next call's precondition reads.
+/// comment.
+///
+/// PHASE B (plan step 23): the task's own contract is that `OutOfOrder` fires when a call is
+/// made before the one before it **has succeeded**, but today every call always returns
+/// `Err` (nothing underneath is ported), so gating the advance on `Ok` would make `apply_config`
+/// through `export_gcode` all report `OutOfOrder` even when called strictly in order — which
+/// would fail this module's own "in order ⇒ `NotYetPorted`, not `OutOfOrder`" test. Until a real
+/// implementation can succeed, `stage` advances as soon as a call's ordering precondition holds
+/// (advance-on-attempt), not as soon as the call succeeds (advance-on-success). The first commit
+/// that gives one of these five methods a real `Ok` body must invert this: move each `stage.set`
+/// below onto that method's success path, so a failed call no longer unlocks the next one.
+///
+/// A second consequence of the same stand-in: `require` compares `stage` for strict equality, so
+/// `Surface` is single-use per call — a second `build_model`, a repeated `validate`, and so on
+/// all report `OutOfOrder` naming the *first* call's predecessor rather than being idempotent.
+/// That is intentional for now (each of the five calls is meant to run exactly once per
+/// `Surface`), not an oversight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stage {
     Fresh,
@@ -103,17 +117,12 @@ pub struct Surface {
     stage: Cell<Stage>,
 }
 
-// A seventh public item the task's fixed shape (the five methods and `new`) does not name:
-// `clippy::new_without_default` fires without it (verified by removing it and re-running
-// `cargo clippy -p grampus-cli --all-targets`). It delegates to `new` and adds no behavior of
-// its own.
-impl Default for Surface {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Surface {
+    // `clippy::new_without_default` fires on a public `new` with no arguments unless either a
+    // `Default` impl exists or the lint is silenced; the task's fixed shape is the five methods
+    // and `new` and nothing else, so this silences the lint rather than adding a seventh public
+    // item.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Surface {
             stage: Cell::new(Stage::Fresh),
@@ -124,10 +133,11 @@ impl Surface {
     /// (`init_print`, `test_helpers.cpp:260-273`), then runs the two per-object calls
     /// `init_print` makes next — `ensure_on_bed()` and `auto_assign_extruders()`
     /// (`:279-280`) — which belong here rather than being dropped (see this module's doc
-    /// comment). Not yet ported: nothing under `crates/slic3r-*/` exists yet.
+    /// comment). Not yet ported: nothing under `crates/slic3r-*/` is ported yet.
     pub fn build_model(&mut self, mesh_path: &Path) -> Result<(), SurfaceError> {
         self.require(Stage::Fresh, "build_model", "new")?;
         let _ = mesh_path;
+        // PHASE B: advance only on Ok (see this module's `Stage` doc comment).
         self.stage.set(Stage::BuiltModel);
         Err(SurfaceError::NotYetPorted("build_model"))
     }
@@ -139,6 +149,7 @@ impl Surface {
     pub fn apply_config(&mut self, config: &ResolvedConfig) -> Result<(), SurfaceError> {
         self.require(Stage::BuiltModel, "apply_config", "build_model")?;
         let _ = config;
+        // PHASE B: advance only on Ok (see this module's `Stage` doc comment).
         self.stage.set(Stage::AppliedConfig);
         Err(SurfaceError::NotYetPorted("apply_config"))
     }
@@ -148,6 +159,7 @@ impl Surface {
     /// to mutate the surface. Not yet ported.
     pub fn validate(&self) -> Result<(), SurfaceError> {
         self.require(Stage::AppliedConfig, "validate", "apply_config")?;
+        // PHASE B: advance only on Ok (see this module's `Stage` doc comment).
         self.stage.set(Stage::Validated);
         Err(SurfaceError::NotYetPorted("validate"))
     }
@@ -155,6 +167,7 @@ impl Surface {
     /// Processes the print (`print.process()`, `test_helpers.cpp:352`). Not yet ported.
     pub fn process(&mut self) -> Result<(), SurfaceError> {
         self.require(Stage::Validated, "process", "validate")?;
+        // PHASE B: advance only on Ok (see this module's `Stage` doc comment).
         self.stage.set(Stage::Processed);
         Err(SurfaceError::NotYetPorted("process"))
     }

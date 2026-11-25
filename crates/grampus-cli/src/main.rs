@@ -1,14 +1,16 @@
 //! `grampus-cli <model> --config <golden> --out <dir> [--export-statistics]`
 //!
 //! The binary tasks `39-compare-stages`, `41-compare-benchy`, `42-compare-fixtures` and
-//! `43-compare-configurations` call (task `19-port-surface`, plan step 19). Its command line is
+//! `43-compare-configurations` call (task `33-port-surface`, plan step 19). Its command line is
 //! fixed here because those four tasks are written against it: a positional model path,
 //! `--config <golden>` (one of the resolved-configuration goldens under
 //! `port/goldens/configs/`), `--out <dir>` and `--export-statistics`, matching `oracle/slice`'s
 //! own `--out` and `--export-statistics` (plan step 2). It writes its G-code as `plate_1.gcode`
 //! under `--out` — the name the oracle writes, `plate_<N>.gcode` — and, with
 //! `--export-statistics`, a statistics JSON under the oracle's own `plate_1.statistics.json`
-//! basename, so `just compare` compares like-named files.
+//! basename, so `just compare` compares like-named files. `--config` is read and parsed before
+//! the surface's five-call sequence starts, so a bad path is reported as its own error rather
+//! than being masked by `build_model`'s not-yet-ported error.
 //!
 //! Until Phase B lands (plan step 23) every path below exits non-zero with a named "not yet
 //! ported" error on stderr, never a panic: [`grampus_cli::surface::Surface`]'s five calls all
@@ -34,8 +36,8 @@ fn usage() -> &'static str {
     "usage: grampus-cli <model> --config <golden> --out <dir> [--export-statistics]\n\n\
      <model>               positional: path to the mesh to slice\n\
      --config <golden>     a resolved-configuration golden (port/goldens/configs/<name>.json)\n\
-     --out <dir>           directory the G-code (and, with --export-statistics, the\n\
-                           statistics JSON) is written under\n\
+     --out <dir>           directory the G-code and (with --export-statistics) the statistics\n\
+     \x20                     JSON are written under\n\
      --export-statistics   also write <out>/plate_1.statistics.json"
 }
 
@@ -121,18 +123,22 @@ impl std::fmt::Display for CliError {
 /// today the sequence never reaches either write, because `build_model` is first and always
 /// returns `SurfaceError::NotYetPorted`.
 fn run(args: &Args) -> Result<(), CliError> {
-    let mut surface = Surface::new();
-
-    surface
-        .build_model(&args.model)
-        .map_err(CliError::Surface)?;
-
+    // Read and parse `--config` before entering the surface's five-call sequence, so a bad
+    // golden path is reported as its own error rather than being masked by `build_model`'s
+    // not-yet-ported error (which fires regardless of whether `--config` is even readable).
+    // This changes nothing about the *surface's* call order, which still mirrors the oracle's
+    // build-model-then-apply-config sequence: reading a file off disk is not `print.apply`.
     let mut config = ResolvedConfig::from_golden(&args.config).map_err(CliError::ResolvedConfig)?;
     // The oracle derives this from the printer's vendor preset, never from the resolved
     // configuration's own JSON (see resolved_config's doc comment); this binary has no vendor
     // preset to read, so until Phase B defines where a caller states it, every run is BBL.
     config.set_bambu_printer(true);
 
+    let mut surface = Surface::new();
+
+    surface
+        .build_model(&args.model)
+        .map_err(CliError::Surface)?;
     surface.apply_config(&config).map_err(CliError::Surface)?;
     surface.validate().map_err(CliError::Surface)?;
     surface.process().map_err(CliError::Surface)?;
@@ -145,9 +151,13 @@ fn run(args: &Args) -> Result<(), CliError> {
     if args.export_statistics {
         let statistics_path = args.out.join("plate_1.statistics.json");
         // Not yet ported: statistics export has no entry point of its own on `Surface` (R10's
-        // five calls are fixed), so Phase B's statistics writer reaches the same named error
-        // `export_gcode` already would have, had it gotten this far.
+        // five calls are fixed), so until Phase B's statistics writer exists, this path reports
+        // the same named "not yet ported" error the other four CLI paths do, rather than
+        // silently exiting 0 having written nothing.
         let _ = statistics_path;
+        return Err(CliError::Surface(SurfaceError::NotYetPorted(
+            "export_statistics",
+        )));
     }
 
     Ok(())

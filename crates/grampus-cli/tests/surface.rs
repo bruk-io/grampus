@@ -1,4 +1,4 @@
-//! The shape and the round trip in one file (task `19-port-surface`): asserts `Surface`
+//! The shape and the round trip in one file (task `33-port-surface`): asserts `Surface`
 //! exposes the five calls in order with no out-of-order escape, and round-trips a committed
 //! golden through `resolved_config`.
 
@@ -140,6 +140,23 @@ fn resolved_config_round_trip_on_committed_golden() {
     assert_eq!(
         config.get("filament_map"),
         Some(ConfigField::Value(serde_json::json!(["1"])))
+    );
+
+    // The two G-code-only keys really are absent from the golden's own JSON — read raw, not
+    // through `ResolvedConfig::get`, which reports both as derived regardless of whether a
+    // golden happens to carry them. This is what makes "does not fail on their absence" a claim
+    // about the committed golden, not just about the constant list `get` consults.
+    let raw: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&golden).expect("golden is readable"))
+            .expect("golden is valid JSON");
+    let raw_object = raw.as_object().expect("golden is a JSON object");
+    assert!(
+        !raw_object.contains_key("first_layer_temperature"),
+        "golden unexpectedly carries first_layer_temperature; get() would silently mask it"
+    );
+    assert!(
+        !raw_object.contains_key("first_layer_bed_temperature"),
+        "golden unexpectedly carries first_layer_bed_temperature; get() would silently mask it"
     );
 
     // The two G-code-only keys: absent from the golden, but reading them does not fail and
