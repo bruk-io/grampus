@@ -46,9 +46,13 @@ therefore implemented but **not exercised by any row this script runs today**; s
 request rather than claim it was measured. It is reached only when a configuration's first pinned-
 CLI run exits non-zero, and then used for every run of that configuration (not mixed per-run),
 since a single row's five runs must come from one oracle for the pairwise comparison to mean
-anything. If the built driver also fails to produce a run, the row is recorded with a gate of
-``none`` for every artifact and a run count of however many runs *did* succeed (possibly zero),
-and the reason is written into the Markdown report's prose, never into the fixed-width TSV.
+anything. If the built driver also fails to produce a single run, the row is recorded with a gate
+of ``none`` for every artifact and a run count of zero, and the reason is written into the
+Markdown report's prose, never into the fixed-width TSV. A run count that is short but *not*
+zero -- either oracle produced at least one run but fewer than ``RUN_COUNT`` -- is never
+published at all: ``main`` treats that as a harness failure and exits non-zero before writing any
+committed file, the same way it does when the pinned binary is missing entirely (probed once, up
+front, before any row is measured).
 
 Every oracle invocation writes into its own fresh directory under
 ``oracle/.cache/determinism/<configuration>/<fixture-stem>/run-NNNN/``, left behind for
@@ -60,6 +64,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import re
 import subprocess
 import sys
@@ -76,6 +81,11 @@ DETERMINISM_TSV = REPO_ROOT / "port" / "reports" / "determinism.tsv"
 DETERMINISM_MD = REPO_ROOT / "port" / "reports" / "determinism.md"
 SCRATCH_ROOT = REPO_ROOT / "oracle" / ".cache" / "determinism"
 STAGE_DUMP_BUILD_DIR = REPO_ROOT / "oracle" / ".cache" / "stage-dump" / "arm64"
+# Mirrors oracle/slice's own BINARY constant (deliberately duplicated, same reason as the table
+# readers below): probed once, up front, so an environment with no pinned binary staged at all
+# fails loudly before any row is measured, rather than silently falling through every
+# configuration to the built-oracle driver and publishing a report no oracle actually produced.
+ORACLE_BINARY = REPO_ROOT / "oracle" / ".cache" / "app" / "OrcaSlicer.app" / "Contents" / "MacOS" / "OrcaSlicer"
 
 TSV_HEADER = ["configuration", "fixture", "artifact", "run count", "normalisation", "gate", "oracle"]
 ARTIFACTS = ["gcode", "settings-json", "statistics-json"]
@@ -252,44 +262,55 @@ def run_pinned_slice(fixture: str, configuration: str, out_dir: Path) -> RunArti
 def build_stage_dump() -> Path:
     """Build oracle/stage-dump's stage_dump binary (task 25-stage-dumper), the same two commands
     `just oracle-dump` runs, without that recipe's armed/unarmed L1 proof or its copy into the
-    committed port/dumps/ -- this task owns neither."""
-    subprocess.run(
-        [
-            "cmake",
-            "-S",
-            "oracle/stage-dump",
-            "-B",
-            str(STAGE_DUMP_BUILD_DIR),
-            "-G",
-            "Ninja",
-            "-DCMAKE_BUILD_TYPE=Release",
-        ],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["cmake", "--build", str(STAGE_DUMP_BUILD_DIR), "--target", "stage_dump"],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-    )
+    committed port/dumps/ -- this task owns neither.
+
+    Built once per configuration (by its one caller, `collect_runs`'s fallback branch), never
+    once per run: a cmake configure+build is not part of what this task measures, and doing it
+    up to `RUN_COUNT` times per row only multiplied a cost this path does not need to pay even
+    once today (see this script's module docstring -- the fallback is not exercised by any row
+    `docs/ORACLE.md` names as of this task)."""
+    try:
+        subprocess.run(
+            [
+                "cmake",
+                "-S",
+                "oracle/stage-dump",
+                "-B",
+                str(STAGE_DUMP_BUILD_DIR),
+                "-G",
+                "Ninja",
+                "-DCMAKE_BUILD_TYPE=Release",
+            ],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["cmake", "--build", str(STAGE_DUMP_BUILD_DIR), "--target", "stage_dump"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        # Echo what cmake actually said, not just the exception's own repr -- the one place
+        # this path most needs a diagnostic is exactly the one a bare `{exc}` throws away.
+        raise DeterminismError(
+            f"building oracle/stage-dump failed: {exc}\n--- stdout ---\n{exc.stdout}\n"
+            f"--- stderr ---\n{exc.stderr}"
+        ) from exc
     return STAGE_DUMP_BUILD_DIR / "stage_dump"
 
 
 def run_built_oracle(
-    fixture: str, configuration: str, overrides: list[tuple[str, str]], out_dir: Path
+    binary: Path, fixture: str, configuration: str, overrides: list[tuple[str, str]], out_dir: Path
 ) -> RunArtifacts | None:
-    """Run the built-oracle driver in its --set mode with `configuration`'s own Overrides cell
-    (C12's decision), unarmed -- consistent with R4's "the normative run ... is the one with the
-    pipeline hook unarmed" -- never through --config (no dependency on a golden that cannot
-    exist for a configuration the pinned CLI refuses). Not exercised by any row this task's own
-    docs/ORACLE.md table names as of this task; see this script's module docstring."""
-    try:
-        binary = build_stage_dump()
-    except subprocess.CalledProcessError as exc:
-        click.echo(f"error: building oracle/stage-dump failed: {exc}", err=True)
-        return None
+    """Run the already-built stage_dump `binary` in its --set mode with `configuration`'s own
+    Overrides cell (C12's decision), unarmed -- consistent with R4's "the normative run ... is
+    the one with the pipeline hook unarmed" -- never through --config (no dependency on a golden
+    that cannot exist for a configuration the pinned CLI refuses). Not exercised by any row this
+    task's own docs/ORACLE.md table names as of this task; see this script's module docstring."""
     cmd = [str(binary), fixture, configuration, "--out", str(out_dir), "--unarmed"]
     for key, value in overrides:
         cmd += ["--set", f"{key}={value}"]
@@ -313,6 +334,7 @@ class FixtureResult:
     oracle: str | None  # "release", "built", or None if nothing could be produced
     runs: list[RunArtifacts] = field(default_factory=list)
     note: str = ""  # only ever used when oracle is None or run count is short; markdown-only
+    generated_line_note: str = ""  # markdown-only; set by measure_fixture_result, see below
 
 
 def collect_runs(configuration: str, fixture: str, overrides: list[tuple[str, str]]) -> FixtureResult:
@@ -336,11 +358,25 @@ def collect_runs(configuration: str, fixture: str, overrides: list[tuple[str, st
         return FixtureResult(configuration=configuration, fixture=fixture, oracle="release", runs=runs)
 
     # The pinned CLI's first run already failed: C12's fallback, the built-oracle driver, for
-    # every run of this configuration (never a mix of oracles within one row's five runs).
+    # every run of this configuration (never a mix of oracles within one row's five runs). Built
+    # once here, not once per run (see build_stage_dump's own docstring).
+    try:
+        binary = build_stage_dump()
+    except DeterminismError as exc:
+        click.echo(f"error: {exc}", err=True)
+        return FixtureResult(
+            configuration=configuration,
+            fixture=fixture,
+            oracle=None,
+            runs=[],
+            note="neither the pinned CLI nor the built-oracle --set driver could construct this "
+            "configuration (the built-oracle binary itself failed to build -- see stderr); "
+            "recorded with a gate of none for every artifact.",
+        )
     runs = []
     for i in range(RUN_COUNT):
         out_dir = fresh_run_dir(configuration, f"built-{fixture}", i)
-        run = run_built_oracle(fixture, configuration, overrides, out_dir)
+        run = run_built_oracle(binary, fixture, configuration, overrides, out_dir)
         if run is None:
             break
         runs.append(run)
@@ -413,6 +449,26 @@ def gate_from_gcode_pairs(pair_levels: list[dict[str, bool]]) -> str:
     return "none"
 
 
+def distinct_generated_lines(runs: list[RunArtifacts]) -> list[str]:
+    """Return the distinct `; generated by ... at HH:MM:SS` lines these runs' G-code carries.
+
+    This is the one line R4's declared normalisation ever has to strip for the four
+    configurations this report measures (confirmed by inspection, not asserted): whether a row's
+    G-code gate reaches L0 or only L1 depends on whether its runs happen to share one
+    one-second-resolution timestamp, which is a property of this harness's scheduling, not of
+    the port's output. Reporting the count (rather than, say, inserting a delay to force runs
+    apart) lets a reader tell the two apart without this script shaping the measurement to
+    reach either level -- task.md's own rule for this report.
+    """
+    values = []
+    for run in runs:
+        for line in run.gcode.read_text().splitlines():
+            if line.startswith("; generated by "):
+                values.append(line)
+                break
+    return sorted(set(values))
+
+
 def gate_from_json_pairs(pair_results: list[str | None]) -> str:
     """The strictest level every JSON-artifact pair reaches. A JSON artifact only ever reports
     L0, L1 or none (crates/oracle-compare/src/json.rs); L0 implies L1 (JsonReport::passed), so
@@ -461,6 +517,26 @@ def measure_fixture_result(result: FixtureResult) -> list[ArtifactMeasurement]:
     gcode_pairs = [gcode_pair_levels(a.gcode, b.gcode) for a, b in pairs]
     settings_pairs = [json_pair_level(a.settings, b.settings, "--settings") for a, b in pairs]
     statistics_pairs = [json_pair_level(a.statistics, b.statistics, "--statistics") for a, b in pairs]
+    gcode_gate = gate_from_gcode_pairs(gcode_pairs)
+
+    # Reported only when it actually explains this row's gate: an L1 (not L0) gate here is
+    # always explained by the runs' own `; generated by` timestamps (confirmed by inspection --
+    # every gcode diff this script's own pull request measured differs at that one line and no
+    # other, for every configuration that reaches L1), so naming the count tells a reader the
+    # gate is clock coincidence, not reproducibility, without this script inserting a delay to
+    # force it either way (task.md's own rule against shaping the measurement). A `none` gate
+    # (fuzzy-skin) has its own, already-documented cause (docs/ORACLE.md's randomised
+    # displacement) -- repeating this note there would misattribute it to the timestamp instead.
+    if gcode_gate == "L1":
+        generated_lines = distinct_generated_lines(result.runs)
+        result.generated_line_note = (
+            f"These {run_count} runs carried {len(generated_lines)} distinct `; generated by` "
+            "lines (the oracle's one-second-resolution timestamp) -- the only reason this row's "
+            "G-code gate is L1 and not L0: two runs scheduled inside the same wall-clock second "
+            "are byte-identical, and two that straddle a second boundary are not. This is a "
+            "property of this harness's run timing, not of the port's output; see the pull "
+            "request."
+        )
 
     measurements.append(
         ArtifactMeasurement(
@@ -469,7 +545,7 @@ def measure_fixture_result(result: FixtureResult) -> list[ArtifactMeasurement]:
             artifact="gcode",
             run_count=run_count,
             normalisation=NORMALISATION["gcode"],
-            gate=gate_from_gcode_pairs(gcode_pairs),
+            gate=gcode_gate,
             oracle=oracle_field,
         )
     )
@@ -526,6 +602,20 @@ def match_label(gate: str) -> str:
     return MATCH_LABEL.get(gate, "not at all")
 
 
+def fetch_provenance_header(fixture: str, configuration: str, oracle: str) -> str:
+    """Call `oracle/provenance --syntax markdown` for one fixture/configuration pair and return
+    its table, stripped of its trailing newline. Raises DeterminismError on a non-zero exit."""
+    result = subprocess.run(
+        ["./oracle/provenance", fixture, configuration, "--oracle", oracle, "--syntax", "markdown"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise DeterminismError(f"oracle/provenance failed: {result.stderr.strip()}")
+    return result.stdout.rstrip("\n")
+
+
 def render_markdown(
     results: list[FixtureResult], measurements_by_key: dict[tuple[str, str], list[ArtifactMeasurement]]
 ) -> str:
@@ -533,29 +623,18 @@ def render_markdown(
         raise DeterminismError("no configuration rows to report")
 
     # The provenance header must be the file's leading content (blank lines, then the table) for
-    # `oracle/provenance --check` to find it -- this script formats no header of its own. One
-    # header for the whole report: every row measured here used the "release" oracle (the first
-    # fixture/configuration pair stands in for all of them, since oracle/provenance's own
-    # interface takes exactly one fixture and one configuration; see the pull request).
+    # `oracle/provenance --check` to find it -- this script formats no header of its own, and
+    # `oracle/provenance`'s own `leading_table_block` stops at the first non-blank, non-table
+    # line, so nothing may precede this table, not even a heading. The first result's header
+    # stands as the file's leading table; every other result gets its own header repeated inside
+    # its own "## configuration / fixture" section below, because this one report covers four
+    # different configurations (and, when the built-oracle fallback is ever exercised, two
+    # different oracles) and R7 requires each output to record the preset set, overrides and
+    # oracle that actually produced it -- not the first row's, standing in for the rest.
     header_oracle = results[0].oracle or "built"
-    header_result = subprocess.run(
-        [
-            "./oracle/provenance",
-            results[0].fixture,
-            results[0].configuration,
-            "--oracle",
-            header_oracle,
-            "--syntax",
-            "markdown",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if header_result.returncode != 0:
-        raise DeterminismError(f"oracle/provenance failed: {header_result.stderr.strip()}")
+    header_table = fetch_provenance_header(results[0].fixture, results[0].configuration, header_oracle)
 
-    lines = [header_result.stdout.rstrip("\n")]
+    lines = [header_table]
     lines.append("")
     lines.append(f"Generated: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}")
     lines.append("")
@@ -564,18 +643,29 @@ def render_markdown(
         "with a sub-row per compared artifact (R3). The gate is the strictest R4 level every "
         f"pair of the row's {RUN_COUNT} (or more) runs reaches against every other; `none` where "
         "no level is reached by every pair. Neither this file nor `port/reports/determinism.tsv` "
-        "is authored by hand -- both are regenerated by `just oracle-determinism`."
+        "is authored by hand -- both are regenerated by `just oracle-determinism`. The table "
+        "above is this report's *first* section's own provenance header (R7), not a single "
+        "header standing in for every section; each later section repeats its own."
     )
 
-    for result in results:
+    for index, result in enumerate(results):
         key = (result.configuration, result.fixture)
         measurements = measurements_by_key[key]
         lines.append("")
         lines.append(f"## {result.configuration} / {result.fixture}")
-        if result.note:
-            lines.append("")
-            lines.append(result.note)
         lines.append("")
+        if index == 0:
+            lines.append("(its `oracle/provenance` header is this report's leading table, above.)")
+        else:
+            section_oracle = result.oracle or "built"
+            lines.append(fetch_provenance_header(result.fixture, result.configuration, section_oracle))
+        lines.append("")
+        if result.note:
+            lines.append(result.note)
+            lines.append("")
+        if result.generated_line_note:
+            lines.append(result.generated_line_note)
+            lines.append("")
         lines.append("| Artifact | Run count | Normalisation | Matched | Gate | Oracle |")
         lines.append("|---|---|---|---|---|---|")
         for m in measurements:
@@ -602,7 +692,13 @@ def render_gate_table(measurements: list[ArtifactMeasurement]) -> str:
         "than the pinned release binary."
     )
     lines.append("")
-    lines.append("| Configuration | Fixture | Artifact | Run count | Gate | Oracle |")
+    # First column named "Config", not "Configuration": docs/ORACLE.md's own configuration table
+    # (oracle/slice, oracle/provenance and this script's own load_configuration_rows) is located
+    # by its header's first column reading exactly "Configuration" -- naming this table's first
+    # column anything that could also match would make this file's correctness depend on this
+    # generated block staying below that real table. Nothing parses this generated table by its
+    # header (tasks 18/41-43 read port/reports/determinism.tsv instead; see the pull request).
+    lines.append("| Config | Fixture | Artifact | Run count | Gate | Oracle |")
     lines.append("|---|---|---|---|---|---|")
     for m in measurements:
         lines.append(f"| {m.configuration} | {m.fixture} | {m.artifact} | {m.run_count} | {m.gate} | {m.oracle} |")
@@ -611,10 +707,12 @@ def render_gate_table(measurements: list[ArtifactMeasurement]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def update_oracle_doc(gate_table: str) -> None:
-    """Replace the generated block between the BEGIN/END markers, or append it (preceded by one
-    blank line) when this is the first run to add it. Idempotent: re-running with an unchanged
-    measurement writes back the same bytes."""
+def compute_oracle_doc_text(gate_table: str) -> str:
+    """Return docs/ORACLE.md's new text with the generated block between the BEGIN/END markers
+    replaced, or appended (preceded by one blank line) when this is the first run to add it.
+    Pure (reads the file but never writes it) so `main` can compute every output before writing
+    any of them -- see this script's module docstring. Idempotent: re-running with an unchanged
+    measurement computes back the same bytes."""
     text = ORACLE_DOC.read_text()
     if GENERATED_BEGIN in text and GENERATED_END in text:
         start = text.index(GENERATED_BEGIN)
@@ -623,10 +721,8 @@ def update_oracle_doc(gate_table: str) -> None:
             # `gate_table` itself already ends in exactly one newline after the END marker;
             # consuming this one too keeps re-running from growing a blank line at EOF forever.
             end += 1
-        new_text = text[:start] + gate_table + text[end:]
-    else:
-        new_text = text.rstrip("\n") + "\n\n" + gate_table
-    ORACLE_DOC.write_text(new_text)
+        return text[:start] + gate_table + text[end:]
+    return text.rstrip("\n") + "\n\n" + gate_table
 
 
 # ---------------------------------------------------------------------------
@@ -639,6 +735,18 @@ def main() -> None:
     """Measure the oracle's run-to-run reproducibility and publish the gate table (R3)."""
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
 
+    # Probed once, up front, environment-wide (mirrors oracle/slice's own check at its own call
+    # site). Without this, an environment with no pinned binary staged at all (a fresh checkout:
+    # oracle/.cache/ is git-ignored) would have every configuration's first pinned-CLI run fail,
+    # reroute silently to the built-oracle fallback, and -- if that also failed to build or run
+    # -- publish all 12 rows as `none` with a fabricated-looking `oracle` column and still exit
+    # 0. That is a harness/environment failure, not a configuration the CLI genuinely refuses
+    # (C12), and it must stop the command before any committed file is touched.
+    if not os.access(ORACLE_BINARY, os.X_OK):
+        click.echo(f"error: oracle binary not found or not executable: {ORACLE_BINARY}", err=True)
+        click.echo("run `just oracle-fetch` first.", err=True)
+        sys.exit(1)
+
     try:
         rows = load_configuration_rows()
     except DeterminismError as exc:
@@ -649,6 +757,23 @@ def main() -> None:
     for row in rows:
         for fixture in row.fixtures:
             results.append(collect_runs(row.name, fixture, row.overrides))
+
+    # A short, non-zero run count (the pinned CLI failing partway through its five, or the
+    # built-oracle fallback producing fewer than five) is never published: task.md's own Done-
+    # when says "no row has a run count below five". The one case that *is* published with a
+    # short count is zero runs -- "neither oracle could construct this configuration" (C12,
+    # task.md's own "what this task must not pre-decide" section) -- which `measure_fixture_result`
+    # turns into `none` gates below, not a TSV row this check would catch.
+    short = [r for r in results if 0 < len(r.runs) < RUN_COUNT]
+    if short:
+        for r in short:
+            click.echo(
+                f"error: {r.configuration} {r.fixture}: only {len(r.runs)} of {RUN_COUNT} runs "
+                f"succeeded ({r.note or 'no reason recorded'}); refusing to publish a row below "
+                "the minimum run count",
+                err=True,
+            )
+        sys.exit(1)
 
     measurements_by_key: dict[tuple[str, str], list[ArtifactMeasurement]] = {}
     all_measurements: list[ArtifactMeasurement] = []
@@ -665,18 +790,23 @@ def main() -> None:
     for m in all_measurements:
         click.echo(f"{m.configuration} {m.fixture} {m.artifact}: {m.run_count} runs, gate {m.gate}")
 
-    DETERMINISM_TSV.parent.mkdir(parents=True, exist_ok=True)
-    DETERMINISM_TSV.write_text(render_tsv(all_measurements))
-
+    # Every output is rendered into memory before anything is written: either all three
+    # committed files change together or none of them do, so a failure in one render (the
+    # `oracle/provenance` calls `render_markdown` makes, say) never leaves the TSV ahead of the
+    # Markdown report and docs/ORACLE.md.
+    tsv_text = render_tsv(all_measurements)
     try:
         md_text = render_markdown(results, measurements_by_key)
     except DeterminismError as exc:
         click.echo(f"error: {exc}", err=True)
         sys.exit(1)
-    DETERMINISM_MD.write_text(md_text)
-
     gate_table = render_gate_table(all_measurements)
-    update_oracle_doc(gate_table)
+    oracle_doc_text = compute_oracle_doc_text(gate_table)
+
+    DETERMINISM_TSV.parent.mkdir(parents=True, exist_ok=True)
+    DETERMINISM_TSV.write_text(tsv_text)
+    DETERMINISM_MD.write_text(md_text)
+    ORACLE_DOC.write_text(oracle_doc_text)
 
     click.echo(f"wrote {DETERMINISM_TSV.relative_to(REPO_ROOT)} ({len(all_measurements)} rows)")
     click.echo(f"wrote {DETERMINISM_MD.relative_to(REPO_ROOT)}")
