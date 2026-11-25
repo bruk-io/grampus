@@ -422,7 +422,6 @@ fn run_stages() -> Result<ExitCode, String> {
         fixture: &args.fixture,
         config: &args.config,
         scratch_dir: &args.scratch,
-        port_env: &[],
     };
 
     let report = stages::run(&cfg)?;

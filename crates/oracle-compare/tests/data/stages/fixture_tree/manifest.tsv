@@ -1,5 +1,5 @@
 path	in scope or out with a reason	target crate	target module	pipeline stage or none	equality tier	tolerance	comparison function	proof path
-Ported/SeamA.cpp	in	fake-crate	crates/fake-crate/src/ported_seam.rs	myDumpStage	exact			proof/ported_seam
-NotPorted/SeamB.cpp	in	fake-crate	crates/fake-crate/src/does_not_exist.rs	myNotPortedStage	exact			proof/does_not_exist
-MissingDump/SeamC.cpp	in	fake-crate	crates/fake-crate/src/ported_seam.rs	myMissingDumpStage	exact			proof/ported_seam
-NoPortRun/SeamD.cpp	in	fake-crate	crates/fake-crate/src/ported_seam.rs	myNoPortDumpStage	exact			proof/ported_seam
+Ported/SeamA.cpp	in	fixture-crate	crates/fixture-crate/src/ported_seam.rs	myDumpStage	exact			proof/ported_seam
+NotPorted/SeamB.cpp	in	fixture-crate	crates/fixture-crate/src/does_not_exist.rs	myNotPortedStage	exact			proof/does_not_exist
+MissingDump/SeamC.cpp	in	fixture-crate	crates/fixture-crate/src/ported_seam.rs	myMissingDumpStage	exact			proof/ported_seam
+NoPortRun/SeamD.cpp	in	fixture-crate	crates/fixture-crate/src/ported_seam.rs	myNoPortDumpStage	exact			proof/ported_seam

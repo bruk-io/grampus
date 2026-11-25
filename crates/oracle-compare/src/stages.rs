@@ -1149,13 +1149,17 @@ pub fn evaluate_fallback(
 /// for, in the caller, does, and the caller needs this process's exit status and stderr to say
 /// *why* when it does (`describe_port_output`). Failing to even start the binary (a bad
 /// `--port-bin` path) is this function's only `Err`.
+///
+/// What the real binary does today is proven against the real binary, in
+/// `crates/grampus-cli/tests/dump_stages.rs`: it accepts `--dump-stages`, fails at
+/// `Surface::build_model` before any of the eleven seams is reached, and writes no dump at all.
+/// Nothing in this crate stands in for it (R19).
 pub fn run_port_binary(
     port_bin: &Path,
     fixture: &Path,
     config: &Path,
     gcode_dir: &Path,
     dump_dir: &Path,
-    extra_env: &[(&str, &str)],
 ) -> Result<std::process::Output, String> {
     fs::create_dir_all(gcode_dir)
         .map_err(|e| format!("cannot create '{}': {e}", gcode_dir.display()))?;
@@ -1169,7 +1173,6 @@ pub fn run_port_binary(
         .arg(gcode_dir)
         .arg("--dump-stages")
         .arg(dump_dir)
-        .envs(extra_env.iter().copied())
         .output()
         .map_err(|e| format!("cannot run port binary '{}': {e}", port_bin.display()))
 }
@@ -1189,7 +1192,7 @@ fn dir_has_any_entry(dir: &Path) -> bool {
 /// having simply run and written nothing (`run_port_binary` discards neither any more — see its
 /// own doc comment and task 39-compare-stages's pull request body on why this was previously
 /// thrown away).
-fn describe_port_output(output: &std::process::Output) -> String {
+pub fn describe_port_output(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let tail: Vec<&str> = stderr
         .lines()
@@ -1220,14 +1223,29 @@ pub struct StagesConfig<'a> {
     pub fixture: &'a Path,
     pub config: &'a Path,
     pub scratch_dir: &'a Path,
-    /// Extra environment variables passed to the port subprocess, beyond whatever it inherits
-    /// from this process's own environment. `just compare-stages` always passes `&[]` — nothing
-    /// about driving the real `grampus-cli` binary needs this. It exists so this crate's own
-    /// tests can steer a committed stand-in port binary
-    /// (`tests/data/stages/fake_port.sh`) through `Command::envs` rather than through
-    /// `std::env::set_var`, which would mutate the *test process's* own environment and race
-    /// across the concurrently-run tests `cargo test` executes in one binary.
-    pub port_env: &'a [(&'a str, &'a str)],
+}
+
+/// One port run's outputs, as [`compare_stage_outputs`] reads them: the two directories the port
+/// was asked to write into, and a diagnostic tail describing how its process ended.
+///
+/// This is the seam that makes the comparison testable without anything standing in for the port
+/// (R19): [`run`] fills it from a real `grampus-cli` subprocess, and this crate's own tests fill
+/// it from directories of committed or generated dump fixtures. A directory of dump files is
+/// fixture *data* for the comparison — it is not a stand-in for the port, which is never invoked
+/// on that path at all, and not a stand-in for the oracle, whose side of every comparison is the
+/// committed dump read from `oracle_dumps_dir`.
+pub struct PortOutputs<'a> {
+    /// Where the port's R5 per-seam stage dumps are. Empty is today's real state at every seam
+    /// (`crates/grampus-cli/src/surface.rs`'s `emit_stage_dump` is a documented no-op), and
+    /// `compare_stage_outputs` reports it as the structural gap it is, not as a pass.
+    pub dump_dir: &'a Path,
+    /// Where the port's exported G-code is, for the two fallback stages.
+    pub gcode_dir: &'a Path,
+    /// A short tail describing how the port process itself ended, appended to the two port-side
+    /// errors so a crash or a real "not yet ported" message is distinguishable from the port
+    /// having run and written nothing. [`run`] fills this with [`describe_port_output`]; a caller
+    /// that ran no port process passes `""`.
+    pub diagnostic: &'a str,
 }
 
 #[derive(Debug)]
@@ -1278,31 +1296,53 @@ pub struct StagesReport {
 /// read as a pass). Both port-side cases keep this command failing shut rather than reporting a
 /// stage this run cannot actually compare as if it had passed.
 pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
-    let rows = load_manifest_rows(cfg.manifest_path)?;
-    let stages = stage_names_in_order(&rows);
-    let known_stages: HashSet<String> = stages.iter().cloned().collect();
-    let uncovered_oracle_dumps = uncovered_oracle_dumps(cfg.oracle_dumps_dir, &known_stages);
-    let mod_reachable = mod_reachable_files(cfg.tree);
-
     let gcode_dir = cfg.scratch_dir.join("gcode");
     let dump_dir = cfg.scratch_dir.join("dump-stages");
-    let port_output = run_port_binary(
-        cfg.port_bin,
-        cfg.fixture,
-        cfg.config,
-        &gcode_dir,
-        &dump_dir,
-        cfg.port_env,
-    )?;
-    let port_wrote_no_dumps_at_all = !dir_has_any_entry(&dump_dir);
-    let port_wrote_no_gcode_at_all = !dir_has_any_entry(&gcode_dir);
+    let port_output =
+        run_port_binary(cfg.port_bin, cfg.fixture, cfg.config, &gcode_dir, &dump_dir)?;
+    let diagnostic = describe_port_output(&port_output);
+    compare_stage_outputs(
+        cfg.manifest_path,
+        cfg.tree,
+        cfg.oracle_dumps_dir,
+        &PortOutputs {
+            dump_dir: &dump_dir,
+            gcode_dir: &gcode_dir,
+            diagnostic: &diagnostic,
+        },
+    )
+}
+
+/// Everything [`run`] does once the port has run: derive each stage's status from `tree` and
+/// `manifest_path`, read its tier, and compare the port's output in `port` against the committed
+/// oracle artifact in `oracle_dumps_dir`.
+///
+/// This is the real comparison, called by `run` on every real invocation and by this crate's own
+/// tests directly, so that no test needs a binary that impersonates the port to reach the
+/// match/differ/fallback branches (R19). It returns the same errors `run` documents.
+pub fn compare_stage_outputs(
+    manifest_path: &Path,
+    tree: &Path,
+    oracle_dumps_dir: &Path,
+    port: &PortOutputs,
+) -> Result<StagesReport, String> {
+    let rows = load_manifest_rows(manifest_path)?;
+    let stages = stage_names_in_order(&rows);
+    let known_stages: HashSet<String> = stages.iter().cloned().collect();
+    let uncovered_oracle_dumps = uncovered_oracle_dumps(oracle_dumps_dir, &known_stages);
+    let mod_reachable = mod_reachable_files(tree);
+
+    let gcode_dir = port.gcode_dir;
+    let dump_dir = port.dump_dir;
+    let port_wrote_no_dumps_at_all = !dir_has_any_entry(dump_dir);
+    let port_wrote_no_gcode_at_all = !dir_has_any_entry(gcode_dir);
 
     let mut lines = Vec::new();
     let mut first_differing_stage: Option<String> = None;
 
     for stage in stages {
         let stage_rows = rows_for_stage(&rows, &stage);
-        let fully_ported = stage_fully_ported(&stage_rows, cfg.tree, &mod_reachable);
+        let fully_ported = stage_fully_ported(&stage_rows, tree, &mod_reachable);
         if !fully_ported {
             lines.push(StageLine {
                 stage,
@@ -1311,10 +1351,10 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
             continue;
         }
 
-        let tolerance = stage_tolerance(cfg.manifest_path, &stage_rows)?;
+        let tolerance = stage_tolerance(manifest_path, &stage_rows)?;
 
         if is_fallback_stage(&stage) {
-            let oracle_gcode_path = cfg.oracle_dumps_dir.join("plate_1.gcode");
+            let oracle_gcode_path = oracle_dumps_dir.join("plate_1.gcode");
             if !oracle_gcode_path.is_file() {
                 return Err(format!(
                     "stage '{stage}' is fully ported but '{}' does not exist, and no command \
@@ -1334,10 +1374,11 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
                 return Err(if port_wrote_no_gcode_at_all {
                     format!(
                         "stage '{stage}' is fully ported but the port wrote no G-code at all: \
-                         `Surface::export_gcode` (crates/grampus-cli/src/surface.rs) is still a \
-                         documented not-yet-ported stub, which this command cannot compare \
-                         against -- exiting non-zero rather than reading this as a pass{}",
-                        describe_port_output(&port_output)
+                         `Surface::export_gcode` (crates/grampus-cli/src/surface.rs) still \
+                         returns its documented not-yet-ported error, so there is nothing for \
+                         this command to compare -- exiting non-zero rather than reading this as \
+                         a pass{}",
+                        port.diagnostic
                     )
                 } else {
                     format!(
@@ -1345,7 +1386,7 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
                          even though it wrote other output (internal inconsistency between \
                          port-status derivation and the port's Surface){}",
                         port_gcode_path.display(),
-                        describe_port_output(&port_output)
+                        port.diagnostic
                     )
                 });
             }
@@ -1362,7 +1403,7 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
                 result: StageResult::Fallback { tolerance, outcome },
             });
         } else {
-            let oracle_dump_path = cfg.oracle_dumps_dir.join(format!("{stage}.dump"));
+            let oracle_dump_path = oracle_dumps_dir.join(format!("{stage}.dump"));
             if !oracle_dump_path.is_file() {
                 return Err(format!(
                     "stage '{stage}' is fully ported but '{}' does not exist; run `just \
@@ -1381,7 +1422,7 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
                          see task 39-compare-stages's pull request body for which task is \
                          expected to give it a real writer once Phase B lands state behind this \
                          seam{}",
-                        describe_port_output(&port_output)
+                        port.diagnostic
                     )
                 } else {
                     format!(
@@ -1389,7 +1430,7 @@ pub fn run(cfg: &StagesConfig) -> Result<StagesReport, String> {
                          even though it wrote other stage dumps (internal inconsistency between \
                          port-status derivation and the port's Surface){}",
                         port_dump_path.display(),
-                        describe_port_output(&port_output)
+                        port.diagnostic
                     )
                 });
             }
@@ -1889,8 +1930,8 @@ mod tests {
         let tree = fixture_tree_dir();
         let mod_reachable = mod_reachable_files(&tree);
         let mut r = row("myModChainStage", true);
-        r.target_crate = "fake-crate".to_string();
-        r.target_module = "crates/fake-crate/src/mod_chain/leaf.rs".to_string();
+        r.target_crate = "fixture-crate".to_string();
+        r.target_module = "crates/fixture-crate/src/mod_chain/leaf.rs".to_string();
         r.proof_path = "proof/mod_chain_leaf".to_string();
         assert!(
             row_is_ported(&r, &tree, &mod_reachable),
@@ -1904,12 +1945,12 @@ mod tests {
         let tree = fixture_tree_dir();
         let mod_reachable = mod_reachable_files(&tree);
         let mut r = row("myExternalProofStage", true);
-        r.target_crate = "fake-crate".to_string();
-        r.target_module = "crates/fake-crate/src/tested_externally.rs".to_string();
+        r.target_crate = "fixture-crate".to_string();
+        r.target_module = "crates/fixture-crate/src/tested_externally.rs".to_string();
         r.proof_path = "proof/tested_externally".to_string();
         assert!(
             row_is_ported(&r, &tree, &mod_reachable),
-            "a proof living under crates/fake-crate/tests/ (not an inline #[cfg(test)] module) \
+            "a proof living under crates/fixture-crate/tests/ (not an inline #[cfg(test)] module) \
              must still be found"
         );
     }
@@ -1923,8 +1964,8 @@ mod tests {
         let tree = fixture_tree_dir();
         let mod_reachable = mod_reachable_files(&tree);
         let mut r = row("myExternalProofStage", true);
-        r.target_crate = "fake-crate".to_string();
-        r.target_module = "crates/fake-crate/src/tested_externally.rs".to_string();
+        r.target_crate = "fixture-crate".to_string();
+        r.target_module = "crates/fixture-crate/src/tested_externally.rs".to_string();
         r.proof_path = String::new();
         assert!(!row_is_ported(&r, &tree, &mod_reachable));
     }

@@ -4,8 +4,6 @@
 // ("ported_seam") -- `row_is_ported`'s three conditions, all satisfied, so every manifest row
 // in the fixture manifest that points at this file derives `ported`.
 
-pub fn stub() {}
-
 #[cfg(test)]
 mod tests {
     // PROOF: proof/ported_seam

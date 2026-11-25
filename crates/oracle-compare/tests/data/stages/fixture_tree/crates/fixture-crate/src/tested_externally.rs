@@ -3,5 +3,3 @@
 // (`tests/tested_externally_proof.rs`) instead -- `proof_present`'s other search location,
 // which no other fixture module here exercises (`ported_seam.rs` and `mod_chain/leaf.rs` both
 // carry their proof inline).
-
-pub fn stub() {}
