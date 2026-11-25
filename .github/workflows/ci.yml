@@ -47,10 +47,15 @@ jobs:
 
       - uses: extractions/setup-just@v3
 
-      # No `toolchain:` input: this reads rust-toolchain.toml itself (channel and the rustfmt
-      # component `cargo fmt --check`, inside `just port-check`, needs), so the version this
-      # job installs can never drift from the one file that pins it.
+      # `toolchain:` is a required input for this action (confirmed empirically: omitting it,
+      # on the assumption the action would fall back to reading rust-toolchain.toml itself,
+      # failed this job's first CI run with "'toolchain' is a required input"). So the version
+      # is spelled out here, matching rust-toolchain.toml's channel; it is not derived from that
+      # file, and the two must be kept in sync by hand.
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: rustfmt
 
       - name: Check out the OrcaSlicer submodule
         run: git submodule update --init --depth 1 vendor/OrcaSlicer
@@ -114,8 +119,10 @@ jobs:
 
       - uses: extractions/setup-just@v3
 
-      # Same unpinned-input form as the ubuntu job's step: reads rust-toolchain.toml itself.
+      # Same explicit toolchain as the ubuntu job's step, and the same reason (see its comment).
       - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
 
       # Reads the gitlink directly, matching .github/workflows/oracle.yml's own step, so the
       # cache key below is stable before the submodule checkout above and if that step is ever
