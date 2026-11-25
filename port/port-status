@@ -1963,10 +1963,21 @@ def check_module(
     manifest_by_path: dict[str, dict[str, str]],
     result: ScanResult,
     text: str,
+    *,
+    require_trailer: bool = True,
 ) -> None:
     result.modules_scanned += 1
     lines = classify_lines(text)
-    check_trailer(module_relpath, lines, manifest_by_path, module_relpath, result)
+    # A module with no manifest row of its own and no "// PORT STATUS" header of its own
+    # writing can never satisfy check_trailer -- there is no row to be judged against and no
+    # trailer attempt to validate -- so the marker sniff that pulls such a module into
+    # scan_tree at all (task 29-ffi-bridge-core's slic3r-ffi crate is the first: it ports no
+    # libslic3r source file and task.md says so explicitly) must not also force the one
+    # requirement only a manifest row or an attempted trailer can authorize. A module that
+    # already carries a trailer header, or that a manifest row names, still gets check_trailer
+    # as before -- this only exempts the third case the union sniff alone pulls in.
+    if require_trailer:
+        check_trailer(module_relpath, lines, manifest_by_path, module_relpath, result)
     check_safety(module_relpath, lines, result)
     check_numeric_constants(module_relpath, lines, result)
     check_marker_whitelist(module_relpath, lines, result)
@@ -1995,13 +2006,29 @@ def scan_tree(tree: Path) -> ScanResult:
             # six markers) rather than by a text sniff alone, and -- unlike a marker-or-trailer
             # sniff on its own -- a real ported module cannot opt out of being scanned by having
             # its trailer and every marker deleted, since its manifest row still names it.
-            is_ported_module = module_relpath in target_modules or (
-                TRAILER_HEADER.removeprefix("// ") in text
+            is_target_module = module_relpath in target_modules
+            has_trailer_header = TRAILER_HEADER.removeprefix("// ") in text
+            is_ported_module = (
+                is_target_module
+                or has_trailer_header
                 or any(f"{prefix}:" in text for prefix in MARKER_WHITELIST)
             )
             if not is_ported_module:
                 continue
-            check_module(module_relpath, manifest_by_path, result, text=text)
+            # require_trailer is false only for a module pulled in solely by a marker other
+            # than the trailer header itself, with no manifest row either -- there is then
+            # nothing for check_trailer to judge it against. A module the manifest names, or
+            # one that already wrote a trailer header of its own (even with no manifest row
+            # yet), still gets checked, matching port/tests/port-status/no-source-line and
+            # source-wrong-module, both of which have no manifest row for the module under
+            # test but must still fail on their trailer's own defects.
+            check_module(
+                module_relpath,
+                manifest_by_path,
+                result,
+                text=text,
+                require_trailer=is_target_module or has_trailer_header,
+            )
     check_perf_fidelity(tree, result)
     return result
 
@@ -2047,6 +2074,17 @@ SELFTEST_FIXTURES: list[tuple[str, bool, str | None]] = [
     ("source-path-absent", False, "source-path-absent"),
     ("source-wrong-module", False, "source-wrong-module"),
     ("unsafe-no-safety", False, "missing-safety"),
+    # task 29-ffi-bridge-core: a crate named by no manifest row (it ports no libslic3r source
+    # file) must not be forced through check_trailer merely because its one SAFETY-commented
+    # `unsafe` pulled it into scan_tree -- see check_module's require_trailer.
+    ("safety-no-manifest-row", True, None),
+    # task 29-ffi-bridge-core: the second class the same `require_trailer` exemption covers,
+    # pinned so it is a recorded decision rather than an accident -- a file that looks ported
+    # whose manifest row misspells its target module and whose trailer is gone. main's
+    # port-status reports missing-trailer here; this branch reports nothing, because the
+    # manifest row is the authority check_trailer judges a trailer against, so a dropped or
+    # misspelled row is a manifest defect, not a trailer defect. See the fixture's own comment.
+    ("manifest-row-typo-no-trailer", True, None),
     ("missing-port-src", False, "missing-port-src"),
     ("placeholder-constant", False, "placeholder-constant"),
     ("two-literals-one-marker", False, "placeholder-constant"),

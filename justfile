@@ -1,6 +1,19 @@
 # asdlc from its repository, so this runs the same in CI and in a terminal with no plugin
 asdlc := "uvx --from git+https://github.com/bruk-io/asdlc asdlc"
 
+# R17, task 29-ffi-bridge-core: crates.io names known today for a Rust reimplementation of one
+# of the six libraries `crates/slic3r-ffi` binds through FFI instead of depending on (C4's
+# decision; there is no allowlist). This is a deny-list of names known today, not a proof of
+# absence -- a later task should extend it when it finds another, not trust that the absence of
+# a name here means no substitute exists. One or more names per library, reviewed in this task's
+# pull request: Clipper2 -- geo-clipper, solidmesh-clipper, clipper2 (crates.io's own name for a
+# Rust API over stock, unpatched Clipper2 -- not the vendored copy's two offsetter patches at
+# Clipper2Lib/src/clipper.offset.cpp:301,377, which is why this is a binding at all),
+# i_overlay, geo-booleanop; admesh -- meshrepair; qhull -- qhull_rayon, chull, qhull; libnest2d
+# -- nfp; Boost.Polygon's Voronoi builder -- voronoi, spade, voronator; NLopt -- cobyla, bobyqa,
+# slsqp, nlopt.
+substitute_names := "geo-clipper|solidmesh-clipper|clipper2|i_overlay|geo-booleanop|meshrepair|qhull_rayon|chull|qhull|nfp|voronoi|spade|voronator|cobyla|bobyqa|slsqp|nlopt"
+
 # everything a pull request has to pass
 check:
     {{asdlc}} document check
@@ -19,6 +32,35 @@ port-check:
     just ownership-check
     ./oracle/provenance --check port/goldens/ 'port/dumps/*/*.dump' port/reports/determinism.md port/reports/oracle-parity.md
     cargo fmt --check
+    # R17, task 29-ffi-bridge-core: -ffp-contract=off cannot drift between the two compilations
+    # the per-unit and per-stage proofs compare against -- the oracle libslic3r build and this
+    # crate's own build.rs. Anchored to the thing that actually reaches each compiler, not a bare
+    # substring: oracle/build-libslic3r's own comment above its CXX_FLAGS line (explaining why
+    # the flag is there) contains the string "-ffp-contract=off" too, and build.rs's module doc
+    # mentions it in prose as well, so a bare `grep -q` would still pass with the flag deleted
+    # from the command line in either file as long as a prose mention survives -- this was found
+    # and fixed on the oracle side during this task and, left as a bare substring, remained a
+    # proven false negative on the build.rs side (see this task's pull request body). Still not
+    # a CMake/syn parse -- the flag is a literal command-line token in both places (the
+    # CXX_FLAGS variable, build.rs's cxx_build::Build::flag() call), so this is checking for its
+    # presence at the call site, not its binding.
+    grep -qE '^CXX_FLAGS = ".*-ffp-contract=off.*"' oracle/build-libslic3r || { echo "port-check: -ffp-contract=off is missing from oracle/build-libslic3r's CXX_FLAGS assignment" >&2; exit 1; }
+    grep -qE '^\s*build\.flag\("-ffp-contract=off"\)' crates/slic3r-ffi/build.rs || { echo "port-check: -ffp-contract=off is missing from crates/slic3r-ffi/build.rs's build.flag() call" >&2; exit 1; }
+    # R17, task 29-ffi-bridge-core: no crate manifest may depend on a named Rust reimplementation
+    # of the six libraries this intent binds through FFI instead -- see substitute_names above.
+    # Catches every realistic way a Cargo.toml spells a dependency on one of these names: the
+    # inline form (`name = "..."` or `name = { version = ... }`), indented under a `[dependencies]`
+    # table (TOML allows leading whitespace on a key); the dotted workspace-inherited form
+    # (`name.workspace = true`); a quoted key (`"name" = "..."`); the dependency's own table
+    # header (`[dependencies.name]`, `[dev-dependencies.name]`, `[build-dependencies.name]`),
+    # indented, with internal spacing, or nested under a target table
+    # (`[target.'cfg(unix)'.dependencies.name]`); and the renamed form
+    # (`alias = { package = "name", version = "..." }`) -- a bare `^name[[:space:]]*=` anchor
+    # alone misses all but the first. Still anchored per form, not a bare substring, so it does
+    # not fire on `slic3r-clipperutils`/`slic3r-clipperzutils`, this workspace's own ported
+    # crates, or any other crate whose name merely contains one of these as a substring (e.g.
+    # `qhull_rayon` naming itself, not `qhull`).
+    ! grep -RnE '^[[:space:]]*\[[[:space:]]*.*dependencies\.({{substitute_names}})[[:space:]]*\]|^[[:space:]]*"?({{substitute_names}})"?(\.workspace)?[[:space:]]*=|package[[:space:]]*=[[:space:]]*"({{substitute_names}})"' crates/*/Cargo.toml
 
 # the guard: this branch changes only what its documents on main allow
 guard *branch:
