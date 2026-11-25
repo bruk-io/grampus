@@ -63,11 +63,14 @@ Two hazards, both measured empirically against this branch's own first real runs
    streams and carry none of this hazard.
 2. **A row's own content can be non-deterministic beyond the clock**, measured by this script's
    sibling task on the release side alone (``fuzzy-skin``'s unseeded perimeter seam,
-   ``port/reports/determinism.tsv``'s ``gate`` column marking it ``none``): for a
-   (configuration, artifact) pair marked ``none`` there, this script commits only the ``none``
-   category it measures for level-reached -- itself still a category, not the specific literal
-   failing value -- and sends this run's own literal detail to stdout and the pull request
-   instead, never into the committed report.
+   ``port/reports/determinism.tsv``'s ``gate`` column marking it ``none``) -- the *built* oracle's
+   own run-to-run determinism is never measured anywhere in this repository, so this withholding
+   rule is keyed on the release oracle's gate alone; a later task may need a built-side gate too.
+   For a (configuration, artifact) pair marked ``none`` there, this script commits only the
+   ``none`` category it measures for level-reached -- itself still a category, not the specific
+   literal failing value -- and sends this run's own literal detail to stdout instead, never into
+   the committed report (stdout is not a committed file, so printing the real location there
+   costs nothing against idempotence).
 
 **What this script never touches.** ``port/reports/divergences.md`` (that file is written by the
 audit regeneration, which reads this script's own ``.tsv`` as one of its four named sources, not by
@@ -314,16 +317,20 @@ def built_oracle_cmake_flags() -> list[str]:
     oracle/build-libslic3r's own `configure_cmd()` (inside `run_stage_two`) rather than retyped
     here -- so a future change to that function (a new flag, a changed CXX_FLAGS value) is
     reflected the next time this report regenerates, with nothing in this file to keep in sync
-    by hand. Includes `-DCMAKE_PREFIX_PATH=<this host's resolved deps install prefix>`, which is
-    host-specific (not a flag that could "drift" the way `-ffp-contract=off` could) but is part
-    of the exact invocation all the same.
+    by hand. `-DCMAKE_PREFIX_PATH` is rendered with the same `<stage one's install prefix>`
+    placeholder `docs/ORACLE.md` already uses for it, never this host's own resolved,
+    worktree-specific path: that path is specific to whichever checkout happened to run this
+    script (this task's own worktree is not even the checkout `vendor/OrcaSlicer/build/arm64`
+    was configured against here -- its own CMakeCache.txt names a different one), so committing
+    it literally would both be wrong about the build actually measured and put an absolute path
+    under a user's home directory into an AGPL-published report -- the only file under
+    `port/reports/` that would.
 
     Raises ParityError if `configure_cmd()`'s shape has changed in a way this extraction cannot
     follow, or if the result does not include `-ffp-contract=off` -- R6/R7's one flag this
     report exists to name -- rather than silently printing an incomplete list.
     """
     mod = load_build_libslic3r_module()
-    deps_prefix = str((mod.REPO_ROOT / mod.INSTALL_PREFIX).resolve())
     source = inspect.getsource(mod.run_stage_two)
     match = re.search(
         r"def configure_cmd\(\) -> list\[str\]:\s*\n(.*?)\n\s*build_cmd = \[", source, re.DOTALL
@@ -335,7 +342,7 @@ def built_oracle_cmake_flags() -> list[str]:
         )
     body = match.group(1)
     substitutions = {
-        "deps_prefix": deps_prefix,
+        "deps_prefix": "<stage one's install prefix>",
         "CMAKE_IGNORE_PREFIX_PATH": mod.CMAKE_IGNORE_PREFIX_PATH,
         "CMAKE_POLICY_VERSION_MINIMUM": mod.CMAKE_POLICY_VERSION_MINIMUM,
         "CXX_FLAGS": mod.CXX_FLAGS,
@@ -514,12 +521,24 @@ def run_compare_json(args: list[str]) -> dict:
     cmd = ["just", "compare", *args, "--format", "json"]
     result = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
     try:
-        return json.loads(result.stdout)
+        report = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise ParityError(
             f"{' '.join(cmd)} exited {result.returncode} with no parseable JSON: "
             f"{result.stderr.strip()}"
         ) from exc
+    if result.returncode != 0:
+        # crates/oracle-compare/src/main.rs only exits non-zero for a named-error (which never
+        # prints parseable JSON, caught above) or when `--require <level>` was passed and not
+        # met -- this script never passes `--require`, so parseable JSON should always come
+        # with exit 0. Asserted rather than silently discarded, so a future change to either
+        # side's contract fails loudly here instead of reading as a clean comparison.
+        raise ParityError(
+            f"{' '.join(cmd)} printed parseable JSON but exited {result.returncode} (this "
+            "script never passes --require, so that should not happen): "
+            f"{result.stderr.strip()}"
+        )
+    return report
 
 
 def gcode_level_reached(report: dict) -> str:
@@ -555,11 +574,16 @@ def json_reaches_l1(report: dict) -> bool:
 class Difference:
     """One level's (or, for a JSON artifact, the whole comparison's) failing location, or a
     note that this row's literal detail is withheld because the release oracle is not
-    run-to-run deterministic here (see detail_is_safe_to_commit)."""
+    run-to-run deterministic here (see detail_is_safe_to_commit).
+
+    `detail` is always safe to commit as-is. `stdout_detail`, set only when `withheld` is True,
+    carries this run's real failing location -- never written into the committed report (that
+    would break idempotence), but costing nothing to print to stdout, which is not committed."""
 
     level: str
     detail: str  # already-rendered prose, safe to commit as-is
     withheld: bool = False
+    stdout_detail: str | None = None  # withheld only: this run's real, uncommitted location
 
 
 def gcode_differences(report: dict, safe_to_commit: bool) -> list[Difference]:
@@ -609,14 +633,36 @@ def gcode_differences(report: dict, safe_to_commit: bool) -> list[Difference]:
                         "withheld: this row's release oracle is not run-to-run deterministic "
                         "for this artifact (`port/reports/determinism.tsv`'s gate is `none`), "
                         "so this run's literal failing location would not reproduce on the next "
-                        "regeneration; see stdout and the pull request for this run's measurement."
+                        "regeneration; see stdout for this run's measurement."
                     ),
                     withheld=True,
+                    stdout_detail=render_gcode_fail(level, outcome),
                 )
             )
             continue
         out.append(Difference(level=level, detail=render_gcode_fail(level, outcome)))
     return out
+
+
+def render_group(group) -> str:
+    """Render an `AggregateGroup` JSON object (`crates/oracle-compare/src/format.rs`'s
+    `group_json`) the same way its own `Display` impl (`levels.rs`) renders it in text mode --
+    never a raw Python dict repr, which is what `{group!r}` would otherwise leak into a
+    committed report."""
+    if not isinstance(group, dict):
+        return repr(group)
+    kind = group.get("kind")
+    if kind == "whole_file":
+        return "whole file"
+    if kind == "layer":
+        return f"layer {group.get('layer')}"
+    if kind == "role":
+        return f"role {group.get('role')}"
+    if kind == "layer_role":
+        return f"layer {group.get('layer')}, role {group.get('role')}"
+    if kind == "object":
+        return f"object {group.get('object')}"
+    return f"group {group!r}"
 
 
 def render_gcode_fail(level: str, outcome: dict) -> str:
@@ -638,16 +684,32 @@ def render_gcode_fail(level: str, outcome: dict) -> str:
         )
     if "group" in outcome and "quantity" in outcome:
         return (
-            f"{outcome['group']}'s {outcome['quantity']} differs (a={outcome.get('a')} "
-            f"b={outcome.get('b')}, tolerance={outcome.get('tolerance')})"
+            f"the {render_group(outcome['group'])}'s {outcome['quantity']} differs "
+            f"(a={outcome.get('a')} b={outcome.get('b')}, tolerance={outcome.get('tolerance')})"
         )
     if "differing_layer" in outcome:
         return (
-            f"{outcome['group']}'s layer count differs (a={outcome.get('count_a')} "
-            f"b={outcome.get('count_b')}); layer {outcome['differing_layer']} present only in "
-            f"{outcome.get('present_in')}"
+            f"the {render_group(outcome['group'])}'s layer count differs "
+            f"(a={outcome.get('count_a')} b={outcome.get('count_b')}); layer "
+            f"{outcome['differing_layer']} present only in {outcome.get('present_in')}"
         )
     return f"unrecognised fail shape at {level}: {outcome!r} (keys: {sorted(kind)})"
+
+
+def render_json_fail(diff: dict) -> str:
+    """Render a JSON artifact's `difference` object as prose, the same rendering used whether
+    or not the result ends up committed -- shared so a withheld row's `stdout_detail` is the
+    exact same text an un-withheld row would commit."""
+    if diff.get("kind") == "pointer":
+        a = diff.get("a") if diff.get("a_present") else "<absent>"
+        b = diff.get("b") if diff.get("b_present") else "<absent>"
+        return f"first difference at `{diff.get('pointer')}`: a={a!r} b={b!r}"
+    if diff.get("kind") == "no_pointer":
+        byte = diff.get("first_differing_byte")
+        if byte is None:
+            return "no JSON pointer could be named (both sides parse equal; raw bytes agree)"
+        return f"no JSON pointer could be named; first differing byte: {byte}"
+    return f"unrecognised difference shape: {diff!r}"
 
 
 def json_difference(report: dict, safe_to_commit: bool) -> Difference | None:
@@ -655,27 +717,19 @@ def json_difference(report: dict, safe_to_commit: bool) -> Difference | None:
     or None when it reached one of those (nothing to report)."""
     if report.get("level") is not None:
         return None
+    diff = report.get("difference") or {}
     if not safe_to_commit:
         return Difference(
             level="none",
             detail=(
                 "withheld: this row's release oracle is not run-to-run deterministic for this "
-                "artifact (`port/reports/determinism.tsv`'s gate is `none`); see stdout and the "
-                "pull request for this run's measurement."
+                "artifact (`port/reports/determinism.tsv`'s gate is `none`); see stdout for "
+                "this run's measurement."
             ),
             withheld=True,
+            stdout_detail=render_json_fail(diff),
         )
-    diff = report.get("difference") or {}
-    if diff.get("kind") == "pointer":
-        a = diff.get("a") if diff.get("a_present") else "<absent>"
-        b = diff.get("b") if diff.get("b_present") else "<absent>"
-        return Difference(level="none", detail=f"first difference at `{diff.get('pointer')}`: a={a!r} b={b!r}")
-    if diff.get("kind") == "no_pointer":
-        byte = diff.get("first_differing_byte")
-        if byte is None:
-            return Difference(level="none", detail="no JSON pointer could be named (both sides parse equal; raw bytes agree)")
-        return Difference(level="none", detail=f"no JSON pointer could be named; first differing byte: {byte}")
-    return Difference(level="none", detail=f"unrecognised difference shape: {diff!r}")
+    return Difference(level="none", detail=render_json_fail(diff))
 
 
 # ---------------------------------------------------------------------------
@@ -744,9 +798,17 @@ def measure_row(
         # opening the .md's prose. `reaches_l1` is always False for a sentinel row: there was no
         # comparison to reach anything.
         if not constructible:
+            # A non-constructible row never attempts a release-side run (release_failed is
+            # always False here), but its built-side `stage_dump --set` run can still fail --
+            # that is still "a run that fails ... is a row and a non-zero exit, not a silent
+            # omission" (task.md), so a failed built run is reported as such rather than masked
+            # behind the not-constructible sentinel.
             measurements.append(
                 ArtifactMeasurement(
-                    configuration=row.name, fixture=fixture, artifact=artifact, level_reached=LEVEL_NOT_CONSTRUCTIBLE
+                    configuration=row.name,
+                    fixture=fixture,
+                    artifact=artifact,
+                    level_reached=LEVEL_BUILT_RUN_FAILED if built_failed else LEVEL_NOT_CONSTRUCTIBLE,
                 )
             )
             continue
@@ -913,6 +975,25 @@ def render_markdown(results: list[RowResult], cmake_flags: list[str]) -> str:
     lines.append("```")
     lines.append("")
     lines.append(
+        "**The `/thumbnails` key is not a release-vs-built divergence.** It is the only "
+        "`settings-json` difference, and the G-code's first L1 difference, on every "
+        "golden-driven row below -- produced by the built side's own golden-ingestion route "
+        "through the *shared* vendored source, not by engine disagreement. Every golden-driven "
+        "row feeds the built side through `--config <golden>` (this task's own driver choice), "
+        "and `DynamicPrintConfig::load_from_json` (`vendor/OrcaSlicer/src/libslic3r/Config.cpp`) "
+        "runs `handle_legacy_composite` on any fully-loaded JSON config, which rebuilds "
+        "`thumbnails` with a comma-space separator "
+        "(`vendor/OrcaSlicer/src/libslic3r/PrintConfig.cpp`); the release side never re-loads "
+        "its own export, so it keeps the preset default without the space. Because this route "
+        "is structural -- every golden-driven row takes it -- `settings-json` cannot reach L0/L1 "
+        "through this driver regardless of how faithful the port becomes, so its `normative "
+        "oracle` is pinned to `built` by this mechanism rather than by a measured geometric "
+        "disagreement; a later task may need to decide at the golden, the comparator or "
+        "`docs/ORACLE.md` whether that is acceptable long-term. This is not a normalisation of "
+        "the key -- the full byte-for-byte comparison below is unchanged."
+    )
+    lines.append("")
+    lines.append(
         "**Three shapes this table always has a row for**, so a later command never finds a "
         "missing lookup, each with its own `level reached` value rather than a shared `none` "
         "(`none` means something else below: both sides ran and were compared, and no level "
@@ -955,32 +1036,22 @@ def render_markdown(results: list[RowResult], cmake_flags: list[str]) -> str:
         lines.append("")
         any_diff = False
         for m in result.measurements:
-            diffs = m.differences
-            # Consecutive withheld entries for one artifact carry the same sentence (R6's
-            # withholding reason does not vary by level) -- collapsed into one line naming the
-            # levels it covers, rather than repeating identical prose once per level.
-            i = 0
-            while i < len(diffs):
-                d = diffs[i]
+            # One bullet per difference found (task.md's own "lists one entry per difference
+            # found with its first failing location"), never collapsed across levels even when
+            # several carry the identical withheld sentence -- a reader must be able to count
+            # "four levels failed here", not just "something failed".
+            for d in m.differences:
                 any_diff = True
                 if d.withheld:
-                    group = [d]
-                    j = i + 1
-                    while j < len(diffs) and diffs[j].withheld and diffs[j].detail == d.detail:
-                        group.append(diffs[j])
-                        j += 1
                     # A JSON artifact's withheld `Difference` always carries `level="none"`
                     # (`json_difference` has no per-level breakdown to name, unlike gcode's
                     # L1-L4) -- naming it here would read as "level reached: none" rather than
                     # as the literal string `Difference.level` happens to hold, so it is left
-                    # out and only a real per-level grouping (gcode's L1/L2/L3/L4) is named.
-                    real_levels = [g.level for g in group if g.level != "none"]
-                    marker = "/".join(real_levels) + ", withheld" if real_levels else "withheld"
-                    lines.append(f"- **{m.artifact}** ({marker}): {d.detail}")
-                    i = j
+                    # out and only a real gcode level is named.
+                    marker = f"{d.level}, withheld" if d.level != "none" else "withheld"
                 else:
-                    lines.append(f"- **{m.artifact}** ({d.level}): {d.detail}")
-                    i += 1
+                    marker = d.level
+                lines.append(f"- **{m.artifact}** ({marker}): {d.detail}")
         if not any_diff:
             lines.append("No differences recorded beyond L0/L1 for this row's artifacts.")
 
@@ -1019,18 +1090,31 @@ def main() -> None:
     click.echo(f"built {stage_dump_bin} in {stage_dump_build_seconds:.1f}s")
 
     results: list[RowResult] = []
-    for row in rows:
-        for fixture in row.fixtures:
-            result = measure_row(row, fixture, stage_dump_bin, determinism_gates)
-            results.append(result)
-            for m in result.measurements:
-                click.echo(
-                    f"{m.configuration} {m.fixture} {m.artifact}: level {m.level_reached}, "
-                    f"normative {result.normative_oracle}"
-                )
-                for d in m.differences:
-                    tag = "withheld (see determinism.tsv)" if d.withheld else d.level
-                    click.echo(f"  [{tag}] {d.detail}")
+    try:
+        for row in rows:
+            for fixture in row.fixtures:
+                result = measure_row(row, fixture, stage_dump_bin, determinism_gates)
+                results.append(result)
+                for m in result.measurements:
+                    click.echo(
+                        f"{m.configuration} {m.fixture} {m.artifact}: level {m.level_reached}, "
+                        f"normative {result.normative_oracle}"
+                    )
+                    for d in m.differences:
+                        tag = "withheld (see determinism.tsv)" if d.withheld else d.level
+                        click.echo(f"  [{tag}] {d.detail}")
+                        if d.withheld and d.stdout_detail:
+                            # This run's real, uncommitted location -- never written to the
+                            # committed .md (see Difference.stdout_detail), printed here because
+                            # stdout is not a committed file and costs nothing against
+                            # idempotence.
+                            click.echo(f"  [{tag}, this run's actual measurement] {d.stdout_detail}")
+    except ParityError as exc:
+        # A problem measuring one row stops the whole run before either committed file is
+        # written, rather than publishing a partial .tsv/.md that silently omits the rows after
+        # it -- itself the "missing lookup" failure task.md's own three shapes exist to prevent.
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
 
     # task.md's third shape: "a run that fails on either side is a row and a non-zero exit, not
     # a silent omission" -- so both committed files are written from whatever was measured
@@ -1050,10 +1134,12 @@ def main() -> None:
     click.echo(f"wrote {PARITY_TSV.relative_to(REPO_ROOT)} ({sum(len(r.measurements) for r in results)} rows)")
     click.echo(f"wrote {PARITY_MD.relative_to(REPO_ROOT)}")
 
-    # A run that fails on either side when it was *expected* to run (a constructible row) is a
-    # harness anomaly, not a measured outcome worth a clean exit -- the row is still in both
-    # files above (never a silent omission), but this script's own exit status says so too.
-    failed = [r for r in results if r.constructible and (r.release_failed or r.built_failed)]
+    # A run that fails on either side -- whether or not the row was constructible, since a
+    # non-constructible row's own built-side `--set` run can still fail -- is a harness anomaly,
+    # not a measured outcome worth a clean exit: the row is still in both files above (never a
+    # silent omission), but this script's own exit status says so too (task.md: "a run that
+    # fails on either side is a row and a non-zero exit, not a silent omission").
+    failed = [r for r in results if r.release_failed or r.built_failed]
     if failed:
         for r in failed:
             click.echo(f"error: {r.configuration} {r.fixture}: {r.failure_detail.strip()}", err=True)

@@ -10,7 +10,7 @@
 | fixture | frog_legs.stl |
 | transform | identity |
 
-Generated: 2026-11-25T12:22:23Z
+Generated: 2026-11-25T12:50:05Z
 
 Whether the pinned v2.5.2 release binary and the locally built `libslic3r` reach L1 against each other (R6), measured once per configuration and fixture named in `docs/ORACLE.md`'s configuration table, for the G-code, the `--export-settings` JSON and the `--export-statistics` JSON. **Run shape: unarmed for every row below** -- the `slicing_pipeline_plugin` hook is never registered on the built side, so its armed/unarmed exemption never applies and every byte of `--export-settings` is compared with no normalisation of its own.
 
@@ -22,7 +22,7 @@ Neither this file nor `port/reports/oracle-parity.tsv` is authored by hand -- bo
 `oracle/build-libslic3r`'s own `configure_cmd()` rather than retyped here:
 
 ```
--DCMAKE_PREFIX_PATH=/Users/brukhabtu/src/github.com/bruk-io/grampus.worktrees/28-oracle-parity/vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep/usr/local
+-DCMAKE_PREFIX_PATH=<stage one's install prefix>
 -DCMAKE_BUILD_TYPE=Release
 -DCMAKE_OSX_ARCHITECTURES=arm64
 -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
@@ -35,6 +35,8 @@ Neither this file nor `port/reports/oracle-parity.tsv` is authored by hand -- bo
 -DCMAKE_CXX_FLAGS=-ffp-contract=off
 -DCMAKE_C_FLAGS=-ffp-contract=off
 ```
+
+**The `/thumbnails` key is not a release-vs-built divergence.** It is the only `settings-json` difference, and the G-code's first L1 difference, on every golden-driven row below -- produced by the built side's own golden-ingestion route through the *shared* vendored source, not by engine disagreement. Every golden-driven row feeds the built side through `--config <golden>` (this task's own driver choice), and `DynamicPrintConfig::load_from_json` (`vendor/OrcaSlicer/src/libslic3r/Config.cpp`) runs `handle_legacy_composite` on any fully-loaded JSON config, which rebuilds `thumbnails` with a comma-space separator (`vendor/OrcaSlicer/src/libslic3r/PrintConfig.cpp`); the release side never re-loads its own export, so it keeps the preset default without the space. Because this route is structural -- every golden-driven row takes it -- `settings-json` cannot reach L0/L1 through this driver regardless of how faithful the port becomes, so its `normative oracle` is pinned to `built` by this mechanism rather than by a measured geometric disagreement; a later task may need to decide at the golden, the comparator or `docs/ORACLE.md` whether that is acceptable long-term. This is not a normalisation of the key -- the full byte-for-byte comparison below is unchanged.
 
 **Three shapes this table always has a row for**, so a later command never finds a missing lookup, each with its own `level reached` value rather than a shared `none` (`none` means something else below: both sides ran and were compared, and no level passed). A configuration `docs/ORACLE.md` marks as not constructible through the pinned CLI gets a row reading `release-not-constructible`, `normative oracle` `built`, with no release-side run attempted (its own section below says so explicitly). An artifact only one of the two oracles produces gets `release-no-artifact` or `built-no-artifact` rather than being absent. A run that fails on either side -- unexpected for a constructible row -- gets `release-run-failed` or `built-run-failed`, still a row, and this script still exits non-zero for it, never a silent omission.
 
@@ -52,7 +54,7 @@ Neither this file nor `port/reports/oracle-parity.tsv` is authored by hand -- bo
 - **gcode** (L1): line 652: a=`; thumbnails = 48x48/PNG,300x300/PNG` b=`; thumbnails = 48x48/PNG, 300x300/PNG`
 - **gcode** (L2): token 9670 (a: line 3609 `G1 F14179.908`; b: line 3609 `G1 F14179.909`)
 - **gcode** (L3): move 1993 (layer=1, role=Internal solid infill, object=22; move count a=16797 b=16797)
-- **gcode** (L4): {'kind': 'whole_file'}'s extruded length differs (a=16157.564196384912 b=16157.563353557689, tolerance=0)
+- **gcode** (L4): the whole file's extruded length differs (a=16157.564196384912 b=16157.563353557689, tolerance=0)
 - **settings-json** (none): first difference at `/thumbnails`: a='48x48/PNG,300x300/PNG' b='48x48/PNG, 300x300/PNG'
 - **statistics-json** (none): first difference at `/layers/5/features/Internal Bridge/time`: a=13.569 b=13.568
 
@@ -80,7 +82,7 @@ Neither this file nor `port/reports/oracle-parity.tsv` is authored by hand -- bo
 - **gcode** (L1): line 652: a=`; thumbnails = 48x48/PNG,300x300/PNG` b=`; thumbnails = 48x48/PNG, 300x300/PNG`
 - **gcode** (L2): token 10343 (a: line 3788 `G1 F14179.908`; b: line 3788 `G1 F14179.909`)
 - **gcode** (L3): move 2145 (layer=1, role=Internal solid infill, object=22; move count a=17078 b=17078)
-- **gcode** (L4): {'kind': 'whole_file'}'s extruded length differs (a=16306.71278707575 b=16306.711944248527, tolerance=0)
+- **gcode** (L4): the whole file's extruded length differs (a=16306.71278707575 b=16306.711944248527, tolerance=0)
 - **settings-json** (none): first difference at `/thumbnails`: a='48x48/PNG,300x300/PNG' b='48x48/PNG, 300x300/PNG'
 - **statistics-json** (none): first difference at `/layers/5/features/Internal Bridge/time`: a=13.569 b=13.568
 
@@ -108,7 +110,7 @@ Neither this file nor `port/reports/oracle-parity.tsv` is authored by hand -- bo
 - **gcode** (L1): line 652: a=`; thumbnails = 48x48/PNG,300x300/PNG` b=`; thumbnails = 48x48/PNG, 300x300/PNG`
 - **gcode** (L2): token 2091 (a: line 1506 `G1 X142.042 Y122.771 Z.6 F30000`; b: line 1506 `G1 X142.043 Y122.771 Z.6 F30000`)
 - **gcode** (L3): move 353 (layer=0, role=Outer wall, object=22; move count a=18648 b=18648)
-- **gcode** (L4): {'kind': 'whole_file'}'s extruded length differs (a=22300.291191447588 b=22300.29034862036, tolerance=0)
+- **gcode** (L4): the whole file's extruded length differs (a=22300.291191447588 b=22300.29034862036, tolerance=0)
 - **settings-json** (none): first difference at `/thumbnails`: a='48x48/PNG,300x300/PNG' b='48x48/PNG, 300x300/PNG'
 - **statistics-json** (none): first difference at `/layers/5/features/Internal Bridge/time`: a=13.569 b=13.568
 
@@ -133,6 +135,9 @@ Neither this file nor `port/reports/oracle-parity.tsv` is authored by hand -- bo
 | statistics-json | none | built |
 
 - **gcode** (L0): raw bytes differ before R4's declared normalisation (expected: each run's own `; generated by ... at HH:MM:SS` line; its first differing byte offset is a race between the two oracles' own process starts, not a property of this row, so it is never committed literally -- see the next level below for the first normalised difference, if any).
-- **gcode** (L1/L2/L3/L4, withheld): withheld: this row's release oracle is not run-to-run deterministic for this artifact (`port/reports/determinism.tsv`'s gate is `none`), so this run's literal failing location would not reproduce on the next regeneration; see stdout and the pull request for this run's measurement.
+- **gcode** (L1, withheld): withheld: this row's release oracle is not run-to-run deterministic for this artifact (`port/reports/determinism.tsv`'s gate is `none`), so this run's literal failing location would not reproduce on the next regeneration; see stdout for this run's measurement.
+- **gcode** (L2, withheld): withheld: this row's release oracle is not run-to-run deterministic for this artifact (`port/reports/determinism.tsv`'s gate is `none`), so this run's literal failing location would not reproduce on the next regeneration; see stdout for this run's measurement.
+- **gcode** (L3, withheld): withheld: this row's release oracle is not run-to-run deterministic for this artifact (`port/reports/determinism.tsv`'s gate is `none`), so this run's literal failing location would not reproduce on the next regeneration; see stdout for this run's measurement.
+- **gcode** (L4, withheld): withheld: this row's release oracle is not run-to-run deterministic for this artifact (`port/reports/determinism.tsv`'s gate is `none`), so this run's literal failing location would not reproduce on the next regeneration; see stdout for this run's measurement.
 - **settings-json** (none): first difference at `/thumbnails`: a='48x48/PNG,300x300/PNG' b='48x48/PNG, 300x300/PNG'
-- **statistics-json** (withheld): withheld: this row's release oracle is not run-to-run deterministic for this artifact (`port/reports/determinism.tsv`'s gate is `none`); see stdout and the pull request for this run's measurement.
+- **statistics-json** (withheld): withheld: this row's release oracle is not run-to-run deterministic for this artifact (`port/reports/determinism.tsv`'s gate is `none`); see stdout for this run's measurement.
