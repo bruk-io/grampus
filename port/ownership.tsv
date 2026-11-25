@@ -78,8 +78,8 @@ GCode/ExtrusionProcessor.hpp	495	ExtrusionQualityEstimator	prev_curled_extrusion
 GCode/ExtrusionProcessor.hpp	497	ExtrusionQualityEstimator	prev_layer_sources	std::unordered_map<const PrintObject*, const Layer*>	borrowed	GCode/ExtrusionProcessor.hpp:526, GCode/ExtrusionProcessor.hpp:527, GCode.cpp:7021	HashMap<&'a PrintObject, &'a Layer>
 GCode/ExtrusionProcessor.hpp	498	ExtrusionQualityEstimator	last_prepared_layers	std::unordered_map<const PrintObject*, const Layer*>	borrowed	GCode/ExtrusionProcessor.hpp:526, GCode.cpp:7021	HashMap<&'a PrintObject, &'a Layer>
 GCode/ExtrusionProcessor.hpp	500	ExtrusionQualityEstimator	current_object	const PrintObject *	borrowed	GCode/ExtrusionProcessor.hpp:516, GCode.cpp:7685	&'a PrintObject
-GCode/GCodeProcessor.hpp	164	ConflictResult	_obj1	const void *	borrowed	GCode/GCodeProcessor.hpp:164, GCode/ConflictChecker.cpp:317	Option<&'a PrintInstance>
-GCode/GCodeProcessor.hpp	165	ConflictResult	_obj2	const void *	borrowed	GCode/GCodeProcessor.hpp:164, GCode/ConflictChecker.cpp:317	Option<&'a PrintInstance>
+GCode/GCodeProcessor.hpp	164	ConflictResult	_obj1	const void *	borrowed	GCode/ConflictChecker.cpp:321, GCode/ConflictChecker.cpp:313, GCode/GCodeProcessor.hpp:164, GCode/ConflictChecker.cpp:317	Option<&'a PrintInstance>
+GCode/GCodeProcessor.hpp	165	ConflictResult	_obj2	const void *	borrowed	GCode/ConflictChecker.cpp:321, GCode/ConflictChecker.cpp:313, GCode/GCodeProcessor.hpp:164, GCode/ConflictChecker.cpp:317	Option<&'a PrintInstance>
 GCode/GCodeProcessor.hpp	1402	GCodeProcessor	m_print	Print *	borrowed	GCode/GCodeProcessor.hpp:1435, GCode/GCodeProcessor.cpp:1544	Option<&'a mut Print>
 GCode/PreciseSeam.hpp	67	PreciseSeamWarnings	modifier_usage	std::unordered_map<const ModelVolume*, ModifierUsage>	borrowed	GCode/SeamPlacer.cpp:2145	HashMap<&'a ModelVolume, ModifierUsage>
 GCode/PreciseSeam.hpp	91	ExtractionContext	layer	const Layer *	borrowed	GCode/PreciseSeam.cpp:949, GCode/PreciseSeam.cpp:312	Option<&'a Layer>
