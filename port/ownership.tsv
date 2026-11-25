@@ -13,13 +13,13 @@ Arachne/utils/HalfEdge.hpp	28	HalfEdge	to	node_t *
 Arachne/utils/HalfEdgeNode.hpp	25	HalfEdgeNode	incident_edge	edge_t *			
 Arachne/utils/PolygonsPointIndex.hpp	32	PathsPointIndex	polygons	const Paths *			
 ClipperUtils.hpp	99	iterator	m_ptr	const Points *	borrowed	ClipperUtils.hpp:92	&'a Points
-ClipperUtils.hpp	315	SurfacesPtrProvider	m_surfaces	const SurfacesPtr &	borrowed	ClipperUtils.hpp:279	&'a [Surface]
+ClipperUtils.hpp	315	SurfacesPtrProvider	m_surfaces	const SurfacesPtr &	borrowed	ClipperUtils.hpp:279	&'a [&'a Surface]
 Config.hpp	264	ConfigSubstitution	opt_def	const ConfigOptionDef *	borrowed	Config.cpp:707, Config.cpp:725	&'a ConfigOptionDef
-Config.hpp	2152	ConfigOptionEnumGeneric	keys_map	const t_config_enum_values *	borrowed	Config.hpp:2149	&'a HashMap<String, i32>
-Config.hpp	2215	ConfigOptionEnumsGenericTempl	keys_map	const t_config_enum_values *	borrowed	Config.hpp:2210	&'a HashMap<String, i32>
-Config.hpp	2619	ConfigOptionDef	enum_keys_map	const t_config_enum_values *	borrowed	Config.hpp:2617, Config.hpp:2618	&'a HashMap<String, i32>
+Config.hpp	2152	ConfigOptionEnumGeneric	keys_map	const t_config_enum_values *	borrowed	Config.hpp:2149	&'a BTreeMap<String, i32>
+Config.hpp	2215	ConfigOptionEnumsGenericTempl	keys_map	const t_config_enum_values *	borrowed	Config.hpp:2210	&'a BTreeMap<String, i32>
+Config.hpp	2619	ConfigOptionDef	enum_keys_map	const t_config_enum_values *	borrowed	Config.hpp:2617, Config.hpp:2618	&'a BTreeMap<String, i32>
 Config.hpp	2636	ConfigOptionDef	nocli	static const constexpr char *	borrowed	Config.hpp:2636	&'static str
-Config.hpp	2659	ConfigDef	by_serialization_key_ordinal	std::map<size_t, const ConfigOptionDef*>	borrowed	Config.hpp:2658	HashMap<usize, &'a ConfigOptionDef>
+Config.hpp	2659	ConfigDef	by_serialization_key_ordinal	std::map<size_t, const ConfigOptionDef*>	borrowed	Config.cpp:370, Config.hpp:2658	BTreeMap<usize, &'a ConfigOptionDef>
 ConnectedBodies.hpp	40	IslandLocator	m_islands	const ExPolygons *	borrowed	ConnectedBodies.hpp:31	&'a ExPolygons
 EdgeGrid.hpp	98	Contour	m_begin	const Slic3r::Point *	borrowed	EdgeGrid.hpp:30, EdgeGrid.hpp:32	&'a Point
 EdgeGrid.hpp	99	Contour	m_end	const Slic3r::Point *	borrowed	EdgeGrid.hpp:30, EdgeGrid.hpp:32	&'a Point
@@ -113,34 +113,34 @@ GCode/ToolOrdering.hpp	427	ToolOrdering	m_print	Print *
 GCode/WipeTower.hpp	415	WipeTower	m_multi_nozzle_group_result	const MultiNozzleUtils::LayeredNozzleGroupResult *			
 GCode/WipeTower.hpp	444	WipeTower	m_cur_block	WipeTowerBlock *			
 GCodeWriter.hpp	262	GCodeWriter	m_curr_filament_extruder	std::vector<Extruder*>	borrowed	GCodeWriter.cpp:809, GCodeWriter.cpp:1680	Vec<&'a mut Extruder>
-GCodeWriter.hpp	402	GCodeFormatter	buf_end	char *	unknown	GCodeWriter.hpp:321	usize
+GCodeWriter.hpp	402	GCodeFormatter	buf_end	char *	borrowed	GCodeWriter.hpp:321	usize
 Geometry/VoronoiUtils.hpp	20	SegmentCellRange	edge_begin	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	21	SegmentCellRange	edge_end	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	35	PointCellRange	edge_begin	const VoronoiDiagram::edge_type *			
 Geometry/VoronoiUtils.hpp	36	PointCellRange	edge_end	const VoronoiDiagram::edge_type *			
-InstanceLock.hpp	55	InstanceLock	m_slot	Slot *	borrowed	InstanceLock.cpp:84, InstanceLock.cpp:89	&'static Slot
+InstanceLock.hpp	55	InstanceLock	m_slot	Slot *	borrowed	InstanceLock.cpp:128, InstanceLock.cpp:84, InstanceLock.cpp:89	&'static mut Slot
 Layer.hpp	133	LayerRegion	m_layer	Layer *	back-reference	Layer.hpp:129	usize
 Layer.hpp	134	LayerRegion	m_region	const PrintRegion *	borrowed	Layer.hpp:129	&'a PrintRegion
-Layer.hpp	146	Layer	upper_layer	Layer *	back-reference	Layer.hpp:146	usize
-Layer.hpp	147	Layer	lower_layer	Layer *	back-reference	Layer.hpp:147	usize
+Layer.hpp	146	Layer	upper_layer	Layer *	back-reference	PrintObjectSlice.cpp:100, Layer.hpp:146	usize
+Layer.hpp	147	Layer	lower_layer	Layer *	back-reference	PrintObjectSlice.cpp:101, Layer.hpp:147	usize
 Layer.hpp	293	Layer	m_object	PrintObject *	back-reference	Layer.hpp:143	usize
 Layer.hpp	294	Layer	m_regions	LayerRegionPtrs	owned	Layer.cpp:34, Layer.cpp:35	Vec<LayerRegion>
-Layer.hpp	344	AreaGroup	area	ExPolygon *	unknown	Layer.hpp:344, Layer.hpp:351	Arc<Mutex<ExPolygon>>
+Layer.hpp	344	AreaGroup	area	ExPolygon *	borrowed	Support/TreeSupport.cpp:2566, Support/TreeSupport.cpp:2590	&'a mut ExPolygon
 MarchingSquares.hpp	225	Grid	m_rst	const Rst *	borrowed	MarchingSquares.hpp:223	&'a Rst
-MarchingSquares.hpp	404	CellIt	grid	const Rst *	borrowed	MarchingSquares.hpp:404	&'a Rst
+MarchingSquares.hpp	404	CellIt	grid	const Rst *	borrowed	MarchingSquares.hpp:406, MarchingSquares.hpp:404	&'a Rst
 Model.hpp	189	ModelMaterial	m_model	Model *	back-reference	Model.hpp:188	usize
 Model.hpp	390	ModelObject	instances	ModelInstancePtrs	owned	Model.hpp:389, Model.cpp:1586	Vec<ModelInstance>
 Model.hpp	393	ModelObject	volumes	ModelVolumePtrs	owned	Model.hpp:392, Model.cpp:1460	Vec<ModelVolume>
 Model.hpp	666	ModelObject	m_model	Model *	back-reference	Model.hpp:665	usize
 Model.hpp	1182	ModelVolume	object	ModelObject *	back-reference	Model.hpp:1181	usize
 Model.hpp	1559	ModelInstance	object	ModelObject *	back-reference	Model.hpp:1558	usize
-Model.hpp	1700	Model	materials	ModelMaterialMap	owned	Model.hpp:1699, Model.cpp:779	HashMap<String, ModelMaterial>
+Model.hpp	1700	Model	materials	ModelMaterialMap	owned	Model.hpp:1699, Model.cpp:779	BTreeMap<String, ModelMaterial>
 Model.hpp	1702	Model	objects	ModelObjectPtrs	owned	Model.hpp:1701, Model.cpp:689	Vec<ModelObject>
 MutablePolygon.hpp	44	const_iterator	m_data	const MutablePolygon *	borrowed	MutablePolygon.hpp:42	&'a MutablePolygon
 MutablePolygon.hpp	68	iterator	m_data	MutablePolygon *	borrowed	MutablePolygon.hpp:66	&'a mut MutablePolygon
 PNGReadWrite.hpp	49	ReadBuf	buf	const void *	borrowed	PNGReadWrite.hpp:48	&'a [u8]
 PerimeterGenerator.hpp	87	PerimeterGenerator	slices	const SurfaceCollection *	borrowed	PerimeterGenerator.hpp:86	&'a SurfaceCollection
-PerimeterGenerator.hpp	88	PerimeterGenerator	compatible_regions	const LayerRegionPtrs *	borrowed	PerimeterGenerator.hpp:86	&'a [LayerRegion]
+PerimeterGenerator.hpp	88	PerimeterGenerator	compatible_regions	const LayerRegionPtrs *	borrowed	PerimeterGenerator.hpp:86	&'a [&'a mut LayerRegion]
 PerimeterGenerator.hpp	89	PerimeterGenerator	upper_slices	const ExPolygons *	borrowed	PerimeterGenerator.hpp:86	&'a ExPolygons
 PerimeterGenerator.hpp	90	PerimeterGenerator	upper_slices_same_region	const SurfaceCollection *	borrowed	PerimeterGenerator.hpp:86	&'a SurfaceCollection
 PerimeterGenerator.hpp	91	PerimeterGenerator	lower_slices	const ExPolygons *	borrowed	PerimeterGenerator.hpp:86	&'a ExPolygons
@@ -152,7 +152,7 @@ PerimeterGenerator.hpp	104	PerimeterGenerator	gap_fill	ExtrusionEntityCollection
 PerimeterGenerator.hpp	105	PerimeterGenerator	fill_surfaces	SurfaceCollection *	borrowed	PerimeterGenerator.hpp:102	&'a mut SurfaceCollection
 PerimeterGenerator.hpp	107	PerimeterGenerator	fill_no_overlap	ExPolygons *	borrowed	PerimeterGenerator.hpp:102	&'a mut ExPolygons
 PlaceholderParser.hpp	93	PlaceholderParser	m_external_config	const DynamicConfig *	borrowed	PlaceholderParser.hpp:91	&'a DynamicConfig
-Print.hpp	218	ConstVectorOfPtrsAdaptor	m_data	const std::vector<T*> *	borrowed	Print.hpp:216	&'a [T]
+Print.hpp	218	ConstVectorOfPtrsAdaptor	m_data	const std::vector<T*> *	borrowed	Print.hpp:216	&'a [&'a T]
 Print.hpp	241	PrintInstance	print_object	PrintObject *	back-reference	Print.hpp:240	usize
 Print.hpp	243	PrintInstance	model_instance	const ModelInstance *	borrowed	Print.hpp:242	&'a ModelInstance
 Print.hpp	278	VolumeRegion	model_volume	const ModelVolume *	borrowed	Print.hpp:277	&'a ModelVolume
@@ -162,7 +162,7 @@ Print.hpp	286	VolumeRegion	prev_same_region	const VolumeRegion *	back-reference	
 Print.hpp	296	PaintedRegion	region	PrintRegion *	borrowed	Print.hpp:295	&'a mut PrintRegion
 Print.hpp	309	FuzzySkinPaintedRegion	region	PrintRegion *	borrowed	Print.hpp:308	&'a mut PrintRegion
 Print.hpp	322	LayerRangeRegions	config	const DynamicPrintConfig *	borrowed	Print.hpp:321	&'a DynamicPrintConfig
-Print.hpp	678	PrintObject	m_shared_regions	PrintObjectRegions *	shared	Print.hpp:677, PrintObject.cpp:170	Arc<PrintObjectRegions>
+Print.hpp	678	PrintObject	m_shared_regions	PrintObjectRegions *	shared	Print.hpp:677, PrintObject.cpp:170	Arc<Mutex<PrintObjectRegions>>
 Print.hpp	681	PrintObject	m_layers	LayerPtrs	owned	PrintObject.cpp:1310	Vec<Layer>
 Print.hpp	682	PrintObject	m_belt_truncated_layers	LayerPtrs	owned	PrintObject.cpp:1313	Vec<Layer>
 Print.hpp	687	BeltDroppedFill	layer	Layer *	borrowed	Print.hpp:684	&'a Layer
@@ -171,8 +171,8 @@ Print.hpp	693	PrintObject	m_support_layers	SupportLayerPtrs	owned	PrintObject.cp
 Print.hpp	718	PrintObject	m_shared_object	PrintObject *	back-reference	Print.cpp:3172	usize
 Print.hpp	1513	Print	m_objects	PrintObjectPtrs	owned	Print.cpp:244	Vec<PrintObject>
 Print.hpp	1514	Print	m_print_regions	PrintRegionPtrs	borrowed	PrintApply.cpp:2233, Print.cpp:246	Vec<&'a mut PrintRegion>
-Print.hpp	1551	Print	m_sequential_dynamic_orderings	std::map<const PrintObject*, ToolOrdering>	back-reference	Print.hpp:1549, Print.hpp:1550	HashMap<usize, ToolOrdering>
-PrintBase.hpp	40	StringObjectException	object	ObjectBase const *	borrowed	PrintBase.hpp:36	&'a ObjectBase
+Print.hpp	1551	Print	m_sequential_dynamic_orderings	std::map<const PrintObject*, ToolOrdering>	back-reference	Print.hpp:1549, Print.hpp:1550	BTreeMap<usize, ToolOrdering>
+PrintBase.hpp	40	StringObjectException	object	ObjectBase const *	borrowed	Print.cpp:965, PrintBase.hpp:36	&'a ObjectBase
 PrintBase.hpp	362	PrintObjectBase	m_model_object	ModelObject *	back-reference	PrintBase.hpp:350	usize
 PrintBase.hpp	376	PrintTryCancel	m_print	const PrintBase *	back-reference	PrintBase.hpp:375	usize
 PrintBase.hpp	691	PrintObjectBaseWithState	m_print	PrintType *	back-reference	PrintBase.hpp:688, PrintBase.hpp:690	usize
@@ -181,10 +181,10 @@ ProjectTask.hpp	138	BBLSliceInfo	profile_	BBLProfile *	unknown	ProjectTask.cpp:5
 ProjectTask.hpp	241	BBLSubTask	parent_task_	BBLTask *	back-reference	ProjectTask.cpp:60	usize
 ProjectTask.hpp	273	BBLTask	profile_	BBLProfile *	unknown	ProjectTask.cpp:52	Arc<Mutex<BBLProfile>>
 ProjectTask.hpp	277	BBLTask	subtasks	std::vector<BBLSubTask*>	owned	ProjectTask.cpp:142, ProjectTask.cpp:167	Vec<BBLSubTask>
-ProjectTask.hpp	278	BBLTask	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:42	HashMap<String, Arc<Mutex<BBLSliceInfo>>>
+ProjectTask.hpp	278	BBLTask	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:42	BTreeMap<String, Arc<Mutex<BBLSliceInfo>>>
 ProjectTask.hpp	300	BBLProfile	tasks	std::vector<BBLTask*>	unknown	ProjectTask.hpp:300	Vec<Arc<Mutex<BBLTask>>>
 ProjectTask.hpp	311	BBLProfile	project_	BBLProject *	unknown	ProjectTask.cpp:33	Arc<Mutex<BBLProject>>
-ProjectTask.hpp	312	BBLProfile	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:42	HashMap<String, Arc<Mutex<BBLSliceInfo>>>
+ProjectTask.hpp	312	BBLProfile	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:42	BTreeMap<String, Arc<Mutex<BBLSliceInfo>>>
 ProjectTask.hpp	340	BBLProject	profiles	std::vector<BBLProfile*>	unknown	ProjectTask.hpp:340	Vec<Arc<Mutex<BBLProfile>>>
 SLA/IndexedMesh.hpp	40	IndexedMesh	m_tm	const indexed_triangle_set *			
 SLA/IndexedMesh.hpp	82	hit_result	m_mesh	const IndexedMesh *			
