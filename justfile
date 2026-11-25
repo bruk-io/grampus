@@ -101,3 +101,12 @@ regenerate:
 # regeneration pass (23-perf-backlog) is what runs it, on main.
 audit-check:
     ./port/audit-order --check
+
+# the drift-detecting variant of the perf-backlog half of regenerate: regenerates
+# port/reports/perf-backlog.md in memory and fails, with a diff, when it differs from the
+# committed file (R15, task 23-perf-backlog). Not a check a port task passes -- see
+# port/regenerate's module docstring and this task's own task.md -- so this recipe is
+# deliberately in neither `.asdlc/checks` nor `just port-check`; step 14's regeneration pass is
+# what runs it, on main, alongside `just audit-check`.
+perf-check:
+    ./port/regenerate --check
