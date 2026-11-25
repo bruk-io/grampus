@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   # Computes whether this push or pull request touches anything the macOS job's checks read,
@@ -69,6 +70,19 @@ jobs:
       - name: Guard the branch
         if: github.event_name == 'pull_request'
         run: just guard "$GITHUB_HEAD_REF"
+
+      # R28, task 36-pr-body-check: reads the pull request itself, so it cannot live in
+      # .asdlc/checks, which a task also runs locally -- and needs no oracle binary or
+      # libslic3r build, so it runs here rather than in the oracle-checks job below.
+      - name: Check the pull request body
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p oracle/.cache/tmp
+          gh pr view "$PR" --json body --jq .body > oracle/.cache/tmp/pr-body.txt
+          just pr-body-check oracle/.cache/tmp/pr-body.txt
 
   # Everything that needs the oracle binary, a local libslic3r build, or a comparison against
   # either (R23) — none of the document checks above wait on this job. Only `just oracle-fetch`
@@ -145,19 +159,24 @@ jobs:
       # keeps. Restore-only: nothing this job runs fills that tree, so there is nothing of this
       # job's own to save.
       #
-      # This cannot hit oracle.yml's cache entry today, even though the key prefix below matches
-      # it exactly: actions/cache resolves an entry by key AND by a version hash computed over
-      # the `path` list, and oracle.yml saves two paths (`vendor/OrcaSlicer/deps/build/arm64` and
-      # `vendor/OrcaSlicer/deps/DL_CACHE`) where this restores one, a child of the first.
-      # Different path lists mean different versions, so an identical key still misses. This
-      # step is kept anyway because task.md's Done-when names this exact path as the one this
-      # task caches; it starts hitting only once a later change makes the two path lists agree
-      # -- either by widening this restore to oracle.yml's two-entry list, or by oracle.yml
-      # adding a save under this narrower path.
+      # task 29-ffi-bridge-core: widened to oracle.yml's own two-entry `path` list (and copied
+      # its key/restore-keys verbatim), because actions/cache resolves an entry by key AND by a
+      # version hash computed over the `path` list -- a narrower, single-path restore here used
+      # to miss oracle.yml's save even on an identical key, because oracle.yml saves two paths
+      # (`vendor/OrcaSlicer/deps/build/arm64` and `vendor/OrcaSlicer/deps/DL_CACHE`) where this
+      # restored only the first path's child, `.../arm64/OrcaSlicer_dep`. Confirmed a matching
+      # entry exists for this pin (`gh cache list`, key prefix
+      # `oracle-deps-arm64-f92a7c065c5718b8ef1baac1cd704df2911238f4-`) before making this change:
+      # this crate's build.rs now runs in this job's `cargo test --workspace` and needs the
+      # superbuild prefix's `tbbmalloc` and TBB headers to not panic (build.rs:76), which is what
+      # exposed the mismatch -- no earlier crate in the workspace required this job to actually
+      # build anything.
       - name: Restore the dependency superbuild
         uses: actions/cache/restore@v4
         with:
-          path: vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep
+          path: |
+            vendor/OrcaSlicer/deps/build/arm64
+            vendor/OrcaSlicer/deps/DL_CACHE
           key: oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-${{ hashFiles('oracle/build-libslic3r') }}
           restore-keys: |
             oracle-deps-arm64-${{ steps.submodule.outputs.sha }}-
@@ -178,3 +197,29 @@ jobs:
 
       - name: Run the workspace's tests
         run: cargo test --workspace
+
+      # This job builds no libslic3r (see the job-level comment above): `just oracle-parity`
+      # needs vendor/OrcaSlicer/build/arm64's archives, which only oracle.yml's own job produces
+      # and caches, under a two-path cache key (vendor/OrcaSlicer/deps/build/arm64 +
+      # vendor/OrcaSlicer/deps/DL_CACHE) this job's "Restore the dependency superbuild" step
+      # above cannot match (different path list, different actions/cache version -- its own
+      # comment explains why). Resolving that is a later task's job, not this one's: this step
+      # only checks whether the archives happen to be present (e.g. a self-hosted or
+      # pre-warmed runner) and, when they are not, skips the parity step with a clear note
+      # instead of failing the job -- so this pull request does not ship a permanently red
+      # required-looking check for every later task's PR.
+      - name: Check whether the built libslic3r is available
+        id: libslic3r-built
+        run: |
+          a=vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a
+          b=vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r_cgal.a
+          if [ -f "$a" ] && [ -f "$b" ]; then
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "built=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::skipping just oracle-parity: this job builds no libslic3r and $a is absent. See this job's own comment above (oracle.yml owns that build); a later task must either cache-restore it here or source it another way."
+          fi
+
+      - name: Report whether the two oracles agree
+        if: steps.libslic3r-built.outputs.built == 'true'
+        run: just oracle-parity
