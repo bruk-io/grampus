@@ -197,3 +197,12 @@ oracle-dump fixture configuration *ARGS:
 # scratch output lands under oracle/.cache/determinism/ (git-ignored, left behind for inspection).
 oracle-determinism:
     ./oracle/determinism
+
+# the one spelling a port unit's pull request is held to (R28, plan step 21, task
+# 36-pr-body-check): fails unless <file> (the pull request body) records both review verdicts
+# the loop in docs/WORKFLOW.md states and names an existing port/manifest.tsv row, skipped --
+# from the diff alone, never from the body -- for a pull request that adds no module. See
+# `./port/port-status --help`'s own --pr-body section. `just port-status` (no argument) forwards
+# nothing to it.
+pr-body-check file *args:
+    ./port/port-status --pr-body {{file}} {{args}}
