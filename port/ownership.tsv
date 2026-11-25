@@ -45,7 +45,7 @@ GCode.hpp	606	ObjectByExtruder	support	const ExtrusionEntityCollection *	borrowe
 GCode.hpp	614	Region	perimeters	std::vector<const ExtrusionEntity*>	borrowed	GCode.hpp:613	Vec<&'a ExtrusionEntity>
 GCode.hpp	616	Region	infills	std::vector<const ExtrusionEntity*>	borrowed	GCode.hpp:615	Vec<&'a ExtrusionEntity>
 GCode.hpp	618	Region	infills_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>	borrowed	GCode.cpp:11796	Vec<&'a WipingExtrusions::ExtruderPerCopy>
-GCode.hpp	619	Region	perimeters_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>	borrowed	GCode.cpp:11796	Vec<&'a WipingExtrusions::ExtruderPerCopy>
+GCode.hpp	619	Region	perimeters_overrides	std::vector<const WipingExtrusions::ExtruderPerCopy*>	borrowed	GCode.cpp:11772, GCode.cpp:11796	Vec<&'a WipingExtrusions::ExtruderPerCopy>
 GCode.hpp	763	PlaceholderParserIntegration	opt_position	ConfigOptionFloats *	borrowed	GCode.cpp:2248, GCode.cpp:2249	&'a mut ConfigOptionFloats
 GCode.hpp	764	PlaceholderParserIntegration	opt_zhop	ConfigOptionFloat *	borrowed	GCode.cpp:2251, GCode.cpp:2252	&'a mut ConfigOptionFloat
 GCode.hpp	765	PlaceholderParserIntegration	opt_e_position	ConfigOptionFloats *	borrowed	GCode.cpp:2233, GCode.cpp:2234	&'a mut ConfigOptionFloats
