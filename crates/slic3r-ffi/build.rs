@@ -214,7 +214,7 @@ fn main() {
         "src/qhull.rs",
         "cxx/libnest2d_shim.h",
         "cxx/libnest2d_glue.cc",
-        "src/nest2d.rs",
+        "src/libnest2d.rs",
         "cxx/voronoi_shim.h",
         "cxx/voronoi_glue.cc",
         "src/voronoi.rs",
@@ -354,7 +354,7 @@ fn main() {
         "src/clipper2.rs",
         "src/admesh.rs",
         "src/qhull.rs",
-        "src/nest2d.rs",
+        "src/libnest2d.rs",
         "src/voronoi.rs",
     ]);
     // `-ffp-contract=off`: not a preference. The library this crate links and the one

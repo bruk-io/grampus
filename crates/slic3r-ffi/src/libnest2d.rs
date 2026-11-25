@@ -10,9 +10,11 @@
 //! (`vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a`) and its own dependency
 //! chain, not only this crate's own glue.
 //!
-//! The module (and bridge namespace) is named `nest2d`, not `libnest2d`: see `cxx/
-//! libnest2d_shim.h`'s header comment for why the identical name would shadow the vendored
-//! library's own top-level `::libnest2d` namespace from inside this bridge's `.cc`.
+//! This file (and Rust module) is named `libnest2d.rs`, matching the task's own naming, but the
+//! `cxx` bridge *namespace* below is `slic3r_ffi::nest2d`, not `slic3r_ffi::libnest2d`: see
+//! `cxx/libnest2d_shim.h`'s header comment for why the identical namespace name would shadow the
+//! vendored library's own top-level `::libnest2d` namespace from inside this bridge's `.cc`. The
+//! namespace is a C++-side concern independent of the Rust file/module name.
 //!
 //! The surface bound is `libnest2d::placers::EdgeCache<ExPolygon>`
 //! (`deps_src/libnest2d/include/libnest2d/placers/nfpplacer.hpp:152-336`), the one in-scope

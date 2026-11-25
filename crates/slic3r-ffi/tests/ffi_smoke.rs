@@ -7,7 +7,7 @@ use slic3r_ffi::admesh::{compute_volume, CFacet, CVertex};
 use slic3r_ffi::clipper2::{
     offset_paths, union_paths, union_paths_z, CPath64, CPathZ, CPoint64, CPointZ,
 };
-use slic3r_ffi::nest2d::{edge_cache_stats, CPoint as NestPoint};
+use slic3r_ffi::libnest2d::{edge_cache_stats, CPoint as NestPoint};
 use slic3r_ffi::qhull::{convex_hull_stats, CPoint3};
 use slic3r_ffi::voronoi::{diagram_stats, CSegment};
 
