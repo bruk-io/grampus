@@ -2078,6 +2078,13 @@ SELFTEST_FIXTURES: list[tuple[str, bool, str | None]] = [
     # file) must not be forced through check_trailer merely because its one SAFETY-commented
     # `unsafe` pulled it into scan_tree -- see check_module's require_trailer.
     ("safety-no-manifest-row", True, None),
+    # task 29-ffi-bridge-core: the second class the same `require_trailer` exemption covers,
+    # pinned so it is a recorded decision rather than an accident -- a file that looks ported
+    # whose manifest row misspells its target module and whose trailer is gone. main's
+    # port-status reports missing-trailer here; this branch reports nothing, because the
+    # manifest row is the authority check_trailer judges a trailer against, so a dropped or
+    # misspelled row is a manifest defect, not a trailer defect. See the fixture's own comment.
+    ("manifest-row-typo-no-trailer", True, None),
     ("missing-port-src", False, "missing-port-src"),
     ("placeholder-constant", False, "placeholder-constant"),
     ("two-literals-one-marker", False, "placeholder-constant"),
