@@ -1,0 +1,35 @@
+[package]
+name = "slic3r-layerregion"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-algorithm = { path = "../slic3r-algorithm" }
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-bridgedetector = { path = "../slic3r-bridgedetector" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-config = { path = "../slic3r-config" }
+slic3r-exception = { path = "../slic3r-exception" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-extrusionentity = { path = "../slic3r-extrusionentity" }
+slic3r-extrusionentitycollection = { path = "../slic3r-extrusionentitycollection" }
+slic3r-flow = { path = "../slic3r-flow" }
+slic3r-geometry = { path = "../slic3r-geometry" }
+slic3r-layer = { path = "../slic3r-layer" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-line = { path = "../slic3r-line" }
+slic3r-multimaterialsegmentation = { path = "../slic3r-multimaterialsegmentation" }
+slic3r-perimetergenerator = { path = "../slic3r-perimetergenerator" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-polyline = { path = "../slic3r-polyline" }
+slic3r-print = { path = "../slic3r-print" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+slic3r-surface = { path = "../slic3r-surface" }
+slic3r-surfacecollection = { path = "../slic3r-surfacecollection" }
+slic3r-svg = { path = "../slic3r-svg" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

@@ -1,0 +1,12 @@
+[package]
+name = "slic3r-kdtreeindirect"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

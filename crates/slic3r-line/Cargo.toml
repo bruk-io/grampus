@@ -1,0 +1,13 @@
+[package]
+name = "slic3r-line"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-point = { path = "../slic3r-point" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

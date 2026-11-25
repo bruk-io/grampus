@@ -1,0 +1,15 @@
+[package]
+name = "slic3r-aabbmesh"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-aabbtreeindirect = { path = "../slic3r-aabbtreeindirect" }
+slic3r-execution = { path = "../slic3r-execution" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-sla = { path = "../slic3r-sla" }
+slic3r-trianglemesh = { path = "../slic3r-trianglemesh" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

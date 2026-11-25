@@ -1,0 +1,16 @@
+[package]
+name = "slic3r-triangleselector"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-aabbtreeindirect = { path = "../slic3r-aabbtreeindirect" }
+slic3r-geometry = { path = "../slic3r-geometry" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-trianglemesh = { path = "../slic3r-trianglemesh" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

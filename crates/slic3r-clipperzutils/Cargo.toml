@@ -1,0 +1,15 @@
+[package]
+name = "slic3r-clipperzutils"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

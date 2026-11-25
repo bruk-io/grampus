@@ -110,3 +110,9 @@ audit-check:
 # what runs it, on main, alongside `just audit-check`.
 perf-check:
     ./port/regenerate --check
+
+# create crates/<crate>/{Cargo.toml,src/lib.rs} for every crate row of port/cut.tsv, plus the
+# shared slic3r-proof skeleton every generated Cargo.toml dev-depends on (task 34-foundation-spike,
+# plan step 20); writes only what is missing, changes no file that already exists
+crate-skeletons:
+    ./port/crate-skeletons

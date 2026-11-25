@@ -1,0 +1,11 @@
+[package]
+name = "slic3r-libslic3r"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-semver = { path = "../slic3r-semver" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

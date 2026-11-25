@@ -1,0 +1,20 @@
+[package]
+name = "slic3r-connectedbodies"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-aabbtreeindirect = { path = "../slic3r-aabbtreeindirect" }
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-geometry-dir = { path = "../slic3r-geometry-dir" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-trianglemesh = { path = "../slic3r-trianglemesh" }
+slic3r-trianglemeshslicer = { path = "../slic3r-trianglemeshslicer" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

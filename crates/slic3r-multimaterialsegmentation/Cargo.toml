@@ -1,0 +1,26 @@
+[package]
+name = "slic3r-multimaterialsegmentation"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-boundingbox = { path = "../slic3r-boundingbox" }
+slic3r-clipperutils = { path = "../slic3r-clipperutils" }
+slic3r-config = { path = "../slic3r-config" }
+slic3r-edgegrid = { path = "../slic3r-edgegrid" }
+slic3r-expolygon = { path = "../slic3r-expolygon" }
+slic3r-flow = { path = "../slic3r-flow" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-line = { path = "../slic3r-line" }
+slic3r-mutablepolygon = { path = "../slic3r-mutablepolygon" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-polygon = { path = "../slic3r-polygon" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+slic3r-surface = { path = "../slic3r-surface" }
+slic3r-surfacecollection = { path = "../slic3r-surfacecollection" }
+slic3r-trianglemeshslicer = { path = "../slic3r-trianglemeshslicer" }
+slic3r-utils = { path = "../slic3r-utils" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

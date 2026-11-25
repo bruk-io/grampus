@@ -1,0 +1,15 @@
+[package]
+name = "slic3r-beltgcode"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-belttransform = { path = "../slic3r-belttransform" }
+slic3r-gcodewriter = { path = "../slic3r-gcodewriter" }
+slic3r-libslic3r = { path = "../slic3r-libslic3r" }
+slic3r-point = { path = "../slic3r-point" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }

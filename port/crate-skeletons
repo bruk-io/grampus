@@ -1,0 +1,186 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.14"
+# dependencies = [
+#   "click>=8.1.0",
+# ]
+# ///
+
+"""Create the crate skeletons `port/cut.tsv` names (plan step 20, task 34-foundation-spike).
+
+Nothing before this script creates the roughly-a-hundred crates `port/cut.tsv`'s `crate` rows
+name, and a hundred Phase A tasks each creating a crate skeleton on its own branch is a
+hundred-way conflict. So this script reads the committed `port/cut.tsv` and, for every `crate`
+row, writes `crates/<crate>/Cargo.toml` and `crates/<crate>/src/lib.rs` if they do not already
+exist. `lib.rs` holds only the crate's doc comment -- no `mod` line, which Phase B adds one at a
+time as it ports each module (`docs/WORKFLOW.md`).
+
+**What a generated `Cargo.toml` declares.** No third-party dependency, only path dependencies:
+one `[dependencies]` entry per crate the row's `dep` rows in `port/cut.tsv` name (`source`
+depends on `target`; the `edge` rows are the cut's own cut file-include edges and are not a
+crate dependency), plus one `[dev-dependencies]` entry on `slic3r-proof`, which every ported
+unit's proof calls through (task 31-proof-harness, plan step 18). They are generated here,
+from the cut, rather than added later, because no port task may add a dependency and no task is
+named as the one that would (task 34-foundation-spike's own "What to build"); task 35-trial-run
+needs the `slic3r-proof` dev-dependency and the cut's edges for its three units, and every Phase
+B unit needs its crate's edges to compile at all.
+
+**`slic3r-proof` does not exist yet.** It is task 31-proof-harness's crate (plan step 18, which
+this spike's own task explicitly does not wait on), and no `crate` row in `port/cut.tsv` names
+it -- it is the shared proof harness, not a ported module's crate. Every generated `Cargo.toml`
+still has to declare the dev-dependency on it (task 34-foundation-spike's "Done when"), and a
+path dependency whose target has no `Cargo.toml` fails `cargo build` outright, even as an unused
+dev-dependency (verified empirically: cargo resolves every workspace member's manifest, dev-deps
+included, before any target is built). So this script also writes a minimal
+`crates/slic3r-proof/` skeleton -- the same doc-comment-only `lib.rs` and a `Cargo.toml` with no
+dependency of its own -- when that directory is absent, exactly as it would for a `port/cut.tsv`
+row, so the workspace builds. Task 31-proof-harness fills `lib.rs` and `Cargo.toml` in for real;
+re-running this script changes neither file once they exist (the same "changes no existing
+file" rule as every other generated crate), so task 31 is free to add real content without this
+script stepping on it. `slic3r-proof` never dev-depends on itself.
+
+**Idempotent.** Re-running this script adds a crate that is missing (a directory, or either one
+of its two files, absent) and changes no file that already exists, so it is safe to run again
+after `port/cut.tsv` is regenerated. The root `Cargo.toml` is `members = ["crates/*"]` (task
+08-comparator-workspace), so a new crate directory needs no edit there.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import click
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CUT_PATH = REPO_ROOT / "port/cut.tsv"
+CRATES_ROOT = REPO_ROOT / "crates"
+
+PROOF_CRATE = "slic3r-proof"
+
+
+def read_tsv(path: Path) -> tuple[list[str], list[list[str]]]:
+    """Return (header, rows) for a committed tab-separated file, split plainly on tabs -- these
+    files carry no literal tab or newline inside a cell."""
+    if not path.is_file():
+        raise SystemExit(f"crate-skeletons: {path} does not exist")
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        raise SystemExit(f"crate-skeletons: {path} is empty")
+    header = lines[0].split("\t")
+    rows = [line.split("\t") for line in lines[1:] if line]
+    return header, rows
+
+
+def column_index(header: list[str], name: str) -> int:
+    """Return name's column index in header, by name rather than a hard-coded position."""
+    try:
+        return header.index(name)
+    except ValueError:
+        raise SystemExit(f"crate-skeletons: column {name!r} not found in header {header!r}") from None
+
+
+def read_cut(cut_path: Path) -> tuple[list[str], dict[str, list[str]]]:
+    """Return (crate names, in crate-row order), {crate: [crates its `dep` rows name]}) from
+    `port/cut.tsv`. `dep` rows read source-depends-on-target; `edge` rows are the cut's own
+    cut file-include edges and are never read as a dependency here."""
+    header, rows = read_tsv(cut_path)
+    kind_i = column_index(header, "kind")
+    crate_i = column_index(header, "crate")
+    source_i = column_index(header, "source")
+    target_i = column_index(header, "target")
+
+    crates: list[str] = []
+    deps: dict[str, list[str]] = {}
+    for row in rows:
+        if row[kind_i] == "crate":
+            crates.append(row[crate_i])
+        elif row[kind_i] == "dep":
+            deps.setdefault(row[source_i], []).append(row[target_i])
+    return crates, deps
+
+
+def cargo_toml_text(crate: str, deps: list[str], *, dev_dep_on_proof: bool) -> str:
+    """The generated Cargo.toml: no third-party dependency, one `[dependencies]` path entry per
+    crate in `deps` (sorted, for a deterministic file), and, unless this crate IS the proof
+    crate, one `[dev-dependencies]` path entry on it. Matches `crates/oracle-compare/Cargo.toml`'s
+    `[package]` shape (edition 2021, `publish = false`); the root `Cargo.toml` defines no
+    `[workspace.package]` field today, so there is nothing to inherit from it yet."""
+    lines = [
+        "[package]",
+        f'name = "{crate}"',
+        'version = "0.1.0"',
+        'edition = "2021"',
+        "publish = false",
+        "",
+    ]
+    if deps:
+        lines.append("[dependencies]")
+        for dep in sorted(deps):
+            lines.append(f'{dep} = {{ path = "../{dep}" }}')
+        lines.append("")
+    if dev_dep_on_proof:
+        lines.append("[dev-dependencies]")
+        lines.append(f'{PROOF_CRATE} = {{ path = "../{PROOF_CRATE}" }}')
+        lines.append("")
+    return "\n".join(lines)
+
+
+def lib_rs_text(crate: str) -> str:
+    """The generated lib.rs: the crate's doc comment only, no `mod` line -- Phase B adds one
+    `mod <module>;` line per ported unit, in alphabetical order, as `docs/WORKFLOW.md` states."""
+    return (
+        f"//! `{crate}`, one of the ported-libslic3r crates `port/cut.tsv` cuts the vendored\n"
+        "//! tree into (plan step 20, task 34-foundation-spike). This skeleton carries no `mod`\n"
+        "//! line yet: Phase B (plan step 23) adds one per ported module, in alphabetical order,\n"
+        "//! as docs/WORKFLOW.md states.\n"
+    )
+
+
+def write_if_absent(path: Path, text: str) -> bool:
+    """Write text to path only if path does not already exist. Returns whether it wrote."""
+    if path.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def write_crate_skeleton(crate: str, deps: list[str], *, dev_dep_on_proof: bool) -> list[str]:
+    """Write crates/<crate>/Cargo.toml and crates/<crate>/src/lib.rs if either is absent.
+    Returns the list of paths (relative to the repo root) this call actually wrote."""
+    crate_dir = CRATES_ROOT / crate
+    written = []
+    if write_if_absent(crate_dir / "Cargo.toml", cargo_toml_text(crate, deps, dev_dep_on_proof=dev_dep_on_proof)):
+        written.append(f"crates/{crate}/Cargo.toml")
+    if write_if_absent(crate_dir / "src/lib.rs", lib_rs_text(crate)):
+        written.append(f"crates/{crate}/src/lib.rs")
+    return written
+
+
+@click.command()
+def main() -> None:
+    """port/crate-skeletons: create crates/<crate>/{Cargo.toml,src/lib.rs} for every `crate` row
+    of the committed port/cut.tsv, plus the shared slic3r-proof skeleton every generated
+    Cargo.toml dev-depends on (see the module docstring). Writes only what is missing; changes
+    no file that already exists."""
+    crates, deps_by_crate = read_cut(CUT_PATH)
+
+    written: list[str] = []
+    for crate in crates:
+        written += write_crate_skeleton(
+            crate, deps_by_crate.get(crate, []), dev_dep_on_proof=True
+        )
+
+    if not (CRATES_ROOT / PROOF_CRATE).is_dir():
+        written += write_crate_skeleton(PROOF_CRATE, [], dev_dep_on_proof=False)
+
+    if written:
+        print(f"crate-skeletons: wrote {len(written)} file(s):")
+        for path in written:
+            print(f"  {path}")
+    else:
+        print("crate-skeletons: nothing to write, every crate skeleton already exists")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,12 @@
+[package]
+name = "slic3r-parameterutils"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slic3r-config = { path = "../slic3r-config" }
+slic3r-printconfig = { path = "../slic3r-printconfig" }
+
+[dev-dependencies]
+slic3r-proof = { path = "../slic3r-proof" }
