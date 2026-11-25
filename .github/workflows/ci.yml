@@ -154,7 +154,7 @@ jobs:
       # entry exists for this pin (`gh cache list`, key prefix
       # `oracle-deps-arm64-f92a7c065c5718b8ef1baac1cd704df2911238f4-`) before making this change:
       # this crate's build.rs now runs in this job's `cargo test --workspace` and needs the
-      # superbuild prefix's `tbbmalloc` and TBB headers to not panic (build.rs:83), which is what
+      # superbuild prefix's `tbbmalloc` and TBB headers to not panic (build.rs:76), which is what
       # exposed the mismatch -- no earlier crate in the workspace required this job to actually
       # build anything.
       - name: Restore the dependency superbuild
