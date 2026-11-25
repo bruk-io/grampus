@@ -187,3 +187,13 @@ oracle-dump fixture configuration *ARGS:
     # Cleaned up only after a successful run reaches here; set -e leaves the two run
     # directories in place on any earlier failure, where they are the evidence.
     rm -rf "$armed_dir" "$unarmed_dir"
+
+# measure the oracle's run-to-run reproducibility and publish the gate table (R3, plan step 6,
+# task 27-oracle-determinism): for every row of docs/ORACLE.md's configuration table and every
+# fixture it names, runs the oracle at least five times through just oracle-slice, compares every
+# pair for the G-code, the --export-settings JSON and the --export-statistics JSON through
+# just compare --format json, and regenerates port/reports/determinism.tsv,
+# port/reports/determinism.md and docs/ORACLE.md's gate table from the measurement. Every run's
+# scratch output lands under oracle/.cache/determinism/ (git-ignored, left behind for inspection).
+oracle-determinism:
+    ./oracle/determinism
