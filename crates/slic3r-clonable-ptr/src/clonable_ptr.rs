@@ -199,15 +199,15 @@ mod tests {
     use slic3r_proof::dumps;
     use std::sync::atomic::{AtomicI64, Ordering};
 
-    // The oracle: `shim/clonable_ptr_shim.cpp`'s scripted sequence over the vendored
-    // `clonable_ptr<T>` template, instantiated there over a polymorphic pointee and compiled from
-    // the pin by this crate's `build.rs` -- see that file for why this crate carries its own build
-    // step. Nothing here compares an address *value* across the two languages, which would be
-    // meaningless; the comparison operators are compared as the relations they induce between two
-    // pointers taken in a known address order.
-    extern "C" {
-        fn slic3r_clonable_ptr_shim_observations(out: *mut i64, capacity: i32) -> i32;
-    }
+    // The oracle: `crates/slic3r-ffi/cxx/proof_units/clonable_ptr.cpp`'s scripted sequence over
+    // the vendored `clonable_ptr<T>` template, instantiated there over a polymorphic pointee and
+    // compiled from the pin onto the FFI crate's shared `cxx_build::Build`. Reached here through
+    // `slic3r-proof`, which re-exports the FFI crate's per-unit proof bridges -- the one
+    // sanctioned route (`docs/PORTING.md`, "Decisions recorded on 2026-11-25"). Nothing here
+    // compares an address *value* across the two languages, which would be meaningless; the
+    // comparison operators are compared as the relations they induce between two pointers taken
+    // in a known address order.
+    use slic3r_proof::proof_units::clonable_ptr::path2_observations;
 
     /// Live-pointee count, the Rust counterpart of the shim's own `g_live_payloads`. It is what
     /// makes the difference between `reset()` (which frees) and `release()` (which does not,
@@ -413,18 +413,12 @@ mod tests {
         );
 
         let ported = ported_observations();
-        let mut oracle = vec![i64::MIN; ported.len()];
-        // SAFETY: `oracle` is a live, exclusively borrowed `Vec<i64>` of exactly `oracle.len()`
-        // elements, and that same length is passed as the capacity; the shim writes `count`
-        // elements only when `capacity >= count` and otherwise writes nothing and returns
-        // `-count`, which the assertion below rejects.
-        let count = unsafe {
-            slic3r_clonable_ptr_shim_observations(oracle.as_mut_ptr(), oracle.len() as i32)
-        };
+        let oracle = path2_observations();
         assert_eq!(
-            count,
-            ported.len() as i32,
-            "the oracle records {count} observation(s) where this test scripts {}",
+            oracle.len(),
+            ported.len(),
+            "the oracle records {} observation(s) where this test scripts {}",
+            oracle.len(),
             ported.len()
         );
         assert_eq!(

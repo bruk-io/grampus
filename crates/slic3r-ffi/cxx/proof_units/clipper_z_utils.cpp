@@ -121,12 +121,13 @@
 // checks comes back unchanged, through `tiers::compare_unit` at that row's declared tier
 // (`exact`).
 
-#include "proof_shims.h"
+#include "clipper_z_utils.h"
 
 #include "ClipperZUtils.cpp"
 
 namespace slic3r_ffi {
-namespace proof {
+namespace proof_units {
+namespace clipper_z_utils {
 
 rust::Vec<ProofZPoint> path3_to_paths64(const rust::Vec<ProofZPoint> &path) {
     Slic3r::ClipperZUtils::ZPath cpp_path;
@@ -149,5 +150,6 @@ rust::Vec<ProofZPoint> path3_to_paths64(const rust::Vec<ProofZPoint> &path) {
     return out;
 }
 
-} // namespace proof
+} // namespace clipper_z_utils
+} // namespace proof_units
 } // namespace slic3r_ffi

@@ -1,11 +1,10 @@
-// Proof shim for `clonable_ptr.hpp` (task 54-foundation-objectid-clonable, R19), compiled by this
-// crate's own `build.rs` and linked into `crates/slic3r-clonable-ptr`'s `#[cfg(test)]` proof --
-// `proof_present`'s "a `#[cfg(test)]` module inside the module file itself" branch. See that
-// `build.rs` for why this crate carries its own build step instead of calling through
-// `crates/slic3r-ffi`.
+// Proof shim for the `clonable_ptr.hpp` unit (R19), compiled onto `crates/slic3r-ffi`'s shared
+// `cxx_build::Build` by this crate's `build.rs` -- the one sanctioned route a ported unit reaches
+// the oracle by (`docs/PORTING.md`, "Decisions recorded on 2026-11-25").
+// `crates/slic3r-clonable-ptr`'s proof calls this through
+// `slic3r_proof::proof_units::clonable_ptr`.
 //
-// `#include`s the vendored header verbatim and unmodified. `clonable_ptr.hpp` includes only
-// `"assert.h"`, so this translation unit needs no include path beyond `src/libslic3r` itself.
+// `#include`s the vendored header verbatim and unmodified.
 //
 // `clonable_ptr<T>` is a template, so it has no compiled code of its own until something
 // instantiates it. The pin's one in-scope instantiation is `clonable_ptr<const ConfigOption>`
@@ -13,14 +12,15 @@
 // into this translation unit for no gain: what the proof measures is the *template's* own
 // behaviour -- the copy constructor's call to the pointee's virtual `clone()`, `release()`'s
 // non-destroying hand-off, `reset`, `swap`, `operator bool` and the six comparison operators --
-// not `ConfigOption`'s. So the element type below is proof input, exactly as an `int64_t` is
-// input to task 53-foundation-int128-queue's `Int128.hpp` proof; the oracle under test is the
+// not `ConfigOption`'s. So the element type below is proof input; the oracle under test is the
 // vendored template's own instantiated code.
 //
 // `ProofPayload` is deliberately shaped like the pin's own pointee: a polymorphic class with a
 // virtual `clone()` returning a fresh heap copy, and a virtual destructor, which is what
 // `clonable_ptr`'s copy constructor (`:46-49`, `rhs.px->clone()`) and `destroy()` (`:128-132`,
 // `delete px`) each require.
+#include "clonable_ptr.h"
+
 #include "clonable_ptr.hpp"
 
 #include <cstdint>
@@ -43,9 +43,11 @@ private:
 
 } // namespace
 
-extern "C" {
+namespace slic3r_ffi {
+namespace proof_units {
+namespace clonable_ptr {
 
-int32_t slic3r_clonable_ptr_shim_observations(int64_t *out, int32_t capacity) {
+rust::Vec<int64_t> path2_observations() {
     g_live_payloads = 0;
 
     // `clonable_ptr()` (`:36-39`) and `operator bool()` (`:104-107`).
@@ -146,14 +148,13 @@ int32_t slic3r_clonable_ptr_shim_observations(int64_t *out, int32_t capacity) {
         self_is_less_or_equal,
         self_is_strictly_less,
     };
-    const int32_t count = static_cast<int32_t>(sizeof(values) / sizeof(values[0]));
-    if (out == nullptr || capacity < count) {
-        return -count;
+    rust::Vec<int64_t> out;
+    for (const int64_t value : values) {
+        out.push_back(value);
     }
-    for (int32_t i = 0; i < count; ++i) {
-        out[i] = values[i];
-    }
-    return count;
+    return out;
 }
 
-} // extern "C"
+} // namespace clonable_ptr
+} // namespace proof_units
+} // namespace slic3r_ffi

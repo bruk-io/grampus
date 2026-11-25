@@ -32,6 +32,14 @@ port-check:
     just ownership-check
     ./oracle/provenance --check port/goldens/ 'port/dumps/*/*.dump' port/reports/determinism.md port/reports/oracle-parity.md
     cargo fmt --check
+    # `cargo fmt` walks the module tree from each crate root and cannot follow an `include!`, so
+    # it never reaches the per-unit proof bridges under crates/slic3r-ffi/src/proof_units/ --
+    # their `pub mod` lines are generated into OUT_DIR by build.rs, which is what makes a port
+    # task's bridge a NEW FILE rather than an append to a shared list (docs/PORTING.md,
+    # "Decisions recorded on 2026-11-25"). Formatting them is restored explicitly here rather
+    # than left as a silent gap in `cargo fmt --check`'s coverage. `find -exec` rather than a
+    # shell glob, so an empty directory is not an error and a file name is never word-split.
+    find crates/slic3r-ffi/src/proof_units -name '*.rs' -exec rustfmt --edition 2021 --check {} +
     # R17, task 29-ffi-bridge-core: -ffp-contract=off cannot drift between the two compilations
     # the per-unit and per-stage proofs compare against -- the oracle libslic3r build and this
     # crate's own build.rs. Anchored to the thing that actually reaches each compiler, not a bare

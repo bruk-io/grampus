@@ -1,4 +1,4 @@
-//! The per-unit proof harness's own proof (task 31-proof-harness, plan step 18, R19): one test
+//! The per-unit proof harness's own proof (plan step 18, R19): one test
 //! per proof path this task wires, each compared through `slic3r_proof::tiers::compare_unit` at
 //! that unit's real `port/manifest.tsv` tier. No ported Rust module exists yet, so `expected`
 //! here is the value this task worked out from reading the vendored C++ directly (see each
@@ -16,7 +16,8 @@
 //! this proof into an order-dependent flake rather than a compile error. A test needing an
 //! `ObjectBase` belongs in its own integration-test file instead.
 
-use slic3r_ffi::proof::{path1_wipe_tower_object_id, path3_to_paths64, ProofZPoint};
+use slic3r_proof::proof_units::clipper_z_utils::{path3_to_paths64, ProofZPoint};
+use slic3r_proof::proof_units::object_id::path1_wipe_tower_object_id;
 use slic3r_proof::{compare_unit, Oracle};
 
 /// Proof path 1 (R19): `src/libslic3r/ObjectID.cpp`'s `wipe_tower_object_id()`, an externally
@@ -35,7 +36,7 @@ fn object_id_wipe_tower_object_id_proves_path_1() {
 }
 
 /// Proof path 3 (R19): `src/libslic3r/ClipperZUtils.cpp`'s `static` (internal-linkage)
-/// `to_paths64`, reached only because `crates/slic3r-ffi/cxx/include_vendored.cpp` `#include`s
+/// `to_paths64`, reached only because `crates/slic3r-ffi/cxx/proof_units/clipper_z_utils.cpp` `#include`s
 /// that vendored file (see its header comment for the inclusion rule this task verified). It
 /// repacks a `Slic3r::ClipperZUtils::ZPath` into a `Clipper2Lib_Z::Path64` with no arithmetic, so
 /// every coordinate must come back unchanged.

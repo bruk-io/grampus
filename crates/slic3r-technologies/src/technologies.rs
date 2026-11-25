@@ -87,17 +87,17 @@ pub const ENABLE_ACTUAL_SPEED_DEBUG: bool = true;
 mod tests {
     use super::*;
 
-    // The proof-path-1 oracle (R19): `shim/technologies_shim.cpp`, which `#include`s the vendored
-    // `Technologies.hpp` unmodified and is compiled from the pin by this crate's own `build.rs`
-    // -- see that file for why this crate carries its own build step instead of calling through
-    // `crates/slic3r-ffi`.
-    extern "C" {
-        fn slic3r_technologies_shim_flags(out: *mut i32, capacity: i32) -> i32;
-    }
+    // The proof-path-1 oracle (R19): `crates/slic3r-ffi/cxx/proof_units/technologies.cpp`,
+    // which `#include`s the vendored `Technologies.hpp` unmodified and is compiled from the pin
+    // onto the FFI crate's shared `cxx_build::Build` with `-ffp-contract=off`. Reached here
+    // through `slic3r-proof`, which re-exports the FFI crate's per-unit proof bridges -- the one
+    // sanctioned route (`docs/PORTING.md`, "Decisions recorded on 2026-11-25"), needing no
+    // dependency of this crate's own beyond the dev-dependency on `slic3r-proof` it already has.
+    use slic3r_proof::proof_units::technologies::path1_flags;
 
     /// Every flag this module ports, in `Technologies.hpp`'s own declaration order -- the same
-    /// order `slic3r_technologies_shim_flags` writes the oracle's values in, so index `i` of one
-    /// is index `i` of the other and a mismatch names the flag.
+    /// order `path1_flags` returns the oracle's values in, so index `i` of one is index `i` of
+    /// the other and a mismatch names the flag.
     const PORTED_FLAGS: &[(&str, bool)] = &[
         ("ENABLE_SHOW_CAMERA_TARGET", ENABLE_SHOW_CAMERA_TARGET),
         (
@@ -155,19 +155,13 @@ mod tests {
     // PROOF: 1
     #[test]
     fn technologies_flags_match_the_oracle() {
-        let mut oracle = [i32::MIN; PORTED_FLAGS.len()];
-        let capacity = oracle.len() as i32;
-        let out = oracle.as_mut_ptr();
-        // SAFETY: `out` points at a live, exclusively borrowed array of exactly `capacity`
-        // `i32`s, and that same length is passed as the capacity; the shim writes `count`
-        // elements only when `capacity >= count` and otherwise writes nothing and returns
-        // `-count`, which the assertion below rejects.
-        let count = unsafe { slic3r_technologies_shim_flags(out, capacity) };
+        let oracle = path1_flags();
         assert_eq!(
-            count,
-            PORTED_FLAGS.len() as i32,
-            "the oracle reports {count} flag(s) where this module ports {}; a flag was added to \
-             or removed from Technologies.hpp",
+            oracle.len(),
+            PORTED_FLAGS.len(),
+            "the oracle reports {} flag(s) where this module ports {}; a flag was added to or \
+             removed from Technologies.hpp",
+            oracle.len(),
             PORTED_FLAGS.len()
         );
 

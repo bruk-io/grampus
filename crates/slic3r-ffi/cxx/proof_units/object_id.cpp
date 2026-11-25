@@ -1,22 +1,31 @@
-// Proof shims for the `ObjectID.cpp`/`ObjectID.hpp` unit (task 54-foundation-objectid-clonable,
-// R19), compiled by this crate's own `build.rs` together with the vendored `ObjectID.cpp` itself,
-// unmodified, and linked into `crates/slic3r-objectid`'s own proofs. See that `build.rs` for why
-// this crate carries its own build step instead of calling through `crates/slic3r-ffi`.
+// Proof shims for the `ObjectID.cpp`/`ObjectID.hpp` unit (R19, proof paths 1 and 2), compiled
+// onto `crates/slic3r-ffi`'s shared `cxx_build::Build` by this crate's `build.rs` -- the one
+// sanctioned route a ported unit reaches the oracle by (`docs/PORTING.md`, "Decisions recorded
+// on 2026-11-25"). `crates/slic3r-objectid`'s proofs call these through
+// `slic3r_proof::proof_units::object_id`.
 //
-// Two shims, one per manifest row, because the unit's two rows carry different `proof path` cells:
+// `Slic3r::wipe_tower_object_id()`/`wipe_tower_instance_id()` (`src/libslic3r/ObjectID.cpp`) are
+// externally linked symbols in the archive `just oracle-build` produces, reached through
+// `build.rs`'s derived link line (read from the CMake build tree, not enumerated). They are
+// deterministic per test binary: `ObjectID.cpp`'s file-static `s_last_id` starts at 0, so the
+// first `Slic3r::ObjectBase` a process constructs has id 1 and the second id 2. Every caller of
+// these two therefore has to be the only test in its binary; both
+// `crates/slic3r-proof/tests/harness_paths.rs` and
+// `crates/slic3r-objectid/tests/object_id_proof_path_1.rs` carry that constraint at the top of
+// their own files.
 //
-//  * `slic3r_objectid_shim_wipe_tower_*_id` -- the `ObjectID.cpp` row (`proof path: 1`): the two
-//    externally linked `Slic3r::wipe_tower_*_id()` functions, plus the `s_last_id`/
-//    `s_last_timestamp` definitions that only that translation unit provides. These are the whole
-//    of ObjectID.cpp's own code.
+// `path2_header_observations()` is the `ObjectID.hpp` row's shim: a scripted sequence over the
+// vendored header's own inline methods, returned as a vector of observations. Every observation
+// is a *delta* or a relation, never an absolute id, so the sequence yields the same vector
+// wherever the process-global `s_last_id`/`s_last_timestamp` counters happen to stand when it
+// runs -- the proof cannot become order-dependent on what else a test binary did first. See the
+// Rust side for what the committed stage-dump corpus does and does not carry for this row.
 //
-//  * `slic3r_objectid_shim_header_observations` -- the `ObjectID.hpp` row (`proof path: 2`): a
-//    scripted sequence over the header's own inline methods, recorded as a vector of
-//    observations. Every observation is a *delta* or a relation, never an absolute id, so the
-//    sequence yields the same vector wherever the process-global `s_last_id`/`s_last_timestamp`
-//    counters happen to stand when it runs -- the proof cannot become order-dependent on what
-//    else a test binary did first. See the Rust side for why that matters and for what the
-//    committed stage-dump corpus does and does not carry for this row.
+// `ObjectID.hpp:4-5` includes `<cereal/access.hpp>` and `<cereal/types/base_class.hpp>`, which
+// the dependency superbuild's include prefix (already on this crate's shared include set)
+// provides.
+#include "object_id.h"
+
 #include "ObjectID.hpp"
 
 #include <cstddef>
@@ -50,17 +59,19 @@ public:
 
 } // namespace
 
-extern "C" {
+namespace slic3r_ffi {
+namespace proof_units {
+namespace object_id {
 
-uint64_t slic3r_objectid_shim_wipe_tower_object_id(void) {
+uint64_t path1_wipe_tower_object_id() {
     return static_cast<uint64_t>(Slic3r::wipe_tower_object_id().id);
 }
 
-uint64_t slic3r_objectid_shim_wipe_tower_instance_id(void) {
+uint64_t path1_wipe_tower_instance_id() {
     return static_cast<uint64_t>(Slic3r::wipe_tower_instance_id().id);
 }
 
-int32_t slic3r_objectid_shim_header_observations(int64_t *out, int32_t capacity) {
+rust::Vec<int64_t> path2_header_observations() {
     // `ObjectBase()` mints a fresh id; the next one is exactly one higher. Recorded as a delta,
     // never as an absolute id (ObjectID.hpp:100, `++s_last_id`).
     ProofObject first;
@@ -177,14 +188,13 @@ int32_t slic3r_objectid_shim_header_observations(int64_t *out, int32_t capacity)
         cut_copy_is_equal,
         cut_invalidate_check_sum,
     };
-    const int32_t count = static_cast<int32_t>(sizeof(values) / sizeof(values[0]));
-    if (out == nullptr || capacity < count) {
-        return -count;
+    rust::Vec<int64_t> out;
+    for (const int64_t value : values) {
+        out.push_back(value);
     }
-    for (int32_t i = 0; i < count; ++i) {
-        out[i] = values[i];
-    }
-    return count;
+    return out;
 }
 
-} // extern "C"
+} // namespace object_id
+} // namespace proof_units
+} // namespace slic3r_ffi
