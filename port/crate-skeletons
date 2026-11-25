@@ -32,12 +32,16 @@ still has to declare the dev-dependency on it (task 34-foundation-spike's "Done 
 path dependency whose target has no `Cargo.toml` fails `cargo build` outright, even as an unused
 dev-dependency (verified empirically: cargo resolves every workspace member's manifest, dev-deps
 included, before any target is built). So this script also writes a minimal
-`crates/slic3r-proof/` skeleton -- the same doc-comment-only `lib.rs` and a `Cargo.toml` with no
-dependency of its own -- when that directory is absent, exactly as it would for a `port/cut.tsv`
-row, so the workspace builds. Task 31-proof-harness fills `lib.rs` and `Cargo.toml` in for real;
-re-running this script changes neither file once they exist (the same "changes no existing
-file" rule as every other generated crate), so task 31 is free to add real content without this
-script stepping on it. `slic3r-proof` never dev-depends on itself.
+`crates/slic3r-proof/` skeleton -- a `Cargo.toml` with no dependency of its own, and its own
+placeholder `lib.rs` doc comment (not the "one of the ported-libslic3r crates `port/cut.tsv`
+cuts the vendored tree into" text every other skeleton gets, since `slic3r-proof` is not one of
+those) -- exactly as it would for a `port/cut.tsv` row, gated the same per-file way
+`write_if_absent` gates every other generated crate (never per-directory, so a crate left with
+only one of its two files missing still gets that file written back rather than being treated
+as already complete), so the workspace builds. Task 31-proof-harness fills `lib.rs` and
+`Cargo.toml` in for real; re-running this script changes neither file once they exist (the same
+"changes no existing file" rule as every other generated crate), so task 31 is free to add real
+content without this script stepping on it. `slic3r-proof` never dev-depends on itself.
 
 **Idempotent.** Re-running this script adds a crate that is missing (a directory, or either one
 of its two files, absent) and changes no file that already exists, so it is safe to run again
@@ -136,6 +140,21 @@ def lib_rs_text(crate: str) -> str:
     )
 
 
+def proof_lib_rs_text() -> str:
+    """The generated lib.rs for the one crate this script writes that is NOT a `port/cut.tsv`
+    row: `slic3r-proof`, task 31-proof-harness's crate (plan step 18). Every generated
+    `Cargo.toml` dev-depends on it by path, so it has to exist for the workspace to build before
+    task 31 lands; this skeleton is placeholder only, in the same no-dependency,
+    doc-comment-only shape as every other generated crate, and task 31 fills it in for real."""
+    return (
+        "//! `slic3r-proof`, the shared proof harness every ported unit's proof calls through\n"
+        "//! (plan step 18, task 31-proof-harness). It is not a `port/cut.tsv` crate row --\n"
+        "//! this placeholder skeleton exists only so every generated crate's path\n"
+        "//! dev-dependency on it resolves before task 31 lands (plan step 20, task\n"
+        "//! 34-foundation-spike). Task 31-proof-harness fills this in for real.\n"
+    )
+
+
 def write_if_absent(path: Path, text: str) -> bool:
     """Write text to path only if path does not already exist. Returns whether it wrote."""
     if path.exists():
@@ -145,14 +164,22 @@ def write_if_absent(path: Path, text: str) -> bool:
     return True
 
 
-def write_crate_skeleton(crate: str, deps: list[str], *, dev_dep_on_proof: bool) -> list[str]:
+def write_crate_skeleton(
+    crate: str, deps: list[str], *, dev_dep_on_proof: bool, lib_text: str | None = None
+) -> list[str]:
     """Write crates/<crate>/Cargo.toml and crates/<crate>/src/lib.rs if either is absent.
+    lib_text overrides the generated doc comment (used only for the slic3r-proof placeholder,
+    which is not a port/cut.tsv crate and must not claim to be one); every port/cut.tsv crate
+    gets lib_rs_text(crate) as before. Each file is gated on its own existence, not the crate
+    directory's, so a crate left with one file missing (by hand, or by a half-finished task)
+    still gets that one file written back rather than being skipped as "already there".
     Returns the list of paths (relative to the repo root) this call actually wrote."""
     crate_dir = CRATES_ROOT / crate
     written = []
     if write_if_absent(crate_dir / "Cargo.toml", cargo_toml_text(crate, deps, dev_dep_on_proof=dev_dep_on_proof)):
         written.append(f"crates/{crate}/Cargo.toml")
-    if write_if_absent(crate_dir / "src/lib.rs", lib_rs_text(crate)):
+    text = lib_text if lib_text is not None else lib_rs_text(crate)
+    if write_if_absent(crate_dir / "src/lib.rs", text):
         written.append(f"crates/{crate}/src/lib.rs")
     return written
 
@@ -171,8 +198,9 @@ def main() -> None:
             crate, deps_by_crate.get(crate, []), dev_dep_on_proof=True
         )
 
-    if not (CRATES_ROOT / PROOF_CRATE).is_dir():
-        written += write_crate_skeleton(PROOF_CRATE, [], dev_dep_on_proof=False)
+    written += write_crate_skeleton(
+        PROOF_CRATE, [], dev_dep_on_proof=False, lib_text=proof_lib_rs_text()
+    )
 
     if written:
         print(f"crate-skeletons: wrote {len(written)} file(s):")

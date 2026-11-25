@@ -4,30 +4,31 @@ foundation-02	4	1017	Int128.hpp, LifecycleEvents.hpp, MacUtils.hpp, MutablePrior
 foundation-03	4	474	ObjectID.cpp, ObjectID.hpp, PrintConfigConstants.hpp, Technologies.hpp, clonable_ptr.hpp
 foundation-04	4	718	enum_bitmask.hpp, format.hpp, libslic3r.cpp, libslic3r.h, Execution/Execution.hpp
 foundation-05	4	1517	Execution/ExecutionSeq.hpp, Execution/ExecutionTBB.hpp, MTUtils.hpp, Point.cpp, Point.hpp
-foundation-06	3	1550	Utils.hpp, BoundingBox.cpp, BoundingBox.hpp, BrimEarsPoint.hpp
-foundation-07	1	5358	Config.cpp, Config.hpp
-foundation-08	4	2353	KDTreeIndirect.hpp, MarchingSquares.hpp, MeshSplitImpl.hpp, AABBTreeIndirect.hpp
-foundation-09	3	2133	Line.cpp, Line.hpp, Slicing.cpp, Slicing.hpp, AABBTreeLines.hpp
-foundation-10	2	2067	MultiPoint.cpp, MultiPoint.hpp, Polygon.cpp, Polygon.hpp
-foundation-11	1	1415	Polyline.cpp, Polyline.hpp
-foundation-12	1	17247	PrintConfig.cpp, PrintConfig.hpp
-foundation-13	3	1971	ExPolygon.cpp, ExPolygon.hpp, ExtrusionEntityCollection.cpp, ExtrusionEntityCollection.hpp, Flow.cpp, Flow.hpp
-foundation-14	1	1490	Geometry.cpp, Geometry.hpp
-foundation-15	2	2261	ExtrusionEntity.cpp, ExtrusionEntity.hpp, MutablePolygon.cpp, MutablePolygon.hpp
-foundation-16	1	419	Surface.cpp, Surface.hpp
-foundation-17	1	2196	ClipperUtils.cpp, ClipperUtils.hpp
-foundation-18	2	2492	TriangleMesh.cpp, TriangleMesh.hpp, ClipperZUtils.cpp, ClipperZUtils.hpp
-foundation-19	4	804	SLA/Concurrency.hpp, SLA/IndexedMesh.cpp, SLA/IndexedMesh.hpp, SLA/JobController.hpp, SLA/SupportPoint.hpp
-foundation-20	4	615	AABBMesh.cpp, AABBMesh.hpp, Arachne/utils/ExtrusionJunction.hpp, Arachne/utils/HalfEdge.hpp, Arachne/utils/HalfEdgeGraph.hpp
-foundation-21	4	565	Arachne/utils/HalfEdgeNode.hpp, Arachne/utils/PolygonsPointIndex.hpp, Arachne/utils/PolygonsSegmentIndex.hpp, Arachne/utils/PolylineStitcher.cpp, Arachne/utils/PolylineStitcher.hpp
-foundation-22	4	351	Arachne/utils/SparseGrid.hpp, Arachne/utils/SparseLineGrid.hpp, Arachne/utils/SparsePointGrid.hpp, Arachne/utils/linearAlg2D.hpp
-foundation-23	2	2349	EdgeGrid.cpp, EdgeGrid.hpp, SurfaceCollection.cpp, SurfaceCollection.hpp
-foundation-24	4	1435	Geometry/Bicubic.hpp, Geometry/Circle.cpp, Geometry/Circle.hpp, Geometry/Curves.hpp, Geometry/Voronoi.cpp, Geometry/Voronoi.hpp
-foundation-25	2	2314	Geometry/VoronoiOffset.cpp, Geometry/VoronoiOffset.hpp, Geometry/VoronoiUtils.cpp, Geometry/VoronoiUtils.hpp
-foundation-26	4	1541	Geometry/VoronoiVisualUtils.hpp, Layer.cpp, Layer.hpp, Arachne/SkeletalTrapezoidationEdge.hpp, Arachne/SkeletalTrapezoidationJoint.hpp
-foundation-27	1	6424	Model.cpp, Model.hpp
-foundation-28	1	870	PrintBase.cpp, PrintBase.hpp
-foundation-29	1	9007	Print.cpp, Print.hpp
-foundation-30	1	3434	Fill/FillBase.cpp, Fill/FillBase.hpp
-foundation-31	4	2019	Support/SupportLayer.hpp, Support/SupportParameters.hpp, Support/TreeSupportCommon.hpp, GCode/ExtrusionProcessor.hpp
-foundation-32	1	42	GCode/PreciseSeamInternal.hpp
+foundation-06	1	3264	Utils.hpp, utils.cpp
+foundation-07	2	684	BoundingBox.cpp, BoundingBox.hpp, BrimEarsPoint.hpp
+foundation-08	1	5358	Config.cpp, Config.hpp
+foundation-09	4	2353	KDTreeIndirect.hpp, MarchingSquares.hpp, MeshSplitImpl.hpp, AABBTreeIndirect.hpp
+foundation-10	3	2133	Line.cpp, Line.hpp, Slicing.cpp, Slicing.hpp, AABBTreeLines.hpp
+foundation-11	2	2067	MultiPoint.cpp, MultiPoint.hpp, Polygon.cpp, Polygon.hpp
+foundation-12	1	1415	Polyline.cpp, Polyline.hpp
+foundation-13	1	17247	PrintConfig.cpp, PrintConfig.hpp
+foundation-14	3	1971	ExPolygon.cpp, ExPolygon.hpp, ExtrusionEntityCollection.cpp, ExtrusionEntityCollection.hpp, Flow.cpp, Flow.hpp
+foundation-15	1	1490	Geometry.cpp, Geometry.hpp
+foundation-16	2	2261	ExtrusionEntity.cpp, ExtrusionEntity.hpp, MutablePolygon.cpp, MutablePolygon.hpp
+foundation-17	1	419	Surface.cpp, Surface.hpp
+foundation-18	1	2196	ClipperUtils.cpp, ClipperUtils.hpp
+foundation-19	2	2492	TriangleMesh.cpp, TriangleMesh.hpp, ClipperZUtils.cpp, ClipperZUtils.hpp
+foundation-20	4	804	SLA/Concurrency.hpp, SLA/IndexedMesh.cpp, SLA/IndexedMesh.hpp, SLA/JobController.hpp, SLA/SupportPoint.hpp
+foundation-21	4	615	AABBMesh.cpp, AABBMesh.hpp, Arachne/utils/ExtrusionJunction.hpp, Arachne/utils/HalfEdge.hpp, Arachne/utils/HalfEdgeGraph.hpp
+foundation-22	4	565	Arachne/utils/HalfEdgeNode.hpp, Arachne/utils/PolygonsPointIndex.hpp, Arachne/utils/PolygonsSegmentIndex.hpp, Arachne/utils/PolylineStitcher.cpp, Arachne/utils/PolylineStitcher.hpp
+foundation-23	4	351	Arachne/utils/SparseGrid.hpp, Arachne/utils/SparseLineGrid.hpp, Arachne/utils/SparsePointGrid.hpp, Arachne/utils/linearAlg2D.hpp
+foundation-24	2	2349	EdgeGrid.cpp, EdgeGrid.hpp, SurfaceCollection.cpp, SurfaceCollection.hpp
+foundation-25	4	1435	Geometry/Bicubic.hpp, Geometry/Circle.cpp, Geometry/Circle.hpp, Geometry/Curves.hpp, Geometry/Voronoi.cpp, Geometry/Voronoi.hpp
+foundation-26	2	2314	Geometry/VoronoiOffset.cpp, Geometry/VoronoiOffset.hpp, Geometry/VoronoiUtils.cpp, Geometry/VoronoiUtils.hpp
+foundation-27	4	1541	Geometry/VoronoiVisualUtils.hpp, Layer.cpp, Layer.hpp, Arachne/SkeletalTrapezoidationEdge.hpp, Arachne/SkeletalTrapezoidationJoint.hpp
+foundation-28	1	6424	Model.cpp, Model.hpp
+foundation-29	1	870	PrintBase.cpp, PrintBase.hpp
+foundation-30	1	9007	Print.cpp, Print.hpp
+foundation-31	1	3434	Fill/FillBase.cpp, Fill/FillBase.hpp
+foundation-32	4	2019	Support/SupportLayer.hpp, Support/SupportParameters.hpp, Support/TreeSupportCommon.hpp, GCode/ExtrusionProcessor.hpp
+foundation-33	1	42	GCode/PreciseSeamInternal.hpp
