@@ -116,3 +116,59 @@ perf-check:
 # plan step 20); writes only what is missing, changes no file that already exists
 crate-skeletons:
     ./port/crate-skeletons
+# build (if needed) and run the per-stage dumper (R5, plan step 8) over <fixture> <configuration>;
+# *ARGS is variadic so the two driver modes' flags reach the program --
+# `just oracle-dump 20mm_cube base-fff --config port/goldens/configs/base-fff.json` and
+# `just oracle-dump 20mm_cube base-fff --set enable_support=1` both work (task 25-stage-dumper).
+# Builds oracle/stage-dump/ into the gitignored oracle/.cache/stage-dump/arm64 (never into
+# vendor/OrcaSlicer/), runs the program twice over the same fixture, configuration and ARGS --
+# once armed (registers and arms the slicing-pipeline hook, writing one dump per fired seam),
+# once with --unarmed (hook never registered, option left empty) -- and proves the two runs'
+# exported G-code agree at L1 through `just compare ... --require L1`: the flag is what makes
+# the check a check, since without --require the comparator exits 0 at every level including
+# none. Copies the armed run's dumps to the committed port/dumps/<fixture-stem>-<configuration>/
+# (05-oracle-provenance's path) and prints their count.
+#
+# When ARGS names neither --config nor --set, this recipe (not stage_dump's own CLI default,
+# which stays --set per oracle/stage-dump/README.md) resolves <configuration>'s own committed
+# golden, port/goldens/configs/<configuration>.json, and passes it as --config when that file
+# exists -- so the dumps committed under a configuration's name are actually that
+# configuration's resolved presets and overrides, not full_print_config() with none of them
+# applied (--set mode resolves no preset at all, R11). C12's accepted fallback tries the pinned
+# CLI first and constructs in code only where it cannot; every row this table has today
+# constructed through the pinned CLI and therefore has a golden, so this is the common case.
+# Falls back to the bare --set driver only for a configuration with no golden yet.
+oracle-dump fixture configuration *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    build_dir=oracle/.cache/stage-dump/arm64
+    cmake -S oracle/stage-dump -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
+    cmake --build "$build_dir" --target stage_dump >/dev/null
+    bin="$build_dir/stage_dump"
+    fixture_stem=$(basename "{{fixture}}" .stl)
+    pair_dir="port/dumps/${fixture_stem}-{{configuration}}"
+    run_root=oracle/.cache/stage-dump/runs
+    mkdir -p "$run_root"
+    armed_dir=$(mktemp -d "$run_root/armed-XXXXXX")
+    unarmed_dir=$(mktemp -d "$run_root/unarmed-XXXXXX")
+    golden_args=""
+    case " {{ARGS}} " in
+      *" --config "*|*" --set "*) ;;
+      *)
+        golden="port/goldens/configs/{{configuration}}.json"
+        if [ -f "$golden" ]; then
+          golden_args="--config $golden"
+        fi
+        ;;
+    esac
+    "$bin" "{{fixture}}" "{{configuration}}" --out "$armed_dir" $golden_args {{ARGS}}
+    "$bin" "{{fixture}}" "{{configuration}}" --out "$unarmed_dir" --unarmed $golden_args {{ARGS}}
+    just compare "$armed_dir/plate_1.gcode" "$unarmed_dir/plate_1.gcode" --require L1
+    echo "L1"
+    mkdir -p "$pair_dir"
+    rm -f "$pair_dir"/*.dump
+    cp "$armed_dir"/*.dump "$pair_dir"/
+    echo "copied $(ls "$pair_dir"/*.dump | wc -l | tr -d ' ') dump(s) to $pair_dir"
+    # Cleaned up only after a successful run reaches here; set -e leaves the two run
+    # directories in place on any earlier failure, where they are the evidence.
+    rm -rf "$armed_dir" "$unarmed_dir"
