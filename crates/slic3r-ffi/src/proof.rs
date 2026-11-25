@@ -53,7 +53,14 @@ mod ffi {
     }
 }
 
+pub use ffi::{path1_wipe_tower_object_id, path3_to_paths64, ProofZPoint};
+
+// Task 54-foundation-objectid-clonable's re-exports, appended as a second `pub use` statement
+// rather than added to the list above, so the line `31-proof-harness` committed is left
+// byte-identical and a sibling foundation task's own append conflicts textually. The blank line
+// above keeps the two statements in separate `use` runs, so `reorder_imports` sorts within each
+// and never moves the line above.
 pub use ffi::{
     path1_initial_layer_height, path1_initial_raft_layers, path1_initial_reduce_crossing_wall,
-    path1_technologies_flags, path1_wipe_tower_object_id, path3_to_paths64, ProofZPoint,
+    path1_technologies_flags,
 };
