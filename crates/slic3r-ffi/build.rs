@@ -1,15 +1,18 @@
 //! Compiles the vendored Clipper2 and admesh sources, the vendored (unmodified)
-//! `libnest2d.cpp`, and this crate's own `cxx` glue (including the Boost.Polygon Voronoi unit)
-//! onto one shared `cxx_build::Build`, so every unit inherits the same flags
-//! (`-ffp-contract=off` above all). qhull is bound against the superbuild's installed copy
-//! instead of a vendored source -- `qhullcpp`/`qhullstatic_r` in `ORACLE_LINK_LIBS` below; see
-//! the determination in `src/lib.rs`'s crate-doc table.
+//! `libnest2d.cpp`, this crate's own `cxx` glue (including the Boost.Polygon Voronoi unit), and
+//! the per-unit proof harness's two shims (task 31-proof-harness, plan step 18, R19:
+//! `cxx/proof_shims.cpp` and `cxx/include_vendored.cpp`) onto one shared `cxx_build::Build`, so
+//! every unit inherits the same flags (`-ffp-contract=off` above all). qhull is bound against the
+//! superbuild's installed copy instead of a vendored source -- `libqhullcpp.a`/
+//! `libqhullstatic_r.a` reach the link through the derived link line below; see the
+//! determination in `src/lib.rs`'s crate-doc table.
 //!
 //! `vendor/OrcaSlicer/` is never written to: every path here is read-only, and the pin
 //! (`f92a7c065c5718b8ef1baac1cd704df2911238f4`) is never edited, generated into or patched.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// `oracle/build-libslic3r`'s dependency superbuild install prefix -- the same default that
@@ -21,12 +24,57 @@ use std::path::{Path, PathBuf};
 const DEPS_PREFIX_VAR: &str = "GRAMPUS_DEPS_PREFIX";
 const DEPS_PREFIX_DEFAULT: &str = "vendor/OrcaSlicer/deps/build/arm64/OrcaSlicer_dep/usr/local";
 
-/// Step 7's own build directory, which already holds the built `libslic3r` (`liblibslic3r.a`)
-/// the libnest2d bridge links, and the `Ninja Multi-Config` config name
-/// `oracle/build-libslic3r` builds (`-DCMAKE_BUILD_TYPE=Release`, `cmake --build ... --config
-/// Release`).
-const ORACLE_BUILD_DIR: &str = "vendor/OrcaSlicer/build/arm64";
+/// Where `just oracle-build` (task 13-build-libslic3r) puts the Ninja Multi-Config build tree.
+/// Two things read it: task 31-proof-harness's derived link line for proof paths 1 and 3, and
+/// task 30-ffi-bridge-libraries' libnest2d bridge, which links the `libslic3r` built there rather
+/// than rebuilding it. Overridable for the same reason `DEPS_PREFIX_VAR` is above -- never
+/// hardcode a path that exists on one machine only.
+const ORACLE_BUILD_DIR_VAR: &str = "GRAMPUS_ORACLE_BUILD_DIR";
+const ORACLE_BUILD_DIR_DEFAULT: &str = "vendor/OrcaSlicer/build/arm64";
+
+/// The `Ninja Multi-Config` config name `oracle/build-libslic3r` builds
+/// (`-DCMAKE_BUILD_TYPE=Release`, `cmake --build ... --config Release`), which is the
+/// subdirectory its archives land in.
 const ORACLE_BUILD_CONFIG: &str = "Release";
+
+/// CMake's "Ninja Multi-Config" generator (plan step 7) splits a build tree into `build.ninja`
+/// (default-config `phony` aliases only), `build-<Config>.ninja` (an `include` of the real file)
+/// and `CMakeFiles/impl-<Config>.ninja` (the actual compile/link edges, with their `FLAGS`,
+/// `INCLUDES`, `LINK_LIBRARIES` and `LINK_FLAGS` variables) -- verified empirically against this
+/// pin's CMake 4.1 output (see task 31-proof-harness's pull request body): `build.ninja` and
+/// `build-Release.ninja` hold only a `phony` alias for `libslic3r_tests`/`fff_print_tests`, never
+/// the edge the task's own text names first. Checked in this order (not a single hardcoded name)
+/// because the real edge could in principle live in any of them on a different CMake version,
+/// and this still never hardcodes a *library* name -- only this generator's known file layout.
+const NINJA_FILES_TO_SEARCH: &[&str] = &[
+    "CMakeFiles/impl-Release.ninja",
+    "build-Release.ninja",
+    "build.ninja",
+];
+
+/// The two targets task 31-proof-harness names, in its own order: `libslic3r_tests` first,
+/// `fff_print_tests` as the fallback.
+const LINK_LINE_TARGETS: &[&str] = &["libslic3r_tests", "fff_print_tests"];
+
+/// A token containing any of these is dropped from the derived link line, for one reason in every
+/// case: **this crate compiles the same sources itself**, so linking the build tree's archive too
+/// would put two definitions of the same symbols on the link, and the crate's own compilation is
+/// the one its bridges' behaviour is measured against. Three of the four are that:
+/// `deps_src/clipper2/` (`CLIPPER2_VENDORED_SOURCES`, task 29-ffi-bridge-core),
+/// `deps_src/admesh/` (`ADMESH_VENDORED_SOURCES`) and `deps_src/libnest2d/`
+/// (`LIBNEST2D_VENDORED_SOURCE`) -- the latter two added by task 30-ffi-bridge-libraries along
+/// with the compilations that made them duplicates, the same pruning that task's own earlier,
+/// hand-enumerated link table did before this derivation replaced it.
+///
+/// Catch2's own archives are the exception: they exist only to give the oracle's
+/// `libslic3r_tests`/`fff_print_tests` binary a `main()` and its assertion macros, neither of
+/// which this crate's bridges or proof shims use.
+const DROPPED_LINK_SUBSTRINGS: &[&str] = &[
+    "deps_src/clipper2/",
+    "deps_src/admesh/",
+    "deps_src/libnest2d/",
+    "tests/catch2/",
+];
 
 /// The five sources `deps_src/clipper2/CMakeLists.txt:26-32` names -- exactly these, unmodified,
 /// at the pin. `clipper2_z.cpp` `#define`s `USINGZ` itself and `#include`s the other four
@@ -92,121 +140,26 @@ const LIBNEST2D_VENDORED_SOURCE: &str = "vendor/OrcaSlicer/deps_src/libnest2d/sr
 /// `ClipperUtils.cpp.o`'s own `DEFINES` line in `CMakeFiles/impl-Release.ninja`, inherited
 /// through `target_link_libraries(libslic3r PUBLIC ... libnest2d ...)`).
 ///
-/// That justification covers the TUs that, in the oracle build, actually depend on `libnest2d`
-/// (`libslic3r`'s own sources, this crate's `voronoi_glue.cc` has no such dependency but is not a
-/// `libnest2d` consumer either). It does not cover Clipper2's five sources or admesh's six: those
-/// are separate CMake targets in the oracle build and link neither `libnest2d` nor `libslic3r`,
-/// so the oracle's own command line gives them none of these four defines
+/// That justification covers the TUs that, in the oracle build, actually depend on `libnest2d`:
+/// `libslic3r`'s own sources -- which includes task 31-proof-harness's
+/// `cxx/include_vendored.cpp`, since the vendored `.cpp` it includes *is* a `libslic3r` source
+/// and the oracle compiles that file with exactly these four defines, so giving them to that TU
+/// moves it towards the oracle's command line rather than away from it.
+///
+/// It does not cover Clipper2's five sources or admesh's six: those are separate CMake targets in
+/// the oracle build and link neither `libnest2d` nor `libslic3r`, so the oracle's own command line
+/// gives them none of these four defines
 /// (`grep -rl LIBNEST2D vendor/OrcaSlicer/deps_src/clipper2 vendor/OrcaSlicer/deps_src/admesh`
 /// matches nothing). `cxx_build::Build` has one shared flag/define set for every `.file()` added
-/// to it, with no per-file override, so this crate gives all six Clipper2/admesh/libnest2d TUs
-/// the same four defines rather than the oracle's narrower per-target sets. Verified inert at the
-/// pin (the grep above), not assumed: neither vendored source tree ever references any
-/// `LIBNEST2D_*` identifier, so the defines have nothing to affect in either one.
+/// to it, with no per-file override, so this crate gives all of its TUs the same four defines
+/// rather than the oracle's narrower per-target sets. Verified inert at the pin (the grep above),
+/// not assumed: neither vendored source tree ever references any `LIBNEST2D_*` identifier, so the
+/// defines have nothing to affect in either one.
 const LIBNEST2D_DEFINES: &[&str] = &[
     "LIBNEST2D_THREADING_tbb",
     "LIBNEST2D_STATIC",
     "LIBNEST2D_OPTIMIZER_nlopt",
     "LIBNEST2D_GEOMETRIES_libslic3r",
-];
-
-/// Where one of [`ORACLE_LINK_LIBS`]'s archives lives.
-enum LibLoc {
-    /// `$DEPS_PREFIX/lib/lib<name>.a` -- the superbuild's own install.
-    DepsPrefixLib,
-    /// `$DEPS_PREFIX/lib/<subdir>/lib<name>.a`.
-    DepsPrefixLibSub(&'static str),
-    /// `$ORACLE_BUILD_DIR/<subdir>/$ORACLE_BUILD_CONFIG/lib<name>.a` -- step 7's own build
-    /// output.
-    OracleBuild(&'static str),
-}
-
-/// Step 7's full link line for an executable linking `libslic3r`
-/// (`CXX_EXECUTABLE_LINKER__libslic3r_tests_Release` in
-/// `vendor/OrcaSlicer/build/arm64/CMakeFiles/impl-Release.ninja`), in the same order, with three
-/// kinds of entry pruned because this crate provides an equivalent itself rather than linking
-/// the oracle's copy: Clipper2 (`clipper2.rs`'s own `CLIPPER2_VENDORED_SOURCES`, task
-/// 29-ffi-bridge-core), admesh (`ADMESH_VENDORED_SOURCES` above), and libnest2d
-/// (`LIBNEST2D_VENDORED_SOURCE` above -- its own compiled object, not `liblibnest2d.a`, is what
-/// actually makes it into this crate's archive). Catch2's two archives (the oracle's own test
-/// framework) are dropped too; nothing here depends on it. `liblibslic3r.a` is kept exactly where
-/// the oracle's own list repeats it.
-const ORACLE_LINK_LIBS: &[(LibLoc, &str)] = &[
-    (LibLoc::OracleBuild("src/libslic3r"), "libslic3r"),
-    (LibLoc::DepsPrefixLib, "draco"),
-    (LibLoc::OracleBuild("src/libslic3r"), "libslic3r"),
-    (LibLoc::OracleBuild("deps_src/miniz"), "miniz_static"),
-    (LibLoc::DepsPrefixLib, "opencv_world"),
-    (LibLoc::DepsPrefixLibSub("opencv4/3rdparty"), "tegra_hal"),
-    (LibLoc::DepsPrefixLib, "jpeg"),
-    (LibLoc::DepsPrefixLib, "png"),
-    (LibLoc::DepsPrefixLib, "assimp"),
-    (LibLoc::DepsPrefixLib, "expat"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKOffset"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKFillet"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKBool"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKDESTEP"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKDE"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKXCAF"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKXSBase"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKVCAF"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKCAF"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKLCAF"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKCDF"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKV3d"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKService"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKMesh"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKBO"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKPrim"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKHLR"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKShHealing"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKTopAlgo"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKGeomAlgo"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKBRep"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKGeomBase"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKG3d"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKG2d"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKMath"),
-    (LibLoc::DepsPrefixLibSub("occt"), "TKernel"),
-    (LibLoc::DepsPrefixLib, "draco"),
-    (LibLoc::OracleBuild("deps_src/glu-libtess"), "glu-libtess"),
-    (LibLoc::DepsPrefixLib, "jpeg"),
-    (LibLoc::OracleBuild("src/libslic3r"), "libslic3r_cgal"),
-    (LibLoc::DepsPrefixLib, "boost_log_setup"),
-    (LibLoc::DepsPrefixLib, "boost_log"),
-    (LibLoc::DepsPrefixLib, "boost_filesystem"),
-    (LibLoc::DepsPrefixLib, "boost_coroutine"),
-    (LibLoc::DepsPrefixLib, "boost_context"),
-    (LibLoc::DepsPrefixLib, "boost_serialization"),
-    (LibLoc::DepsPrefixLib, "boost_locale"),
-    (LibLoc::DepsPrefixLib, "boost_thread"),
-    (LibLoc::DepsPrefixLib, "boost_chrono"),
-    (LibLoc::DepsPrefixLib, "boost_atomic"),
-    (LibLoc::DepsPrefixLib, "boost_date_time"),
-    (LibLoc::DepsPrefixLib, "boost_exception"),
-    (LibLoc::DepsPrefixLib, "boost_program_options"),
-    (LibLoc::DepsPrefixLib, "boost_container"),
-    (LibLoc::DepsPrefixLib, "boost_nowide"),
-    (LibLoc::DepsPrefixLib, "gmpxx"),
-    (LibLoc::DepsPrefixLib, "mpfr"),
-    (LibLoc::DepsPrefixLib, "gmp"),
-    (LibLoc::OracleBuild("deps_src/mcut"), "mcut"),
-    (LibLoc::DepsPrefixLib, "libnoise_static"),
-    (LibLoc::DepsPrefixLib, "png"),
-    (LibLoc::DepsPrefixLib, "qhullcpp"),
-    (LibLoc::DepsPrefixLib, "qhullstatic_r"),
-    (LibLoc::OracleBuild("deps_src/qoi"), "qoi"),
-    (LibLoc::OracleBuild("lib"), "semver"),
-    // libtbbmalloc is linked once already, below, for Clipper2's own tbbmalloc check.
-    (LibLoc::DepsPrefixLib, "crypto"),
-    (LibLoc::DepsPrefixLib, "openvdb"),
-    (LibLoc::DepsPrefixLib, "boost_iostreams"),
-    (LibLoc::DepsPrefixLib, "boost_random"),
-    (LibLoc::DepsPrefixLib, "Half-2_5"),
-    (LibLoc::DepsPrefixLib, "blosc"),
-    (LibLoc::DepsPrefixLib, "slvs"),
-    (LibLoc::DepsPrefixLib, "tbb"),
-    (LibLoc::DepsPrefixLib, "nlopt"),
 ];
 
 /// A directory `build.rs` must never pass as an include path: the oracle build itself passes
@@ -235,6 +188,142 @@ fn is_disallowed_include(path: &Path) -> bool {
     }
 }
 
+/// Finds every line in `content` containing `needle` and, for each, collects the following
+/// `  NAME = value` lines -- CMake Ninja's own indentation for a build edge's variables -- up to
+/// the first line that is not indented that way (the next build edge, or a blank line). A CMake
+/// that emits the rule declaration (`rule CXX_EXECUTABLE_LINKER__<target>_Release`, no
+/// `LINK_LIBRARIES`) into the same per-config file as the build edge (which does carry
+/// `LINK_LIBRARIES`) would otherwise make the first match -- the rule block -- look like the
+/// whole story, so every match is collected and the caller picks the one that actually has the
+/// variable it needs. Purely textual: this crate already parses `oracle/build-libslic3r`'s and
+/// its own `CXX_FLAGS`/`build.flag(...)` lines the same way (`just port-check`'s drift check),
+/// never a CMake or Ninja grammar.
+fn ninja_edge_vars_all(content: &str, needle: &str) -> Vec<HashMap<String, String>> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut blocks = Vec::new();
+    for start in lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.contains(needle))
+        .map(|(i, _)| i)
+    {
+        let mut vars = HashMap::new();
+        for line in &lines[start + 1..] {
+            if !line.starts_with("  ") {
+                break;
+            }
+            if let Some(eq) = line.find(" = ") {
+                let name = line[2..eq].trim().to_string();
+                let value = line[eq + 3..].to_string();
+                vars.insert(name, value);
+            }
+        }
+        blocks.push(vars);
+    }
+    blocks
+}
+
+/// Searches `NINJA_FILES_TO_SEARCH` under `build_dir` for the Release-config link edge of
+/// `libslic3r_tests`, falling back to `fff_print_tests`. Returns the target name found, its
+/// `LINK_LIBRARIES` value, and the file it was read from (for `cargo:rerun-if-changed` and the
+/// build-time note naming where this derivation actually read its link line from). Keeps the
+/// first block, among every occurrence of the needle in the file, that actually carries a
+/// `LINK_LIBRARIES` variable -- not just the first occurrence of the needle itself, which may be
+/// the `rule` declaration rather than the build edge.
+fn find_link_libraries(build_dir: &Path) -> Option<(&'static str, String, PathBuf)> {
+    for rel in NINJA_FILES_TO_SEARCH {
+        let path = build_dir.join(rel);
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for target in LINK_LINE_TARGETS {
+            let needle = format!("CXX_EXECUTABLE_LINKER__{target}_Release");
+            for vars in ninja_edge_vars_all(&content, &needle) {
+                if let Some(libs) = vars.get("LINK_LIBRARIES") {
+                    return Some((target, libs.clone(), path));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Emits the `cargo:rustc-link-search`/`cargo:rustc-link-lib` directives the derived
+/// `LINK_LIBRARIES` string implies, token by token:
+/// - a static archive (`.a`) or Apple's text-based dylib stub (`.tbd`) becomes a search path
+///   (its parent directory, deduplicated) plus a named lib -- `static=` for `.a`, bare (dylib,
+///   the default kind) for `.tbd`; this is how the SDK's own `libz.tbd`/`libiconv.tbd` reach the
+///   link without this crate naming either one;
+/// - `-framework X` becomes `cargo:rustc-link-lib=framework=X`, never a raw
+///   `cargo:rustc-link-arg=-framework`: a plain `rustc-link-arg` only reaches this package's own
+///   binary targets, which this library crate has none of, while `rustc-link-lib` (every kind,
+///   `framework` included) propagates to a dependent crate's test binary the way linking a C
+///   library from a build script always has;
+/// - a bare `-lNAME` becomes `cargo:rustc-link-lib=NAME`, which is how `-lc++` here carries the
+///   C++ standard library onto the link without this crate hardcoding "c++" vs. "stdc++" itself;
+/// - anything else is warned about rather than silently dropped: this list is derived, not
+///   enumerated, so an unrecognised shape is exactly what a future libslic3r dependency change
+///   would produce, and the build must not go quietly wrong.
+///
+/// `LINK_FLAGS` (`-Wl,-search_paths_first`, `-Wl,-headerpad_max_install_names`) is deliberately
+/// not derived: both are policy flags for ld64's library search order and later
+/// `install_name_tool` edits, neither of which this crate's own, purely static link needs, and
+/// `cargo:rustc-link-arg` would not propagate them past this package's own (non-existent) binary
+/// targets regardless.
+fn emit_link_directives(build_dir: &Path, link_libraries: &str) {
+    let mut search_dirs: BTreeSet<PathBuf> = BTreeSet::new();
+    let tokens: Vec<&str> = link_libraries.split_whitespace().collect();
+    let mut i = 0;
+    while i < tokens.len() {
+        let tok = tokens[i];
+        if DROPPED_LINK_SUBSTRINGS.iter().any(|s| tok.contains(s)) {
+            i += 1;
+            continue;
+        }
+        if tok == "-framework" {
+            let name = tokens
+                .get(i + 1)
+                .unwrap_or_else(|| panic!("slic3r-ffi build.rs: '-framework' with no name"));
+            println!("cargo:rustc-link-lib=framework={name}");
+            i += 2;
+            continue;
+        }
+        if let Some(name) = tok.strip_prefix("-l") {
+            println!("cargo:rustc-link-lib={name}");
+            i += 1;
+            continue;
+        }
+        if tok.ends_with(".a") || tok.ends_with(".tbd") {
+            let path = if tok.starts_with('/') {
+                PathBuf::from(tok)
+            } else {
+                build_dir.join(tok)
+            };
+            let dir = path.parent().unwrap_or(build_dir).to_path_buf();
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let stem = file_name
+                .strip_prefix("lib")
+                .unwrap_or(file_name)
+                .trim_end_matches(".a")
+                .trim_end_matches(".tbd");
+            if search_dirs.insert(dir.clone()) {
+                println!("cargo:rustc-link-search=native={}", dir.display());
+            }
+            if tok.ends_with(".a") {
+                println!("cargo:rustc-link-lib=static={stem}");
+            } else {
+                println!("cargo:rustc-link-lib={stem}");
+            }
+            i += 1;
+            continue;
+        }
+        println!(
+            "cargo:warning=slic3r-ffi build.rs: unrecognised LINK_LIBRARIES token '{tok}', ignored"
+        );
+        i += 1;
+    }
+}
+
 fn main() {
     // Cargo runs build scripts with the crate directory as the current directory, not the
     // workspace root, so every path below is built from CARGO_MANIFEST_DIR rather than a bare
@@ -244,6 +333,7 @@ fn main() {
     let workspace_root = crate_dir.join("..").join("..");
 
     println!("cargo:rerun-if-env-changed={DEPS_PREFIX_VAR}");
+    println!("cargo:rerun-if-env-changed={ORACLE_BUILD_DIR_VAR}");
     for src in CLIPPER2_VENDORED_SOURCES
         .iter()
         .chain(ADMESH_VENDORED_SOURCES)
@@ -271,6 +361,11 @@ fn main() {
         "cxx/voronoi_shim.h",
         "cxx/voronoi_glue.cc",
         "src/voronoi.rs",
+        // task 31-proof-harness's two proof translation units and their bridge.
+        "cxx/proof_shims.h",
+        "cxx/proof_shims.cpp",
+        "cxx/include_vendored.cpp",
+        "src/proof.rs",
     ] {
         println!("cargo:rerun-if-changed={}", crate_dir.join(glue).display());
     }
@@ -279,7 +374,6 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root.join(DEPS_PREFIX_DEFAULT));
     let deps_prefix_lib = deps_prefix.join("lib");
-    let oracle_build_dir = workspace_root.join(ORACLE_BUILD_DIR);
 
     // Fail with a named error rather than silently falling back to a system or Homebrew TBB: the
     // oracle build passes -DCMAKE_IGNORE_PREFIX_PATH to keep Homebrew out, so a Homebrew
@@ -310,9 +404,45 @@ fn main() {
         );
     }
 
-    // The built libslic3r this crate's libnest2d bridge links -- step 7's own output. Checked
-    // the same way as tbbmalloc above: against the actual archive, not just the build directory's
-    // existence.
+    println!(
+        "cargo:rustc-link-search=native={}",
+        deps_prefix_lib.display()
+    );
+    println!("cargo:rustc-link-lib=static=tbbmalloc");
+
+    let clipper2_lib_include =
+        workspace_root.join("vendor/OrcaSlicer/deps_src/clipper2/Clipper2Lib/include");
+
+    // ---- the build tree `just oracle-build` produces, and the link line derived from it ----
+    //
+    // Two tasks need it and neither can run without it: task 31-proof-harness's proof paths 1
+    // and 3 (R19) link against the archives there, and task 30-ffi-bridge-libraries' libnest2d
+    // bridge links the `libslic3r` built there rather than rebuilding it (R17).
+    //
+    // The derived link line: the generated link command of `libslic3r_tests` (or
+    // `fff_print_tests`), read out of the CMake build tree rather than enumerated by name -- the
+    // one approach that cannot be wrong about which of the three places (the superbuild prefix,
+    // the main project's own `deps_src/` archives, or an Apple framework/`SLVS::slvs`) a given
+    // archive is in, and that stays correct when the pin's own dependency list changes. It is
+    // also what puts the superbuild's `libqhullcpp.a`/`libqhullstatic_r.a` on the link, which is
+    // the qhull determination task 30-ffi-bridge-libraries recorded (see `src/lib.rs`'s table):
+    // they appear in this line because the step-7 build itself linked that copy, which is
+    // stronger evidence than this file naming them.
+    let oracle_build_dir: PathBuf = env::var_os(ORACLE_BUILD_DIR_VAR)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root.join(ORACLE_BUILD_DIR_DEFAULT));
+
+    if !oracle_build_dir.is_dir() {
+        panic!(
+            "slic3r-ffi build.rs: no oracle build tree at {:?} (from {ORACLE_BUILD_DIR_VAR}, \
+             default {ORACLE_BUILD_DIR_DEFAULT}). Run `just oracle-build` first.",
+            oracle_build_dir
+        );
+    }
+
+    // The built libslic3r itself, checked the same way as tbbmalloc above: against the actual
+    // archive, not just the build directory's existence, so a half-populated tree fails here with
+    // a named error rather than obscurely at the link step.
     let libslic3r_archive = oracle_build_dir
         .join("src/libslic3r")
         .join(ORACLE_BUILD_CONFIG)
@@ -320,75 +450,116 @@ fn main() {
     if !libslic3r_archive.is_file() {
         panic!(
             "slic3r-ffi build.rs: no liblibslic3r.a under {:?}. Run `just oracle-build` first \
-             (task 13-build-libslic3r) -- this crate's libnest2d bridge links step 7's built \
-             libslic3r, it does not rebuild it.",
+             (task 13-build-libslic3r) -- this crate's libnest2d bridge and its two proof paths \
+             link step 7's built libslic3r, they do not rebuild it.",
             libslic3r_archive
         );
     }
 
+    let (link_target, link_libraries, link_ninja_file) = find_link_libraries(&oracle_build_dir)
+        .unwrap_or_else(|| {
+            panic!(
+                "slic3r-ffi build.rs: no 'libslic3r_tests' or 'fff_print_tests' Release link \
+                 edge found under {:?}. Run `just oracle-build` first -- its STAGE2_TARGETS \
+                 builds both with BUILD_TESTS=ON.",
+                oracle_build_dir
+            )
+        });
+    // Plain stdout, not a `cargo:warning=` -- this is a normal, expected build step on every
+    // build of this crate (by every downstream task, forever), not something to flag. Visible
+    // with `cargo build -vv` for anyone who needs to know which file the link line actually
+    // came from.
     println!(
-        "cargo:rustc-link-search=native={}",
-        deps_prefix_lib.display()
+        "slic3r-ffi build.rs: deriving the link line from {link_target}'s link edge in {}",
+        link_ninja_file.display()
     );
-    println!("cargo:rustc-link-lib=static=tbbmalloc");
-    // Two system dylibs the oracle link line pulls from the macOS SDK sysroot
-    // (`libz.tbd`/`libiconv.tbd` under the Xcode SDK, not under any of
-    // `DISALLOWED_INCLUDE_PREFIXES` -- those are include-path prefixes, this is a link library),
-    // resolved the ordinary way through the linker's default system search path rather than by
-    // pointing at the SDK's `.tbd` stub file directly.
-    println!("cargo:rustc-link-lib=dylib=z");
-    println!("cargo:rustc-link-lib=dylib=iconv");
+    println!("cargo:rerun-if-changed={}", link_ninja_file.display());
+    // NOTE: `link_libraries`'s own tokens can carry CMake's *absolute* paths, baked in at the
+    // configure time of whichever checkout built `oracle_build_dir` -- normally this one, but a
+    // build tree cloned copy-on-write from another checkout (for example a worktree created from
+    // a checkout that already ran `just oracle-build`) keeps that other checkout's paths. So the
+    // `tbbmalloc`/TBB-header guard above, which resolves strictly from `DEPS_PREFIX_VAR`/
+    // `deps_prefix`, can pass while some of the archives `emit_link_directives` below actually
+    // points the linker at live under a different prefix than the one just validated. Harmless
+    // when the two coincide (an ordinary clone, or CI); the fix, if this ever needs one, is
+    // deriving the guard's own path from a token of `link_libraries` instead of from
+    // `DEPS_PREFIX_VAR` -- not weakening the guard, which still correctly proves *some* tbbmalloc
+    // is present.
+    emit_link_directives(&oracle_build_dir, &link_libraries);
 
-    let mut search_dirs_emitted: BTreeSet<PathBuf> = BTreeSet::new();
-    search_dirs_emitted.insert(deps_prefix_lib.clone());
-    for (loc, name) in ORACLE_LINK_LIBS {
-        let dir = match loc {
-            LibLoc::DepsPrefixLib => deps_prefix_lib.clone(),
-            LibLoc::DepsPrefixLibSub(sub) => deps_prefix_lib.join(sub),
-            LibLoc::OracleBuild(sub) => oracle_build_dir.join(sub).join(ORACLE_BUILD_CONFIG),
-        };
-        if search_dirs_emitted.insert(dir.clone()) {
-            println!("cargo:rustc-link-search=native={}", dir.display());
-        }
-        println!("cargo:rustc-link-lib=static={name}");
-    }
-
-    let clipper2_lib_include =
-        workspace_root.join("vendor/OrcaSlicer/deps_src/clipper2/Clipper2Lib/include");
     let admesh_include = workspace_root.join("vendor/OrcaSlicer/deps_src/admesh");
-    let admesh_parent_include = workspace_root.join("vendor/OrcaSlicer/deps_src");
+    // `deps_src` itself, the parent, is on the path twice over: `admesh`'s own headers reach
+    // their siblings through it (`deps_src/admesh/CMakeLists.txt:14-18`), and `Semver.hpp`
+    // (pulled in by `libslic3r.h`, which `ClipperZUtils.hpp`/`ObjectID.hpp` both reach)
+    // `#include`s "semver/semver.h" while the vendored file sits flat at
+    // `deps_src/semver/semver.h`. The real oracle build's own `INCLUDES` line for the latter
+    // names `deps_src/semver` directly and still resolves the same `#include`, but only because
+    // that compile also loads a precompiled header built with CMake's own, different include
+    // set; this crate compiles with no PCH, so it needs the path that actually resolves this
+    // include on its own (verified: see task 31-proof-harness's pull request body).
+    let deps_src_include = workspace_root.join("vendor/OrcaSlicer/deps_src");
     let libnest2d_include = workspace_root.join("vendor/OrcaSlicer/deps_src/libnest2d/include");
-    let libslic3r_src_include = workspace_root.join("vendor/OrcaSlicer/src");
+    let miniz_include = workspace_root.join("vendor/OrcaSlicer/deps_src/miniz");
+    let vendor_src_dir = workspace_root.join("vendor/OrcaSlicer/src");
+    let libslic3r_src_dir = vendor_src_dir.join("libslic3r");
     let deps_prefix_include = deps_prefix.join("include");
     // Eigen installs itself one level deeper than the rest of the superbuild
     // (`$prefix/include/eigen3/Eigen/...`, not `$prefix/include/Eigen/...` -- see the
     // `-isystem .../include/eigen3` entry on `ClipperUtils.cpp.o`'s own `INCLUDES` line in
     // `CMakeFiles/impl-Release.ninja`), which `admesh/stl.h:31`'s `#include <Eigen/Geometry>`
-    // needs.
+    // needs. OCCT and OpenCV install themselves the same way, and libslic3r's own headers reach
+    // both.
     let deps_prefix_eigen3_include = deps_prefix_include.join("eigen3");
+    let deps_prefix_occt_include = deps_prefix_include.join("occt");
+    let deps_prefix_opencv4_include = deps_prefix_include.join("opencv4");
     // `libslic3r.h:4`'s `#include "libslic3r_version.h"` is a CMake-generated file that lands in
     // the build directory, not the source tree (`CMAKE_CURRENT_BINARY_DIR`, the same `-I
     // .../build/arm64/src/libslic3r` entry on `ClipperUtils.cpp.o`'s own `INCLUDES` line) --
     // step 7's own build already generated it, this crate does not.
     let libslic3r_build_include = oracle_build_dir.join("src/libslic3r");
 
-    // Checkable from this list, which the Done-when condition asks for: every include directory
-    // this build adds to the shared `Build`, printed so `cargo build -p slic3r-ffi -vv`'s output
-    // (or this list itself) shows it, and asserted here to carry none of
-    // `DISALLOWED_INCLUDE_PREFIXES` -- the superbuild prefix's own path ends in `usr/local` but
-    // does not *start* with `/usr/local`, so it passes.
-    let include_dirs = [
-        crate_dir.clone(),
+    // The include set for the whole shared `Build`, in two groups.
+    //
+    // `-isystem`, not plain `-I`, for every vendor/superbuild/dependency directory -- exactly how
+    // the oracle build itself puts them on `libnest2d.cpp.o`'s command line
+    // (`CMakeFiles/impl-Release.ninja`'s `INCLUDES` line). This is not cosmetic: clang suppresses
+    // diagnostics raised *inside* a system header, and without it this exact header chain
+    // (`libnest2d.hpp` -> `geometries.hpp` -> `utils/boost_alg.hpp` -> `boost/geometry.hpp` ->
+    // `boost/qvm/quat_traits.hpp`) fails to compile under this toolchain
+    // (`-Wmissing-template-arg-list-after-template-kw`) when included as an ordinary `-I` --
+    // confirmed by reproducing the error with `-I` and clearing it by switching to `-isystem`,
+    // not guessed. A directory passed as *both* `-I` and `-isystem` is deduplicated by clang
+    // keeping the earlier, non-system `-I` entry, so a dependency directory must appear in this
+    // group and nowhere else, or the suppression is silently lost.
+    let isystem_include_dirs = [
         clipper2_lib_include.clone(),
         admesh_include.clone(),
-        admesh_parent_include.clone(),
+        deps_src_include.clone(),
         libnest2d_include.clone(),
-        libslic3r_src_include.clone(),
+        miniz_include.clone(),
+        vendor_src_dir.clone(),
         deps_prefix_include.clone(),
         deps_prefix_eigen3_include.clone(),
+        deps_prefix_occt_include.clone(),
+        deps_prefix_opencv4_include.clone(),
+    ];
+    // Plain `-I`: this crate's own directory (for `cxx/...` includes), the vendored libslic3r
+    // source directory and the build tree's generated-header directory -- the three the oracle
+    // build itself passes as ordinary `-I` entries too.
+    let plain_include_dirs = [
+        crate_dir.clone(),
+        libslic3r_src_dir.clone(),
+        libslic3r_src_dir.join("TextureToColor"),
         libslic3r_build_include.clone(),
     ];
-    for dir in &include_dirs {
+
+    // Checkable from this list, which task 30-ffi-bridge-libraries' Done-when condition asks for:
+    // every include directory this build adds to the shared `Build` -- and therefore to every
+    // unit on it, this task's four bridges and task 31-proof-harness's two proof units alike --
+    // printed so `cargo build -p slic3r-ffi -vv`'s output (or this list itself) shows it, and
+    // asserted here to carry none of `DISALLOWED_INCLUDE_PREFIXES`. The superbuild prefix's own
+    // path ends in `usr/local` but does not *start* with `/usr/local`, so it passes.
+    for dir in isystem_include_dirs.iter().chain(&plain_include_dirs) {
         println!(
             "cargo:warning=slic3r-ffi build.rs include path: {}",
             dir.display()
@@ -409,6 +580,7 @@ fn main() {
         "src/qhull.rs",
         "src/libnest2d.rs",
         "src/voronoi.rs",
+        "src/proof.rs",
     ]);
     // `-ffp-contract=off`: not a preference. The library this crate links and the one
     // `oracle/build-libslic3r` builds are the normative oracle for every per-unit and per-stage
@@ -416,34 +588,18 @@ fn main() {
     // otherwise, by grepping for this exact call below -- not a bare substring anywhere in this
     // file, which a stray prose mention of the flag could satisfy without the flag reaching the
     // compiler). Applied to the shared `Build` before any `.file()` call, so a unit a later task
-    // adds cannot miss it.
+    // adds -- or the four bridges and two proof units below -- cannot miss it.
     build.flag("-ffp-contract=off");
     for define in LIBNEST2D_DEFINES {
         build.define(define, None);
     }
-    build
-        .std("c++17")
-        .include(&crate_dir)
-        .include(&libslic3r_build_include);
-    // Every vendor/superbuild/dependency directory goes on the path as `-isystem`, not plain
-    // `-I` -- exactly how the oracle build itself puts them on `libnest2d.cpp.o`'s command line
-    // (`CMakeFiles/impl-Release.ninja`'s `INCLUDES` line). This is not cosmetic: clang suppresses
-    // diagnostics raised *inside* a system header, and without it this exact header chain
-    // (`libnest2d.hpp` -> `geometries.hpp` -> `utils/boost_alg.hpp` -> `boost/geometry.hpp` ->
-    // `boost/qvm/quat_traits.hpp`) fails to compile under this toolchain
-    // (`-Wmissing-template-arg-list-after-template-kw`) when included as an ordinary `-I` --
-    // confirmed by reproducing the error with `-I` and clearing it by switching to `-isystem`,
-    // not guessed.
-    for dir in [
-        &clipper2_lib_include,
-        &admesh_include,
-        &admesh_parent_include,
-        &libnest2d_include,
-        &libslic3r_src_include,
-        &deps_prefix_include,
-        &deps_prefix_eigen3_include,
-    ] {
-        build.flag(&format!("-isystem{}", dir.display()));
+    build.std("c++17");
+    for dir in &plain_include_dirs {
+        build.include(dir);
+    }
+    for dir in &isystem_include_dirs {
+        build.flag("-isystem");
+        build.flag(dir.to_str().expect("utf-8 workspace path"));
     }
     build
         .file(crate_dir.join("cxx/clipper2_plain.cc"))
@@ -451,7 +607,9 @@ fn main() {
         .file(crate_dir.join("cxx/admesh_glue.cc"))
         .file(crate_dir.join("cxx/qhull_glue.cc"))
         .file(crate_dir.join("cxx/libnest2d_glue.cc"))
-        .file(crate_dir.join("cxx/voronoi_glue.cc"));
+        .file(crate_dir.join("cxx/voronoi_glue.cc"))
+        .file(crate_dir.join("cxx/proof_shims.cpp"))
+        .file(crate_dir.join("cxx/include_vendored.cpp"));
     for src in CLIPPER2_VENDORED_SOURCES
         .iter()
         .chain(ADMESH_VENDORED_SOURCES)
@@ -459,5 +617,20 @@ fn main() {
     {
         build.file(workspace_root.join(src));
     }
-    build.compile("slic3r-ffi-bridges");
+    // The vendored libslic3r files task 31-proof-harness's two proof units reach: proof path 3
+    // `#include`s `ClipperZUtils.cpp` outright, so a change to either file (or to the headers the
+    // shims call through) must rebuild this crate.
+    for rerun in [
+        libslic3r_src_dir.join("ObjectID.hpp"),
+        libslic3r_src_dir.join("ObjectID.cpp"),
+        libslic3r_src_dir.join("ClipperZUtils.hpp"),
+        libslic3r_src_dir.join("ClipperZUtils.cpp"),
+    ] {
+        println!("cargo:rerun-if-changed={}", rerun.display());
+    }
+    // One archive for every source on the shared `Build`: this crate's own Clipper2/admesh/
+    // libnest2d compilations, its four bridge glue units and the proof harness's two shims all
+    // need the same flags, so they are one `cc::Build` and one output archive rather than several
+    // with a flag that could drift between them.
+    build.compile("slic3r-ffi-cxx");
 }
