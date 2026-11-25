@@ -14,10 +14,14 @@ namespace voronoi {
 
 namespace bp = boost::polygon;
 
-// `src/libslic3r/Geometry/Voronoi.hpp:33-36`'s own aliases: the diagram is always
-// `voronoi_diagram<double>` regardless of the integer input coordinate type construct_voronoi
-// consumes (`boost/polygon/voronoi.hpp`'s own doc comment: input coordinates are 32-bit signed
-// integers; the builder's internal fixed-point arithmetic produces the `double` diagram).
+// The diagram is `voronoi_diagram<double>` regardless of the integer input coordinate type
+// construct_voronoi consumes (`boost/polygon/voronoi.hpp`'s own doc comment: input coordinates
+// are 32-bit signed integers; the builder's internal fixed-point arithmetic produces the
+// `double` diagram). This is the same `coordinate_type` `Voronoi.hpp:33-36`'s own
+// `voronoi_diagram_type` alias parameterizes with -- but that file's `point_type`/`segment_type`
+// aliases (also `:33-36`) are therefore `point_data<double>`/`segment_data<double>`, not the
+// `int32_t` input types this bridge builds below; this bridge binds the builder's own documented
+// 32-bit input range, not those aliases. See `voronoi.rs`'s module doc for the full citation.
 using VD = bp::voronoi_diagram<double>;
 
 CVoronoiStats voronoi_diagram_stats(const rust::Vec<CSegment> &segments) {

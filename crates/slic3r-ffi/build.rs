@@ -51,6 +51,25 @@ const ADMESH_VENDORED_SOURCES: &[&str] = &[
 ];
 
 /// The vendored, unmodified libnest2d translation unit (`deps_src/libnest2d/CMakeLists.txt:21`).
+///
+/// **Known divergence from the oracle's own command line for this TU, not fixed here.** The
+/// oracle compiles this file with `-DNDEBUG` (and several more defines this crate's command line
+/// omits: `-D_HAS_AUTO_PTR_ETC=0`, `-DBOOST_NO_CXX98_FUNCTION_BASE`, `-DUSE_TBB`, ...; see
+/// `vendor/OrcaSlicer/build/arm64/CMakeFiles/impl-Release.ninja`'s own `libnest2d.cpp.o` entry),
+/// while `cargo build`/`cargo test` add no `-DNDEBUG` under the `dev`/`test` profile. Measured
+/// directly against this crate's own build (not assumed, and not the evidence another reviewer
+/// already measured): `nm -u` on the compiled object this build produces lists one undefined
+/// `___assert_rtn`, where the oracle's own `libnest2d.cpp.o` (built by `oracle/build-libslic3r`,
+/// `deps_src/libnest2d/CMakeFiles/libnest2d.dir/Release/src/libnest2d.cpp.o`) has zero among its
+/// 150 undefined symbols. So an `assert()` inside `libnest2d.hpp`'s header-only templates (e.g.
+/// `nfpplacer.hpp:247`) is live in this crate's object and compiled out of the oracle's
+/// `liblibslic3r.a` for the same inline functions -- an ODR mismatch and a behaviour divergence a
+/// later task porting against this bridge (`TreeSupport.cpp`) should know about. Not fixed here:
+/// adding `-DNDEBUG` crate-wide would also reach Clipper2's and admesh's TUs (task
+/// 29-ffi-bridge-core's and this task's own committed smoke-test numbers were measured without
+/// it), and no `Done when` line in this task asks for NDEBUG parity -- only the four
+/// `LIBNEST2D_*` defines below are named. Left as a recorded hazard, not silently accepted; see
+/// the pull request body.
 const LIBNEST2D_VENDORED_SOURCE: &str = "vendor/OrcaSlicer/deps_src/libnest2d/src/libnest2d.cpp";
 
 /// The four compile definitions the vendored target makes `PUBLIC`
@@ -58,6 +77,18 @@ const LIBNEST2D_VENDORED_SOURCE: &str = "vendor/OrcaSlicer/deps_src/libnest2d/sr
 /// the oracle build applies them to every target depending on `libnest2d` (they show up on
 /// `ClipperUtils.cpp.o`'s own `DEFINES` line in `CMakeFiles/impl-Release.ninja`, inherited
 /// through `target_link_libraries(libslic3r PUBLIC ... libnest2d ...)`).
+///
+/// That justification covers the TUs that, in the oracle build, actually depend on `libnest2d`
+/// (`libslic3r`'s own sources, this crate's `voronoi_glue.cc` has no such dependency but is not a
+/// `libnest2d` consumer either). It does not cover Clipper2's five sources or admesh's six: those
+/// are separate CMake targets in the oracle build and link neither `libnest2d` nor `libslic3r`,
+/// so the oracle's own command line gives them none of these four defines
+/// (`grep -rl LIBNEST2D vendor/OrcaSlicer/deps_src/clipper2 vendor/OrcaSlicer/deps_src/admesh`
+/// matches nothing). `cxx_build::Build` has one shared flag/define set for every `.file()` added
+/// to it, with no per-file override, so this crate gives all six Clipper2/admesh/libnest2d TUs
+/// the same four defines rather than the oracle's narrower per-target sets. Verified inert at the
+/// pin (the grep above), not assumed: neither vendored source tree ever references any
+/// `LIBNEST2D_*` identifier, so the defines have nothing to affect in either one.
 const LIBNEST2D_DEFINES: &[&str] = &[
     "LIBNEST2D_THREADING_tbb",
     "LIBNEST2D_STATIC",
@@ -174,12 +205,20 @@ const ORACLE_LINK_LIBS: &[(LibLoc, &str)] = &[
 const DISALLOWED_INCLUDE_PREFIXES: &[&str] = &["/usr/local", "/opt/homebrew", "/opt/local"];
 
 fn is_disallowed_include(path: &Path) -> bool {
-    let Ok(canon) = path.canonicalize() else {
-        return false;
-    };
-    DISALLOWED_INCLUDE_PREFIXES
-        .iter()
-        .any(|prefix| canon.starts_with(prefix))
+    // A directory that does not exist yet cannot be canonicalized, but it would still reach the
+    // compiler as a dangling `-isystem` entry (clang ignores a missing `-isystem` dir silently),
+    // so this guard must not treat canonicalize failure as "not disallowed" -- that would let a
+    // not-yet-created path under one of the disallowed prefixes through unchecked, and the
+    // failure would then surface much later as a confusing header error instead of this panic.
+    // Fall back to a lexical prefix check on the path as given.
+    match path.canonicalize() {
+        Ok(canon) => DISALLOWED_INCLUDE_PREFIXES
+            .iter()
+            .any(|prefix| canon.starts_with(prefix)),
+        Err(_) => DISALLOWED_INCLUDE_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix)),
+    }
 }
 
 fn main() {

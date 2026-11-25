@@ -17,9 +17,11 @@ mod ffi {
     }
 
     /// One `stl_facet` (`stl.h:55-65`): an outward unit normal and three vertices. The normal is
-    /// supplied, not computed on either side of the bridge -- `stl_calculate_volume`
-    /// (`deps_src/admesh/util.cpp`'s `get_volume`) reads the *stored* normal to get a face's
-    /// signed distance from the reference point, it does not recompute one from the vertices.
+    /// supplied, not computed by this bridge, but `stl_calculate_volume`
+    /// (`deps_src/admesh/util.cpp`) does not simply trust it for the whole computation: `get_volume`'s
+    /// height term reads the *stored* normal (`util.cpp:282`), while its area term (`get_area`,
+    /// `util.cpp:271-273`) derives its own normal from the vertices. A facet whose stored normal
+    /// disagrees with its vertices changes only the height factor, not the area one.
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct CFacet {
         normal: CVertex,

@@ -9,12 +9,21 @@
 //! resolved against the superbuild prefix's `include` directory and no other Boost on the
 //! machine.
 //!
-//! It exposes the builder over `boost::polygon::construct_voronoi` for segment input
-//! (`int32_t`-coordinate `point_data`/`segment_data`, the range `voronoi.hpp`'s own doc comment
-//! requires) and the `voronoi_diagram<double>` `Voronoi.hpp:33-36` declares, returning its cell,
-//! vertex and edge counts across the bridge. `Geometry/Voronoi.{hpp,cpp}` and its
-//! `VoronoiDiagram` class are libslic3r files with manifest rows of their own; they are ported
-//! against this bridge in a later task, not here.
+//! It exposes `boost::polygon::construct_voronoi` over segment input built from
+//! `boost::polygon::point_data<int32_t>`/`segment_data<int32_t>` -- the 32-bit signed integer
+//! range `boost/polygon/voronoi.hpp`'s own doc comment asks for -- and reads back the resulting
+//! `voronoi_diagram<double>`'s cell, vertex and edge counts, not (yet) its actual cells, vertices
+//! and edges. This is narrower on both ends than `Voronoi.hpp:200-207` feeds the builder in
+//! production: `segment_traits<VoronoiDiagram::Segment>` over 64-bit `Slic3r::Point`
+//! (`coord_t = int64_t`, `libslic3r.h:48`), through its own traits specialization, not the
+//! `point_data<double>`/`segment_data<double>` aliases `Voronoi.hpp:33-36` itself declares (those
+//! are `voronoi_diagram_type::coordinate_type`-parameterized, i.e. double, matching the output
+//! diagram, not this bridge's int32 input). The int32 choice is deliberate -- it is the type the
+//! builder's own doc comment is written for -- but it is this bridge's own narrower surface, not
+//! an aliasing of those lines; a later task that ports `Geometry/Voronoi.{hpp,cpp}` and its
+//! `VoronoiDiagram` class against this bridge will need to extend it to the int64 input and to
+//! the diagram's actual topology, the same way `admesh.rs` and `clipper2.rs` grow their own bound
+//! surface per ported unit rather than up front.
 
 #[cxx::bridge(namespace = "slic3r_ffi::voronoi")]
 mod ffi {

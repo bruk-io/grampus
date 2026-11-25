@@ -15,7 +15,7 @@
 namespace slic3r_ffi {
 namespace nest2d {
 
-CEdgeCacheStats libnest2d_edge_cache_stats(const rust::Vec<CPoint> &contour);
+CEdgeCacheStats libnest2d_edge_cache_stats(const rust::Vec<CPoint> &contour, double distance);
 
 } // namespace nest2d
 } // namespace slic3r_ffi

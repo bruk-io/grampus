@@ -11,7 +11,16 @@ namespace nest2d {
 // way (`nfpplacer.hpp:286`). `EdgeCache` is header-only template code -- a later task ports
 // `TreeSupport.cpp` itself against this binding, this one just proves it compiles and runs
 // against this crate's build of `libnest2d.cpp`.
-CEdgeCacheStats libnest2d_edge_cache_stats(const rust::Vec<CPoint> &contour) {
+//
+// Guard this bridge owns, not the vendored header: `EdgeCache::createCache`
+// (`nfpplacer.hpp:173-186`) takes `next = std::next(first)` before checking `first != endit`, so
+// a contour of fewer than two points walks `next` past `endit` with no bounds check. No in-scope
+// caller constructs an `EdgeCache` over such a contour, but this fn is a safe Rust entry point,
+// so it refuses the input itself rather than relying on that.
+CEdgeCacheStats libnest2d_edge_cache_stats(const rust::Vec<CPoint> &contour, double distance) {
+    if (contour.size() < 2)
+        return CEdgeCacheStats{};
+
     Slic3r::ExPolygon expoly;
     expoly.contour.points.reserve(contour.size());
     for (const CPoint &p : contour)
@@ -21,9 +30,9 @@ CEdgeCacheStats libnest2d_edge_cache_stats(const rust::Vec<CPoint> &contour) {
 
     CEdgeCacheStats stats{};
     stats.circumference = cache.circumference();
-    Slic3r::Point first = cache.coords(0.0);
-    stats.first_point.x = first.x();
-    stats.first_point.y = first.y();
+    Slic3r::Point point = cache.coords(distance);
+    stats.point_at_distance.x = point.x();
+    stats.point_at_distance.y = point.y();
     return stats;
 }
 

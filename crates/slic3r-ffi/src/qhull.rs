@@ -1,12 +1,14 @@
 //! The `cxx` bridge over qhull (task 30-ffi-bridge-libraries, plan step 17, R17).
 //!
 //! **Which qhull.** `deps_src/qhull/CMakeLists.txt:13` is `find_package(Qhull 7.2 QUIET)`, and
-//! the vendored sources at `:20-137` are compiled only when that lookup fails (`:15`,
-//! `Qhull_FOUND`). The step-7 build's own configure log
-//! (`oracle/.cache/main-oracle-build.log`, the `-- Using qhull from system.` line inside the
-//! `libslic3r` configure block, not the dependency superbuild's own `dep_Qhull` build earlier in
-//! the same log) prints exactly the message `deps_src/qhull/CMakeLists.txt:17` emits on success,
-//! and `vendor/OrcaSlicer/build/arm64/CMakeCache.txt`'s `Qhull_DIR` points at
+//! the vendored sources -- the combined source list at `:88-129`, built into one library at
+//! `:134-135` with `:145`'s include path, all inside the `else(Qhull_FOUND)` branch opened at
+//! `:28` -- are compiled only when that lookup fails (`:17`, `if(Qhull_FOUND)`). The step-7
+//! build's own configure log (`oracle/.cache/main-oracle-build.log`, the `-- Using qhull from
+//! system.` line inside the `libslic3r` configure block, not the dependency superbuild's own
+//! `dep_Qhull` build earlier in the same log) prints exactly the message
+//! `deps_src/qhull/CMakeLists.txt:19` emits on success, and
+//! `vendor/OrcaSlicer/build/arm64/CMakeCache.txt`'s `Qhull_DIR` points at
 //! `deps/build/arm64/OrcaSlicer_dep/usr/local/lib/cmake/Qhull` -- the superbuild's own install,
 //! which built Qhull 8.0.2 (`deps/Qhull/Qhull.cmake:3`, `v8.0.2.zip`). So the step-7 build linked
 //! the superbuild's Qhull, not the vendored copy: this bridge links that prefix's installed
