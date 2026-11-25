@@ -78,15 +78,38 @@ Paths are relative to `vendor/OrcaSlicer`.
 
 ### Pipeline steps
 
-From `src/libslic3r/Print.hpp`. These are the stage boundaries the oracle dumps at.
+From `src/libslic3r/Print.hpp`. These are the stage boundaries the oracle dumps at. "Hook seam"
+says only whether `Print::process()` fires `Print::set_slicing_pipeline_hook_fn`'s hook for that
+step (i.e. the step has a value in `SlicingPipelineStepPlugin`, `Print.hpp:132`, with a live fire
+site in `Print.cpp`); it carries no reason and is not where R5's own seam list or its reasons are
+read -- that is R5 in `intent/libslic3r-rust-port/spec.md`, restated nowhere else.
 
-Per object (`PrintObjectStep`), in order: `posSlice`, `posPerimeters`,
-`posEstimateCurledExtrusions`, `posPrepareInfill`, `posInfill`, `posIroning`, `posContouring`,
-`posSupportMaterial`, `posSimplifyPath`, `posSimplifySupportPath`,
-`posDetectOverhangsForLift`, `posSimplifyWall`, `posSimplifyInfill`.
+Per object (`PrintObjectStep`), in order:
 
-Per print (`PrintStep`): `psWipeTower` (also tool ordering), `psSkirtBrim`, `psGCodeExport`,
-`psConflictCheck`.
+| Step | Hook seam |
+|---|---|
+| `posSlice` | yes |
+| `posPerimeters` | yes |
+| `posEstimateCurledExtrusions` | yes |
+| `posPrepareInfill` | yes |
+| `posInfill` | yes |
+| `posIroning` | yes |
+| `posContouring` | yes |
+| `posSupportMaterial` | yes |
+| `posSimplifyPath` | yes |
+| `posSimplifySupportPath` | no |
+| `posDetectOverhangsForLift` | yes |
+| `posSimplifyWall` | no |
+| `posSimplifyInfill` | no |
+
+Per print (`PrintStep`), in order:
+
+| Step | Hook seam |
+|---|---|
+| `psWipeTower` (also tool ordering) | yes |
+| `psSkirtBrim` | yes |
+| `psGCodeExport` | no |
+| `psConflictCheck` | no |
 
 ### Relevant upstream build options
 
