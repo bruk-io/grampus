@@ -1,0 +1,13 @@
+configuration	fixture	artifact	run count	normalisation	gate	oracle
+base-fff	frog_legs.stl	gcode	5	gcode-line-strip	L1	release
+base-fff	frog_legs.stl	settings-json	5	none	L0	release
+base-fff	frog_legs.stl	statistics-json	5	generator-field	L0	release
+tree-support	frog_legs.stl	gcode	5	gcode-line-strip	L1	release
+tree-support	frog_legs.stl	settings-json	5	none	L0	release
+tree-support	frog_legs.stl	statistics-json	5	generator-field	L0	release
+wipe-tower-multi-filament	frog_legs.stl	gcode	5	gcode-line-strip	L1	release
+wipe-tower-multi-filament	frog_legs.stl	settings-json	5	none	L0	release
+wipe-tower-multi-filament	frog_legs.stl	statistics-json	5	generator-field	L0	release
+fuzzy-skin	frog_legs.stl	gcode	5	gcode-line-strip	none	release
+fuzzy-skin	frog_legs.stl	settings-json	5	none	L0	release
+fuzzy-skin	frog_legs.stl	statistics-json	5	generator-field	none	release

@@ -359,3 +359,26 @@ list — could not satisfy it (`Could NOT find LibLZMA (missing: LIBLZMA_INCLUDE
 (`scripts/CAD/run-kernel-tests.sh:145-158`), on Linux only, for one target. The flags above are
 measured: both stages complete, the three named targets build, and both upstream Catch2 suites
 pass in full. `vendor/README.md` records the wall-clock, the disk cost and the suite outcomes.
+
+<!-- BEGIN GENERATED: determinism gate table (oracle/determinism; R3) -->
+
+## Determinism gate table
+
+Generated from `port/reports/determinism.md` by `just oracle-determinism` (R3, task `27-oracle-determinism`); not authored by hand. The gate is the strictest R4 level every pair of a row's runs reaches against every other, over at least 5 runs; `none` where no level is reached by every pair. See `port/reports/determinism.md` for the full measurement, including any row whose runs came from the built oracle rather than the pinned release binary.
+
+| Configuration | Fixture | Artifact | Run count | Gate | Oracle |
+|---|---|---|---|---|---|
+| base-fff | frog_legs.stl | gcode | 5 | L1 | release |
+| base-fff | frog_legs.stl | settings-json | 5 | L0 | release |
+| base-fff | frog_legs.stl | statistics-json | 5 | L0 | release |
+| tree-support | frog_legs.stl | gcode | 5 | L1 | release |
+| tree-support | frog_legs.stl | settings-json | 5 | L0 | release |
+| tree-support | frog_legs.stl | statistics-json | 5 | L0 | release |
+| wipe-tower-multi-filament | frog_legs.stl | gcode | 5 | L1 | release |
+| wipe-tower-multi-filament | frog_legs.stl | settings-json | 5 | L0 | release |
+| wipe-tower-multi-filament | frog_legs.stl | statistics-json | 5 | L0 | release |
+| fuzzy-skin | frog_legs.stl | gcode | 5 | none | release |
+| fuzzy-skin | frog_legs.stl | settings-json | 5 | L0 | release |
+| fuzzy-skin | frog_legs.stl | statistics-json | 5 | none | release |
+
+<!-- END GENERATED: determinism gate table -->
