@@ -1,0 +1,23 @@
+[package]
+name = "grampus-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "grampus-cli"
+path = "src/main.rs"
+
+[lib]
+name = "grampus_cli"
+path = "src/lib.rs"
+
+[dependencies]
+# Exactly 1.0.117 ("=", not "^"), matching crates/oracle-compare (task 10-comparator-json): the
+# only JSON library the workspace carries. `src/resolved_config.rs` parses a golden under
+# `port/goldens/configs/` with it rather than hand-rolling a second parser. This declares an
+# existing workspace dependency in a second crate's manifest, not a new one: `Cargo.lock` gains
+# only this crate's own package entry, no new serde_json (or transitive) package, which plan.md
+# step 5's list of steps allowed to change `Cargo.lock` (5, 17, 18, 19, and step 20's skeleton
+# task) covers either way, naming step 19 by name.
+serde_json = "=1.0.117"
