@@ -103,9 +103,10 @@ pub struct Surface {
     stage: Cell<Stage>,
 }
 
-// `clippy::new_without_default` requires this; it adds no sixth public entry point the task's
-// shape didn't already imply, since `Default::default` and `Surface::new` are one call either
-// way.
+// A seventh public item the task's fixed shape (the five methods and `new`) does not name:
+// `clippy::new_without_default` fires without it (verified by removing it and re-running
+// `cargo clippy -p grampus-cli --all-targets`). It delegates to `new` and adds no behavior of
+// its own.
 impl Default for Surface {
     fn default() -> Self {
         Self::new()
