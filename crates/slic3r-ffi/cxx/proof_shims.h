@@ -17,3 +17,18 @@ rust::Vec<ProofZPoint> path3_to_paths64(const rust::Vec<ProofZPoint> &path);
 
 } // namespace proof
 } // namespace slic3r_ffi
+
+// Task 54-foundation-objectid-clonable's declarations for its own `PrintConfigConstants.hpp` and
+// `Technologies.hpp` proof-path-1 shims. Appended at the end, so a sibling foundation task's
+// append conflicts textually rather than reordering silently; see `cxx/proof_shims.cpp`'s own
+// append for why these are unexercised from that task's crates.
+namespace slic3r_ffi {
+namespace proof {
+
+double path1_initial_layer_height();
+int32_t path1_initial_raft_layers();
+bool path1_initial_reduce_crossing_wall();
+rust::Vec<int32_t> path1_technologies_flags();
+
+} // namespace proof
+} // namespace slic3r_ffi

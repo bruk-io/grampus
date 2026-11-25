@@ -156,12 +156,13 @@ mod tests {
     #[test]
     fn technologies_flags_match_the_oracle() {
         let mut oracle = [i32::MIN; PORTED_FLAGS.len()];
-        // SAFETY: `oracle` is a live, exclusively borrowed array of exactly `oracle.len()`
+        let capacity = oracle.len() as i32;
+        let out = oracle.as_mut_ptr();
+        // SAFETY: `out` points at a live, exclusively borrowed array of exactly `capacity`
         // `i32`s, and that same length is passed as the capacity; the shim writes `count`
         // elements only when `capacity >= count` and otherwise writes nothing and returns
         // `-count`, which the assertion below rejects.
-        let count =
-            unsafe { slic3r_technologies_shim_flags(oracle.as_mut_ptr(), oracle.len() as i32) };
+        let count = unsafe { slic3r_technologies_shim_flags(out, capacity) };
         assert_eq!(
             count,
             PORTED_FLAGS.len() as i32,
