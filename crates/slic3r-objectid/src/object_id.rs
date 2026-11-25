@@ -466,6 +466,220 @@ pub fn wipe_tower_instance_id() -> ObjectID {
     WIPE_TOWER_INSTANCE.get_or_init(ObjectBase::new).id()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slic3r_proof::dumps;
+
+    // The oracle for the `ObjectID.hpp` row: `shim/object_id_shim.cpp`'s scripted sequence over
+    // the vendored header's own inline methods, compiled from the pin by this crate's `build.rs`
+    // -- see that file for why this crate carries its own build step. Every value the shim
+    // records is a delta or a relation, never an absolute id or timestamp, so this comparison
+    // does not depend on where either side's process-global counter stood when it ran and cannot
+    // become order-dependent on what else this test binary did first. The absolute first-id
+    // values belong to the `ObjectID.cpp` row and are proven in
+    // `tests/object_id_proof_path_1.rs`, which is a separate binary for exactly that reason.
+    extern "C" {
+        fn slic3r_objectid_shim_header_observations(out: *mut i64, capacity: i32) -> i32;
+    }
+
+    /// Every observation `slic3r_objectid_shim_header_observations` records, in its own order,
+    /// named so a failure names the vendored behaviour that diverged rather than an index.
+    const OBSERVATION_NAMES: &[&str] = &[
+        "consecutive ObjectBase ids differ by (ObjectID.hpp:100)",
+        "ObjectBase(int)'s id is invalid() (ObjectID.hpp:82, :37)",
+        "ObjectBase(int)'s id is valid() (ObjectID.hpp:82, :36)",
+        "a freshly minted id is valid() (ObjectID.hpp:79, :36)",
+        "set_new_unique_id() advances the id by (ObjectID.hpp:89)",
+        "set_invalid_id() leaves an invalid() id (ObjectID.hpp:90)",
+        "copy_id() reproduces the source id (ObjectID.hpp:92)",
+        "assign_new_unique_ids_recursive() advances the id by (ObjectID.hpp:95)",
+        "ObjectBase::timestamp() (ObjectID.hpp:74)",
+        "a fresh ObjectWithTimestamp's timestamp is non-zero (ObjectID.hpp:138-139)",
+        "consecutive touch()es differ by (ObjectID.hpp:135)",
+        "two independently constructed timestamps match (ObjectID.hpp:133)",
+        "timestamps match after copy_timestamp() (ObjectID.hpp:125, :133)",
+        "object_id_and_timestamp_match() after copy_timestamp() (ObjectID.hpp:134)",
+        "ObjectInstanceID's default instance_id is size_t(-1) (ObjectID.hpp:48)",
+        "ObjectInstanceID's order is object_id-major (ObjectID.hpp:52-55)",
+        "ObjectInstanceID's order breaks ties on instance_id (ObjectID.hpp:52-55)",
+        "CutObjectBase()'s id is invalid() (ObjectID.hpp:156)",
+        "CutObjectBase()'s check_sum (ObjectID.hpp:150)",
+        "CutObjectBase()'s connectors_cnt (ObjectID.hpp:152)",
+        "check_sum after increase_check_sum(7) (ObjectID.hpp:197)",
+        "connectors_cnt after increase_connectors_cnt(3) (ObjectID.hpp:200)",
+        "CutObjectBase's order compares the id alone (ObjectID.hpp:165)",
+        "CutObjectBase's equality compares the id alone (ObjectID.hpp:166)",
+        "is_equal() after copy() (ObjectID.hpp:168-173, :193)",
+        "check_sum after invalidate() (ObjectID.hpp:184-189)",
+    ];
+
+    /// The same scripted sequence `slic3r_objectid_shim_header_observations` runs, against this
+    /// module's own types instead of the vendored header's, in the same order and recorded as the
+    /// same deltas and relations.
+    fn ported_header_observations() -> Vec<i64> {
+        let first = ObjectBase::new();
+        let second = ObjectBase::new();
+        let consecutive_ids_differ_by = second.id().id as i64 - first.id().id as i64;
+
+        let invalid = ObjectBase::new_invalid();
+        let invalid_is_invalid = i64::from(invalid.id().invalid());
+        let invalid_is_not_valid = i64::from(invalid.id().valid());
+        let fresh_is_valid = i64::from(first.id().valid());
+
+        let mut mutated = ObjectBase::new();
+        let before_mutation = mutated.id().id as i64;
+        mutated.set_new_unique_id();
+        let set_new_unique_id_advances_by = mutated.id().id as i64 - before_mutation;
+        mutated.set_invalid_id();
+        let set_invalid_id_gives_invalid = i64::from(mutated.id().invalid());
+        mutated.copy_id(&first);
+        let copy_id_matches_source = i64::from(mutated.id() == first.id());
+
+        let mut recursive = ObjectBase::new();
+        let before_recursive = recursive.id().id as i64;
+        recursive.assign_new_unique_ids_recursive();
+        let assign_recursive_advances_by = recursive.id().id as i64 - before_recursive;
+
+        let object_base_timestamp = first.timestamp() as i64;
+        let mut stamped = ObjectWithTimestamp::new();
+        let timestamp_is_nonzero_before_touch = i64::from(stamped.timestamp() != 0);
+        stamped.touch();
+        let after_first_touch = stamped.timestamp() as i64;
+        stamped.touch();
+        let consecutive_touches_differ_by = stamped.timestamp() as i64 - after_first_touch;
+        let mut other_stamped = ObjectWithTimestamp::new();
+        let distinct_timestamps_match = i64::from(stamped.timestamp_matches(&other_stamped));
+        other_stamped.copy_timestamp(&stamped);
+        let copied_timestamps_match = i64::from(stamped.timestamp_matches(&other_stamped));
+        let id_and_timestamp_match_after_copy =
+            i64::from(stamped.object_id_and_timestamp_match(&other_stamped));
+
+        let default_instance = ObjectInstanceID::default();
+        let default_instance_id_is_size_t_minus_one =
+            i64::from(default_instance.instance_id == usize::MAX);
+        let low = ObjectInstanceID {
+            object_id: ObjectID::new(1),
+            instance_id: 1,
+        };
+        let high_by_object = ObjectInstanceID {
+            object_id: ObjectID::new(2),
+            instance_id: 0,
+        };
+        let high_by_instance = ObjectInstanceID {
+            object_id: ObjectID::new(1),
+            instance_id: 2,
+        };
+        let instance_order_is_object_major = i64::from(low < high_by_object);
+        let instance_order_breaks_ties_on_instance = i64::from(low < high_by_instance);
+
+        let mut cut = CutObjectBase::new();
+        let cut_default_id_is_invalid = i64::from(cut.id().invalid());
+        let cut_default_check_sum = cut.check_sum() as i64;
+        let cut_default_connectors_cnt = cut.connectors_cnt() as i64;
+        cut.increase_check_sum(7);
+        cut.increase_connectors_cnt(3);
+        let cut_check_sum_after_increase = cut.check_sum() as i64;
+        let cut_connectors_cnt_after_increase = cut.connectors_cnt() as i64;
+        let cut_low = CutObjectBase::with_id(ObjectID::new(1), 0, 0);
+        let cut_high = CutObjectBase::with_id(ObjectID::new(2), 99, 99);
+        let cut_order_is_id_only = i64::from(cut_low < cut_high);
+        let cut_equality_is_id_only =
+            i64::from(cut_low == CutObjectBase::with_id(ObjectID::new(1), 42, 42));
+        let mut cut_copied = CutObjectBase::new();
+        cut_copied.copy(&cut_high);
+        let cut_copy_is_equal = i64::from(cut_copied.is_equal(&cut_high));
+        cut_copied.invalidate();
+        let cut_invalidate_check_sum = cut_copied.check_sum() as i64;
+
+        vec![
+            consecutive_ids_differ_by,
+            invalid_is_invalid,
+            invalid_is_not_valid,
+            fresh_is_valid,
+            set_new_unique_id_advances_by,
+            set_invalid_id_gives_invalid,
+            copy_id_matches_source,
+            assign_recursive_advances_by,
+            object_base_timestamp,
+            timestamp_is_nonzero_before_touch,
+            consecutive_touches_differ_by,
+            distinct_timestamps_match,
+            copied_timestamps_match,
+            id_and_timestamp_match_after_copy,
+            default_instance_id_is_size_t_minus_one,
+            instance_order_is_object_major,
+            instance_order_breaks_ties_on_instance,
+            cut_default_id_is_invalid,
+            cut_default_check_sum,
+            cut_default_connectors_cnt,
+            cut_check_sum_after_increase,
+            cut_connectors_cnt_after_increase,
+            cut_order_is_id_only,
+            cut_equality_is_id_only,
+            cut_copy_is_equal,
+            cut_invalidate_check_sum,
+        ]
+    }
+
+    /// Proof path 2 (R19) for the `ObjectID.hpp` manifest row.
+    ///
+    /// **The declared mechanism, and what the corpus does not carry.** This row's `proof path`
+    /// cell is `2`, the committed stage dumps, seeded from its non-`none` pipeline stage
+    /// (`posSlice`) by `port/inventory`'s own rule. That dump is read below -- a real committed
+    /// dump, whose provenance header `dumps::read_dump_default` checks against the pin and
+    /// refuses if it disagrees -- so the declared mechanism genuinely runs. But the corpus
+    /// carries no `ObjectID` value anywhere to compare against: the `; object:` key every dump
+    /// starts with is a *positional index* into `print.objects()`, written by
+    /// `oracle/stage-dump/dump_seams.cpp:109-113`'s own linear scan and never derived from an
+    /// `ObjectBase::id()`, and every body field below it is geometry and scalars
+    /// (`oracle/stage-dump/README.md`'s "Dump format"). That is a finding for whoever
+    /// regenerates `port/inventory`'s seeding rule, recorded in this task's pull request body,
+    /// and not something a tolerance or a stand-in may paper over on this branch.
+    ///
+    /// **What is proven instead.** The vendored header's own inline code, compiled from the pin
+    /// and called through this crate's shim, against this module's rendering of it -- a
+    /// differential comparison, which is *stronger* than the declared mechanism rather than a
+    /// substitute for it, and exact with no tolerance as this row's `exact` tier requires. Never
+    /// read this as the row's mechanism being proof path 1: path 1 is the `ObjectID.cpp` row's
+    /// cell, proven separately in `tests/object_id_proof_path_1.rs`.
+    // PROOF: 2
+    #[test]
+    fn object_id_header_semantics_match_the_oracle() {
+        let dump = dumps::read_dump_default("20mm_cube-base-fff", "posSlice")
+            .expect("port/dumps/20mm_cube-base-fff/posSlice.dump must read at the pinned commit");
+        assert_eq!(
+            dump.seam, "posSlice",
+            "the dump read is this row's own pipeline stage"
+        );
+
+        let ported = ported_header_observations();
+        let mut oracle = vec![i64::MIN; ported.len()];
+        // SAFETY: `oracle` is a live, exclusively borrowed `Vec<i64>` of exactly `oracle.len()`
+        // elements, and that same length is passed as the capacity; the shim writes `count`
+        // elements only when `capacity >= count` and otherwise writes nothing and returns
+        // `-count`, which the assertion below rejects.
+        let count = unsafe {
+            slic3r_objectid_shim_header_observations(oracle.as_mut_ptr(), oracle.len() as i32)
+        };
+        assert_eq!(
+            count,
+            ported.len() as i32,
+            "the oracle records {count} observation(s) where this test scripts {}",
+            ported.len()
+        );
+        assert_eq!(
+            OBSERVATION_NAMES.len(),
+            ported.len(),
+            "every observation must be named, so a failure names the behaviour that diverged"
+        );
+
+        for (index, name) in OBSERVATION_NAMES.iter().enumerate() {
+            assert_eq!(ported[index], oracle[index], "{name}");
+        }
+    }
+}
+
 // PORT STATUS
 // source: src/libslic3r/ObjectID.cpp
 // source: src/libslic3r/ObjectID.hpp
