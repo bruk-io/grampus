@@ -61,7 +61,7 @@ use crate::resolved_config::ResolvedConfig;
 /// `Print.cpp:3958`, inside `Print::process()`'s main per-object/per-print sequence; the
 /// `simplify_extrusion_path()` loop that marks `posSimplifyPath` done (`Print.cpp:3971,
 /// 3979-3980`) runs afterwards, as a separate pass over every object. A reader placing a real
-/// emission call site "at" `posSimplifyPath" by this list's position would put it in the wrong
+/// emission call site "at" `posSimplifyPath` by this list's position would put it in the wrong
 /// place; place it after the `psSkirtBrim` call site instead.
 pub const STAGE_DUMP_SEAMS: [&str; 11] = [
     "posSlice",
