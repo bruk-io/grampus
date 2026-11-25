@@ -1,0 +1,10 @@
+; HAND-WRITTEN FIXTURE (task 32-proof-dumps-fuzz, plan step 18, R19) -- NOT an oracle output.
+; No real `just oracle-dump` run can ever produce this file: a 256 by 256 mm bed at
+; SCALING_FACTOR gives coordinates around 2.6e8, nowhere near 2^53, so the one case this fixture
+; exists to exercise -- a coord_t (int64_t) coordinate too large to be represented exactly in
+; f64 -- cannot come from a real dump. It carries no provenance header (no `oracle-commit` key)
+; because it is not a dump of anything: `dumps::read_dump`/`parse_dump_text` would refuse it for
+; exactly that reason, so the test reading this file calls `dumps::parse_records` directly, the
+; one function this module exposes with no provenance requirement at all. See
+; `crates/slic3r-proof/src/dumps.rs`'s module doc and `crates/slic3r-proof/tests/dumps_proof.rs`.
+field=lslices layer=0 region=- poly=0 ring=contour n=1 pts=9007199254740993,-9007199254740993

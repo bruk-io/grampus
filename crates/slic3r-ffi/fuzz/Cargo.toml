@@ -1,0 +1,35 @@
+# A cargo-fuzz crate (task 32-proof-dumps-fuzz, plan step 18, R19): its own [workspace] table
+# below makes it its own workspace root, so the root Cargo.toml's `members = ["crates/*"]` (plan
+# step 5) never sees it (that glob only matches a direct child of `crates/`, and this directory
+# is two levels down besides) and `cargo test --workspace` never builds it. Run through
+# `just fuzz <target>`, never directly with a bare `cargo fuzz` invocation, because the pinned
+# toolchain (`rust-toolchain.toml`, unchanged by this task) is stable and cargo-fuzz's
+# instrumentation needs nightly -- the recipe names `+nightly` explicitly rather than this crate
+# carrying its own `rust-toolchain.toml` override.
+
+[package]
+name = "slic3r-ffi-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+# The trait the three ArbPoint/ArbPolygon/ArbExPolygon newtypes in
+# fuzz_targets/slic3r-ffi_roundtrip.rs implement, over 64-bit integer coordinates (R19).
+arbitrary = { version = "1.5.0", features = ["derive"] }
+
+[dependencies.slic3r-ffi]
+path = ".."
+
+[[bin]]
+name = "slic3r-ffi_roundtrip"
+path = "fuzz_targets/slic3r-ffi_roundtrip.rs"
+test = false
+doc = false
+bench = false
