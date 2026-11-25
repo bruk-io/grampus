@@ -3,7 +3,7 @@
 `just port-status` reads the twelve headings below — the six `##` sections and the six `###`
 rules under `## Rules` — to check that this document says what it must (R29); renaming one
 breaks that check. This document is committed before any unit is ported.
-Every unit of Phase A and Phase B — `port/manifest.tsv`'s 409 in-scope files — is held to
+Every unit of Phase A and Phase B — `port/manifest.tsv`'s 408 in-scope files — is held to
 it, and a porter is given their task, this repository and nothing else: this document is written
 so a porter never has to guess and never has to ask. `docs/WORKFLOW.md` is the process this
 document's rules are used inside; it states the phases, the review loop and the conflict
@@ -20,12 +20,12 @@ awk -F'\t' 'NR==1{for(i=1;i<=NF;i++)c[$i]=i} NR>1 {print $c["target crate"]}' po
   | sort | uniq -c
 ```
 
-(an empty-string line in that output counts the 198 out-of-scope rows, which carry no crate —
+(an empty-string line in that output counts the 199 out-of-scope rows, which carry no crate —
 expected, not an error) against the `crate` rows of `port/cut.tsv`
 (`awk -F'\t' '$1=="crate"{print $2, $3, $4, $5}' port/cut.tsv`, which prints the table's four
 columns — crate, level, subsystems, in-scope files — in order).
-As this document is written, the two agree exactly: the same 126 crate names, and the same
-in-scope file count per crate, summing to the 409 in-scope rows `port/manifest.tsv` carries. Plan
+As this document is written, the two agree exactly: the same 125 crate names, and the same
+in-scope file count per crate, summing to the 408 in-scope rows `port/manifest.tsv` carries. Plan
 step 20's prose estimate of "roughly 43 crates" is stale against the committed cut; `port/cut.tsv`
 is the authority, not the plan's prose.
 
@@ -55,7 +55,6 @@ cut's edges or any file's per-file scope decision — those are `port/cut.tsv`'s
 | `slic3r-int128` | 0 | Int128 | 1 |
 | `slic3r-lifecycleevents` | 0 | LifecycleEvents | 1 |
 | `slic3r-localesutils` | 0 | LocalesUtils | 2 |
-| `slic3r-macutils` | 0 | MacUtils | 1 |
 | `slic3r-materialtype` | 0 | MaterialType | 2 |
 | `slic3r-mutablepriorityqueue` | 0 | MutablePriorityQueue | 1 |
 | `slic3r-objectid` | 0 | ObjectID | 2 |
