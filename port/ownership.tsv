@@ -65,53 +65,53 @@ GCode.hpp	961	GCode	m_belt_floor_object	const PrintObject *	borrowed	GCode.hpp:9
 GCode.hpp	963	BeltFloorObjectGuard	slot	const PrintObject *&	borrowed	GCode.hpp:964	&'a mut Option<&'b PrintObject>
 GCode.hpp	972	GCode	m_belt_travel_target	const ExtrusionPath *	borrowed	GCode.hpp:970, GCode.hpp:971	&'a ExtrusionPath
 GCode.hpp	975	GCode	m_belt_uncut_line_lengths	const std::vector<double> *	borrowed	GCode.hpp:973, GCode.hpp:974	&'a Vec<f64>
-GCode/ConflictChecker.hpp	27	LineWithID	_id	const void *			
-GCode/ConflictChecker.hpp	38	ExtrusionLayer	layer	const Layer *			
-GCode/ConflictChecker.hpp	70	LinesBucket	_id	const void *			
-GCode/ConflictChecker.hpp	123	LinesBucketQueue	line_bucket_ptr_queue	std::priority_queue<LinesBucket *, std::vector<LinesBucket *>, LinesBucketPtrComp>			
-GCode/ConflictChecker.hpp	142	ConflictComputeResult	_obj1	const void *			
-GCode/ConflictChecker.hpp	143	ConflictComputeResult	_obj2	const void *			
-GCode/ExtrusionProcessor.hpp	449	PrecomputedOverhangLayer	object	const PrintObject *			
-GCode/ExtrusionProcessor.hpp	450	PrecomputedOverhangLayer	layer	const Layer *			
-GCode/ExtrusionProcessor.hpp	494	ExtrusionQualityEstimator	prev_layer_boundaries	std::unordered_map<const PrintObject*, std::shared_ptr<const Boundaries>>			
-GCode/ExtrusionProcessor.hpp	495	ExtrusionQualityEstimator	prev_curled_extrusions	std::unordered_map<const PrintObject*, std::shared_ptr<const CurledLines>>			
-GCode/ExtrusionProcessor.hpp	497	ExtrusionQualityEstimator	prev_layer_sources	std::unordered_map<const PrintObject*, const Layer*>			
-GCode/ExtrusionProcessor.hpp	498	ExtrusionQualityEstimator	last_prepared_layers	std::unordered_map<const PrintObject*, const Layer*>			
-GCode/ExtrusionProcessor.hpp	500	ExtrusionQualityEstimator	current_object	const PrintObject *			
-GCode/GCodeProcessor.hpp	164	ConflictResult	_obj1	const void *			
-GCode/GCodeProcessor.hpp	165	ConflictResult	_obj2	const void *			
-GCode/GCodeProcessor.hpp	1402	GCodeProcessor	m_print	Print *			
-GCode/PreciseSeam.hpp	67	PreciseSeamWarnings	modifier_usage	std::unordered_map<const ModelVolume*, ModifierUsage>			
-GCode/PreciseSeam.hpp	91	ExtractionContext	layer	const Layer *			
-GCode/PreciseSeam.hpp	92	ExtractionContext	modifier	const ModelVolume *			
-GCode/PreciseSeam.hpp	93	ExtractionContext	warnings	PreciseSeamWarnings *			
-GCode/PreciseSeam.hpp	152	WeakModifierSegment	modifier	const ModelVolume *			
-GCode/PreciseSeamInternal.hpp	23	FragmentBindingFailure	reason	const char *			
-GCode/PressureEqualizer.hpp	211	PressureEqualizer	m_layer_results	std::queue<LayerResult*>			
-GCode/RetractWhenCrossingPerimeters.hpp	23	RetractWhenCrossingPerimeters	m_layer	const Layer *			
-GCode/RetractWhenCrossingPerimeters.hpp	25	RetractWhenCrossingPerimeters	m_internal_islands	std::vector<const ExPolygon*>			
-GCode/SeamPlacer.hpp	163	SeamPlacer	m_seam_per_object	std::unordered_map<const PrintObject*, PrintObjectSeamData>			
-GCode/SpiralVase.hpp	51	SpiralVase	m_previous_layer	std::vector<SpiralPoint> *			
-GCode/Thumbnails.hpp	30	CompressedImageBuffer	data	void *			
-GCode/TimelapsePosPicker.hpp	27	PosPickCtx	curr_layer	const Layer *			
-GCode/TimelapsePosPicker.hpp	30	PosPickCtx	printed_objects	std::optional<std::vector<const PrintObject*>>			
-GCode/TimelapsePosPicker.hpp	73	TimelapsePosPicker	print	const Print *			
-GCode/TimelapsePosPicker.hpp	87	TimelapsePosPicker	bbox_cache	std::unordered_map<const PrintInstance*, BoundingBoxf3>			
-GCode/ToolOrdering.hpp	107	WipingExtrusions	entity_map	std::map<std::tuple<const ExtrusionEntity*, const PrintObject *>, ExtruderPerCopy>			
-GCode/ToolOrdering.hpp	109	WipingExtrusions	support_map	std::map<const PrintObject*, int>			
-GCode/ToolOrdering.hpp	110	WipingExtrusions	support_intf_map	std::map<const PrintObject*, int>			
-GCode/ToolOrdering.hpp	113	WipingExtrusions	m_layer_tools	const LayerTools *			
-GCode/ToolOrdering.hpp	198	LayerTools	custom_gcode	const CustomGCode::Item *			
-GCode/ToolOrdering.hpp	224	MixedSubLayerGroup	per_object_gradient	std::map<const PrintObject*, ObjectGradient>			
-GCode/ToolOrdering.hpp	233	VolumeKey	obj	const PrintObject *			
-GCode/ToolOrdering.hpp	405	ToolOrdering	m_print_full_config	const DynamicPrintConfig *			
-GCode/ToolOrdering.hpp	406	ToolOrdering	m_print_config_ptr	const PrintConfig *			
-GCode/ToolOrdering.hpp	410	ToolOrdering	m_mixed_object_layers	std::map<unsigned int, std::map<const PrintObject*, std::vector<size_t>>>			
-GCode/ToolOrdering.hpp	415	ToolOrdering	m_object_all_layer_indices	std::map<const PrintObject*, std::vector<size_t>>			
-GCode/ToolOrdering.hpp	426	ToolOrdering	m_print_object_ptr	const PrintObject *			
-GCode/ToolOrdering.hpp	427	ToolOrdering	m_print	Print *			
-GCode/WipeTower.hpp	415	WipeTower	m_multi_nozzle_group_result	const MultiNozzleUtils::LayeredNozzleGroupResult *			
-GCode/WipeTower.hpp	444	WipeTower	m_cur_block	WipeTowerBlock *			
+GCode/ConflictChecker.hpp	27	LineWithID	_id	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ConflictChecker.hpp	38	ExtrusionLayer	layer	const Layer *	borrowed	GCode/ConflictChecker.cpp:184, GCode/ConflictChecker.cpp:198	&'a Layer
+GCode/ConflictChecker.hpp	70	LinesBucket	_id	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ConflictChecker.hpp	123	LinesBucketQueue	line_bucket_ptr_queue	std::priority_queue<LinesBucket *, std::vector<LinesBucket *>, LinesBucketPtrComp>	borrowed	GCode/ConflictChecker.cpp:112, GCode/ConflictChecker.cpp:116	BinaryHeap<Reverse<(OrderedFloat<f32>, usize)>>
+GCode/ConflictChecker.hpp	142	ConflictComputeResult	_obj1	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ConflictChecker.hpp	143	ConflictComputeResult	_obj2	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ExtrusionProcessor.hpp	449	PrecomputedOverhangLayer	object	const PrintObject *	borrowed	GCode.cpp:5137, GCode/ExtrusionProcessor.hpp:460	&'a PrintObject
+GCode/ExtrusionProcessor.hpp	450	PrecomputedOverhangLayer	layer	const Layer *	borrowed	GCode.cpp:5137, GCode/ExtrusionProcessor.hpp:460	&'a Layer
+GCode/ExtrusionProcessor.hpp	494	ExtrusionQualityEstimator	prev_layer_boundaries	std::unordered_map<const PrintObject*, std::shared_ptr<const Boundaries>>	borrowed	GCode/ExtrusionProcessor.hpp:516, GCode/ExtrusionProcessor.hpp:533, GCode.cpp:7021	HashMap<&'a PrintObject, Arc<Boundaries>>
+GCode/ExtrusionProcessor.hpp	495	ExtrusionQualityEstimator	prev_curled_extrusions	std::unordered_map<const PrintObject*, std::shared_ptr<const CurledLines>>	borrowed	GCode/ExtrusionProcessor.hpp:516, GCode/ExtrusionProcessor.hpp:534, GCode.cpp:7021	HashMap<&'a PrintObject, Arc<CurledLines>>
+GCode/ExtrusionProcessor.hpp	497	ExtrusionQualityEstimator	prev_layer_sources	std::unordered_map<const PrintObject*, const Layer*>	borrowed	GCode/ExtrusionProcessor.hpp:526, GCode/ExtrusionProcessor.hpp:527, GCode.cpp:7021	HashMap<&'a PrintObject, &'a Layer>
+GCode/ExtrusionProcessor.hpp	498	ExtrusionQualityEstimator	last_prepared_layers	std::unordered_map<const PrintObject*, const Layer*>	borrowed	GCode/ExtrusionProcessor.hpp:526, GCode.cpp:7021	HashMap<&'a PrintObject, &'a Layer>
+GCode/ExtrusionProcessor.hpp	500	ExtrusionQualityEstimator	current_object	const PrintObject *	borrowed	GCode/ExtrusionProcessor.hpp:516, GCode.cpp:7685	&'a PrintObject
+GCode/GCodeProcessor.hpp	164	ConflictResult	_obj1	const void *	borrowed	GCode/ConflictChecker.cpp:321, GCode/ConflictChecker.cpp:313, GCode/GCodeProcessor.hpp:164, GCode/ConflictChecker.cpp:317	Option<&'a PrintInstance>
+GCode/GCodeProcessor.hpp	165	ConflictResult	_obj2	const void *	borrowed	GCode/ConflictChecker.cpp:321, GCode/ConflictChecker.cpp:313, GCode/GCodeProcessor.hpp:164, GCode/ConflictChecker.cpp:317	Option<&'a PrintInstance>
+GCode/GCodeProcessor.hpp	1402	GCodeProcessor	m_print	Print *	borrowed	GCode/GCodeProcessor.hpp:1435, GCode/GCodeProcessor.cpp:1544	Option<&'a mut Print>
+GCode/PreciseSeam.hpp	67	PreciseSeamWarnings	modifier_usage	std::unordered_map<const ModelVolume*, ModifierUsage>	borrowed	GCode/SeamPlacer.cpp:2145	HashMap<&'a ModelVolume, ModifierUsage>
+GCode/PreciseSeam.hpp	91	ExtractionContext	layer	const Layer *	borrowed	GCode/PreciseSeam.cpp:949, GCode/PreciseSeam.cpp:312	Option<&'a Layer>
+GCode/PreciseSeam.hpp	92	ExtractionContext	modifier	const ModelVolume *	borrowed	GCode/PreciseSeam.cpp:949, GCode/PreciseSeam.cpp:315	Option<&'a ModelVolume>
+GCode/PreciseSeam.hpp	93	ExtractionContext	warnings	PreciseSeamWarnings *	borrowed	GCode/PreciseSeam.cpp:949, GCode/PreciseSeam.cpp:346	Option<&'a mut PreciseSeamWarnings>
+GCode/PreciseSeam.hpp	152	WeakModifierSegment	modifier	const ModelVolume *	borrowed	GCode/PreciseSeam.cpp:956	&'a ModelVolume
+GCode/PreciseSeamInternal.hpp	23	FragmentBindingFailure	reason	const char *	borrowed	GCode/PreciseSeamInternal.hpp:23, GCode/PreciseSeam.cpp:192	&'static str
+GCode/PressureEqualizer.hpp	211	PressureEqualizer	m_layer_results	std::queue<LayerResult*>	owned	GCode/PressureEqualizer.cpp:194, GCode/PressureEqualizer.cpp:215	VecDeque<LayerResult>
+GCode/RetractWhenCrossingPerimeters.hpp	23	RetractWhenCrossingPerimeters	m_layer	const Layer *	borrowed	GCode/RetractWhenCrossingPerimeters.cpp:24	&'a Layer
+GCode/RetractWhenCrossingPerimeters.hpp	25	RetractWhenCrossingPerimeters	m_internal_islands	std::vector<const ExPolygon*>	borrowed	GCode/RetractWhenCrossingPerimeters.hpp:25, GCode/RetractWhenCrossingPerimeters.cpp:31	Vec<&'a ExPolygon>
+GCode/SeamPlacer.hpp	163	SeamPlacer	m_seam_per_object	std::unordered_map<const PrintObject*, PrintObjectSeamData>	borrowed	GCode/SeamPlacer.cpp:1638	HashMap<&'a PrintObject, PrintObjectSeamData>
+GCode/SpiralVase.hpp	51	SpiralVase	m_previous_layer	std::vector<SpiralPoint> *	owned	GCode/SpiralVase.cpp:221, GCode/SpiralVase.cpp:222	Option<Vec<SpiralPoint>>
+GCode/Thumbnails.hpp	30	CompressedImageBuffer	data	void *	owned	GCode/Thumbnails.cpp:34, GCode/Thumbnails.cpp:65	Vec<u8>
+GCode/TimelapsePosPicker.hpp	27	PosPickCtx	curr_layer	const Layer *	borrowed	GCode.cpp:6571	&'a Layer
+GCode/TimelapsePosPicker.hpp	30	PosPickCtx	printed_objects	std::optional<std::vector<const PrintObject*>>	borrowed	GCode.cpp:6581	Option<Vec<&'a PrintObject>>
+GCode/TimelapsePosPicker.hpp	73	TimelapsePosPicker	print	const Print *	borrowed	GCode/TimelapsePosPicker.cpp:33	&'a Print
+GCode/TimelapsePosPicker.hpp	87	TimelapsePosPicker	bbox_cache	std::unordered_map<const PrintInstance*, BoundingBoxf3>	borrowed	GCode/TimelapsePosPicker.cpp:351	HashMap<&'a PrintInstance, BoundingBoxf3>
+GCode/ToolOrdering.hpp	107	WipingExtrusions	entity_map	std::map<std::tuple<const ExtrusionEntity*, const PrintObject *>, ExtruderPerCopy>	borrowed	GCode/ToolOrdering.cpp:3393, GCode/ToolOrdering.cpp:3389	BTreeMap<(&'a ExtrusionEntity, &'a PrintObject), ExtruderPerCopy>
+GCode/ToolOrdering.hpp	109	WipingExtrusions	support_map	std::map<const PrintObject*, int>	borrowed	GCode/ToolOrdering.cpp:3407, GCode/ToolOrdering.cpp:3404	BTreeMap<&'a PrintObject, i32>
+GCode/ToolOrdering.hpp	110	WipingExtrusions	support_intf_map	std::map<const PrintObject*, int>	borrowed	GCode/ToolOrdering.cpp:3413, GCode/ToolOrdering.cpp:3410	BTreeMap<&'a PrintObject, i32>
+GCode/ToolOrdering.hpp	113	WipingExtrusions	m_layer_tools	const LayerTools *	back-reference	GCode/ToolOrdering.hpp:260, GCode/ToolOrdering.hpp:266	usize
+GCode/ToolOrdering.hpp	198	LayerTools	custom_gcode	const CustomGCode::Item *	borrowed	GCode/ToolOrdering.cpp:3307, GCode/ToolOrdering.cpp:3365	&'a CustomGCode::Item
+GCode/ToolOrdering.hpp	224	MixedSubLayerGroup	per_object_gradient	std::map<const PrintObject*, ObjectGradient>	borrowed	GCode/ToolOrdering.cpp:2709	BTreeMap<&'a PrintObject, ObjectGradient>
+GCode/ToolOrdering.hpp	233	VolumeKey	obj	const PrintObject *	borrowed	GCode/ToolOrdering.cpp:950	&'a PrintObject
+GCode/ToolOrdering.hpp	405	ToolOrdering	m_print_full_config	const DynamicPrintConfig *	borrowed	GCode/ToolOrdering.cpp:518, GCode/ToolOrdering.cpp:569	&'a DynamicPrintConfig
+GCode/ToolOrdering.hpp	406	ToolOrdering	m_print_config_ptr	const PrintConfig *	borrowed	GCode/ToolOrdering.cpp:519, GCode/ToolOrdering.cpp:571	&'a PrintConfig
+GCode/ToolOrdering.hpp	410	ToolOrdering	m_mixed_object_layers	std::map<unsigned int, std::map<const PrintObject*, std::vector<size_t>>>	borrowed	GCode/ToolOrdering.cpp:916	BTreeMap<u32, BTreeMap<&'a PrintObject, Vec<usize>>>
+GCode/ToolOrdering.hpp	415	ToolOrdering	m_object_all_layer_indices	std::map<const PrintObject*, std::vector<size_t>>	borrowed	GCode/ToolOrdering.cpp:839	BTreeMap<&'a PrintObject, Vec<usize>>
+GCode/ToolOrdering.hpp	426	ToolOrdering	m_print_object_ptr	const PrintObject *	borrowed	GCode/ToolOrdering.cpp:520	&'a PrintObject
+GCode/ToolOrdering.hpp	427	ToolOrdering	m_print	Print *	borrowed	GCode/ToolOrdering.cpp:521, GCode/ToolOrdering.cpp:3155	Option<&'a mut Print>
+GCode/WipeTower.hpp	415	WipeTower	m_multi_nozzle_group_result	const MultiNozzleUtils::LayeredNozzleGroupResult *	borrowed	GCode/WipeTower.hpp:412, Print.cpp:5367	&'a MultiNozzleUtils::LayeredNozzleGroupResult
+GCode/WipeTower.hpp	444	WipeTower	m_cur_block	WipeTowerBlock *	borrowed	GCode/WipeTower.cpp:3532, GCode/WipeTower.cpp:4452	usize
 GCodeWriter.hpp	262	GCodeWriter	m_curr_filament_extruder	std::vector<Extruder*>	borrowed	GCodeWriter.cpp:809, GCodeWriter.cpp:1680	Vec<&'a mut Extruder>
 GCodeWriter.hpp	402	GCodeFormatter	buf_end	char *	borrowed	GCodeWriter.hpp:321	usize
 Geometry/VoronoiUtils.hpp	20	SegmentCellRange	edge_begin	const VoronoiDiagram::edge_type *	ffi	Geometry/Voronoi.hpp:180, Geometry/VoronoiUtils.cpp:218, Geometry/Voronoi.hpp:41, Geometry/Voronoi.cpp:326, Arachne/SkeletalTrapezoidation.cpp:387	*const VoronoiEdge
