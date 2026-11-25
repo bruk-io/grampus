@@ -65,12 +65,12 @@ GCode.hpp	961	GCode	m_belt_floor_object	const PrintObject *
 GCode.hpp	963	BeltFloorObjectGuard	slot	const PrintObject *&			
 GCode.hpp	972	GCode	m_belt_travel_target	const ExtrusionPath *			
 GCode.hpp	975	GCode	m_belt_uncut_line_lengths	const std::vector<double> *			
-GCode/ConflictChecker.hpp	27	LineWithID	_id	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ConflictChecker.hpp	27	LineWithID	_id	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
 GCode/ConflictChecker.hpp	38	ExtrusionLayer	layer	const Layer *	borrowed	GCode/ConflictChecker.cpp:184, GCode/ConflictChecker.cpp:198	&'a Layer
-GCode/ConflictChecker.hpp	70	LinesBucket	_id	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ConflictChecker.hpp	70	LinesBucket	_id	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
 GCode/ConflictChecker.hpp	123	LinesBucketQueue	line_bucket_ptr_queue	std::priority_queue<LinesBucket *, std::vector<LinesBucket *>, LinesBucketPtrComp>	borrowed	GCode/ConflictChecker.cpp:112, GCode/ConflictChecker.cpp:116	BinaryHeap<Reverse<(OrderedFloat<f32>, usize)>>
-GCode/ConflictChecker.hpp	142	ConflictComputeResult	_obj1	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
-GCode/ConflictChecker.hpp	143	ConflictComputeResult	_obj2	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ConflictChecker.hpp	142	ConflictComputeResult	_obj1	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
+GCode/ConflictChecker.hpp	143	ConflictComputeResult	_obj2	const void *	borrowed	GCode/ConflictChecker.cpp:271, GCode/ConflictChecker.cpp:261, GCode/ConflictChecker.cpp:308, GCode/ConflictChecker.cpp:310	ConflictPointee<'a>
 GCode/ExtrusionProcessor.hpp	449	PrecomputedOverhangLayer	object	const PrintObject *	borrowed	GCode.cpp:5137, GCode/ExtrusionProcessor.hpp:460	&'a PrintObject
 GCode/ExtrusionProcessor.hpp	450	PrecomputedOverhangLayer	layer	const Layer *	borrowed	GCode.cpp:5137, GCode/ExtrusionProcessor.hpp:460	&'a Layer
 GCode/ExtrusionProcessor.hpp	494	ExtrusionQualityEstimator	prev_layer_boundaries	std::unordered_map<const PrintObject*, std::shared_ptr<const Boundaries>>	borrowed	GCode/ExtrusionProcessor.hpp:516, GCode/ExtrusionProcessor.hpp:533, GCode.cpp:7021	HashMap<&'a PrintObject, Arc<Boundaries>>
