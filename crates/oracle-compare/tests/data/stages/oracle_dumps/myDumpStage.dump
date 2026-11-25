@@ -1,6 +1,0 @@
-; provenance
-;   oracle-commit: f92a7c065c5718b8ef1baac1cd704df2911238f4
-;   oracle: built (unrecorded)
-; seam: myDumpStage
-; object: 0
-field=print_z layer=0 region=- value=0x1p0
