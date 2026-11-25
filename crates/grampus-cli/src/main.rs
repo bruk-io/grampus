@@ -29,16 +29,22 @@ struct Args {
     config: PathBuf,
     out: PathBuf,
     export_statistics: bool,
+    dump_stages: Option<PathBuf>,
 }
 
-/// Printed for `--help` and on a usage error; names all four options the task fixes.
+/// Printed for `--help` and on a usage error; names all five options this binary takes
+/// (`--dump-stages` added by task `39-compare-stages`, R20).
 fn usage() -> &'static str {
-    "usage: grampus-cli <model> --config <golden> --out <dir> [--export-statistics]\n\n\
+    "usage: grampus-cli <model> --config <golden> --out <dir> [--export-statistics]\n       \
+     [--dump-stages <dir>]\n\n\
      <model>               positional: path to the mesh to slice\n\
      --config <golden>     a resolved-configuration golden (port/goldens/configs/<name>.json)\n\
      --out <dir>           directory the G-code and (with --export-statistics) the statistics\n\
      \x20                     JSON are written under\n\
-     --export-statistics   also write <out>/plate_1.statistics.json"
+     --export-statistics   also write <out>/plate_1.statistics.json\n\
+     --dump-stages <dir>   write the R5 per-seam dump format to <dir> at each ported seam\n\
+     \x20                     (`Surface::process`); a seam whose modules are not ported yet\n\
+     \x20                     writes nothing"
 }
 
 enum ParsedArgs {
@@ -51,6 +57,7 @@ fn parse_args(raw: &[String]) -> Result<ParsedArgs, String> {
     let mut config: Option<PathBuf> = None;
     let mut out: Option<PathBuf> = None;
     let mut export_statistics = false;
+    let mut dump_stages: Option<PathBuf> = None;
 
     let mut i = 0;
     while i < raw.len() {
@@ -74,6 +81,13 @@ fn parse_args(raw: &[String]) -> Result<ParsedArgs, String> {
                 export_statistics = true;
                 i += 1;
             }
+            "--dump-stages" => {
+                let value = raw
+                    .get(i + 1)
+                    .ok_or_else(|| "--dump-stages needs a path".to_string())?;
+                dump_stages = Some(PathBuf::from(value));
+                i += 2;
+            }
             other if other.starts_with("--") => {
                 return Err(format!("unknown flag: {other}"));
             }
@@ -96,6 +110,7 @@ fn parse_args(raw: &[String]) -> Result<ParsedArgs, String> {
         config,
         out,
         export_statistics,
+        dump_stages,
     }))
 }
 
@@ -143,6 +158,9 @@ fn run(args: &Args) -> Result<(), CliError> {
     config.set_bambu_printer(true);
 
     let mut surface = Surface::new();
+    if let Some(dir) = &args.dump_stages {
+        surface.set_dump_stages_dir(dir.clone());
+    }
 
     surface
         .build_model(&args.model)

@@ -263,3 +263,29 @@ oracle-parity:
 # nothing to it.
 pr-body-check file *args:
     ./port/port-status --pr-body {{file}} {{args}}
+
+# the command half of R20 / plan step 24 (task 39-compare-stages): slices fixtures/3DBenchy.stl
+# with the port in the base FFF configuration and compares, for every pipeline stage
+# port/manifest.tsv's own `pipeline stage or none` column marks as fully ported (derived the same
+# way just port-status derives it, never read from the status cell), the port's per-seam stage
+# dump against that stage's committed oracle dump (port/dumps/3DBenchy-base-fff/*.dump, from
+# just oracle-dump 3DBenchy base-fff) at the stage's declared tier; the two stages with no R5
+# seam fall back to the exported G-code's L0-L4 levels instead. A stage whose rows are not all
+# `ported` prints `not ported`, which is not a failure -- see
+# crates/oracle-compare/src/stages.rs's own doc comment for what this reads and does not re-derive.
+# This task adds no CI line (task 40-compare-stages-ci owns that). `--port-bin` is passed in
+# rather than read from `CARGO_BIN_EXE_grampus-cli`, which is only ever set inside that crate's
+# own tests: this is what keeps crates/oracle-compare/Cargo.toml free of a dependency on
+# grampus-cli (and, through it, on any slic3r-* crate or a libslic3r build).
+compare-stages:
+    cargo build --quiet --release -p grampus-cli
+    rm -rf oracle/.cache/tmp/compare-stages
+    mkdir -p oracle/.cache/tmp/compare-stages
+    cargo run --quiet --release -p oracle-compare -- --stages \
+      --manifest port/manifest.tsv \
+      --tree . \
+      --oracle-dumps port/dumps/3DBenchy-base-fff \
+      --port-bin target/release/grampus-cli \
+      --fixture fixtures/3DBenchy.stl \
+      --config port/goldens/configs/base-fff.json \
+      --scratch oracle/.cache/tmp/compare-stages

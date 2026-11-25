@@ -1,0 +1,9 @@
+; provenance
+;   this half is hand-written, not produced by grampus-cli (which does not emit any seam yet) --
+;   see crates/oracle-compare/tests/stages.rs's own doc comment.
+; seam: posSlice
+; object: 0
+field=print_z layer=0 region=- value=0x1.999999999999ap-3
+field=slice_z layer=0 region=- value=0x1.999999999999ap-4
+field=lslices layer=0 region=- count=1
+field=lslices layer=0 region=- poly=0 ring=contour n=4 pts=10000000,10000000 -10000000,10000000 -10000000,-10000000 10000000,-10000000

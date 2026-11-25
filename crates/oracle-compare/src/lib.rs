@@ -8,6 +8,7 @@
 pub mod gcode;
 pub mod json;
 pub mod levels;
+pub mod stages;
 pub mod tolerance;
 
 pub use levels::{

@@ -44,9 +44,38 @@
 
 use std::cell::Cell;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::resolved_config::ResolvedConfig;
+
+/// The R5 per-object and print-wide seams, in `Print.hpp`'s `SlicingPipelineStepPlugin` enum's
+/// own **declaration** order (`:133-134`) — named here because task `39-compare-stages` asks
+/// this module for "the emission call sites ... at the same eleven seams" — unlike
+/// `crates/oracle-compare/src/stages.rs`, which reads the stage list from `port/manifest.tsv`
+/// and names none of them, this module *is* where the eleven seams are named, the same way
+/// `dump_seams.cpp`'s own `seam_name` names them.
+///
+/// **This is not the firing order.** `Print::process()` (`Print.cpp:3300`) calls
+/// `posSimplifyPath` *last* of the eleven, after `psSkirtBrim` — not ninth, where it sits in
+/// this list and in the enum's own declaration. `psSkirtBrim` is marked done at
+/// `Print.cpp:3958`, inside `Print::process()`'s main per-object/per-print sequence; the
+/// `simplify_extrusion_path()` loop that marks `posSimplifyPath` done (`Print.cpp:3971,
+/// 3979-3980`) runs afterwards, as a separate pass over every object. A reader placing a real
+/// emission call site "at" `posSimplifyPath` by this list's position would put it in the wrong
+/// place; place it after the `psSkirtBrim` call site instead.
+pub const STAGE_DUMP_SEAMS: [&str; 11] = [
+    "posSlice",
+    "posPerimeters",
+    "posPrepareInfill",
+    "posInfill",
+    "posIroning",
+    "posContouring",
+    "posSupportMaterial",
+    "posDetectOverhangsForLift",
+    "posSimplifyPath",
+    "psWipeTower",
+    "psSkirtBrim",
+];
 
 /// Which of the five calls `Surface` has reached. Tracked so an out-of-order call is caught
 /// mechanically (`require`) rather than relying on every caller reading this module's doc
@@ -115,6 +144,10 @@ impl std::error::Error for SurfaceError {}
 /// does not expose.
 pub struct Surface {
     stage: Cell<Stage>,
+    /// Set by [`Surface::set_dump_stages_dir`] (`grampus-cli`'s `--dump-stages <dir>`, task
+    /// `39-compare-stages`). `None` by default, so a caller that never asks for stage dumps (the
+    /// five-call tests, every binary invocation before this task) sees no change in behaviour.
+    dump_stages_dir: Option<PathBuf>,
 }
 
 impl Surface {
@@ -126,7 +159,16 @@ impl Surface {
     pub fn new() -> Self {
         Surface {
             stage: Cell::new(Stage::Fresh),
+            dump_stages_dir: None,
         }
+    }
+
+    /// Enables per-seam stage-dump emission: [`Surface::process`] attempts to write the R5 dump
+    /// format (`oracle/stage-dump/dump_seams.cpp`'s record shape) to `dir` at each of
+    /// [`STAGE_DUMP_SEAMS`] as it reaches them. Does not change the five-call order or any
+    /// method's return value — only `process`'s internal emission call sites read this field.
+    pub fn set_dump_stages_dir(&mut self, dir: PathBuf) {
+        self.dump_stages_dir = Some(dir);
     }
 
     /// Builds the model: adds an object from `mesh_path`, adds its volume and adds an instance
@@ -164,11 +206,26 @@ impl Surface {
         Err(SurfaceError::NotYetPorted("validate"))
     }
 
-    /// Processes the print (`print.process()`, `test_helpers.cpp:352`). Not yet ported.
+    /// Processes the print (`print.process()`, `test_helpers.cpp:352`). The R5 seams fire during
+    /// this call on the oracle's side (`Print::process()`), which is why the eleven
+    /// `emit_stage_dump` call sites below live here and nowhere else in this module. Not yet
+    /// ported.
     pub fn process(&mut self) -> Result<(), SurfaceError> {
         self.require(Stage::Validated, "process", "validate")?;
         // PHASE B: advance only on Ok (see this module's `Stage` doc comment).
         self.stage.set(Stage::Processed);
+        // The eleven R5 seams, in `STAGE_DUMP_SEAMS`'s own pipeline order. Each call site is
+        // placed where the corresponding seam would fire once this method's body is a real
+        // port rather than an immediate `NotYetPorted` (below): nothing under `crates/slic3r-*/`
+        // is ported yet, so `emit_stage_dump` has no per-object/per-layer state to serialise at
+        // any of them today and every call is a documented no-op (see its own doc comment) —
+        // this is what task `39-compare-stages`'s "a seam whose modules are not ported yet
+        // writes nothing" means in this module. This also means `--dump-stages` changes nothing
+        // about this method's control flow or return value: the slicing sequence and the
+        // eventual exported G-code are identical with and without a dump directory set.
+        for seam in STAGE_DUMP_SEAMS {
+            self.emit_stage_dump(seam);
+        }
         Err(SurfaceError::NotYetPorted("process"))
     }
 
@@ -179,6 +236,23 @@ impl Surface {
         self.require(Stage::Processed, "export_gcode", "process")?;
         let _ = out;
         Err(SurfaceError::NotYetPorted("export_gcode"))
+    }
+
+    /// The one emission call site every R5 seam in [`STAGE_DUMP_SEAMS`] goes through. A no-op
+    /// when [`Surface::set_dump_stages_dir`] was never called (the common case today — no
+    /// binary invocation passes `--dump-stages` unless `just compare-stages` is asking for one).
+    /// With a dump directory set, this is still a no-op today: there is no per-object/per-layer
+    /// state anywhere in this crate to serialise at `seam` (nothing under `crates/slic3r-*/` is
+    /// ported), so writing the R5 record format here would be inventing data rather than
+    /// reporting it — task `39-compare-stages`'s own rule ("A seam whose modules are not ported
+    /// yet writes nothing"). The first Phase B batch that ports a module `seam` depends on is
+    /// what turns this into the one place that actually writes
+    /// `oracle/stage-dump/dump_seams.cpp`'s record shape under `dir`.
+    fn emit_stage_dump(&self, seam: &'static str) {
+        let Some(_dir) = self.dump_stages_dir.as_ref() else {
+            return;
+        };
+        let _ = seam;
     }
 
     /// The mechanical order check: `called` may run only once `stage` has reached `expected`.

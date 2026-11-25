@@ -1,0 +1,19 @@
+; provenance
+;   oracle-commit: f92a7c065c5718b8ef1baac1cd704df2911238f4
+;   oracle: built (unrecorded)
+;   os: macOS 27.0.1
+;   arch: arm64
+;   compiler: Apple clang version 21.0.0 (clang-2100.3.34.2)
+;   scaling-factor: 0.000001
+;   preset-set: machine=machine/Bambu Lab X1 Carbon 0.4 nozzle.json; process=process/0.20mm Standard @BBL X1C.json; filaments=filament/Bambu PLA Basic @BBL X1C.json; overrides=(none)
+;   fixture: 3DBenchy.stl
+;   transform: identity
+; seam: psWipeTower
+; object: print
+field=wipe_tower_depth layer=- region=- value=0x0p+0
+field=wipe_tower_width layer=- region=- value=0x0p+0
+field=wipe_tower_height layer=- region=- value=0x0p+0
+field=wipe_tower_brim_width layer=- region=- value=0x0p+0
+field=wipe_tower_number_of_toolchanges layer=- region=- value=-1
+field=wipe_tower_bbx layer=- region=- defined=0 min=0x0p+0,0x0p+0 max=0x0p+0,0x0p+0
+field=wipe_tower_rib_offset layer=- region=- value=0x0p+0,0x0p+0
