@@ -3,6 +3,12 @@
 //! `               [--tolerance-from-config <md> --configuration <name>]`
 //! `oracle-compare --settings <a> <b> [--require <level>] [--format text|json]`
 //! `oracle-compare --statistics <a> <b> [--require <level>] [--format text|json]`
+//! `oracle-compare --stages --manifest <tsv> --tree <dir> --oracle-dumps <dir>`
+//! `               --port-bin <path> --fixture <path> --config <path> --scratch <dir>`
+//!
+//! `--stages` is `just compare-stages` (task `39-compare-stages`, R20): per-stage dispatch and
+//! status derivation live in `stages.rs`; this binary only parses its own flags and prints what
+//! that module returns. See `stages.rs`'s own doc comment for what it does and does not compare.
 //!
 //! Evaluates all five levels between two files, read as raw bytes. With neither tolerance flag
 //! the comparator is exact; `--tolerance-from-manifest`/`--tolerance-from-config` read a looser
@@ -22,9 +28,10 @@
 //! error on stderr, and a tolerance error is checked before either G-code file is read, so the
 //! run compares nothing.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use oracle_compare::{format, json, tolerance, Level, Tolerance};
+use oracle_compare::{format, json, stages, tolerance, Level, Tolerance};
 
 struct Args {
     a: String,
@@ -304,7 +311,145 @@ fn run_json(args: &Args) -> Result<ExitCode, String> {
     })
 }
 
+/// `--stages`'s own argument shape (task `39-compare-stages`), entirely separate from the G-code/
+/// JSON modes above: no positional `a`/`b`, no `--require`, no `--tolerance-from-*` (each stage's
+/// tolerance comes from its own manifest rows, read by `stages::stage_tolerance`).
+///
+/// Exit status: 0 when every stage this run derives as fully ported either prints `not ported`
+/// or actually matches its oracle at its declared tier; non-zero, naming the first differing
+/// stage (already printed in the table above it), the moment any compared stage differs
+/// (`report.first_differing_stage.is_some()`) — `not ported` alone is never the reason this
+/// exits non-zero (task.md's own "Done when": "run on a tree where no stage is fully ported, it
+/// exits 0"). A bad manifest, a refused tolerance, a missing committed oracle artifact or the
+/// internal-inconsistency case are `stages::run`'s own `Err`s and exit non-zero before any table
+/// is printed at all (see `stages.rs`'s doc comment on its one named error).
+struct StagesArgs {
+    manifest: PathBuf,
+    tree: PathBuf,
+    oracle_dumps: PathBuf,
+    port_bin: PathBuf,
+    fixture: PathBuf,
+    config: PathBuf,
+    scratch: PathBuf,
+}
+
+fn stages_usage() -> &'static str {
+    "usage: oracle-compare --stages --manifest <tsv> --tree <dir> --oracle-dumps <dir>\n       \
+     --port-bin <path> --fixture <path> --config <path> --scratch <dir>"
+}
+
+fn parse_stages_args(raw: &[String]) -> Result<StagesArgs, String> {
+    let mut manifest = None;
+    let mut tree = None;
+    let mut oracle_dumps = None;
+    let mut port_bin = None;
+    let mut fixture = None;
+    let mut config = None;
+    let mut scratch = None;
+
+    let mut i = 0;
+    while i < raw.len() {
+        let take = |flag: &str| -> Result<Option<String>, String> {
+            if raw[i] == flag {
+                let value = raw
+                    .get(i + 1)
+                    .ok_or_else(|| format!("{flag} needs a value"))?;
+                Ok(Some(value.clone()))
+            } else {
+                Ok(None)
+            }
+        };
+        if let Some(v) = take("--manifest")? {
+            manifest = Some(v);
+            i += 2;
+            continue;
+        }
+        if let Some(v) = take("--tree")? {
+            tree = Some(v);
+            i += 2;
+            continue;
+        }
+        if let Some(v) = take("--oracle-dumps")? {
+            oracle_dumps = Some(v);
+            i += 2;
+            continue;
+        }
+        if let Some(v) = take("--port-bin")? {
+            port_bin = Some(v);
+            i += 2;
+            continue;
+        }
+        if let Some(v) = take("--fixture")? {
+            fixture = Some(v);
+            i += 2;
+            continue;
+        }
+        if let Some(v) = take("--config")? {
+            config = Some(v);
+            i += 2;
+            continue;
+        }
+        if let Some(v) = take("--scratch")? {
+            scratch = Some(v);
+            i += 2;
+            continue;
+        }
+        return Err(format!("unknown flag: {}", raw[i]));
+    }
+
+    Ok(StagesArgs {
+        manifest: PathBuf::from(manifest.ok_or("missing required flag: --manifest <tsv>")?),
+        tree: PathBuf::from(tree.ok_or("missing required flag: --tree <dir>")?),
+        oracle_dumps: PathBuf::from(
+            oracle_dumps.ok_or("missing required flag: --oracle-dumps <dir>")?,
+        ),
+        port_bin: PathBuf::from(port_bin.ok_or("missing required flag: --port-bin <path>")?),
+        fixture: PathBuf::from(fixture.ok_or("missing required flag: --fixture <path>")?),
+        config: PathBuf::from(config.ok_or("missing required flag: --config <path>")?),
+        scratch: PathBuf::from(scratch.ok_or("missing required flag: --scratch <dir>")?),
+    })
+}
+
+fn run_stages() -> Result<ExitCode, String> {
+    let raw: Vec<String> = std::env::args().skip(2).collect();
+    let args = parse_stages_args(&raw).map_err(|e| format!("{e}\n{}", stages_usage()))?;
+
+    let cfg = stages::StagesConfig {
+        manifest_path: &args.manifest,
+        tree: &args.tree,
+        oracle_dumps_dir: &args.oracle_dumps,
+        port_bin: &args.port_bin,
+        fixture: &args.fixture,
+        config: &args.config,
+        scratch_dir: &args.scratch,
+    };
+
+    let report = stages::run(&cfg)?;
+    print!("{}", stages::render_text(&report));
+
+    // A real per-stage divergence must fail the command, not just print a line: task 40's CI
+    // line (`just compare-stages`) has to be able to fail on a mismatch, and "not ported" alone
+    // is explicitly not a failure (task.md's own "Done when"), so the table is always printed
+    // first and only `first_differing_stage` decides the exit code.
+    Ok(if report.first_differing_stage.is_some() {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
 fn main() -> ExitCode {
+    let first_arg = std::env::args().nth(1);
+    if first_arg.as_deref() == Some("--stages") {
+        return match run_stages() {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     match run() {
         Ok(code) => code,
         Err(message) => {

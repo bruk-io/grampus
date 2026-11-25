@@ -1,0 +1,3 @@
+path	in scope or out with a reason	target crate	target module	pipeline stage or none	equality tier	tolerance	comparison function	proof path
+Fallback/GCode.cpp	in	fixture-crate	crates/fixture-crate/src/ported_seam.rs	psGCodeExport	exact			proof/ported_seam
+Fallback/Conflict.cpp	in	fixture-crate	crates/fixture-crate/src/ported_seam.rs	psConflictCheck	exact			proof/ported_seam
