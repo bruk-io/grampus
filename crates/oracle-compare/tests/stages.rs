@@ -166,6 +166,41 @@ fn fully_ported_stage_with_no_committed_oracle_dump_fails_naming_the_fix() {
 }
 
 #[test]
+fn run_routes_a_fully_ported_fallback_stage_to_the_gcode_path_not_the_dump_path() {
+    // Proves `run()`'s own dispatch decision (`is_fallback_stage`), not just `evaluate_fallback`
+    // in isolation (the test above): a manifest naming only `psGCodeExport`/`psConflictCheck`,
+    // both fully ported, against an *empty* oracle-dumps directory. The dump-record branch would
+    // fail naming `psGCodeExport.dump`; the fallback branch fails naming `plate_1.gcode` instead
+    // -- the error text alone tells us which branch actually ran.
+    let manifest = data_dir().join("fixture_tree/manifest_fallback_only.tsv");
+    let tree = data_dir().join("fixture_tree");
+    let scratch = run_dir("fallback-routing");
+    let empty_dumps_dir = scratch.join("empty-oracle-dumps");
+    std::fs::create_dir_all(&empty_dumps_dir).unwrap();
+
+    let cfg = stages::StagesConfig {
+        manifest_path: &manifest,
+        tree: &tree,
+        oracle_dumps_dir: &empty_dumps_dir,
+        port_bin: &stand_in_port_bin(),
+        fixture: &repo_root().join("fixtures/20mm_cube.stl"),
+        config: &repo_root().join("port/goldens/configs/base-fff.json"),
+        scratch_dir: &scratch,
+    };
+
+    let err = stages::run(&cfg)
+        .expect_err("a fully-ported fallback stage with no oracle gcode must fail");
+    assert!(
+        err.contains("plate_1.gcode"),
+        "expected the fallback (gcode) path to run, naming plate_1.gcode: {err}"
+    );
+    assert!(
+        !err.contains(".dump"),
+        "the dump-record path must not have run for a fallback stage: {err}"
+    );
+}
+
+#[test]
 fn fully_ported_stage_whose_port_run_wrote_no_dump_is_an_internal_inconsistency_not_a_pass() {
     let manifest = data_dir().join("fixture_tree/manifest.tsv");
     let tree = data_dir().join("fixture_tree");

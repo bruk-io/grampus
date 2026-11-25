@@ -73,6 +73,13 @@ pub struct ManifestRow {
     /// The raw `pipeline stage or none` cell: a stage name or the literal `none`.
     pub stage: String,
     pub proof_path: String,
+    /// The raw `equality tier` cell (R19/R20: "exact equality of integer-coordinate output for a
+    /// fixed-point stage, and the row's declared tolerance and comparison function for a float
+    /// one"). `stage_tolerance` reads this only to refuse the one contradiction a row's own
+    /// cells can state (`exact` *and* a declared tolerance) — the actual comparison tier is
+    /// still the resolved `Tolerance`, exactly as every other consumer of
+    /// `tolerance::from_manifest_row` already reads it.
+    pub equality_tier: String,
 }
 
 fn find_col(headers: &[&str], name: &str) -> Result<usize, String> {
@@ -100,6 +107,7 @@ pub fn load_manifest_rows(tsv_path: &Path) -> Result<Vec<ManifestRow>, String> {
     let module_col = find_col(&headers, "target module")?;
     let stage_col = find_col(&headers, "pipeline stage or none")?;
     let proof_col = find_col(&headers, "proof path")?;
+    let tier_col = find_col(&headers, "equality tier")?;
 
     let mut rows = Vec::new();
     for line in lines {
@@ -117,6 +125,7 @@ pub fn load_manifest_rows(tsv_path: &Path) -> Result<Vec<ManifestRow>, String> {
             target_module: get(module_col),
             stage: get(stage_col),
             proof_path: get(proof_col),
+            equality_tier: get(tier_col),
         });
     }
     Ok(rows)
@@ -877,6 +886,20 @@ pub fn stage_tolerance(manifest_path: &Path, rows: &[&ManifestRow]) -> Result<To
     let mut result: Option<Tolerance> = None;
     for row in rows {
         let tol = tolerance::from_manifest_row(manifest_str, &row.path)?;
+        // The one contradiction a row's own cells can state: `equality tier` says `exact`
+        // (R19/R20's fixed-point reading) while `tolerance` is non-empty (a declared, non-zero
+        // deviation). Refused here, the same way a value with no reason is refused, rather than
+        // silently comparing at the looser declared tolerance — a reviewer grepping this
+        // module for the `equality tier` column (task.md names all three columns together)
+        // finds this is where it is read and enforced.
+        let tier = row.equality_tier.trim();
+        if tier.eq_ignore_ascii_case("exact") && matches!(tol, Tolerance::Declared { .. }) {
+            return Err(format!(
+                "row '{}' declares equality tier 'exact' but also a non-empty tolerance cell \
+                 ({tol}); a fixed-point row cannot also be a float row",
+                row.path
+            ));
+        }
         result = Some(match result {
             None => tol,
             Some(current) => stricter(current, tol),
@@ -1419,6 +1442,7 @@ mod tests {
             target_module: String::new(),
             stage: stage.to_string(),
             proof_path: String::new(),
+            equality_tier: String::new(),
         }
     }
 
@@ -1466,6 +1490,23 @@ mod tests {
         let rows = vec![&r];
         let err = stage_tolerance(&tsv, &rows).expect_err("a value with no reason must be refused");
         assert!(err.contains("no reason"), "{err}");
+    }
+
+    #[test]
+    fn stage_tolerance_refuses_exact_tier_combined_with_a_declared_tolerance() {
+        let tsv = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/manifest/tolerance.tsv");
+        // `Foo/Bar.cpp` declares a valid tolerance *with* a reason (so this reaches the new
+        // check rather than being refused by `tolerance::from_manifest_row` first); this test's
+        // row states `equality tier: exact` on top of it, which is the one contradiction a
+        // row's own cells can state.
+        let mut r = row("someStage", true);
+        r.path = "Foo/Bar.cpp".to_string();
+        r.equality_tier = "exact".to_string();
+        let rows = vec![&r];
+        let err = stage_tolerance(&tsv, &rows)
+            .expect_err("'exact' plus a declared tolerance must be refused");
+        assert!(err.contains("exact"), "{err}");
+        assert!(err.contains("Foo/Bar.cpp"), "{err}");
     }
 
     #[test]
