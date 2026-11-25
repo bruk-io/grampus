@@ -969,8 +969,14 @@ def render_markdown(results: list[RowResult], cmake_flags: list[str]) -> str:
                     while j < len(diffs) and diffs[j].withheld and diffs[j].detail == d.detail:
                         group.append(diffs[j])
                         j += 1
-                    levels = "/".join(g.level for g in group)
-                    lines.append(f"- **{m.artifact}** ({levels}, withheld): {d.detail}")
+                    # A JSON artifact's withheld `Difference` always carries `level="none"`
+                    # (`json_difference` has no per-level breakdown to name, unlike gcode's
+                    # L1-L4) -- naming it here would read as "level reached: none" rather than
+                    # as the literal string `Difference.level` happens to hold, so it is left
+                    # out and only a real per-level grouping (gcode's L1/L2/L3/L4) is named.
+                    real_levels = [g.level for g in group if g.level != "none"]
+                    marker = "/".join(real_levels) + ", withheld" if real_levels else "withheld"
+                    lines.append(f"- **{m.artifact}** ({marker}): {d.detail}")
                     i = j
                 else:
                     lines.append(f"- **{m.artifact}** ({d.level}): {d.detail}")
