@@ -1,0 +1,8 @@
+path	target crate	target module	in scope or out with a reason	equality tier	proof path	fuzz target
+Geometry/Circle.cpp	slic3r-status	crates/slic3r-status/src/drafted_mod.rs	in	exact		required
+Geometry/Circle.hpp	slic3r-status	crates/slic3r-status/src/not_started_mod.rs	in	exact		n/a
+libslic3r.h	slic3r-status	crates/slic3r-status/src/no_proof_mod.rs	in	exact	2	n/a
+Geometry.hpp	slic3r-status	crates/slic3r-status/src/ported_mod.rs	in	exact	3	required
+Geometry.cpp	slic3r-status	crates/slic3r-status/src/ported_with_fuzz.rs	in	exact	4	required
+Point.hpp	slic3r-status	crates/slic3r-status/src/outscope_mod.rs	out: fixture row, never reached	exact		n/a
+Geometry/Circle.hpp	slic3r-status	crates/slic3r-status/src/mod_reached_todo_mod.rs	in	exact		n/a
