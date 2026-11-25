@@ -57,7 +57,7 @@ GCode.hpp	770	PlaceholderParserIntegration	opt_extruded_volume_total	ConfigOptio
 GCode.hpp	771	PlaceholderParserIntegration	opt_extruded_weight_total	ConfigOptionFloat *	borrowed	GCode.cpp:2240, GCode.cpp:2244	&'a mut ConfigOptionFloat
 GCode.hpp	825	GCode	m_instance_names	std::unordered_map<const PrintInstance*, std::string>	borrowed	GCode.hpp:824	HashMap<&'a PrintInstance, String>
 GCode.hpp	843	GCode	m_layer	const Layer *	borrowed	GCode.hpp:842	&'a Layer
-GCode.hpp	910	GCode	m_last_obj_copy	std::pair<const PrintObject*, Point>	borrowed	GCode.hpp:909	(&'a PrintObject, Point)
+GCode.hpp	910	GCode	m_last_obj_copy	std::pair<const PrintObject*, Point>	borrowed	GCode.cpp:7689, GCode.cpp:7692, GCode.hpp:909	(&'a PrintObject, Point)
 GCode.hpp	919	GCode	m_print	Print *	borrowed	GCode.cpp:3423	&'a mut Print
 GCode.hpp	921	GCode	m_printed_objects	std::vector<const PrintObject*>	borrowed	GCode.cpp:4729	Vec<&'a PrintObject>
 GCode.hpp	934	GCode	m_curr_print	Print *	borrowed	GCode.cpp:2867	&'a mut Print
@@ -177,11 +177,11 @@ PrintBase.hpp	362	PrintObjectBase	m_model_object	ModelObject *	back-reference	Pr
 PrintBase.hpp	376	PrintTryCancel	m_print	const PrintBase *	back-reference	PrintBase.hpp:375	usize
 PrintBase.hpp	691	PrintObjectBaseWithState	m_print	PrintType *	back-reference	PrintBase.hpp:688, PrintBase.hpp:690	usize
 PrintConfig.hpp	1132	StaticCache	m_defaults	T *	borrowed	PrintConfig.hpp:1111	&'a mut T
-ProjectTask.hpp	138	BBLSliceInfo	profile_	BBLProfile *	unknown	ProjectTask.cpp:52	Arc<Mutex<BBLProfile>>
+ProjectTask.hpp	138	BBLSliceInfo	profile_	BBLProfile *	unknown	ProjectTask.hpp:105, ProjectTask.hpp:121	Arc<Mutex<BBLProfile>>
 ProjectTask.hpp	241	BBLSubTask	parent_task_	BBLTask *	back-reference	ProjectTask.cpp:60	usize
 ProjectTask.hpp	273	BBLTask	profile_	BBLProfile *	unknown	ProjectTask.cpp:52	Arc<Mutex<BBLProfile>>
 ProjectTask.hpp	277	BBLTask	subtasks	std::vector<BBLSubTask*>	owned	ProjectTask.cpp:142, ProjectTask.cpp:167	Vec<BBLSubTask>
-ProjectTask.hpp	278	BBLTask	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:42	BTreeMap<String, Arc<Mutex<BBLSliceInfo>>>
+ProjectTask.hpp	278	BBLTask	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.hpp:278	BTreeMap<String, Arc<Mutex<BBLSliceInfo>>>
 ProjectTask.hpp	300	BBLProfile	tasks	std::vector<BBLTask*>	unknown	ProjectTask.hpp:300	Vec<Arc<Mutex<BBLTask>>>
 ProjectTask.hpp	311	BBLProfile	project_	BBLProject *	unknown	ProjectTask.cpp:33	Arc<Mutex<BBLProject>>
 ProjectTask.hpp	312	BBLProfile	slice_info	std::map<std::string, BBLSliceInfo*>	unknown	ProjectTask.cpp:42	BTreeMap<String, Arc<Mutex<BBLSliceInfo>>>

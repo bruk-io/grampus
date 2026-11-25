@@ -79,10 +79,31 @@ that same owned `subtasks`. The remaining seven -- `profile_` (`BBLSliceInfo` an
 `project_`, `tasks`, and both `slice_info` maps -- are genuinely unresolved: `ProjectTask.cpp` only
 ever assigns these from a constructor parameter or looks them up (`get_slice_info`); nothing under
 `src/libslic3r` ever `push_back`s into `tasks`/`profiles` or deletes a `profile_`/`project_`/
-`slice_info` pointee. Unlike the `AreaGroup` row above, there genuinely is no use of these seven
-anywhere in this header's own evidence path to cite -- the object graph that would settle them (if
-one exists) is built in GUI code under `src/slic3r/GUI`, out of scope for this header's own
-evidence, so their `evidence` cell cites the field's own declaration in place of a use. All seven
+`slice_info` pointee. The object graph that would settle them (if one exists) is built in GUI code
+under `src/slic3r/GUI`, out of scope for this header's own evidence. The seven split two ways on
+what their `evidence` cell can cite, and an earlier draft of this plan wrongly claimed the second
+case for all of them:
+
+- **Four rows cite a real in-scope use of their own field**, and that use is precisely why it does
+  not settle ownership -- an assignment from a constructor parameter, or a lookup, with no `delete`
+  anywhere: `:138` `BBLSliceInfo::profile_` (`ProjectTask.hpp:105`, its own constructor's
+  `profile_ = profile;`, and `ProjectTask.hpp:121`, its copy constructor's
+  `this->profile_ = obj.profile_;` -- a shallow pointer copy with no matching delete); `:273`
+  `BBLTask::profile_` (`ProjectTask.cpp:52`); `:311` `BBLProfile::project_`
+  (`ProjectTask.cpp:33`); `:312` `BBLProfile::slice_info` (`ProjectTask.cpp:42`,
+  `BBLProfile::get_slice_info`'s own `slice_info.find(plate_idx)`). Each row cites *its own*
+  field's site, never an identically-named field of a different class.
+- **Three rows have no citable site at all** under `src/libslic3r`: `:278`
+  `BBLTask::slice_info`, `:300` `BBLProfile::tasks` and `:340` `BBLProject::profiles` are each
+  declared and never read, written, pushed into or deleted anywhere in the tree (verified by
+  `grep -rn` over the whole of `vendor/OrcaSlicer/src/libslic3r`; `BBLProject::reset()`,
+  `ProjectTask.cpp:177-189`, does not touch `profiles` either). For these three the `evidence`
+  cell cites the field's own declaration, and **this plan rules the "`path:line` of the use that
+  leaves the class unclear" requirement discharged on that ground**: where a field has no use at
+  all, its declaration is the whole of the in-scope evidence, and having none is itself what
+  leaves the class unclear. That is a stated ruling, not an oversight.
+
+All seven
 carry the conservative `Arc<Mutex<Pointee>>` (the pointee's own pointer is never `const`, so a
 porter must assume concurrent mutation until a later pass resolves it), except the two `slice_info`
 maps, whose element type keeps that `Arc<Mutex<Pointee>>` but whose container follows `std::map`'s
@@ -141,7 +162,11 @@ not `HashMap`.
 
 Container rows (a `Vec`, map or `std::pair` of raw pointers, or a pointer/reference *to* such a
 container) take the per-element default extended mechanically to the container, the same way the
-table already does for an `owned` container (`Vec<ExtrusionEntity>`, not a container of pointers):
+table already does for an `owned` container (`Vec<ExtrusionEntity>`, not a container of pointers).
+A `std::pair` takes a Rust tuple with the rule applied to each element -- this batch's one instance
+is `GCode.hpp:910` `m_last_obj_copy` (`std::pair<const PrintObject*, Point>`, `borrowed`), giving
+`(&'a PrintObject, Point)`: the pointer element becomes the `borrowed` default for a `const`
+pointee, the by-value element stays by value. The rest of the rule:
 a `borrowed` container of `const T*` becomes `Vec<&'a T>`, or `&'a [&'a T]` where the container
 itself is only borrowed (`ClipperUtils.hpp:315`, `PerimeterGenerator.hpp:88`, `Print.hpp:218` --
 the inner `&'a T` is kept, never flattened to `&'a [T]`, because the elements are pointers
