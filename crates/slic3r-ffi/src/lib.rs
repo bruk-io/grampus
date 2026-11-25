@@ -29,3 +29,4 @@
 //! completion trailer only a manifest row, or a trailer already written, could authorize.
 
 pub mod clipper2;
+pub mod proof;

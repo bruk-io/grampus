@@ -1,0 +1,63 @@
+// Proof path 3 (R19, plan step 18, task 31-proof-harness): a test translation unit that
+// `#include`s a vendored `.cpp` whole, so this crate can reach a `static` or anonymous-namespace
+// helper the pin never exports -- 49 of 268 vendored `.cpp` files declare an anonymous namespace
+// and 112 declare `static` free functions, none with external linkage, and the pin
+// (f92a7c065c5718b8ef1baac1cd704df2911238f4) forbids adding an export. `#include`ing the file
+// does not modify it, so the pin holds; nothing under vendor/OrcaSlicer/ is edited by this file.
+//
+// WHICH VENDORED FILES MAY BE #include'd HERE, AND WHY (the duplicate-symbol constraint):
+//
+// A vendored `.cpp` `#include`d here also defines *that file's externally linked* symbols in
+// this translation unit -- and the same symbols already exist in `liblibslic3r.a`, which
+// `crates/slic3r-ffi/build.rs`'s derived link line also links. On this pin's macOS `ld`, a
+// static archive member is only extracted when something still-unresolved needs it, so as long
+// as nothing else this crate links needs that vendored `.cpp`'s externally linked symbols, the
+// archive's own copy of that translation unit is simply never pulled in, and there is no
+// duplicate definition. This was verified empirically for the file chosen below, by compiling
+// and linking it against this crate's derived link line directly with no undefined or duplicate
+// symbol (see this task's pull request body for the command and its output) -- it is not an
+// assumption. A vendored file whose externally linked symbols are *already* needed elsewhere in
+// this crate's link (so the archive member would be unavoidably extracted too) would collide,
+// and may not be `#include`d here this way. Where a helper's enclosing file cannot be included
+// at all (because of that collision, or for any other reason), the manifest row says so and the
+// helper is proven through its enclosing file's exported surface instead -- R19's stated
+// fallback.
+//
+// THIS FILE'S CHOICE: `src/libslic3r/ClipperZUtils.cpp` (`port/manifest.tsv`'s `proof path` `3`
+// row). Its `static` `to_paths64` (internal linkage, reachable only in this translation unit,
+// after the `#include` below) converts one `Slic3r::ClipperZUtils::ZPath` into one
+// `Clipper2Lib_Z::Path64`, both built from plain `coord_t` (int64_t) coordinates -- a pure
+// repack, no arithmetic, which is exactly what `crates/slic3r-proof/tests/harness_paths.rs`
+// checks comes back unchanged, through `tiers::compare_unit` at that row's declared tier
+// (`exact`).
+
+#include "proof_shims.h"
+
+#include "ClipperZUtils.cpp"
+
+namespace slic3r_ffi {
+namespace proof {
+
+rust::Vec<ProofZPoint> path3_to_paths64(const rust::Vec<ProofZPoint> &path) {
+    Slic3r::ClipperZUtils::ZPath cpp_path;
+    cpp_path.reserve(path.size());
+    for (const ProofZPoint &p : path) {
+        cpp_path.emplace_back(p.x, p.y, p.z);
+    }
+
+    // `to_paths64` is `static` (internal linkage): reachable only because this translation unit
+    // `#include`s `ClipperZUtils.cpp` above, never through a header declaration.
+    Slic3r::ClipperZUtils::ZPaths cpp_paths{cpp_path};
+    auto result = Slic3r::ClipperZUtils::to_paths64(cpp_paths);
+
+    rust::Vec<ProofZPoint> out;
+    if (!result.empty()) {
+        for (const auto &pt : result[0]) {
+            out.push_back(ProofZPoint{pt.x, pt.y, pt.z});
+        }
+    }
+    return out;
+}
+
+} // namespace proof
+} // namespace slic3r_ffi
