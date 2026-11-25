@@ -100,11 +100,16 @@ fn parse_args(raw: &[String]) -> Result<ParsedArgs, String> {
 }
 
 /// This binary's one named error, never a panic: a usage problem, a resolved-configuration
-/// read failure, or the surface's own not-yet-ported/out-of-order error.
+/// read failure, the surface's own not-yet-ported/out-of-order error, or the statistics export
+/// path's own not-yet-ported report (there is no `Surface::export_statistics` method to name —
+/// statistics export has no entry point of its own on `Surface`, R10's five calls being fixed —
+/// so this gets its own variant rather than borrowing `SurfaceError::NotYetPorted` with a method
+/// name that doesn't exist).
 enum CliError {
     Usage(String),
     ResolvedConfig(ResolvedConfigError),
     Surface(SurfaceError),
+    StatisticsNotYetPorted,
 }
 
 impl std::fmt::Display for CliError {
@@ -113,6 +118,9 @@ impl std::fmt::Display for CliError {
             CliError::Usage(message) => write!(f, "{message}\n\n{}", usage()),
             CliError::ResolvedConfig(e) => write!(f, "{e}"),
             CliError::Surface(e) => write!(f, "{e}"),
+            CliError::StatisticsNotYetPorted => {
+                write!(f, "not yet ported: plate_1.statistics.json export")
+            }
         }
     }
 }
@@ -155,9 +163,7 @@ fn run(args: &Args) -> Result<(), CliError> {
         // the same named "not yet ported" error the other four CLI paths do, rather than
         // silently exiting 0 having written nothing.
         let _ = statistics_path;
-        return Err(CliError::Surface(SurfaceError::NotYetPorted(
-            "export_statistics",
-        )));
+        return Err(CliError::StatisticsNotYetPorted);
     }
 
     Ok(())
