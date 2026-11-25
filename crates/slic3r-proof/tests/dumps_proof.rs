@@ -331,9 +331,20 @@ fn scalar_and_pair_accessors_read_the_real_wipe_tower_dump() {
         .field("wipe_tower_rib_offset")
         .next()
         .expect("wipe_tower_rib_offset record must exist");
-    rib_offset
+    let err = rib_offset
         .value_f64(&dump.path)
         .expect_err("'value=' on this record is a comma-separated pair, not a single scalar");
+    assert!(
+        matches!(
+            err,
+            DumpError::PairValuedField {
+                expected_pair: false,
+                ..
+            }
+        ),
+        "a paired value read through the single-value accessor is a usage mismatch, not a \
+         malformed token: {err}"
+    );
     assert_eq!(
         rib_offset.pair_f64(&dump.path, "value").unwrap(),
         Some((0.0, 0.0))

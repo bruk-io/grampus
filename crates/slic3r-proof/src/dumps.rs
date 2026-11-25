@@ -111,6 +111,18 @@ pub enum DumpError {
         field: String,
         detail: String,
     },
+    /// [`Record::scalar_f64`] was called on a key whose value is a comma-separated pair (read it
+    /// with [`Record::pair_f64`] instead), or [`Record::pair_f64`] was called on a key whose
+    /// value has no comma (read it with [`Record::scalar_f64`] instead) -- a usage mismatch, not
+    /// a malformed token: the value parses fine, just not in the shape the accessor called
+    /// expects, so this is never [`DumpError::MalformedHexFloat`].
+    PairValuedField {
+        path: PathBuf,
+        line: usize,
+        key: String,
+        value: String,
+        expected_pair: bool,
+    },
     /// A record [`Dump::points_at`] (or [`Dump::points_at_support_layer`]) matched on `field`
     /// (and `layer`/`region`, or `support_layer`) also carries a record-placing key the call did
     /// not constrain at all (`support_layer`, `object`, `group` or `brim`) -- refused rather than
@@ -182,6 +194,33 @@ impl fmt::Display for DumpError {
                 "slic3r-proof/dumps: {}: no '{field}' record found ({detail})",
                 path.display()
             ),
+            DumpError::PairValuedField {
+                path,
+                line,
+                key,
+                value,
+                expected_pair,
+            } => {
+                let (have, want, accessor) = if *expected_pair {
+                    (
+                        "a single value",
+                        "a comma-separated pair",
+                        "Record::scalar_f64",
+                    )
+                } else {
+                    (
+                        "a comma-separated pair",
+                        "a single value",
+                        "Record::pair_f64",
+                    )
+                };
+                write!(
+                    f,
+                    "slic3r-proof/dumps: {}:{line}: '{key}={value}' is {have}, not {want}; read \
+                     it with {accessor}",
+                    path.display()
+                )
+            }
             DumpError::AmbiguousAxis {
                 path,
                 field,
@@ -297,13 +336,12 @@ impl Record {
     pub fn scalar_f64(&self, path: &Path, key: &str) -> Result<Option<f64>, DumpError> {
         match self.get(key) {
             None => Ok(None),
-            Some(v) if v.contains(',') => Err(DumpError::MalformedHexFloat {
+            Some(v) if v.contains(',') => Err(DumpError::PairValuedField {
                 path: path.to_path_buf(),
                 line: self.line,
-                token: v.to_string(),
-                detail: format!(
-                    "'{key}={v}' is a comma-separated pair; read it with Record::pair_f64, not scalar_f64"
-                ),
+                key: key.to_string(),
+                value: v.to_string(),
+                expected_pair: false,
             }),
             Some(v) => parse_scalar(v, path, self.line).map(Some),
         }
@@ -322,13 +360,12 @@ impl Record {
                     let b = parse_scalar(b, path, self.line)?;
                     Ok(Some((a, b)))
                 }
-                None => Err(DumpError::MalformedHexFloat {
+                None => Err(DumpError::PairValuedField {
                     path: path.to_path_buf(),
                     line: self.line,
-                    token: v.to_string(),
-                    detail: format!(
-                        "'{key}={v}' has no ',' -- not a pair; read it with scalar_f64"
-                    ),
+                    key: key.to_string(),
+                    value: v.to_string(),
+                    expected_pair: true,
                 }),
             },
         }
