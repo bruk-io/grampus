@@ -55,3 +55,5 @@ git submodule update --init --depth 1
 
 AGPL-3.0. See [LICENSE](LICENSE). grampus is derived from OrcaSlicer, which is AGPL-3.0, so it
 carries the same license.
+
+<!-- scratch doc-only filter test, see PR #39 Done-when; will be closed -->
