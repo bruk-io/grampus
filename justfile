@@ -5,6 +5,21 @@ asdlc := "uvx --from git+https://github.com/bruk-io/asdlc asdlc"
 check:
     {{asdlc}} document check
 
+# the code checks that need neither the oracle binary nor a built libslic3r (R23): every one
+# of these reads only the vendored source and the repository's own files, so a task that
+# touches no code still passes with this recipe alone, and it never waits on a build. Two more
+# lines join it later, each added by the task that makes it pass: Step 17's substitute and
+# -ffp-contract=off drift checks and Step 18's mock check (task 24-port-check-ci does not add
+# either). `just audit-check` and the perf-backlog whole-file diff are deliberately not here --
+# see their own recipes' docstrings -- and neither is `just port-status` without
+# `--per-commit`, the completion gate that runs in the macOS job instead.
+port-check:
+    just port-status --per-commit
+    just inventory-check
+    just ownership-check
+    ./oracle/provenance --check port/goldens/ 'port/dumps/*/*.dump' port/reports/determinism.md port/reports/oracle-parity.md
+    cargo fmt --check
+
 # the guard: this branch changes only what its documents on main allow
 guard *branch:
     {{asdlc}} branch check {{branch}}
