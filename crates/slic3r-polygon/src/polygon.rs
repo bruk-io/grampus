@@ -460,6 +460,13 @@ impl Polygon {
             let d = self.points[i] - self.points[i - 1];
             lengths[i] = lengths[i - 1] + ((d.x() as f32).powi(2) + (d.y() as f32).powi(2)).sqrt();
         }
+        // PORT NOTE: src/libslic3r/Polygon.cpp:377 -- the vendored `lengths.back() =
+        // lengths[lengths.size()-2] + ...` reads `lengths[(size_t)-1]` (an out-of-bounds,
+        // wrapped `size_t`) when `points` is empty, since `lengths.size()` is `1` there; this
+        // `if n >= 1` guard is a disclosed divergence for that one degenerate input, returning
+        // the harmless `[0.0]` this port's own bounds-checked `Vec` would otherwise panic on,
+        // rather than reproducing the vendored out-of-bounds read. No in-scope caller reaches
+        // `parameter_by_length`/`densify` on an empty `Polygon`.
         if n >= 1 {
             let d = self.points[0] - self.points[n - 1];
             lengths[n] = lengths[n - 1] + ((d.x() as f32).powi(2) + (d.y() as f32).powi(2)).sqrt();
