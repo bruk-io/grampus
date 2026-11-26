@@ -22,21 +22,39 @@ disk, so it is not a file this task writes at all (see that file's own header co
 
 ## The risk this plan exists to answer, measured rather than argued
 
-**The true size, measured before any Rust was written.** The unit is 17,247 source lines, but that
-undercounts the work: `grep -c '^\s*def\s*=\s*this->add' PrintConfig.cpp` finds **981** option
-definitions in the `.cpp`, each a `ConfigOptionDef` built by direct field assignment
-(`def->label = L("...")`, `def->min = 1`, ...) plus one `set_default_value(new ConfigOptionX{...})`
-call -- and `PrintConfig.hpp` separately declares **~40 enums** (several with their own helper
-functions reaching real logic, not just values) and, through the `PRINT_CONFIG_CLASS_DEFINE`/
-`PRINT_CONFIG_CLASS_DERIVED_DEFINE` macro family (`:1213-1276`), **11 `StaticPrintConfig`-derived
-classes** (`PrintObjectConfig`, `PrintRegionConfig`, `MachineEnvelopeConfig`, `GCodeConfig`,
-`PrintConfig`, `FullPrintConfig`, `SLAPrintConfig`, `SLAPrintObjectConfig`, `SLAMaterialConfig`,
-`SLAPrinterConfig`, `SLAFullPrintConfig`) each declaring, as **typed struct fields**, a second,
-independent list of the option keys it carries -- a list this plan must transcribe in addition to
-the 981 `.add()` calls, not instead of them, because the two lists serve different jobs (the
-registry's metadata vs. a config object's typed storage) and disagree in membership (`FullPrintConfig`
-and `SLAFullPrintConfig` declare **no fields of their own** -- they only aggregate their parents).
-So the real transcription surface is on the order of 981 metadata blocks plus ~900 struct-field
+**The true size, measured before any Rust was written -- corrected again here against a prior
+miscount.** The unit is 17,247 source lines, but that undercounts the work, and an earlier version
+of this plan undercounted it a second way by treating one raw grep count as the registry size.
+Measured precisely: `grep -nP '^\s*def\s*=\s*this->add' PrintConfig.cpp | wc -l` finds **981**
+`this->add(...)`/`this->add_nullable(...)` call sites in the whole file -- but **848** of them are
+on lines before `CLIActionsConfigDef::CLIActionsConfigDef()` at `PrintConfig.cpp:12713`, i.e.
+inside `PrintConfigDef`'s own `init_*` functions, and the remaining **133** belong to the file's
+other `ConfigDef` subclasses (`CLIActionsConfigDef`, `CLITransformConfigDef`, `CLIMiscConfigDef`
+and the slicing-state/placeholder defs from `:12713` on) and never enter `print_config_def` at all.
+Inside the `PrintConfigDef` region, not every add site is a plain literal key either: at least
+three are commented out (`:4069` `adaptive_layer_height`, `:4474` `spaghetti_detector`, `:6426`
+`filament_extruder_id`) and several are generated at run time rather than written as a literal
+string -- a `for` loop over `filament_extruder_override_keys` (`:97-122`, 19 entries, added via
+`add_nullable` at `:8788`), a loop of three string-concatenated `machine_max_*` prefixes
+(`:5388,5406,5424`), a `for` loop of three `*_plugin_config_overrides` keys (`:1305`), and three
+`add_belt_remap` calls building `gcode_remap_x/y/z` (`:7785-7791`). The registry's own key count --
+measured by `oracle_option_keys()` against the real oracle library, on this branch and
+independently reproduced by both review passes below -- is **881** unique keys, which is the
+number this plan now uses as the comparison test's denominator everywhere below; 981 is a call-site
+count across several different registries, not the size of `print_config_def`, and this plan no
+longer uses it as a key-count gate. `PrintConfig.hpp` separately declares, per
+`CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS`'s own 65 invocations in the `.cpp`, **65 enum types** (see
+Step 2 below for which are in scope), several with their own helper functions reaching real logic,
+not just values, and, through the `PRINT_CONFIG_CLASS_DEFINE`/`PRINT_CONFIG_CLASS_DERIVED_DEFINE`
+macro family (`:1213-1276`), **11 `StaticPrintConfig`-derived classes** (`PrintObjectConfig`,
+`PrintRegionConfig`, `MachineEnvelopeConfig`, `GCodeConfig`, `PrintConfig`, `FullPrintConfig`,
+`SLAPrintConfig`, `SLAPrintObjectConfig`, `SLAMaterialConfig`, `SLAPrinterConfig`,
+`SLAFullPrintConfig`) each declaring, as **typed struct fields**, a second, independent list of
+the option keys it carries -- a list this plan must transcribe in addition to the 881-row registry,
+not instead of it, because the two lists serve different jobs (the registry's metadata vs. a
+config object's typed storage) and disagree in membership (`FullPrintConfig` and
+`SLAFullPrintConfig` declare **no fields of their own** -- they only aggregate their parents).
+So the real transcription surface is on the order of 881 metadata rows plus ~900 struct-field
 declarations plus `handle_legacy`/`handle_legacy_composite` (hundreds of their own renamed-key
 branches) plus the per-class `apply_to()` bodies `PrintConfig.cpp` defines for each of the 11
 classes. This is, measured this way, the largest single unit in the whole port by a wide margin --
@@ -49,7 +67,7 @@ fallback explicitly: never land a `mod` line over a live `todo!()`; an unreached
 worse. This unit cannot be split (`task.md`'s own "Why this is an 8" section: one `target module`
 path, so two tasks writing it would be one conflict, and the spike's batch caps already apply to
 this row). So the order of work below is chosen so that, whatever fraction completes, a reviewer
-can tell exactly which slice of the 981+900 declarations is in and which is not, and the pull
+can tell exactly which slice of the 881+900 declarations is in and which is not, and the pull
 request records the true fraction measured at push time rather than a rounded claim.
 
 ## The proof design -- the risk `task.md` actually names
@@ -81,29 +99,49 @@ are mechanically checked against the oracle's own `print_config_def`; the GUI-pr
 `gui_flags`, ...) are not slicing behaviour, are not separately exercised by any oracle entry point,
 and are instead caught the way every transcribed literal is caught: a `// PORT SRC:` marker per
 value and the two-pass adversarial review reading the diff against the vendored source. This is the
-split that turns "14,438 unreviewable lines" into "981 mechanically-checked rows plus N
+split that turns "14,438 unreviewable lines" into "881 mechanically-checked rows plus N
 reviewed-by-reading rows," which is the actual risk `task.md` asks this plan to resolve.
 
-**Shim shape**, in `cxx/proof_units/print_config.{h,cpp}`:
+**Shim shape**, in `cxx/proof_units/print_config.{h,cpp}` -- as actually built in this task's first
+commits, corrected here from an earlier draft of this plan that named five per-field accessors:
 
 - `oracle_option_keys() -> Vec<String>`: the full key set, in `print_config_def.options`' own
   iteration order (a `std::map<std::string, ConfigOptionDef>`, so alphabetical -- itself a
   `// FIDELITY(port):` site, since the Rust port's own table must iterate the same way wherever
   that order reaches output).
-- `oracle_option_type(key) -> i32`, `oracle_option_cli(key) -> String`,
-  `oracle_option_default_serialized(key) -> String` (`ConfigOptionDef::default_value->serialize()`,
-  or a sentinel for a null default -- measured against `Config.hpp`'s `default_value` type before
-  this is written), `oracle_option_enum_values(key) -> Vec<String>`,
-  `oracle_option_enum_keys_map(key) -> Vec<(String, i32)>` (empty for a non-enum option).
+- `oracle_option_info(key) -> OracleOptionInfo`: one struct per key, not five separate functions,
+  holding `found` (false when the oracle's registry has no such key), `option_type`, `nullable`,
+  `cli`, `has_default`/`default_serialized`, `enum_values` and `enum_keys_map` (a `Vec` of
+  `(name, value)` pairs, empty for a non-enum option) -- `ConfigOptionDef::default_value->serialize()`,
+  or `has_default = false` for a null default.
 
-**One comparison test, over the whole key set from the start.** `print_config_proof.rs` calls
-`oracle_option_keys()` once and, for every key, compares the port's own `print_config_def()`
-against the five functions above at exact equality -- never a subset the implementer happened to
-finish, which would be weakening the check rather than proving it. Its failure count is this task's
-own honest coverage meter: "N of 981 keys agree" is a number this plan's author measures and reports
-in the pull request, not one it asserts. The test runs regardless of whether the module is `mod`-
-reached; `cargo test -p slic3r-printconfig` sees it once the crate compiles, independent of whether
-`lib.rs` gains the `mod print_config;` line.
+**One comparison test, over the whole key set, asserted at exact equality -- corrected here from an
+earlier version of this plan that described a check that could not fail.** `print_config_proof.rs`
+calls `oracle_option_keys()` once and, for every one of the 881 keys, asserts the port's own
+`print_config_def()` agrees with `oracle_option_info(key)` at exact equality -- never a subset the
+implementer happened to finish, which would be weakening the check rather than proving it, and
+never a check that merely *reports* a count while passing regardless, which task.md's R19 ("held to
+exact equality with no tolerance") and this task's own honesty rules both forbid: a test that is
+green while the table agrees with the oracle on nothing is a false-green waiting to be read as
+progress. An earlier draft of this plan said the test would be "passing-against-an-empty-table
+(0 of 981) before any option is transcribed" and would run "independent of whether `lib.rs` gains
+the `mod print_config;` line" -- both wrong, and corrected together because the second explains why
+the first was tempting: a `tests/print_config_proof.rs` integration test can only call
+`slic3r_printconfig::print_config::...` once `lib.rs` actually declares `mod print_config;` (Rust
+has no way to reach a sibling-crate-visible module that is not `mod`-declared), so the test cannot
+compile, let alone run, before that line lands -- which is also the line `task.md`'s own rule says
+must not go in over a live `todo!()`. The two rules together mean this test is **written** in Step
+1 (so its assertions are settled before any option is transcribed, and a reviewer can read what
+"exact equality" means here without waiting for Step 7) but is only ever **compiled and run** once
+the module is complete enough to add `mod print_config;` without a live `todo!()`/`unimplemented!()`
+-- i.e. at Step 7, atomically with the `mod` line, not before. There is no intermediate state in
+which `cargo test --workspace` both includes this test and is allowed to fail: if Step 5's
+transcription is incomplete when the branch has to stop, the honest outcome is the one `docs/
+WORKFLOW.md` already states -- the `mod` line and this test both stay out of the tree (uncommitted
+or `#[ignore]`d, never committed as a passing check against a partial table), and the pull request
+reports the fraction some other way (a count the author measured against a throwaway, uncommitted
+run, named plainly as such, the way this task's own pull request already does for the 881-key
+shim-only probe).
 
 ## The class hierarchy and the one raw-pointer row
 
@@ -156,19 +194,27 @@ no dependency on `crates/slic3r-i18n` and every `L("...")` becomes `"...".to_str
 Each step names the slice a reviewer can accept or reject on its own, even though the task's
 "Done when" gate (`mod print_config;`, `ported` status) is all-or-nothing across every step.
 
-### Step 1: the proof shim and the whole-key-set comparison test
-- `cxx/proof_units/print_config.{h,cpp}`, `src/proof_units/print_config.rs`,
-  `tests/print_config_proof.rs`. Written and passing-against-an-empty-table (0 of 981) before any
-  option is transcribed, so every later step's progress is a number this test prints, not a claim.
+### Step 1: the proof shim, and the whole-key-set comparison test's assertions settled (not yet running)
+- `cxx/proof_units/print_config.{h,cpp}`, `src/proof_units/print_config.rs` are written and
+  compile/link/run on their own (no module to reach). `tests/print_config_proof.rs` is written in
+  this step too -- its exact-equality assertions over all 881 oracle keys are settled before any
+  option is transcribed, so a reviewer can read what the proof checks without waiting for Step 7 --
+  but per "The proof design" above it cannot compile until `lib.rs` carries `mod print_config;`,
+  so it is not yet part of `cargo test --workspace`'s run; it is wired in at Step 7, atomically with
+  the `mod` line, once it is expected to pass in full.
 - delivers: none (step 20 is groundwork).
 
 ### Step 2: the ~63 enums and their helper functions
 - Larger than first scoped from `PrintConfig.hpp:52-839` alone (~40 enums): `PrintConfig.cpp`'s
-  `CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS` invocations name 65 types, two of which
-  (`NozzleType`, `SLAMaterialSpeed`) are declared outside this unit's `.hpp` and need a
-  `// TODO(port):` at their first use rather than a guess at their home file. Finite and fully
-  bounded either way; ported in full, including `is_separable_infill_pattern` and its siblings,
-  which are real logic, not plain value lists.
+  `CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS` invocations name 65 types. Corrected here from an earlier
+  version of this plan, which wrongly said two of them were declared outside this unit's `.hpp`:
+  only **one**, `NozzleType` (`vendor/OrcaSlicer/src/libslic3r/CommonDefs.hpp:12`), is actually
+  external and needs a `// TODO(port):` at its first use rather than a guess at its home file.
+  `SLAMaterialSpeed` is declared inside this unit's own header, at `PrintConfig.hpp:2343`
+  (`enum SLAMaterialSpeed { slamsSlow, slamsFast };`) -- outside the `:52-839` range this plan
+  first scoped enums from, but still this unit's to port, not a `// TODO(port):` target. Finite
+  and fully bounded either way; ported in full, including `is_separable_infill_pattern` and its
+  siblings, which are real logic, not plain value lists.
 - **`ConfigOptionEnumValue`'s `from_i32` is an open design question, not a mechanical one.**
   `grep -rl "ConfigOptionEnumValue" crates/` (outside `slic3r-config/src/config.rs`, which
   declares the trait) finds no implementer anywhere in the workspace -- this step is the first to
@@ -199,7 +245,7 @@ Each step names the slice a reviewer can accept or reject on its own, even thoug
   `init_filament_option_keys`, `init_sla_params`, in that order (smallest first). Each option's
   `// PORT SRC:` lines are checked against the vendored source line a scratch extraction script
   records (`oracle/.cache/tmp/`, never committed, per `task.md`'s own scratch-file rule) -- a
-  reliability aid for 981 line numbers, not a generator of the Rust itself: `docs/WORKFLOW.md`'s
+  reliability aid for the registry's 881 rows' line numbers, not a generator of the Rust itself: `docs/WORKFLOW.md`'s
   must-not-write list forecloses a committed generator under `port/`, and this script never
   produces committed output on its own.
 - delivers: none.
@@ -210,7 +256,7 @@ Each step names the slice a reviewer can accept or reject on its own, even thoug
   table they rename or drop it from.
 - delivers: none.
 
-### Step 7: wire the module in, only once steps 1-6 compile, hold no live `todo!()`/`unimplemented!()`, and the Step 1 test is fully green over all 981 keys
+### Step 7: wire the module in, only once steps 1-6 compile, hold no live `todo!()`/`unimplemented!()`, and the Step 1 test is fully green over all 881 keys
 - Add `mod print_config;` to `crates/slic3r-printconfig/src/lib.rs` at its alphabetical position.
   Not added at all if any earlier step is short; see "Risks" below.
 - delivers: none.
@@ -219,12 +265,14 @@ Each step names the slice a reviewer can accept or reject on its own, even thoug
 
 **The real risk is Step 5's volume, not Steps 1-4's design.** Steps 1-4 are one-time, bounded design
 decisions this plan has already settled by measurement (the `nm` count, the `L(s)` macro, the
-`PRINT_CONFIG_CLASS_DEFINE` expansion). Step 5 is 981 rows of transcription that cannot be
-reviewed as a block; the Step 1 test is what makes each row's default/type/enum/cli checkable on
-its own instead of trusted. If Step 5 does not finish inside this task's branch, the honest outcome
-is: `mod print_config;` stays out of `lib.rs`, `port/port-status` reports the unit `drafted`, and the
-pull request states the exact count the Step 1 test passed against the exact count of 981 --
-measured at push time, not estimated here.
+`PRINT_CONFIG_CLASS_DEFINE` expansion). Step 5 is 881 rows of transcription that cannot be
+reviewed as a block; the Step 1 test (compiled and run only at Step 7, per "The proof design"
+above) is what makes each row's default/type/enum/cli checkable on its own instead of trusted. If
+Step 5 does not finish inside this task's branch, the honest outcome is: `mod print_config;` and
+`tests/print_config_proof.rs` both stay out of the committed tree, `port/port-status` reports the
+unit `drafted`, and the pull request states whatever fraction was measured against an uncommitted,
+throwaway run at push time -- never a committed test asserting agreement on fewer than all 881
+keys, which would weaken the check task.md's R19 requires.
 
 **A second, smaller risk:** the `StaticCache` translation (Step 3) is this unit's only `unsafe` design
 of its own; a wrong `// SAFETY:` invariant there is wrong for all 11 classes at once, which is why it
