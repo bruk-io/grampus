@@ -16,24 +16,20 @@
 //! (`CommonDefs.hpp:15-20`), so Rust's own implicit `+1` numbering reproduces the enum exactly
 //! with no literal of its own to cite.
 //!
-//! **Proof path 2 could not be honoured as a real proof (a finding for this pull request, not a
-//! tolerance or a stand-in invented on this branch).** `port/manifest.tsv`'s `proof path` cell
-//! for this row is `2` (the committed stage dumps, read through `crates/slic3r-proof/src/dumps.rs`),
-//! seeded — per task.md's own words — "from a row's own pipeline stage" (`posSlice`), not from a
-//! verified dump field. `NozzleType` is a machine/printer property, never written into any
-//! `posSlice` (or any other) stage dump: every field name across the committed corpus was
-//! checked --
-//! `grep -n "^field=" port/dumps/*/*.dump | awk -F'field=' '{print $2}' | awk '{print $1}' | sort -u`
-//! -- and lists only `fill_surfaces, fills, height, lslices, object_skirt, perimeters, print_z,
-//! raw_slices, skirt, skirt_brim_groups, slice_z, slices, thin_fills, wipe_tower_*`; a further
-//! `grep -i "nozzle"` over every dump matches only a preset *filename* in a provenance comment
-//! (`machine/Bambu Lab X1 Carbon 0.4 nozzle.json`), never a `NozzleType` value. There is no
-//! dump-derived oracle value for this unit to compare against, so writing a `// PROOF: 2` test
-//! that reads a dump and asserts something about it, unconnected to `NozzleType`, would be
-//! exactly the fake-green "a test that does not exercise the real implementation" the requester's
-//! honesty rules forbid. This module therefore carries no `// PROOF:` marker and `port/port-status`
-//! derives it as `drafted`, not `ported` -- the status `derive_row_status` defines for "a `mod`
-//! declaration reaches the target file ... but ... its proof is not yet present", which this is.
+//! **Proof path 2, reached via `slic3r-proof`'s re-export of `slic3r-ffi`'s per-unit proof
+//! bridges (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 1 and decision 4).**
+//! `port/manifest.tsv`'s `proof path` cell for this row is `2`, seeded -- per task.md's own
+//! words -- "from a row's own pipeline stage" (`posSlice`), not from a verified dump field:
+//! `NozzleType` is a machine/printer property, never written into any `posSlice` (or any other)
+//! stage dump (checked with
+//! `grep -n "^field=" port/dumps/*/*.dump | awk -F'field=' '{print $2}' | awk '{print $1}' | sort -u`,
+//! which lists only `fill_surfaces, fills, height, lslices, object_skirt, perimeters, print_z,
+//! raw_slices, skirt, skirt_brim_groups, slice_z, slices, thin_fills, wipe_tower_*`). Decision 4
+//! names the per-unit proof bridges, not only the dump corpus, as a "2" row's oracle entry point
+//! -- the same answer `ObjectID.hpp`'s `path2_header_observations` is proven by -- so this unit's
+//! shim (`crates/slic3r-ffi/cxx/proof_units/common_defs.{h,cpp}`,
+//! `crates/slic3r-ffi/src/proof_units/common_defs.rs`) drives the vendored header's own compiled
+//! enumerators directly.
 
 #![allow(non_camel_case_types)]
 
@@ -57,9 +53,9 @@ pub enum NozzleType {
 mod tests {
     use super::NozzleType;
 
-    /// Not a `// PROOF:` marker (see this module's doc comment: no dump field holds this
-    /// unit's output, so proof path 2 cannot be honoured here) -- a plain correctness check that
-    /// this port's discriminants match `CommonDefs.hpp:14-20` one for one.
+    /// A plain correctness check that this port's discriminants match `CommonDefs.hpp:14-20`
+    /// one for one. Not a `// PROOF:` marker -- see `common_defs_nozzle_type_matches_the_oracle`
+    /// below for that.
     #[test]
     fn common_defs_nozzle_type_discriminants_match_the_vendored_enum() {
         assert_eq!(NozzleType::ntUndefine as i32, 0);
@@ -69,6 +65,30 @@ mod tests {
         assert_eq!(NozzleType::ntBrass as i32, 4);
         assert_eq!(NozzleType::ntE3D as i32, 5);
         assert_eq!(NozzleType::ntCount as i32, 6);
+    }
+
+    /// `Slic3r::NozzleType`'s seven enumerators (`CommonDefs.hpp:11-20`), read from the
+    /// vendored header's own compiled definition through `slic3r-proof`'s re-export of
+    /// `slic3r-ffi`'s per-unit proof bridge (`docs/PORTING.md`, "Decisions recorded on
+    /// 2026-11-25", decisions 1 and 4), against this port's own discriminants.
+    // PROOF: 2
+    #[test]
+    fn common_defs_nozzle_type_matches_the_oracle() {
+        use slic3r_proof::proof_units::common_defs::path2_nozzle_type_discriminants;
+        use slic3r_proof::{compare_unit, Oracle};
+
+        let oracle = path2_nozzle_type_discriminants();
+        let ported = vec![
+            NozzleType::ntUndefine as i64,
+            NozzleType::ntHardenedSteel as i64,
+            NozzleType::ntStainlessSteel as i64,
+            NozzleType::ntTungstenCarbide as i64,
+            NozzleType::ntBrass as i64,
+            NozzleType::ntE3D as i64,
+            NozzleType::ntCount as i64,
+        ];
+        compare_unit("CommonDefs.hpp", Oracle::Built, ported, oracle)
+            .expect("NozzleType's seven discriminants against the oracle");
     }
 }
 
