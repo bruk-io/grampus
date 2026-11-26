@@ -110,29 +110,22 @@ use std::sync::Mutex;
 // ---------------------------------------------------------------------------------------------
 
 /// `Slic3r::FilePtr` (`Utils.hpp:535-545`): "a very lightweight RAII wrapper around a C FILE"
-/// (the vendored comment, `:534`). `port/ownership.tsv` classifies its one field, `FilePtr::f`
-/// (`Utils.hpp:544`, `FILE *`, class `owned`), as `std::fs::File` -- the type map's rule for an
-/// owned raw-pointer field. The field's vendored type is nullable (`FILE* f = nullptr`,
-/// `:544`), and every in-scope construction site relies on that: `GCodeReader.cpp:152` and
-/// `GCode/GCodeProcessor.cpp:1171`, `:1177`, `:2049`, `:2054` all build a `FilePtr` directly
-/// from a possibly-failed `fopen`/`boost::nowide::fopen` result, with `close()`'s own null
-/// guard (`:538-543`) as the only check. So this wraps the ownership row's `std::fs::File` cell
-/// in `Option` to carry that null state, rather than the cell verbatim.
+/// (the vendored comment, `:534`). `port/ownership.tsv:207` classifies its one field,
+/// `FilePtr::f` (`Utils.hpp:544`, `FILE *`, class `owned`), as `Option<std::fs::File>`, and that
+/// is the cell this type takes verbatim -- the type map's rule for an owned raw-pointer field.
 ///
-/// **This is a deviation from a Done-when line of this task, carried forward rather than
-/// hidden.** `port/ownership.tsv:207` reads
-/// `Utils.hpp 544 FilePtr f FILE * owned Utils.hpp:536, Utils.hpp:540 std::fs::File`, and the
-/// task's sixth Done-when line asks for that `rust type` cell verbatim. `docs/PORTING.md`'s
-/// type map has a rule for an `unknown`-class row and one for a blank-class row and none for a
-/// *nullable* owned pointer, so the cell and the vendored field genuinely disagree and nothing
-/// in the governing documents breaks the tie. Taking the cell literally would leave `FilePtr`
-/// unable to represent the state all five in-scope construction sites pass it, which is the
-/// divergence the first adversarial review of this unit rejected it for; keeping `Option`
-/// leaves that Done-when line unmet as written. Both ways to close it -- amending
-/// `port/ownership`'s generator, or recording the deviation as a `docs/PORTING.md` decision --
-/// are on this task's must-not-write list, so it is carried in this task's pull request body as
-/// a finding instead, exactly as pull requests #54, #56 and #57 carried theirs before
-/// `docs/PORTING.md`'s "Decisions recorded on 2026-11-26" closed them.
+/// The `Option` is the vendored field's own null state, not a Rust convenience. `FILE* f`
+/// defaults to `nullptr` (`:544`), `close()` (`:538-543`) sets it back to null while the object
+/// lives on, and every in-scope construction site relies on that: `GCodeReader.cpp:152` and
+/// `GCode/GCodeProcessor.cpp:1171`, `:1177`, `:2049`, `:2054` all build a `FilePtr` directly
+/// from a possibly-failed `fopen`/`boost::nowide::fopen` result, with `close()`'s own null guard
+/// as the only check.
+///
+/// The cell read `std::fs::File` when this module was written, so the cell and the vendored
+/// field disagreed. This task reported that rather than invent a type or drop the `Option`, and
+/// `docs/PORTING.md`'s "Decisions recorded on 2026-11-26", decision 6 -- "An `owned` field that
+/// the C++ can null is an `Option`" -- amended the cell on `main` in pull request #62. No code
+/// here changed: the port was already `Option<std::fs::File>` and now matches the cell.
 pub struct FilePtr(Option<std::fs::File>);
 
 impl FilePtr {
