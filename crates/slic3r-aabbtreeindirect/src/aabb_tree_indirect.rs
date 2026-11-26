@@ -243,6 +243,23 @@ pub const NPOS: usize = usize::MAX;
 pub const INNER: usize = usize::MAX - 1;
 
 impl<C: TreeCoord, const D: usize> Node<C, D> {
+    /// `Node()` (`:61-63`, default-constructed): `idx = npos` is explicit (`:63`), but `BoundingBox
+    /// bbox;` (`:66`) default-constructs `Eigen::AlignedBox`, which Eigen initialises *empty*
+    /// (`min = +infinity`, `max = -infinity` componentwise), not a zero-sized box at the origin --
+    /// the value this port's own `AlignedBox::from_point([C::zero(); D])` gives instead. **Found
+    /// on review and deliberately not matched**: `m_nodes.assign(..., Node())` (`build_modify_input`,
+    /// `:104`) pre-fills every slot, including the ones a non-power-of-2 leaf count's last level
+    /// never writes; those slots' `idx` stays `npos` (`is_valid()` false), and every reader
+    /// (`traverse_recurse`, `intersect_ray_recursive_first_hit`/`_all_hits`,
+    /// `squared_distance_to_indexed_primitives_recursive`, `get_candidate_idxs`) reaches a node only
+    /// by descending into a specific child index of a node it already found `is_inner()`, which
+    /// `build_recursive` guarantees was itself written -- an unwritten slot is therefore never
+    /// visited by any of them, on either side, so its `bbox` value is read by nothing. A degenerate
+    /// point box at the origin was chosen over reproducing Eigen's own empty-box sentinel only
+    /// because the latter needs no separate representation this module does not otherwise carry
+    /// (`AlignedBox` has no "empty" state); should a future caller ever iterate `Tree::nodes()`
+    /// directly rather than through the validity-gated recursion above, this is the one place that
+    /// value would surface, and `is_valid()` is what it must check first.
     fn empty() -> Self {
         Node {
             idx: NPOS,
