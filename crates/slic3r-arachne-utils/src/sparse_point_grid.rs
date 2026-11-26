@@ -55,6 +55,18 @@ where
         let grid_loc = self.base.square_grid().to_grid_point(loc);
         self.base.grid_mut().entry(grid_loc).or_default().push(elem);
     }
+
+    /// `SparseGrid<ElemT>::begin()/end()` (`SparseGrid.hpp:48-51`) are **public** members of the
+    /// base, so public inheritance (`:26`) puts them on `SparsePointGrid`'s own surface -- and
+    /// `Arachne/WallToolPaths.cpp:874` uses them, range-for'ing a `SparsePointGrid` directly
+    /// (`:869`, `using GridT = SparsePointGrid<LineLoc, Locator>`) and reading `pair.second`.
+    /// Rust inherits nothing and `base` is private, so that caller needs this explicit
+    /// delegation to [`SparseGrid::iter`] -- the same reason [`SparsePointGrid::get_nearby`]
+    /// below exists. The order it exposes, and the `// FIDELITY(port):` marker recording it, are
+    /// `SparseGrid::iter`'s own; this forwards and adds nothing.
+    pub fn iter(&self) -> impl Iterator<Item = (Point, &Elem)> {
+        self.base.iter()
+    }
 }
 
 impl<Elem, Locator> SparsePointGrid<Elem, Locator>

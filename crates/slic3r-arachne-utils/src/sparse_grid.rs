@@ -45,10 +45,11 @@
 //! `Arachne/WallToolPaths.cpp:306` (`getNearby`) and `:878` observes. (2) [`SparseGrid::iter`]'s
 //! top-level order across *different* `GridPoint` keys is `HashMap`'s per-process-randomised
 //! order, substituting for `unordered_multimap::begin()/end()`'s bucket order (deterministic for
-//! a fixed insertion sequence) -- reached today by no in-scope caller (the one caller that walks
-//! a grid by `begin()/end()`, `WallToolPaths.cpp:874`, does so on a `SparsePointGrid`, not
-//! `SparseGrid` directly, through the same flattened shape this module's `iter` gives it), but
-//! named here because `square_grid.rs`'s own fan-out task inherits this module as-is. Both are
+//! a fixed insertion sequence) -- reached today by no in-scope caller of `SparseGrid` itself (the
+//! one caller that walks a grid by `begin()/end()`, `WallToolPaths.cpp:874`, does so on a
+//! `SparsePointGrid`, which in Rust reaches this flattened shape only through the explicit `iter`
+//! delegation `sparse_point_grid.rs` declares, there being no inheritance to carry `begin()/end()`
+//! across), but named here because that delegation forwards straight to this site. Both are
 //! marked at their own site below rather than only in this doc comment, so each lands its own
 //! row in `port/reports/divergences.md` (task.md's own marker rule: "every order choice ...
 //! carries a `// FIDELITY(port):`").
@@ -186,9 +187,14 @@ impl<Elem> SparseGrid<Elem> {
     // sequence (and sensitive to `max_load_factor`, see `new` above); `self.grid.iter()` walks
     // `HashMap`'s per-process-randomised order instead for the cross-bucket (different
     // `GridPoint`) order, while the within-bucket order still matches (see `process_from_cell`
-    // above). No in-scope caller reaches `SparseGrid::iter` directly today -- the one caller
-    // that range-for's a grid, `Arachne/WallToolPaths.cpp:874`, does so on a `SparsePointGrid`
-    // through this same flattened shape, inherited unchanged once `square_grid.rs` lands.
+    // above). No in-scope caller reaches `SparseGrid::iter` directly today -- the one caller that
+    // range-for's a grid, `Arachne/WallToolPaths.cpp:874`, does so on a `SparsePointGrid`
+    // (`:869`, `using GridT = SparsePointGrid<LineLoc, Locator>`), which in C++ gets
+    // `begin()/end()` by public inheritance. Rust inherits nothing: `SparsePointGrid` composes a
+    // private `base`, so that caller is served only through the explicit `iter` delegation
+    // `sparse_point_grid.rs` declares for it (and `sparse_line_grid.rs` the same, for symmetry
+    // with no in-scope caller of its own), which forwards here and therefore carries this same
+    // cross-bucket order substitution.
     pub fn iter(&self) -> impl Iterator<Item = (Point, &Elem)> {
         self.grid
             .iter()

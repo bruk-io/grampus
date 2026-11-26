@@ -45,7 +45,7 @@ fuzz_target!(|input: ArbInput| {
     let b = Point::new(input.b.x, input.b.y);
     let c = Point::new(input.c.x, input.c.y);
 
-    // Arm 1: `pointIsLeftOfLine(p, a, b)` (`linearAlg2D.hpp:27-30`).
+    // Arm 1: `pointIsLeftOfLine(p, a, b)` (`linearAlg2D.hpp:26-29`).
     let actual_left = point_is_left_of_line(p, a, b);
     let oracle_left = path1_point_is_left_of_line(p.x(), p.y(), a.x(), a.y(), b.x(), b.y());
     assert_eq!(
@@ -54,7 +54,7 @@ fuzz_target!(|input: ArbInput| {
         input.p, input.a, input.b,
     );
 
-    // Arm 2: `getAngleLeft(a, b, c)` (`linearAlg2D.hpp:46-70`).
+    // Arm 2: `getAngleLeft(a, b, c)` (`linearAlg2D.hpp:48-65`).
     let actual_angle = get_angle_left(a, b, c);
     let oracle_angle = path1_get_angle_left(a.x(), a.y(), b.x(), b.y(), c.x(), c.y());
     assert_eq!(

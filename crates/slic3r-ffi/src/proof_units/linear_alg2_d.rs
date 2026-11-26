@@ -14,12 +14,12 @@ mod ffi {
         include!("cxx/proof_units/linear_alg2_d.h");
 
         /// `Slic3r::Arachne::LinearAlg2D::pointIsLeftOfLine(p, a, b)`
-        /// (`Arachne/utils/linearAlg2D.hpp:27-30`).
+        /// (`Arachne/utils/linearAlg2D.hpp:26-29`).
         fn path1_point_is_left_of_line(px: i64, py: i64, ax: i64, ay: i64, bx: i64, by: i64)
             -> i64;
 
         /// `Slic3r::Arachne::LinearAlg2D::getAngleLeft(a, b, c)`
-        /// (`Arachne/utils/linearAlg2D.hpp:46-70`).
+        /// (`Arachne/utils/linearAlg2D.hpp:48-65`).
         fn path1_get_angle_left(ax: i64, ay: i64, bx: i64, by: i64, cx: i64, cy: i64) -> f32;
     }
 }

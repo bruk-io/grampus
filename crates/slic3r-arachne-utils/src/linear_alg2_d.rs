@@ -16,8 +16,8 @@
 //! `scaled`/`unscaled` wrappers do.
 //!
 //! **The missing generic `cross2` and `dot`.** `getAngleLeft` needs `cross2(Vec2i64, Vec2i64)`
-//! (`src/libslic3r/Point.hpp:112-118`, the generic `T` overload -- *not* the `int32_t` overload
-//! at `:111`, which is `= delete`d) and `Vec2i64::dot`. `crates/slic3r-point/src/point.rs` only
+//! (`src/libslic3r/Point.hpp:115-119`, the generic `T` overload -- *not* the `int32_t` overload
+//! at `:112-113`, which is `= delete`d) and `Vec2i64::dot`. `crates/slic3r-point/src/point.rs` only
 //! ports the private, monomorphic `cross2_f64` (its own module doc: "the fully generic
 //! `Mat<N,M,T>`/`Vec<N,T>` templates ... have no in-scope caller inside this task's own two
 //! units ... left as `// TODO(port):` markers ... for whichever fan-out unit first needs a
@@ -27,7 +27,7 @@
 //! **Finding, named in this task's pull request.**
 //!
 //! **Signed-overflow UB.** The vendored `int64_t` multiplications and subtractions in both
-//! functions carry no overflow check (`linearAlg2D.hpp:28`, `:49-50`): a `coord_t` product that
+//! functions carry no overflow check (`linearAlg2D.hpp:28`, `:50-53`): a `coord_t` product that
 //! overflows is undefined behaviour in C++, which the oracle's own build (compiled without an
 //! overflow sanitizer) resolves as ordinary two's-complement wraparound. `wrapping_*` is used
 //! throughout both functions for the same reason `crates/slic3r-point/src/point.rs`'s

@@ -3,7 +3,7 @@
 // -- the one sanctioned route a ported unit reaches the oracle by (`docs/PORTING.md`,
 // "Decisions recorded on 2026-11-25").
 //
-// `pointIsLeftOfLine` and `getAngleLeft` (`Arachne/utils/linearAlg2D.hpp:27`, `:46`) are
+// `pointIsLeftOfLine` and `getAngleLeft` (`Arachne/utils/linearAlg2D.hpp:26`, `:48`) are
 // `static inline` free functions at namespace scope -- internal linkage per translation unit,
 // but reached by any in-scope caller through the header alone. This shim includes the header
 // directly and calls both, the same technique `cxx/proof_units/point.cpp`'s three

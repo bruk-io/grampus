@@ -80,6 +80,17 @@ where
                 .push(elem.clone());
         }
     }
+
+    /// `SparseGrid<ElemT>::begin()/end()` (`SparseGrid.hpp:48-51`) are **public** members of the
+    /// base, so public inheritance (`:28`) puts them on `SparseLineGrid`'s own surface too, the
+    /// same way it does `SparsePointGrid`'s. No in-scope caller range-for's a `SparseLineGrid`
+    /// today (the one `begin()/end()` caller, `Arachne/WallToolPaths.cpp:874`, holds a
+    /// `SparsePointGrid`), but the surface is part of the vendored type and Rust's composition
+    /// would otherwise drop it silently, so it is delegated here as well. The order it exposes,
+    /// and the `// FIDELITY(port):` marker recording it, are [`SparseGrid::iter`]'s own.
+    pub fn iter(&self) -> impl Iterator<Item = (Point, &Elem)> {
+        self.base.iter()
+    }
 }
 
 impl<Elem, Locator> SparseLineGrid<Elem, Locator>
