@@ -531,7 +531,7 @@ def let_binding_pattern(pattern: str) -> str:
     dropped.
 
     Only a `let` carries an annotation; a `for` pattern is passed through untouched. The depth
-    counter is what keeps a tuple's own `:` (`let Foo { a: x }: Foo`) and an array length
+    counter is what keeps a struct pattern's own `:` (`let Foo { a: x }: Foo`) and an array length
     (`let oracle: [i64; 3]`) from cutting in the wrong place, and the `::` test is what keeps a
     path pattern (`let Enum::V(x)`) from being read as an annotation."""
     depth = 0

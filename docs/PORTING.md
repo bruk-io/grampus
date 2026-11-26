@@ -723,9 +723,9 @@ as a divergence.
 
 The three port tasks merged as pull requests #54, #56 and #57 each carried forward a finding they
 were not allowed to fix: every file that would have to change was on their own must-not-write
-list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision
-1. Every one was made by Claude acting for Bruk
-Habtu, under the delegation for this intent, on 2026-11-26; the owner was away and had handed
+list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1.
+Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
+2026-11-26; the owner was away and had handed
 over this intent's decisions. Like the section above, this is a record: where a decision changes
 a rule above, the rule's own text says so and points here.
 
@@ -745,8 +745,8 @@ could not write.
 **The decision.** A type annotation names types and binds nothing, so it is cut off before the
 pattern's names are taken: `let_binding_pattern` keeps the pattern's text up to its first `:` at
 bracket depth 0 that is not part of a `::` path. A `for` pattern is passed through untouched,
-since only a `let` carries an annotation. The depth counter is what keeps a tuple's own `:`
-(`let Foo { a: x }: Foo`) and an array length (`let oracle: [i64; 3]`) from cutting in the wrong
+since only a `let` carries an annotation. The depth counter is what keeps a struct pattern's own
+`:` (`let Foo { a: x }: Foo`) and an array length (`let oracle: [i64; 3]`) from cutting in the wrong
 place, and the `::` test is what keeps a path pattern (`let Enum::V(x)`) from reading as an
 annotation.
 
@@ -775,9 +775,9 @@ committed stage dumps (R5), for whole pipeline steps" — names a mechanism that
 unit, and that the cell should arguably read `1`. Four merged rows carry the finding in their
 module doc comments: `LifecycleEvents.hpp`
 (`crates/slic3r-lifecycleevents/src/lifecycle_events.rs`), `enum_bitmask.hpp`, `format.hpp` and
-`Execution/Execution.hpp`. The finding's premise is correct
-and was measured again here: `port/inventory`'s `seed_judgement_cells` seeds `2` from the row's
-own `pipeline stage or none` cell, and that cell means only "some stage's `#include` closure
+`Execution/Execution.hpp`. The finding's premise is correct and was measured again here:
+`port/inventory`'s `seed_judgement_cells` seeds `2` from the row's own
+`pipeline stage or none` cell, and that cell means only "some stage's `#include` closure
 reaches this file" (`compute_pipeline_stages`' own docstring says header rows are dominated by the
 earliest stage that reaches the hub `Print.hpp`) — not "this file is that pipeline step". 85
 in-scope rows carry `proof path: 2`. Seven of them name a stage the committed corpus holds no dump
