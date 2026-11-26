@@ -2822,6 +2822,617 @@ pub fn get_bed_temp_1st_layer_key(bed_type: BedType) -> String {
     String::new()
 }
 
+// --------------------------------------------------------------------------------------------
+// Step 5: `PrintConfigDef` and the option registry (`PrintConfig.cpp:991-9747`).
+//
+// **Order of work, corrected against the plan by building it.** The plan puts `StaticCache`
+// (step 3) and the 11 derived classes (step 4) before the option table (step 5). Building it
+// that way does not work: `StaticPrintConfig::def()` (`PrintConfig.hpp:1047`) returns
+// `&print_config_def`, and `StaticCache::finalize` (`:1105-1129`) reads `defs->options` and
+// each option's `default_value`, so steps 3 and 4 cannot compile -- let alone be checked --
+// before the registry they are defined against exists. The table is therefore built first and
+// the reorder is recorded here and in this task's pull request body, as the plan's own
+// "each step names the slice a reviewer can accept or reject on its own" allows.
+// --------------------------------------------------------------------------------------------
+
+use slic3r_config::config::ConfigDef;
+use slic3r_config::config::ConfigOptionBool;
+use slic3r_config::config::ConfigOptionBools;
+use slic3r_config::config::ConfigOptionEnumGeneric;
+use slic3r_config::config::ConfigOptionFloat;
+use slic3r_config::config::ConfigOptionFloatOrPercent;
+use slic3r_config::config::ConfigOptionFloats;
+use slic3r_config::config::ConfigOptionFloatsNullable;
+use slic3r_config::config::ConfigOptionInt;
+use slic3r_config::config::ConfigOptionInts;
+use slic3r_config::config::ConfigOptionPercent;
+use slic3r_config::config::ConfigOptionPoint;
+use slic3r_config::config::ConfigOptionPoints;
+use slic3r_config::config::ConfigOptionPointsGroups;
+use slic3r_config::config::ConfigOptionString;
+use slic3r_config::config::ConfigOptionStrings;
+use slic3r_config::config::ConfigOptionType;
+use slic3r_config::config::GuiType;
+use slic3r_config::config::PrinterTechnology;
+use slic3r_config::config::TOptiondefMap;
+use slic3r_config::config::NOCLI;
+use slic3r_point::point::Vec2d;
+
+/// `assign_printer_technology_to_unknown` (`PrintConfig.cpp:991-996`), a file-scope `static`
+/// free function with internal linkage -- the second item of this unit a literal proof path 3
+/// would have to `#include` the vendored `.cpp` to reach.
+fn assign_printer_technology_to_unknown(
+    options: &mut TOptiondefMap,
+    printer_technology: PrinterTechnology,
+) {
+    for (_, def) in options.iter_mut() {
+        if def.printer_technology == PrinterTechnology::Unknown {
+            def.printer_technology = printer_technology;
+        }
+    }
+}
+
+/// `class PrintConfigDef : public ConfigDef` (`PrintConfig.hpp:843-876`). Rust has no
+/// inheritance, so the base is a field; every `this->add(...)` in the vendored `init_*` bodies
+/// becomes `self.def.add(...)` and every `this->options` becomes `self.def.options`.
+pub struct PrintConfigDef {
+    /// The `ConfigDef` base.
+    pub def: ConfigDef<'static>,
+    /// `m_extruder_option_keys` (`PrintConfig.hpp:868`).
+    m_extruder_option_keys: Vec<String>,
+    /// `m_extruder_retract_keys` (`PrintConfig.hpp:869`).
+    m_extruder_retract_keys: Vec<String>,
+    /// `m_filament_option_keys` (`PrintConfig.hpp:874`).
+    m_filament_option_keys: Vec<String>,
+    /// `m_filament_retract_keys` (`PrintConfig.hpp:875`).
+    m_filament_retract_keys: Vec<String>,
+}
+
+impl PrintConfigDef {
+    /// `PrintConfigDef::PrintConfigDef()` (`PrintConfig.cpp:998-1007`).
+    pub fn new() -> Self {
+        let mut this = PrintConfigDef {
+            def: ConfigDef::new(),
+            m_extruder_option_keys: Vec::new(),
+            m_extruder_retract_keys: Vec::new(),
+            m_filament_option_keys: Vec::new(),
+            m_filament_retract_keys: Vec::new(),
+        };
+        this.init_common_params();
+        assign_printer_technology_to_unknown(&mut this.def.options, PrinterTechnology::Any);
+        this.init_fff_params();
+        this.init_extruder_option_keys();
+        assign_printer_technology_to_unknown(&mut this.def.options, PrinterTechnology::Fff);
+        this.init_sla_params();
+        assign_printer_technology_to_unknown(&mut this.def.options, PrinterTechnology::Sla);
+        this
+    }
+
+    /// `extruder_option_keys()` (`PrintConfig.hpp:852`).
+    pub fn extruder_option_keys(&self) -> &Vec<String> {
+        &self.m_extruder_option_keys
+    }
+    /// `extruder_retract_keys()` (`PrintConfig.hpp:856`).
+    pub fn extruder_retract_keys(&self) -> &Vec<String> {
+        &self.m_extruder_retract_keys
+    }
+    /// `filament_option_keys()` (`PrintConfig.hpp:859`).
+    pub fn filament_option_keys(&self) -> &Vec<String> {
+        &self.m_filament_option_keys
+    }
+    /// `filament_retract_keys()` (`PrintConfig.hpp:860`).
+    pub fn filament_retract_keys(&self) -> &Vec<String> {
+        &self.m_filament_retract_keys
+    }
+}
+
+impl Default for PrintConfigDef {
+    fn default() -> Self {
+        PrintConfigDef::new()
+    }
+}
+
+/// `extern const PrintConfigDef print_config_def` (`PrintConfig.hpp:880`), the externally linked
+/// global this unit's proof shim reads.
+///
+/// **PORT NOTE: one registry per thread, not one per process, and the reason is not a choice
+/// this module made.** The vendored object is a `const` global constructed before `main` and
+/// shared by every thread. `ConfigOptionDef::default_value` is a
+/// `Option<Box<dyn ConfigOption>>` (`slic3r-config`, task `59-foundation-config`), and
+/// `ConfigOption` is declared there with no `Send`/`Sync` bound, so a `PrintConfigDef` cannot be
+/// placed in a `static` at all -- `OnceLock<PrintConfigDef>` is rejected for exactly that
+/// reason. Widening that trait is `slic3r-config`'s module to change, not this one's
+/// (`task.md`: "Write only your own modules"), so this function leaks one registry per thread
+/// instead and hands out a `&'static` into it. The registry is read-only after construction and
+/// every copy is built by the same code from the same source, so the content a caller observes
+/// is identical; what differs is storage, plus `ConfigOptionDef::serialization_key_ordinal`,
+/// which `slic3r-config` draws from a process-wide atomic counter and which therefore depends on
+/// how many registries have been built. Neither reaches this unit's proof, which compares
+/// `option_type`, `nullable`, `cli`, the serialized default, `enum_values` and `enum_keys_map`.
+/// Named here and in this task's pull request body as a finding against `slic3r-config`'s trait
+/// declaration rather than papered over.
+pub fn print_config_def() -> &'static PrintConfigDef {
+    thread_local! {
+        static DEF: &'static PrintConfigDef = Box::leak(Box::new(PrintConfigDef::new()));
+    }
+    DEF.with(|d| *d)
+}
+
+impl PrintConfigDef {
+    /// `PrintConfigDef::init_common_params()` (`PrintConfig.cpp:1009-1316`).
+    fn init_common_params(&mut self) {
+        {
+            let def = self.def.add("printer_technology", ConfigOptionType::Enum);
+            def.label = "Printer technology".to_string();
+            def.enum_keys_map = keys_map_printer_technology();
+            def.enum_values.push("FFF".to_string());
+            def.enum_values.push("SLA".to_string());
+            // PORT NOTE: the vendored default is
+            // `new ConfigOptionEnum<PrinterTechnology>(ptFFF)` (`PrintConfig.cpp:1019`).
+            // `PrinterTechnology` and `ConfigOptionEnumValue` both live in `slic3r-config`, so
+            // Rust's orphan rule forbids this crate implementing the trait for that type (see
+            // the note after the key maps above). `ConfigOptionEnumGeneric` over the same key
+            // map is used instead: its `serialize()` returns the name whose value matches, i.e.
+            // the same `"FFF"` the oracle's `ConfigOptionEnum<PrinterTechnology>` serializes.
+            def.set_default_value(Box::new(ConfigOptionEnumGeneric::with_value(
+                keys_map_printer_technology(),
+                PrinterTechnology::Fff as i32,
+            )));
+        }
+        {
+            let def = self.def.add("printable_area", ConfigOptionType::Points);
+            def.label = "Printable area".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            let mut v = ConfigOptionPoints::new();
+            v.values.push(Vec2d::new(0_f64, 0_f64));
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1025
+            v.values.push(Vec2d::new(200_f64, 0_f64));
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1025
+            v.values.push(Vec2d::new(200_f64, 200_f64));
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1025
+            v.values.push(Vec2d::new(0_f64, 200_f64));
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("extruder_printable_area", ConfigOptionType::PointsGroups);
+            def.label = "Extruder printable area".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.gui_type = GuiType::OneString;
+            def.set_default_value(Box::new(ConfigOptionPointsGroups { values: Vec::new() }));
+        }
+        {
+            let def = self
+                .def
+                .add("support_parallel_printheads", ConfigOptionType::Bool);
+            def.label = "Support parallel printheads".to_string();
+            def.tooltip =
+                "Enable printer settings for machines that can use multiple printheads in parallel."
+                    .to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self
+                .def
+                .add("parallel_printheads_count", ConfigOptionType::Int);
+            def.label = "Parallel printheads count".to_string();
+            def.tooltip =
+                "Set the number of parallel printheads for machines like OrangeStorm Giga printer."
+                    .to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.min = 1_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1044
+            def.max = 4_f32;
+            def.set_default_value(Box::new(ConfigOptionInt::new(1)));
+        }
+        {
+            let def = self.def.add(
+                "parallel_printheads_bed_exclude_areas",
+                ConfigOptionType::Strings,
+            );
+            def.label = "Parallel printheads bed exclude areas".to_string();
+            def.tooltip = "Ordered list of bed exclude areas by parallel printhead count. Item 1 applies to one printhead, item 2 to two printheads, and so on. Leave an item empty for no excluded area.".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("bed_exclude_area", ConfigOptionType::Points);
+            def.label = "Excluded bed area".to_string();
+            def.tooltip = concat!(
+                "Unprintable area in XY plane. For example, X1 Series printers use the front left corner to cut filament during filament change. ",
+                "The area is expressed as a polygon in the format \"XxY, XxY, ...\". It constrains material and model placement, ",
+                "but allows machine travel. Configure toolhead collision volumes separately for G-code checking and travel avoidance."
+            ).to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.gui_type = GuiType::OneString;
+            let mut v = ConfigOptionPoints::new();
+            v.values.push(Vec2d::new(0_f64, 0_f64));
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("bed_exclude_volumes", ConfigOptionType::String);
+            def.label = "Toolhead collision volumes".to_string();
+            def.tooltip = concat!(
+                "Collision volumes used for model and generated-material exclusion, G-code checking, and travel avoidance. ",
+                "Use \"XxY, XxY, ...\" for a full-height polygon or \"ZMIN..ZMAX;XxY, XxY, ...\" for a Z-limited volume. ",
+                "Separate multiple volumes with \"|\". These volumes are additional to the excluded bed area. ",
+                "Automatic arrangement conservatively uses the bounding box of a non-convex volume."
+            ).to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.gui_type = GuiType::OneString;
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self
+                .def
+                .add("bed_exclude_volume_mode", ConfigOptionType::Enum);
+            def.label = "Collision volume behavior".to_string();
+            def.tooltip = "Choose whether all nozzles use the same collision volumes, derive toolhead-relative volumes from each nozzle's XY offset, or configure independent volumes for every extruder. In individual mode, select each extruder on the Extruder page to configure its volumes.".to_string();
+            def.enum_keys_map = keys_map_bed_exclude_volume_mode();
+            def.enum_values = vec![
+                "shared".to_string(),
+                "toolhead_offset".to_string(),
+                "per_extruder".to_string(),
+            ];
+            def.enum_labels = vec![
+                "Shared by all nozzles".to_string(),
+                "Toolhead-relative (nozzle offsets)".to_string(),
+                "Individual per extruder".to_string(),
+            ];
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionEnumGeneric::with_value(
+                keys_map_bed_exclude_volume_mode(),
+                BedExcludeVolumeMode::Shared as i32,
+            )));
+        }
+        {
+            let def = self
+                .def
+                .add("extruder_bed_exclude_volumes", ConfigOptionType::Strings);
+            def.label = "Extruder collision volumes".to_string();
+            def.tooltip = "Collision volumes used only by this extruder in individual mode. Use the same polygon and optional Z-range format as the shared collision volumes. Leave empty for no collision volumes on this extruder. Automatic arrangement conservatively uses the bounding box of a non-convex volume.".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.gui_type = GuiType::OneString;
+            let mut v = ConfigOptionStrings::new();
+            v.values.push(String::new());
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("bed_custom_texture", ConfigOptionType::String);
+            def.label = "Bed custom texture".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.gui_type = GuiType::OneString;
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("bed_custom_model", ConfigOptionType::String);
+            def.label = "Bed custom model".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.gui_type = GuiType::OneString;
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self
+                .def
+                .add("elefant_foot_compensation", ConfigOptionType::Float);
+            def.label = "Elephant foot compensation".to_string();
+            def.category = "Quality".to_string();
+            def.tooltip = "This shrinks the first layer on the build plate to compensate for elephant foot effect.".to_string();
+            def.sidetext = "mm".to_string();
+            def.min = 0_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1109
+            def.set_default_value(Box::new(ConfigOptionFloat::new(0.)));
+        }
+        {
+            let def = self
+                .def
+                .add("elefant_foot_compensation_layers", ConfigOptionType::Int);
+            def.label = "Elephant foot compensation layers".to_string();
+            def.category = "Quality".to_string();
+            def.tooltip = concat!(
+                "The number of layers on which the elephant foot compensation will be active. ",
+                "The first layer will be shrunk by the elephant foot compensation value, then ",
+                "the next layers will be linearly shrunk less, up to the layer indicated by this value."
+            ).to_string();
+            def.sidetext = "layers".to_string();
+            def.min = 1_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionInt::new(1)));
+        }
+        {
+            let def = self
+                .def
+                .add("elefant_foot_layers_density", ConfigOptionType::Percent);
+            def.label = "Elephant foot layers density".to_string();
+            def.category = "Quality".to_string();
+            def.tooltip = concat!(
+                "Density of internal solid infill for Elephant foot layers compensation.\n",
+                "The initial value for the second layer is set.\n",
+                "Subsequent layers become linearly denser by the height specified in elefant_foot_compensation_layers."
+            ).to_string();
+            def.sidetext = "%".to_string();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1129
+            def.min = 50_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1130
+            def.max = 100_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Expert;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1132
+            def.set_default_value(Box::new(ConfigOptionPercent::new(100_f64)));
+        }
+        {
+            let def = self.def.add("layer_height", ConfigOptionType::Float);
+            def.label = "Layer height".to_string();
+            def.category = "Quality".to_string();
+            def.tooltip = "This is the height for each layer. Smaller layer heights give greater accuracy but longer printing time.".to_string();
+            def.sidetext = "mm".to_string();
+            def.min = 0_f32;
+            def.set_default_value(Box::new(ConfigOptionFloat::new(
+                slic3r_printconfigconstants::print_config_constants::INITIAL_LAYER_HEIGHT,
+            )));
+        }
+        {
+            let def = self.def.add("printable_height", ConfigOptionType::Float);
+            def.label = "Printable height".to_string();
+            def.tooltip =
+                "This is the maximum printable height which is limited by the height of the build area."
+                    .to_string();
+            def.sidetext = "mm".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1147
+            def.max = 214700_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Simple;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1149
+            def.set_default_value(Box::new(ConfigOptionFloat::new(100.0)));
+        }
+        {
+            let def = self
+                .def
+                .add("extruder_printable_height", ConfigOptionType::Floats);
+            def.label = "Extruder printable height".to_string();
+            def.tooltip =
+                "Maximum printable height of this extruder which is limited by mechanism of printer."
+                    .to_string();
+            def.sidetext = "mm".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1156
+            def.max = 1000_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            // PORT NOTE: the vendored default is a `ConfigOptionFloatsNullable` although the
+            // option itself is registered with plain `coFloats` and not `add_nullable`
+            // (`PrintConfig.cpp:1151,1158`), so the oracle's `def->nullable` is false while the
+            // default value object is the nullable template. Transcribed exactly as written.
+            let mut v = ConfigOptionFloatsNullable::new();
+            v.values.push(0_f64);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("preferred_orientation", ConfigOptionType::Float);
+            def.label = "Preferred orientation".to_string();
+            def.tooltip =
+                "Automatically orient STL files on the Z axis upon initial import.".to_string();
+            def.sidetext = "\u{b0}".to_string();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1164
+            def.max = 360_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1165
+            def.min = -360_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1167
+            def.set_default_value(Box::new(ConfigOptionFloat::new(0.0)));
+        }
+        {
+            // The first of two `add`s of this key: the second, at `PrintConfig.cpp:1276-1280`,
+            // keeps every field this one set and overwrites only `opt_key`, `type` and
+            // `serialization_key_ordinal` (`ConfigDef::add`, `Config.cpp:363-372`), so the
+            // surviving `mode` is the second one's `comAdvanced` and the surviving tooltip is
+            // the second one's.
+            let def = self.def.add("preset_names", ConfigOptionType::Strings);
+            def.label = "Printer preset names".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Develop;
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("bbl_use_printhost", ConfigOptionType::Bool);
+            def.label = "Use 3rd-party print host".to_string();
+            def.tooltip =
+                "Allow controlling BambuLab's printer through 3rd party print hosts.".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("use_3mf", ConfigOptionType::Bool);
+            def.label = "Use 3MF instead of G-code".to_string();
+            def.tooltip = concat!(
+                "Enable this if the printer accepts a 3MF file as the print job. When enabled, Orca Slicer ",
+                "sends the sliced file as a .gcode.3mf, instead of a plain .gcode file."
+            ).to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("printer_agent", ConfigOptionType::String);
+            def.label = "Printer Agent".to_string();
+            def.tooltip =
+                "Select the network agent implementation for printer communication.".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.plugin_type = "printer-connection".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("print_host", ConfigOptionType::String);
+            def.label = "Hostname, IP or URL".to_string();
+            def.tooltip = concat!(
+                "Orca Slicer can upload G-code files to a printer host. This field should contain ",
+                "the hostname, IP address or URL of the printer host instance. ",
+                "Print host behind HAProxy with basic auth enabled can be accessed by putting the user name and password into the URL ",
+                "in the following format: https://username:password@your-octopi-address/"
+            ).to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("print_host_webui", ConfigOptionType::String);
+            def.label = "Device UI".to_string();
+            def.tooltip =
+                "Specify the URL of your device user interface if it's not same as print_host."
+                    .to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("printhost_apikey", ConfigOptionType::String);
+            def.label = "API Key / Password".to_string();
+            def.tooltip = concat!(
+                "Orca Slicer can upload G-code files to a printer host. This field should contain ",
+                "the API Key or the password required for authentication."
+            )
+            .to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self
+                .def
+                .add("flashforge_serial_number", ConfigOptionType::String);
+            def.label = "Serial Number".to_string();
+            def.tooltip = "Flashforge local API requires the printer serial number.".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("printhost_port", ConfigOptionType::String);
+            def.label = "Printer".to_string();
+            def.tooltip = "Name of the printer.".to_string();
+            def.gui_type = GuiType::SelectOpen;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("printhost_cafile", ConfigOptionType::String);
+            def.label = "HTTPS CA File".to_string();
+            def.tooltip = concat!(
+                "Custom CA certificate file can be specified for HTTPS OctoPrint connections, in crt/pem format. ",
+                "If left blank, the default OS CA certificate repository is used."
+            ).to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("printhost_user", ConfigOptionType::String);
+            def.label = "User".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("printhost_password", ConfigOptionType::String);
+            def.label = "Password".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self
+                .def
+                .add("printhost_ssl_ignore_revoke", ConfigOptionType::Bool);
+            def.label = "Ignore HTTPS certificate revocation checks".to_string();
+            def.tooltip = "Ignore HTTPS certificate revocation checks in the case of missing or offline distribution points. One may want to enable this option for self signed certificates if connection fails.".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            // The second `add` of `preset_names` (`PrintConfig.cpp:1276-1280`); see the first,
+            // above. It overwrites the tooltip and the mode and keeps the label and default.
+            let def = self.def.add("preset_names", ConfigOptionType::Strings);
+            def.label = "Printer preset names".to_string();
+            def.tooltip = "Names of presets related to the physical printer.".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self
+                .def
+                .add("printhost_authorization_type", ConfigOptionType::Enum);
+            def.label = "Authorization Type".to_string();
+            def.enum_keys_map = keys_map_authorization_type();
+            def.enum_values.push("key".to_string());
+            def.enum_values.push("user".to_string());
+            def.enum_labels.push("API key".to_string());
+            def.enum_labels.push("HTTP digest".to_string());
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.cli = NOCLI.to_string();
+            def.set_default_value(Box::new(ConfigOptionEnumGeneric::with_value(
+                keys_map_authorization_type(),
+                AuthorizationType::atKeyPassword as i32,
+            )));
+        }
+        {
+            // "temporary workaround for compatibility with older Slicer"
+            // (`PrintConfig.cpp:1294-1298`): registered with no label, tooltip or mode.
+            let def = self.def.add("preset_name", ConfigOptionType::String);
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            // `PrintConfig.cpp:1304-1314`: three keys generated by a loop over a brace-init list
+            // of string literals, one per preset type, all sharing one body.
+            for key in [
+                "print_plugin_config_overrides",
+                "printer_plugin_config_overrides",
+                "filament_plugin_config_overrides",
+            ] {
+                let def = self.def.add(key, ConfigOptionType::String);
+                def.label = "Capabilities".to_string();
+                def.tooltip = concat!(
+                    "Configuration for the plugin capabilities this preset uses, overriding the global ",
+                    "Capabilities configuration. Stored as a raw JSON array and edited through the dialog ",
+                    "behind the button, never typed in directly."
+                ).to_string();
+                def.gui_type = GuiType::PluginConfig;
+                def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+                def.cli = NOCLI.to_string();
+                def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+            }
+        }
+    }
+
+    /// `PrintConfigDef::init_fff_params()` (`PrintConfig.cpp:1317-8991`).
+    fn init_fff_params(&mut self) {
+        // <<<STEP5-FFF>>>
+    }
+
+    /// `PrintConfigDef::init_extruder_option_keys()` (`PrintConfig.cpp:8992-9054`).
+    fn init_extruder_option_keys(&mut self) {
+        // <<<STEP5-EXTRUDER>>>
+    }
+
+    /// `PrintConfigDef::init_filament_option_keys()` (`PrintConfig.cpp:9055-9109`).
+    #[allow(dead_code)]
+    fn init_filament_option_keys(&mut self) {
+        // <<<STEP5-FILAMENT>>>
+    }
+
+    /// `PrintConfigDef::init_sla_params()` (`PrintConfig.cpp:9110-9747`).
+    fn init_sla_params(&mut self) {
+        // <<<STEP5-SLA>>>
+    }
+}
+
 // <<<APPEND>>>
 
 // PORT STATUS
