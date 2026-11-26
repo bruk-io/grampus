@@ -18,7 +18,21 @@ mod ffi {
 
         /// `Slic3r::Point(px, py).rotate(angle, Slic3r::Point(cx, cy))`, returning `[x, y]`.
         fn path2_point_rotate(px: i64, py: i64, cx: i64, cy: i64, angle: f64) -> Vec<i64>;
+
+        /// `Slic3r::scaled<coord_t>(v)` (`Point.hpp:669-678`), `Tin` deduced as `double`.
+        fn path2_scaled_coord_f64(v: f64) -> i64;
+        /// `Slic3r::scaled<coord_t>(v)` (`Point.hpp:669-678`), `Tin` deduced as `float`.
+        fn path2_scaled_coord_f32(v: f32) -> i64;
+        /// `Slic3r::unscaled<double>(v)` (`Point.hpp:692-700`).
+        fn path2_unscaled_f64(v: i64) -> f64;
+
+        /// `Slic3r::Point(qx, qy).nearest_point_index(points)` (`Point.cpp:197-204`), `points`
+        /// given as parallel `x`/`y` slices (`cxx` has no `Vec<(i64, i64)>`).
+        fn path1_nearest_point_index(xs: &[i64], ys: &[i64], qx: i64, qy: i64) -> i32;
     }
 }
 
-pub use ffi::{path1_int128_orient, path2_point_rotate};
+pub use ffi::{
+    path1_int128_orient, path1_nearest_point_index, path2_point_rotate, path2_scaled_coord_f32,
+    path2_scaled_coord_f64, path2_unscaled_f64,
+};

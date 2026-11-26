@@ -198,7 +198,7 @@ pub type Vec4d = Vec4<f64>;
 // (Eigen::Transform); no in-scope caller in this task's own units.
 // TODO(port): src/libslic3r/Point.hpp:106-108,170,179,187-194 -- identity<N,T>/identity3f/
 // identity3d, has_reflection and the get_base family, all over the deferred Transform type above.
-// TODO(port): src/libslic3r/Point.hpp:759-770 -- `std::hash<Vec2ds>`/`std::hash<vector<int>>`
+// TODO(port): src/libslic3r/Point.hpp:759-783 -- `std::hash<Vec2ds>`/`std::hash<vector<int>>`
 // specialisations for `ConfigOptionPointsGroups`; no in-scope caller in this task's own units.
 // TODO(port): src/libslic3r/Point.hpp:786-813 -- the Boost.Polygon `geometry_concept`/
 // `point_traits`/`point_mutable_traits` specialisations for `Point`; no in-scope caller.
@@ -220,6 +220,12 @@ pub type Vec4d = Vec4<f64>;
 fn cross2_f64(v1: Vec2d, v2: Vec2d) -> f64 {
     v1.x() * v2.y() - v1.y() * v2.x()
 }
+// PORT NOTE: src/libslic3r/Point.hpp:112-113 -- `template<int Options> int32_t cross2(...) =
+// delete;` forbids calling the generic `cross2` with 32-bit-integer Eigen vectors at compile
+// time, to stop a caller silently overflowing a 32-bit cross product. This port has no generic
+// `cross2` at all -- only the private, monomorphic `cross2_f64` above, which can never be
+// instantiated over `i32` -- so there is no overload for a Rust `= delete` counterpart to forbid;
+// the type system already rules out the call the vendored deletion exists to catch.
 
 // -------------------------------------------------------------------------------------------
 // Point (Point.hpp:198-280, Point.cpp)
@@ -234,6 +240,11 @@ pub struct Point {
     x: i64,
     y: i64,
 }
+
+/// `using Vector = Point;` (`:42`): the vendored codebase's own alias for "a `Point` used as a
+/// displacement rather than a position" -- the same underlying type either way, so this is a
+/// plain type alias, not a second struct.
+pub type Vector = Point;
 
 /// `using Points = std::vector<Point, PointsAllocator<Point>>;` (`:73`). `PointsAllocator`
 /// (`tbb::scalable_allocator<Point>`, `:71-72`) is a custom allocator with no behavioural effect
@@ -252,6 +263,27 @@ pub type Points = Vec<Point>;
 pub type PointPtrs<'a> = Vec<&'a Point>;
 /// `using PointConstPtrs = std::vector<const Point*>;` (`:75`); see [`PointPtrs`]'s doc.
 pub type PointConstPtrs<'a> = Vec<&'a Point>;
+/// `using Pointfs = std::vector<Vec2d>;` (`:77`).
+pub type Pointfs = Vec<Vec2d>;
+/// `using Vec2ds = std::vector<Vec2d>;` (`:78`); the identical shape as [`Pointfs`] under its own
+/// vendored name -- the vendored header gives the same `std::vector<Vec2d>` two aliases, and
+/// this port gives it the same two `pub type`s rather than collapsing them, so a caller naming
+/// either vendored alias finds its exact counterpart here.
+pub type Vec2ds = Vec<Vec2d>;
+/// `using Pointf3s = std::vector<Vec3d>;` (`:79`).
+pub type Pointf3s = Vec<Vec3d>;
+/// `using VecOfPoints = std::vector<Points, PointsAllocator<Points>>;` (`:81`); see [`Points`]'s
+/// doc for why the custom allocator needs no counterpart.
+pub type VecOfPoints = Vec<Points>;
+
+/// `inline bool operator<(const Vec2d &lhs, const Vec2d &rhs)` (`:110`): lexicographic by `x`
+/// then `y`, over plain `f64` comparisons (no `NaN` handling beyond what `<`/`==` already give
+/// `f64`, matching the vendored body exactly) -- a free function rather than `impl Ord`/`PartialOrd`
+/// for [`Vec2<f64>`], since `f64` has no total order and this predicate is the vendored one's
+/// literal two-comparison body, not a claim that `Vec2d` is now totally ordered.
+pub fn vec2d_less(lhs: Vec2d, rhs: Vec2d) -> bool {
+    lhs.x() < rhs.x() || (lhs.x() == rhs.x() && lhs.y() < rhs.y())
+}
 
 impl Point {
     /// `Point() : Vec2crd(0, 0) {}` (`:203`).
@@ -291,6 +323,15 @@ impl Point {
             x: scale_(x) as i64,
             y: scale_(y) as i64,
         }
+    }
+    /// `template<typename OtherDerived> static Point new_scale(const Eigen::MatrixBase<OtherDerived>
+    /// &v)` (`:215-216`): the vendored overload is a generic Eigen-expression template; this port
+    /// has no generic Eigen-expression type (only the concrete [`Vec2`]/[`Vec3`]/[`Vec4`] structs,
+    /// per the module doc), so it is narrowed to the one concrete shape an in-scope caller can
+    /// actually hold, `Vec2d` -- the same computation as [`Point::new_scale`], read from a vector
+    /// rather than two scalars.
+    pub fn new_scale_vec2(v: Vec2d) -> Self {
+        Point::new_scale(v.x(), v.y())
     }
 
     pub fn x(&self) -> i64 {
@@ -441,18 +482,28 @@ impl Point {
     /// *result* here (both compute the true nearest point either way) but is kept faithful
     /// because a later unit may copy this loop shape against a case where the early-out changes
     /// which candidate is examined, not just how fast.
+    // FIDELITY(port): src/libslic3r/Point.cpp:213 -- `(*this)(0) - (*it)->x()` subtracts two
+    // `coord_t` (`int64_t`) values *before* `sqr<double>` converts the result, so the oracle's
+    // own subtraction can overflow signed 64-bit arithmetic for two arbitrary far-apart points
+    // (undefined behaviour by the C++ standard, which in practice wraps on the two's-complement
+    // build this port is held against, since it is compiled without an overflow sanitizer).
+    // Found by `slic3r-point_point`'s fuzz target's `Points` arm: a plain Rust `-` panics on the
+    // same overflow instead of silently wrapping, which would make this port crash on inputs the
+    // oracle merely computes a nonsensical (but defined-on-this-build) distance for. `wrapping_sub`
+    // reproduces the oracle's own two's-complement wraparound bit-for-bit rather than papering
+    // over the divergence with a widen-before-subtract that the oracle's call site does not do.
     pub fn nearest_point_index_ptrs(&self, points: &PointConstPtrs) -> i32 {
         let mut idx: i32 = -1;
         // PORT SRC: src/libslic3r/Point.cpp:209
         let mut distance: f64 = -1_f64;
         for (i, p) in points.iter().enumerate() {
-            let dx = (self.x - p.x) as f64;
+            let dx = self.x.wrapping_sub(p.x) as f64;
             let mut d = dx * dx;
             // PORT SRC: src/libslic3r/Point.cpp:215
             if distance != -1_f64 && d > distance {
                 continue;
             }
-            let dy = (self.y - p.y) as f64;
+            let dy = self.y.wrapping_sub(p.y) as f64;
             d += dy * dy;
             // PORT SRC: src/libslic3r/Point.cpp:220
             if distance != -1_f64 && d > distance {
@@ -565,6 +616,11 @@ impl Sub for Point {
 /// `inline std::ostream &operator<<(std::ostream &os, const Point &pt)` (`:393-397`): writes the
 /// *unscaled* (millimetre) coordinates, comma-separated -- a human-facing `Display`, not emitted
 /// G-code, so the idiom map's "never `Display` for compared output" caution does not apply here.
+// PORT NOTE: src/libslic3r/Point.hpp:395 -- `std::ostream <<` on a `double` renders at its
+// default precision, 6 significant digits (`unscale_(1234567)` prints `1.23457`); Rust's `{}`
+// renders shortest-round-trip (`1.234567`). Not compared output (see this impl's own doc), so
+// `docs/PORTING.md`'s "Number formatting" rule does not bind it, but noted here since a later
+// unit that logs through this `Display` inherits the divergence.
 impl std::fmt::Display for Point {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -580,6 +636,8 @@ impl std::fmt::Display for Point {
 /// writes the raw components as stored, comma-separated -- unlike [`Point`]'s own `Display`
 /// above, this does **not** unscale, exactly matching the vendored body's own plain `pointf(0)`/
 /// `pointf(1)` reads.
+// PORT NOTE: src/libslic3r/Point.cpp:250 -- same `std::ostream` 6-significant-digit vs. Rust
+// shortest-round-trip divergence as [`Point`]'s own `Display`, see that impl's note.
 impl std::fmt::Display for Vec2<f64> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{},{}", self.x(), self.y())
@@ -610,6 +668,58 @@ impl Point3 {
         Point3 { x, y, z }
     }
 
+    /// `Point3(double x, double y, double z = 0.0)` (`:290`): round-half-away-from-zero
+    /// (`std::round`), the same rounding [`Point::from_f64_rounded`] uses for `Point`'s own
+    /// double constructor -- see that method's doc for why this is `std::round`, not
+    /// [`fast_round_up`].
+    // PORT SRC: src/libslic3r/Point.hpp:290
+    pub fn from_f64_rounded(x: f64, y: f64, z: f64) -> Self {
+        Point3 {
+            x: x.round() as i64,
+            y: y.round() as i64,
+            z: z.round() as i64,
+        }
+    }
+
+    /// `explicit Point3(const Vec2crd& vec2crd, coord_t z = 0)` (`:291`).
+    pub fn from_vec2crd(vec2crd: Vec2crd, z: i64) -> Self {
+        Point3 {
+            x: vec2crd.x(),
+            y: vec2crd.y(),
+            z,
+        }
+    }
+
+    /// `explicit Point3(const Vec3crd &vec3crd)` (`:292`): a plain component-wise copy, `Vec3crd`
+    /// already being the same `(i64, i64, i64)` shape this struct stores.
+    pub fn from_vec3crd(vec3crd: Vec3crd) -> Self {
+        Point3 {
+            x: vec3crd.x(),
+            y: vec3crd.y(),
+            z: vec3crd.z(),
+        }
+    }
+
+    /// `static Point3 new_scale(coordf_t x, coordf_t y, coordf_t z)` (`:297-299`); see
+    /// [`Point::new_scale`]'s doc for `scale_`'s truncating cast.
+    pub fn new_scale(x: f64, y: f64, z: f64) -> Self {
+        Point3 {
+            x: scale_(x) as i64,
+            y: scale_(y) as i64,
+            z: scale_(z) as i64,
+        }
+    }
+    /// `static Point3 new_scale(const Vec3d &v)` (`:300-302`); the same computation as
+    /// [`Point3::new_scale`], read from a `Vec3d` rather than three scalars.
+    pub fn new_scale_vec3(v: Vec3d) -> Self {
+        Point3::new_scale(v.x(), v.y(), v.z())
+    }
+    /// `static Point3 new_scale(const Vec3f &v)` (`:303-305`); same as
+    /// [`Point3::new_scale_vec3`], over `f32` components.
+    pub fn new_scale_vec3_f32(v: Vec3f) -> Self {
+        Point3::new_scale(v.x() as f64, v.y() as f64, v.z() as f64)
+    }
+
     pub fn x(&self) -> i64 {
         self.x
     }
@@ -620,18 +730,103 @@ impl Point3 {
         self.z
     }
 
+    /// `Point3& operator+=(const Point3& rhs)` (`:315`).
+    pub fn add_assign(&mut self, rhs: Point3) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+        self.z += rhs.z;
+    }
+    /// `Point3& operator-=(const Point3& rhs)` (`:316`).
+    pub fn sub_assign(&mut self, rhs: Point3) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
+        self.z -= rhs.z;
+    }
+    /// `Point3& operator*=(const double &rhs)` (`:317-322`): each component promoted to `f64`,
+    /// multiplied, then truncated back to `coord_t`; see [`Point::mul_assign`]'s identical doc.
+    pub fn mul_assign(&mut self, rhs: f64) {
+        self.x = ((self.x as f64) * rhs) as i64;
+        self.y = ((self.y as f64) * rhs) as i64;
+        self.z = ((self.z as f64) * rhs) as i64;
+    }
+    /// `Point3 operator*(const double &rhs) const` (`:323`): the member overload, which (like
+    /// [`Point::mul_rounded`]) rounds through the `Point3(double, double, double)` constructor
+    /// rather than truncating.
+    pub fn mul_rounded(&self, rhs: f64) -> Point3 {
+        Point3::from_f64_rounded(
+            self.x as f64 * rhs,
+            self.y as f64 * rhs,
+            self.z as f64 * rhs,
+        )
+    }
+    /// `inline Point3 operator* (const Point3& l, const double& r)` (`:388-391`): the
+    /// free-function overload, truncating via the brace-init `coord_t(...)` cast; see
+    /// [`Point::scaled_mul`]'s identical doc.
+    pub fn scaled_mul(&self, rhs: f64) -> Point3 {
+        Point3 {
+            x: (self.x as f64 * rhs) as i64,
+            y: (self.y as f64 * rhs) as i64,
+            z: (self.z as f64 * rhs) as i64,
+        }
+    }
+
+    /// `bool both_comp(const Point3 &rhs, const std::string& op)` (`:325-331`); see
+    /// [`Point::both_greater`]'s doc for why the runtime-string operator collapses to two named
+    /// predicates.
+    pub fn both_greater(&self, rhs: &Point3) -> bool {
+        self.x > rhs.x && self.y > rhs.y
+    }
+    /// See [`Point3::both_greater`]'s doc; the `op == "<"` branch (`:329`).
+    pub fn both_less(&self, rhs: &Point3) -> bool {
+        self.x < rhs.x && self.y < rhs.y
+    }
+    /// `bool any_comp(const Point3 &rhs, const std::string &op)` (`:332-339`); see
+    /// [`Point::any_greater`]'s doc.
+    pub fn any_greater(&self, rhs: &Point3) -> bool {
+        self.x > rhs.x || self.y > rhs.y
+    }
+    /// See [`Point3::any_greater`]'s doc; the `op == "<"` branch (`:338`).
+    pub fn any_less(&self, rhs: &Point3) -> bool {
+        self.x < rhs.x || self.y < rhs.y
+    }
+    /// `bool any_comp(const coord_t val, const std::string &op)` (`:340-347`): the scalar
+    /// overload, comparing both `x` and `y` against the same bare value rather than another
+    /// `Point3`'s components.
+    pub fn any_greater_val(&self, val: i64) -> bool {
+        self.x > val || self.y > val
+    }
+    /// See [`Point3::any_greater_val`]'s doc; the `op == "<"` branch (`:346`).
+    pub fn any_less_val(&self, val: i64) -> bool {
+        self.x < val || self.y < val
+    }
+
     /// `Point to_point() const { return Point(this->x(), this->y()); }` (`:372-374`).
     pub fn to_point(&self) -> Point {
         Point::new(self.x, self.y)
     }
 
+    /// `void rotate(double angle) { this->rotate(std::cos(angle), std::sin(angle)); }`
+    /// (`:349`): rotates the `(x, y)` plane about the origin, `z` unchanged.
+    pub fn rotate(&mut self, angle: f64) {
+        self.rotate_cos_sin(angle.cos(), angle.sin());
+    }
+    /// `void rotate(double cos_a, double sin_a)` (`:350-355`): same per-component formula as
+    /// [`Point::rotate_cos_sin`], `round()`-rounded, `z` unchanged.
+    // PORT SRC: src/libslic3r/Point.hpp:353
+    // PORT SRC: src/libslic3r/Point.hpp:354
+    pub fn rotate_cos_sin(&mut self, cos_a: f64, sin_a: f64) {
+        let cur_x = self.x as f64;
+        let cur_y = self.y as f64;
+        self.x = (cos_a * cur_x - sin_a * cur_y).round() as i64;
+        self.y = (sin_a * cur_x + cos_a * cur_y).round() as i64;
+    }
     /// `void rotate(double angle, const Point3 &center)` (`Point.cpp:293-299`): rotates the
     /// `(x, y)` plane about `center`'s `(x, y)`, through [`Point::rotate`] -- the vendored body
     /// round-trips through a `Point3`-as-diff-then-sum rather than operating on `x`/`y` directly;
     /// this port keeps that same two-step shape (diff from center in 3D, rotate the 2D part,
     /// sum back) because the vendored `z` component of `diff`/`sum` is carried through unchanged
     /// either way and a direct `(x, y)`-only rewrite would be a second, unaudited order choice.
-    pub fn rotate(&mut self, angle: f64, center: Point3) {
+    pub fn rotate_about(&mut self, angle: f64, center: Point3) {
         let diff = Point3::new(self.x - center.x, self.y - center.y, self.z - center.z);
         let mut temp = Point::new(diff.x, diff.y);
         temp.rotate(angle);
@@ -639,9 +834,21 @@ impl Point3 {
         *self = sum;
     }
     /// `Point3 rotated(double angle) const` (`:358`).
-    pub fn rotated(&self, angle: f64, center: Point3) -> Point3 {
+    pub fn rotated(&self, angle: f64) -> Point3 {
         let mut res = *self;
-        res.rotate(angle, center);
+        res.rotate(angle);
+        res
+    }
+    /// `Point3 rotated(double cos_a, double sin_a) const` (`:359`).
+    pub fn rotated_cos_sin(&self, cos_a: f64, sin_a: f64) -> Point3 {
+        let mut res = *self;
+        res.rotate_cos_sin(cos_a, sin_a);
+        res
+    }
+    /// `Point3 rotated(double angle, const Point3 &center) const` (`:360`).
+    pub fn rotated_about(&self, angle: f64, center: Point3) -> Point3 {
+        let mut res = *self;
+        res.rotate_about(angle, center);
         res
     }
     /// `Point3 rotate_90_degree_ccw() const { return Point3(-this->y(), this->x(), this->z()); }`
@@ -711,6 +918,22 @@ impl Sub for Point3 {
 /// `inline void append_points(Points &dst, const Points3 &src)` (`:380-386`).
 pub fn append_points(dst: &mut Points, src: &Points3) {
     dst.extend(src.iter().map(Point3::to_point));
+}
+
+/// `Points to_points(const Points3 &points3)` (`Point.cpp:273-278`): drops each point's `z`,
+/// through [`Point3::to_point`].
+pub fn to_points(points3: &Points3) -> Points {
+    points3.iter().map(Point3::to_point).collect()
+}
+/// `Points3 to_points3(const Points& points)` (`Point.cpp:280-286`): lifts each point to 3D with
+/// `z = 0`, through the implicit `Point3(const Vec2crd&, coord_t z = 0)` conversion the vendored
+/// `points3.emplace_back(pt)` invokes (`Point` derives `Vec2crd`) -- [`Point3::from_vec2crd`] is
+/// that same conversion, ported explicitly since Rust has no implicit base-class slicing.
+pub fn to_points3(points: &Points) -> Points3 {
+    points
+        .iter()
+        .map(|pt| Point3::new(pt.x(), pt.y(), 0))
+        .collect()
 }
 
 // TODO(port): src/libslic3r/Point.cpp:19-36 -- `transform(const std::vector<Vec3f>&,
@@ -921,6 +1144,36 @@ pub fn align_to_grid_point_based(coord: Point, spacing: Point, base: Point) -> P
     )
 }
 
+/// `template<typename T> struct MinMax { T min; T max; };` (`:736`).
+pub struct MinMax<T> {
+    pub min: T,
+    pub max: T,
+}
+
+/// `template<typename T> static bool apply(T &val, const MinMax<T> &limit)` (`:744-752`):
+/// clamps `val` into `[limit.min, limit.max]` in place, returning whether it changed.
+pub fn apply_minmax<T: PartialOrd + Copy>(val: &mut T, limit: &MinMax<T>) -> bool {
+    if *val > limit.max {
+        *val = limit.max;
+        return true;
+    }
+    if *val < limit.min {
+        *val = limit.min;
+        return true;
+    }
+    false
+}
+/// `template<typename T> static bool apply(std::optional<T> &val, const MinMax<T> &limit)`
+/// (`:738-741`): the `Option` overload, `false` when there is no value to clamp -- Rust has no
+/// overload resolution on the two vendored `apply`s, so this is named separately rather than
+/// sharing [`apply_minmax`]'s name.
+pub fn apply_minmax_option<T: PartialOrd + Copy>(val: &mut Option<T>, limit: &MinMax<T>) -> bool {
+    match val {
+        None => false,
+        Some(v) => apply_minmax(v, limit),
+    }
+}
+
 /// `inline bool is_approx(const Point &p1, const Point &p2, coord_t epsilon =
 /// coord_t(SCALED_EPSILON))` (`:399-403`). `SCALED_EPSILON` (`libslic3r.h:109`,
 /// `slic3r_libslic3r::scaled_epsilon`) is a function, not a constant (that crate's own doc
@@ -1043,6 +1296,10 @@ pub fn has_duplicate_successive_points_closed(pts: &Points) -> bool {
 pub fn collect_duplicates(mut pts: Points) -> Points {
     pts.sort_unstable();
     let mut duplicates: Points = Vec::new();
+    // PORT NOTE: src/libslic3r/Point.cpp:151 -- the vendored body reads `*pts.begin()`
+    // unconditionally before this loop, undefined behaviour on an empty `pts`; this port adds
+    // the early return above it does not have, since Rust has no equivalent "read past the end"
+    // to be faithful to and `Vec::is_empty()` is the one-line fix rather than a silent guess.
     if pts.is_empty() {
         return duplicates;
     }
@@ -1072,10 +1329,14 @@ pub fn shorter_then(p0: Point, len: i64) -> bool {
     if p0.y() > len || p0.y() < -len {
         return false;
     }
+    // `p0.cast<int64_t>().squaredNorm() <= Slic3r::sqr(int64_t(len))` (`:492`): plain `i64`
+    // multiplication through the port's own `sqr`, not a wrapping substitute -- the two early
+    // returns above already bound `|x|`/`|y|` to `len`, so this is the same arithmetic the
+    // vendored line performs, held to the same overflow behaviour rather than silently widened.
     let x = p0.x();
     let y = p0.y();
-    let squared_norm = x.wrapping_mul(x).wrapping_add(y.wrapping_mul(y));
-    squared_norm <= len.wrapping_mul(len)
+    let squared_norm = slic3r_libslic3r::libslic3r::sqr(x) + slic3r_libslic3r::libslic3r::sqr(y);
+    squared_norm <= slic3r_libslic3r::libslic3r::sqr(len)
 }
 
 /// `namespace int128 { int orient(...); int cross(...); }` (`Point.hpp:495-502`,
@@ -1110,20 +1371,20 @@ pub mod int128 {
 /// radius of a query point, bucketed onto a power-of-two grid (`m_grid_log2`) sized from the
 /// radius.
 ///
-/// **Keyed by `std::collections::HashMap`, not this port's one insertion-ordered spelling.**
-/// `docs/PORTING.md`'s "Insertion-ordered containers" rule exists for a site where iteration
-/// order over a hash-keyed container *reaches compared output* -- `port/reports/order-containers.md`
-/// is the per-site authority for which existing sites need it, and it carries no row for this
-/// class (checked: `grep -n 'Point.hpp' port/reports/order-containers.md
-/// port/reports/order-comparators.md` finds neither this file nor any of its lines). This task's
-/// own two units have no in-scope caller of this generic class either (it is foundation design,
-/// written before any fan-out unit exists to call it), so there is no compared output today for
-/// its bucket-iteration order to reach. A future caller that does observe this order --
-/// [`ClosestPointInRadiusLookup::find`]'s own tie-break on "first value seen with a strictly
-/// smaller distance" is exactly such a site -- gets its own `port/reports/order-containers.md`
-/// audit then, naming this class, rather than this task pre-committing to `IndexMap` on no
-/// audited call site at all.
-// PORT NOTE: src/libslic3r/Point.hpp:640 -- `std::unordered_multimap<Vec2crd, ValueType,
+/// **Keyed by `std::collections::HashMap`, not this port's one insertion-ordered spelling --
+/// but the per-key group order inside it is still an order choice, marked `// FIDELITY(port):`
+/// below, not the container spelling itself.** The container choice is checked against
+/// `port/reports/order-containers.md`, the per-site authority for which existing sites need the
+/// insertion-ordered spelling, and it carries no row for this class (checked: `grep -n
+/// 'Point.hpp' port/reports/order-containers.md port/reports/order-comparators.md` finds neither
+/// this file nor any of its lines) -- `HashMap`, not `IndexMap`, is therefore this site's
+/// faithful Rust shape. What *is* an order choice is the per-key `Vec<V>`'s insertion order,
+/// which [`ClosestPointInRadiusLookup::find`]'s strict `d2 < dist_min` tie-break and
+/// [`ClosestPointInRadiusLookup::find_all`]'s result order both observe -- `task.md`'s own rule
+/// names exactly this ("an insertion-ordered map whose iteration order reaches output"), which
+/// is why the marker below is `// FIDELITY(port):`, the one that lands this site in
+/// `port/reports/divergences.md`, not `// PORT NOTE:`.
+// FIDELITY(port): src/libslic3r/Point.hpp:594-640 -- `std::unordered_multimap<Vec2crd, ValueType,
 // PointHash>` ported as `std::collections::HashMap<(i64, i64), Vec<ValueType>>` rather than this
 // port's one insertion-ordered spelling; see this struct's own doc comment for why no audited
 // call site requires the insertion-ordered form yet.
@@ -1202,6 +1463,26 @@ where
             let cell = self.cell_of(pt);
             self.map.entry(cell).or_default().push(value);
         }
+    }
+
+    /// `bool erase(const ValueType &value)` (`:562-577`): removes the first stored value equal
+    /// to `value`, returning whether one was found -- the vendored doc comment states
+    /// `ValueType` "has to declare the `operator==`", which this port expresses as the
+    /// `V: PartialEq` bound below rather than a runtime check.
+    pub fn erase(&mut self, value: &V) -> bool
+    where
+        V: PartialEq,
+    {
+        if let Some(pt) = (self.point_accessor)(value) {
+            let cell = self.cell_of(pt);
+            if let Some(bucket) = self.map.get_mut(&cell) {
+                if let Some(pos) = bucket.iter().position(|v| v == value) {
+                    bucket.remove(pos);
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// `std::pair<const ValueType*, double> find(const Vec2crd &pt)` (`:580-610`): the stored
@@ -1385,7 +1666,7 @@ mod tests {
     /// "Decisions recorded on 2026-11-25").
     // PROOF: 1
     #[test]
-    fn int128_orient_matches_the_oracle() {
+    fn point_int128_orient_matches_the_oracle() {
         let p1 = Vec2crd::new(0, 0);
         let p2 = Vec2crd::new(100, 0);
         let p3 = Vec2crd::new(50, 100);
@@ -1412,7 +1693,7 @@ mod tests {
     /// shim bridge instead, the same route path 1 above uses, naming oracle `built`.
     // PROOF: 2
     #[test]
-    fn rotate_about_matches_the_oracle() {
+    fn point_rotate_about_matches_the_oracle() {
         let p = Point::new(1000, 0);
         let center = Point::new(0, 0);
         let angle = std::f64::consts::PI / 2.0;
@@ -1432,6 +1713,35 @@ mod tests {
         )
         .expect(
             "Point::rotate(angle, center) must match the oracle's own fast_round_up-based rotation",
+        );
+    }
+
+    /// Proof path 2 (R19), second marker for the `Point.hpp` row. **Finding from adversarial
+    /// review**: the proof above drives only `Point::rotate`, which `Point.cpp` defines --
+    /// `Point.hpp`'s own header-only surface (the scaling entry points this task exists to
+    /// get right) was going unproven. This test drives `Slic3r::scaled<coord_t>()`'s integral
+    /// overload at both input precisions and `Slic3r::unscaled<double>()` directly, through
+    /// `cxx/proof_units/point.cpp`'s three shims (the same "instantiate the real header template
+    /// in the shim TU" technique `mt_utils.cpp` uses for `Slic3r::grid<double>`).
+    // PROOF: 2
+    #[test]
+    fn point_scaled_unscaled_match_the_oracle() {
+        let v = 1234.5678_f64;
+        let actual_f64 = scaled_coord(v);
+        let oracle_f64 = slic3r_proof::proof_units::point::path2_scaled_coord_f64(v);
+        assert_eq!(actual_f64, oracle_f64);
+
+        let vf = 1234.5_f32;
+        let actual_f32 = scaled_coord_f32(vf);
+        let oracle_f32 = slic3r_proof::proof_units::point::path2_scaled_coord_f32(vf);
+        assert_eq!(actual_f32, oracle_f32);
+
+        let coord = 123_456_789_i64;
+        let actual_unscaled = unscaled_f64(coord);
+        let oracle_unscaled = slic3r_proof::proof_units::point::path2_unscaled_f64(coord);
+        compare_unit("Point.hpp", Oracle::Built, actual_unscaled, oracle_unscaled).expect(
+            "scaled<coord_t>()/unscaled<double>() must match the oracle's own header-only \
+             templates exactly",
         );
     }
 }

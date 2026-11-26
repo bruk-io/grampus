@@ -40,8 +40,13 @@ pub struct ExecutionTbb;
 
 impl crate::execution::Traits for ExecutionTbb {
     /// `using SpinningMutex = tbb::spin_mutex;` (`:40`) -- see the module doc.
+    // PORT NOTE: src/libslic3r/Execution/ExecutionTBB.hpp:40 -- `tbb::spin_mutex` collapses to
+    // `()`, a type that locks nothing; see the module doc's "collapse to `()`" paragraph for why
+    // that is faithful here (this port's loop bodies are serial, so nothing ever contends for it).
     type SpinningMutex = ();
     /// `using BlockingMutex = std::mutex;` (`:41`).
+    // PORT NOTE: src/libslic3r/Execution/ExecutionTBB.hpp:41 -- `std::mutex` collapses to `()`
+    // for the same reason as `SpinningMutex` above.
     type BlockingMutex = ();
 
     /// `static size_t max_concurrency(const ExecutionTBB &) { return
@@ -54,6 +59,11 @@ impl crate::execution::Traits for ExecutionTbb {
     // `for_each`/`reduce` below are a single serial loop (docs/PORTING.md's idiom map, TBB row:
     // "the port sums in a fixed order and is serial"), so `1` is the faithful answer for *this*
     // port's own concurrency, not a stand-in for the oracle's.
+    // FIDELITY(port): src/libslic3r/Execution/ExecutionTBB.hpp:73-76 -- unlike the loop bodies'
+    // own `// PERF(port):` markers (a deferred optimisation, R15), this is a function whose
+    // *return value* differs from the oracle's -- a deliberate divergence a caller that sizes
+    // work from this value would observe -- so it also carries `// FIDELITY(port):`, which is
+    // what lands it in `port/reports/divergences.md`.
     fn max_concurrency(_ep: &Self) -> usize {
         1
     }

@@ -15,6 +15,11 @@ int32_t path1_int128_orient(int64_t p1x, int64_t p1y, int64_t p2x, int64_t p2y, 
                              int64_t p3y);
 rust::Vec<int64_t> path2_point_rotate(int64_t px, int64_t py, int64_t cx, int64_t cy,
                                        double angle);
+int64_t path2_scaled_coord_f64(double v);
+int64_t path2_scaled_coord_f32(float v);
+double path2_unscaled_f64(int64_t v);
+int32_t path1_nearest_point_index(rust::Slice<const int64_t> xs, rust::Slice<const int64_t> ys,
+                                   int64_t qx, int64_t qy);
 
 } // namespace point
 } // namespace proof_units

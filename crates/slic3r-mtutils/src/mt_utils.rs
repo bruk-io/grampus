@@ -39,6 +39,9 @@
 /// [`CachedObject::invalidate`] and refreshed on the next [`CachedObject::get`]. The vendored
 /// `Setter` (`std::function<void(T&)>`, `:38`) is a boxed closure here, the same shape every
 /// stored-closure field in this port takes.
+// PORT NOTE: src/libslic3r/MTUtils.hpp:20-31 -- `SpinMutex` is not ported as a lockable type;
+// see the module doc's own `SpinMutex` paragraph for why `&mut self` already gives this struct
+// the same "one caller at a time" guarantee a spin lock gives at runtime.
 pub struct CachedObject<T> {
     obj: T,
     valid: bool,
@@ -93,6 +96,13 @@ pub fn linspace_vector(start: f64, stop: f64, n: usize) -> Vec<f64> {
     let stride = (stop - start) / (n as f64);
     (0..n).map(|i| start + (i as f64) * stride).collect()
 }
+// TODO(port): src/libslic3r/MTUtils.hpp:108-120 -- `linspace_array<N, T>`; no in-scope caller
+// of this task's own units needs the fixed-size-array form (see the module doc's own
+// `linspace_array` paragraph). Not ported as `all_of` and `SpinMutex` are (a decision this
+// module's own code has no behaviour left to replace), but genuinely deferred for the next
+// caller that needs it, which is why this is a `// TODO(port):`, not a `// PORT NOTE:`.
+// PORT NOTE: src/libslic3r/MTUtils.hpp:79-86 -- `all_of` is not ported as a standalone item; see
+// the module doc's own `all_of` paragraph for why `Iterator::all` already is it.
 
 /// `template<class T> inline std::vector<ArithmeticOnly<T>> grid(const T &start, const T &stop,
 /// const T &stride)` (`:126-139`): equally spaced values from `start` (inclusive) up to the
@@ -174,7 +184,7 @@ mod tests {
     /// (`docs/PORTING.md`'s decision 1, generalised to a `proof path: 2` header-only row).
     // PROOF: 2
     #[test]
-    fn grid_matches_the_oracle() {
+    fn mt_utils_grid_matches_the_oracle() {
         let actual = grid(1.0, 10.0, 2.5);
         let oracle = slic3r_proof::proof_units::mt_utils::path2_grid(1.0, 10.0, 2.5);
         compare_unit("MTUtils.hpp", Oracle::Built, actual, oracle)
