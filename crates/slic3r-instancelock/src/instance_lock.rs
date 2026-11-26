@@ -48,27 +48,32 @@ extern "C" {
 }
 
 /// `flock(2)`'s operation flags. `flock()` and its `LOCK_*` flags are not in POSIX at all --
-/// they are a 4.2BSD extension, carried forward by the BSD/macOS and glibc `<sys/fcntl.h>`
-/// (reached through `<sys/file.h>`) headers, the same way `O_CREAT`'s numeric value is
-/// platform-defined rather than standardised (`std::fs::OpenOptions` is used for the open call
+/// they are a 4.2BSD extension, carried forward by two different headers on the two platforms
+/// `just oracle-build` targets: BSD/macOS defines them in `<sys/fcntl.h>` (reached through
+/// `<sys/file.h>`), glibc directly in `<sys/file.h>` itself. Their values are
+/// platform-defined rather than standardised, the same way `O_CREAT`'s numeric value is
+/// (`std::fs::OpenOptions` is used for the open call
 /// for exactly that reason, below) -- it merely happens to agree across the platforms
 /// `just oracle-build` targets. The vendored source writes the symbolic macro names
 /// (`LOCK_EX | LOCK_NB`, `InstanceLock.cpp:47`; `LOCK_UN`, `:54`), never these numbers, so there
 /// is no vendored line to cite -- each gets the "constant whose origin is outside the vendored
 /// tree" marker form instead (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 2).
 // PORT SRC: external: BSD/macOS <sys/fcntl.h> (Apple's MacOSX SDK,
-// usr/include/sys/fcntl.h:506, reached through <sys/file.h>) and glibc's <bits/file.h> --
+// usr/include/sys/fcntl.h:506, reached through <sys/file.h>) and glibc's misc/sys/file.h,
+// installed as <sys/file.h>, which defines all four LOCK_* macros directly --
 // LOCK_EX, the exclusive-lock flag for flock(2), value 2 (0x02) on every platform
 // `just oracle-build` targets. `2` is also R16's exempt literal, so no marker is mechanically
 // required here; it is given one anyway, as every transcribed constant in this module gets one.
 const LOCK_EX: i32 = 2;
 // PORT SRC: external: BSD/macOS <sys/fcntl.h> (Apple's MacOSX SDK,
-// usr/include/sys/fcntl.h:507, reached through <sys/file.h>) and glibc's <bits/file.h> --
+// usr/include/sys/fcntl.h:507, reached through <sys/file.h>) and glibc's misc/sys/file.h,
+// installed as <sys/file.h>, which defines all four LOCK_* macros directly --
 // LOCK_NB, the non-blocking flag bit for flock(2), value 4 (0x04) on every platform
 // `just oracle-build` targets
 const LOCK_NB: i32 = 4;
 // PORT SRC: external: BSD/macOS <sys/fcntl.h> (Apple's MacOSX SDK,
-// usr/include/sys/fcntl.h:508, reached through <sys/file.h>) and glibc's <bits/file.h> --
+// usr/include/sys/fcntl.h:508, reached through <sys/file.h>) and glibc's misc/sys/file.h,
+// installed as <sys/file.h>, which defines all four LOCK_* macros directly --
 // LOCK_UN, the unlock operation for flock(2), value 8 (0x08) on every platform
 // `just oracle-build` targets
 const LOCK_UN: i32 = 8;
@@ -476,10 +481,17 @@ mod tests {
     /// contend over the real OS lock instead of each independently exercising the same
     /// mechanism.
     fn fresh_lock_path(tag: &str) -> String {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../oracle/.cache/tmp")
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../oracle/.cache/tmp");
+        // Created here rather than assumed: the directory is git-ignored, so a fresh checkout
+        // does not carry it, and nothing in the repository guarantees an earlier step made it.
+        // `canonicalize` below would return `Err` on a missing path, which would make this
+        // proof's outcome depend on whether some other test binary happened to run first.
+        std::fs::create_dir_all(&dir).expect("oracle/.cache/tmp must be creatable (git-ignored)");
+        // Resolved to an absolute path with the `../..` and macOS's `/var` -> `/private/var`
+        // symlink collapsed, because the result is handed to `flock(2)` through both sides.
+        let dir = dir
             .canonicalize()
-            .expect("oracle/.cache/tmp exists in this worktree");
+            .expect("oracle/.cache/tmp was just created, so it canonicalizes");
         format!(
             "{}/grampus-instance-lock-proof-{tag}-{}-{}.lock",
             dir.display(),

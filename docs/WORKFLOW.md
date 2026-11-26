@@ -346,23 +346,23 @@ landed) — recorded as each reviewer actually gave it, not softened:**
 - **Manifest row:** InstanceLock.cpp
 - **Manifest row:** InstanceLock.hpp
 - **Reviewer 1:** `src/libslic3r/InstanceLock.cpp:124-154` against
-  `crates/slic3r-instancelock/src/instance_lock.rs:254-312` — the constructor's `if (depth==0 &&
+  `crates/slic3r-instancelock/src/instance_lock.rs:259-317` — the constructor's `if (depth==0 &&
   now>=cooldown_until && open_lock_file(...))` guard, the retry loop's `try_lock`/deadline/sleep
   sequence, and `++depth` *before* `m_locked = file_lock != nullptr` (`:152-153`, matching
-  `instance_lock.rs:306-307`) all appear in the same order in the port;
+  `instance_lock.rs:311-312`) all appear in the same order in the port;
   `src/libslic3r/InstanceLock.cpp:156-168` against
-  `crates/slic3r-instancelock/src/instance_lock.rs:320-334` — the destructor's own body runs
+  `crates/slic3r-instancelock/src/instance_lock.rs:325-339` — the destructor's own body runs
   before its member destructors release the mutex in C++ (reverse declaration order), which the
   port reproduces by running `Drop::drop`'s explicit body on the taken `guard` before that local
   `guard` goes out of scope and releases the reentrant lock itself. No divergence found.
 - **Reviewer 2:** `src/libslic3r/InstanceLock.cpp:39-53` against
-  `crates/slic3r-instancelock/src/instance_lock.rs:89-126` — `NativeFileLock`'s constructor
+  `crates/slic3r-instancelock/src/instance_lock.rs:94-131` — `NativeFileLock`'s constructor
   (`O_RDWR|O_CREAT|O_CLOEXEC`, mode `0644`, throwing `std::system_error` on failure) and
   `try_lock()`'s `EWOULDBLOCK`/`EINTR` → "keep trying", anything else → the unit's other throw,
   against `OpenOptions`'s equivalent flags/mode and `io::ErrorKind::WouldBlock`/`Interrupted` →
   `Ok(false)`, anything else → `Err`; `src/libslic3r/InstanceLock.hpp:52-53` (the `private:`
   non-const-reference out-params this leg is chosen for) against
-  `crates/slic3r-instancelock/src/instance_lock.rs:207-232` — `open_lock_file`/`defer` take `Slot
+  `crates/slic3r-instancelock/src/instance_lock.rs:212-237` — `open_lock_file`/`defer` take `Slot
   &slot` in the vendored source and `&mut SlotState` here, both mutating shared state the caller
   already holds locked, matching the idiom map's "a non-const reference out-parameter -> a
   return value" by returning `bool`/`()` rather than adopting a second `&mut` parameter to mirror
@@ -412,9 +412,10 @@ three units in this pass, recorded as each reviewer actually gave it:**
   vendored `std::unique_lock<std::recursive_mutex> m_slot_guard` (`InstanceLock.hpp:56`) is never
   moved across threads in the vendored code, so the port was strictly weaker than the source
   here, not equivalent.
-- **Fixed in commit `166c759`**: re-cited LOCK_NB/LOCK_UN's external markers to the real
-  authority (BSD/macOS's and glibc's `<sys/fcntl.h>`, verified against this machine's SDK) and
-  dropped the "POSIX-standardised" claim; changed the slot registry from `HashMap` to `BTreeMap`;
+- **Fixed in commit `166c759`**: re-cited LOCK_EX/LOCK_NB/LOCK_UN's external markers away from
+  POSIX to the BSD/macOS SDK header the values were verified against
+  (`usr/include/sys/fcntl.h:506-508`, reached through `<sys/file.h>`) and dropped the
+  "POSIX-standardised" claim; changed the slot registry from `HashMap` to `BTreeMap`;
   added a `PhantomData<*const ()>` field to `ReentrantGuard` (the same device `MutexGuard` uses)
   so it -- and therefore `InstanceLock` -- is `!Send`, and rewrote the `Send`/`Sync` `SAFETY`
   comments to state the real invariant instead of the false claim that this was "the same
@@ -431,6 +432,26 @@ three units in this pass, recorded as each reviewer actually gave it:**
   immediately above this bullet are deliberately **not** touched by either commit: their
   `module:line` halves (`:56`, `:59`, `:160`, `:330`, `:277`) describe the file as it stood
   *before* the fix, which is what "as it then stood" marks them as, on purpose.
+- **Third pass on this same pull request (2026-11-26), two majors, both fixed.** The re-citation
+  above was itself only half right: the three markers `166c759` wrote named a *second* authority,
+  "glibc's `<bits/file.h>`", that does not exist — glibc has no `bits/file.h`; it defines all
+  four `LOCK_*` macros directly in `misc/sys/file.h` (installed as `<sys/file.h>`), and again in
+  `sysdeps/unix/sysv/linux/bits/fcntl-linux.h` under `#ifdef __USE_MISC`, both verified against
+  glibc's own source. A false cited origin in an external marker is the same defect class this
+  unit had already been rejected over twice, so the three markers and the doc comment above them
+  now name glibc's `misc/sys/file.h` (the macOS SDK half, `usr/include/sys/fcntl.h:506-508`,
+  was re-verified against this machine's SDK and is unchanged). Separately, `fresh_lock_path`
+  (the proof's own test helper) called `Path::canonicalize()` on the git-ignored
+  `oracle/.cache/tmp/` and `.expect`ed it to exist, so on a checkout where no earlier step had
+  created that directory `cargo test -p slic3r-instancelock` would have panicked in the helper
+  instead of running the proof — it passed only because another crate's test binary happened to
+  create the directory first, a cross-binary ordering dependence this project's own unit-test
+  rules name as an anti-pattern, and this unit is the exemplar the fan-out copies. The helper now
+  calls `std::fs::create_dir_all` before canonicalizing, the pattern its two siblings
+  (`crates/slic3r-proof/tests/manifest_env.rs:29`, `crates/slic3r-proof/tests/dumps_proof.rs:118`)
+  already use. Neither fix changes a line of ported logic; the live `module:line` citations at the
+  top of this unit were re-derived against the file as committed, because the marker fix shifted
+  every line after `:58` by five.
 - **LOCK_EX and the `0o644` open mode, two related findings also raised on this pass (majors, not
   blockers): fixed and recorded, respectively.** `LOCK_EX`'s value (`2`) carries no `// PORT SRC:`
   marker even though the module's own doc comment claimed all three flock flags had one — `2` is
@@ -456,7 +477,7 @@ Recorded for the same reason the review methodology note above is: `just port-ch
 passes above had already signed off on all three units, found 545 findings across all three --
 markers missing the `src/libslic3r/` path prefix `resolve_vendored` requires, float literals
 written in a decimal form that does not textually match the vendored line's bare-integer
-spelling, two symbolic POSIX flag values and one octal-notation mismatch needing the external
+spelling, two symbolic `flock(2)` flag values and one octal-notation mismatch needing the external
 marker form instead, and both `MaterialType`'s and `InstanceLock`'s proofs reading as
 non-differential to the text scanner because their `use ... as oracle;` import is invisible to
 it. None of this was a *behavioural* divergence the "assume the module is wrong, cite
