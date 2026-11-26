@@ -654,21 +654,23 @@ mod tests {
 
         let center = [1.0f64, 1.0];
         let max_distance = 6.0f64;
-        let mut actual: Vec<u64> = find_nearby_points(&tree, &center, max_distance)
+        // Not sorted before comparing: `KDTreeIndirect.hpp:310`'s `result.push_back(idx)` inside
+        // `visit_recursive` appends in a traversal order the tree layout fully determines
+        // (`:184-190`), so the *order* `find_nearby_points` returns is itself part of what this
+        // differential holds to exact equality, not only the set of indices.
+        let actual: Vec<u64> = find_nearby_points(&tree, &center, max_distance)
             .into_iter()
             .map(|i| i as u64)
             .collect();
-        actual.sort_unstable();
-        let mut oracle = proof_units::kd_tree_indirect::path2_find_nearby_points(
+        let oracle = proof_units::kd_tree_indirect::path2_find_nearby_points(
             &coords_flat,
             center[0],
             center[1],
             max_distance,
         );
-        oracle.sort_unstable();
         assert_eq!(
             actual, oracle,
-            "find_nearby_points must match the vendored template exactly"
+            "find_nearby_points must match the vendored template exactly, including order"
         );
     }
 }
