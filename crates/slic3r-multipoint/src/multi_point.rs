@@ -1393,8 +1393,11 @@ mod tests {
         .expect("MultiPoint::symmetric_y must match the oracle exactly");
 
         // `concave_hull_2d` (review finding on this task's own pull request: no comparison
-        // reached this function). A concave input (a notch cut into one edge) so the pop branch
-        // actually runs.
+        // reached this function), first at `tolerance = 0.0`. At that tolerance the vendored
+        // pop condition (`MultiPoint.cpp:372`) is unsatisfiable: `ccw <= 0` forces `-ccw >= 0`,
+        // so `-ccw / norm` is `>= 0`, `+inf` or `NaN` and never `< 0.0`. This sub-arm therefore
+        // pins the *no-pop* path only -- every input point is kept -- and it does not exercise
+        // the divisor at all. The sub-arm below is the one that does.
         let hull_input: Points = vec![
             Point::new(0, 0),
             Point::new(50, 0),
@@ -1411,6 +1414,48 @@ mod tests {
             slic3r_proof::proof_units::multi_point::path1_concave_hull_2d(&hull_xs, &hull_ys, 0.0);
         compare_unit("MultiPoint.cpp", Oracle::Built, actual_hull, oracle_hull)
             .expect("MultiPoint::concave_hull_2d must match the oracle exactly");
+
+        // `concave_hull_2d` again, at `tolerance = 3.25` -- a positive tolerance chosen so that
+        // the `--k` pop branch runs *and* the divisor at `MultiPoint.cpp:372` is load-bearing on
+        // this fixed input: the integer-truncated Eigen `norm()` this module reproduces with
+        // `diff_norm_eigen_int_truncated`, not the exact `f64` `diff_norm`. Walked through the
+        // vendored loop:
+        //   - `(50,-1)` against the chain `(0,0)`,`(10,0)`: `-ccw = 10`, divisor `|(40,-1)|`
+        //     (truncated `40`), so `0.25 < 3.25` and `--k` runs.
+        //   - `(13,-1)` against `(0,0)`,`(50,-1)`: `-ccw = 37`, divisor `|(-37,0)| = 37` exactly,
+        //     so `1.0 < 3.25` and `--k` runs again.
+        //   - `(16,-2)` against `(0,0)`,`(13,-1)`: `-ccw = 10`, divisor `|(3,-1)|`, whose
+        //     truncated norm `3` gives `10/3 = 3.333... >= 3.25` (no pop, `(13,-1)` kept) while
+        //     the exact `f64` norm `3.1622...` would give `3.1622... < 3.25` (pop, `(13,-1)`
+        //     dropped). The two divisors therefore produce different hulls here.
+        // Confirmed by negative control: replacing `diff_norm_eigen_int_truncated` with
+        // `diff_norm` in `concave_hull_2d` makes this sub-arm fail against the oracle. Arbitrary
+        // finite tolerances are additionally covered by fuzz arm 7 of
+        // `crates/slic3r-ffi/fuzz/fuzz_targets/slic3r-multipoint_multi_point.rs`.
+        let hull_pop_input: Points = vec![
+            Point::new(0, 0),
+            Point::new(10, 0),
+            Point::new(50, -1),
+            Point::new(13, -1),
+            Point::new(16, -2),
+        ];
+        let hull_pop_xs: Vec<i64> = hull_pop_input.iter().map(|p| p.x()).collect();
+        let hull_pop_ys: Vec<i64> = hull_pop_input.iter().map(|p| p.y()).collect();
+        let actual_hull_pop = flatten(&concave_hull_2d(&hull_pop_input, 3.25));
+        let oracle_hull_pop = slic3r_proof::proof_units::multi_point::path1_concave_hull_2d(
+            &hull_pop_xs,
+            &hull_pop_ys,
+            3.25,
+        );
+        compare_unit(
+            "MultiPoint.cpp",
+            Oracle::Built,
+            actual_hull_pop,
+            oracle_hull_pop,
+        )
+        .expect(
+            "MultiPoint::concave_hull_2d must match the oracle exactly where the pop branch runs",
+        );
 
         // `minimumDistanceBetweenLinesDefinedByPoints` (review finding: no comparison reached
         // this function or its only caller, `squaredDistanceToLineSegment`) -- the reviewer's
