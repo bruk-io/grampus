@@ -256,8 +256,8 @@ pub fn step(crd: &mut Coord, d: Dir, n: i64) {
 }
 
 /// `template<class Rst> class Grid` (`MarchingSquares.hpp:223-618`).
-pub struct Grid<'a, R: RasterTraits> {
-    m_rst: &'a R,
+pub struct Grid<'a, Rst: RasterTraits> {
+    m_rst: &'a Rst,
     m_window: Coord,
     m_rastsize: Coord,
     m_gridsize: Coord,
@@ -268,26 +268,26 @@ pub struct Grid<'a, R: RasterTraits> {
 
 /// `struct CellIt { ... };` (`:394-468`): a bidirectional walk along one cell edge, stepping by
 /// `dir` each increment -- the random-access iterator `interpolate_edge`'s binary search walks.
-pub struct CellIt<'a, R: RasterTraits> {
+pub struct CellIt<'a, Rst: RasterTraits> {
     pub crd: Coord,
     pub dir: Dir,
-    grid: &'a R,
+    grid: &'a Rst,
 }
 
-// Written by hand rather than `#[derive(Clone, Copy)]`: the derive macro adds a `where R:
-// Copy`/`R: Clone` bound on the generic raster parameter even though this struct only ever
-// holds a `&'a R` (itself `Copy` regardless of `R`), which would force every caller's raster
+// Written by hand rather than `#[derive(Clone, Copy)]`: the derive macro adds a `where Rst:
+// Copy`/`Rst: Clone` bound on the generic raster parameter even though this struct only ever
+// holds a `&'a Rst` (itself `Copy` regardless of `Rst`), which would force every caller's raster
 // type to be `Copy` for no reason this struct's own fields need.
-impl<'a, R: RasterTraits> Clone for CellIt<'a, R> {
+impl<'a, Rst: RasterTraits> Clone for CellIt<'a, Rst> {
     fn clone(&self) -> Self {
         *self
     }
 }
-impl<'a, R: RasterTraits> Copy for CellIt<'a, R> {}
+impl<'a, Rst: RasterTraits> Copy for CellIt<'a, Rst> {}
 
-impl<'a, R: RasterTraits> CellIt<'a, R> {
+impl<'a, Rst: RasterTraits> CellIt<'a, Rst> {
     /// `TRasterValue<Rst> operator*() const` (`:406`).
-    pub fn value(&self) -> R::ValueType {
+    pub fn value(&self) -> Rst::ValueType {
         self.grid.get(self.crd.r as usize, self.crd.c as usize)
     }
 
@@ -297,7 +297,7 @@ impl<'a, R: RasterTraits> CellIt<'a, R> {
     }
 
     /// `long operator-(const CellIt &o) const` (`:452-461`): `*this - o`, in steps along `dir`.
-    pub fn distance_from(&self, o: &CellIt<'a, R>) -> i64 {
+    pub fn distance_from(&self, o: &CellIt<'a, Rst>) -> i64 {
         match self.dir {
             Dir::Left => o.crd.c - self.crd.c,
             Dir::Down => self.crd.r - o.crd.r,
@@ -309,14 +309,14 @@ impl<'a, R: RasterTraits> CellIt<'a, R> {
 }
 
 /// `struct Edge { CellIt from, to; };` (`:472-475`).
-pub struct Edge<'a, R: RasterTraits> {
-    pub from: CellIt<'a, R>,
-    pub to: CellIt<'a, R>,
+pub struct Edge<'a, Rst: RasterTraits> {
+    pub from: CellIt<'a, Rst>,
+    pub to: CellIt<'a, Rst>,
 }
 
-impl<'a, R: RasterTraits> Grid<'a, R> {
+impl<'a, Rst: RasterTraits> Grid<'a, Rst> {
     /// `explicit Grid(const Rst &rst, const Coord &window)` (`:523-531`).
-    pub fn new(rst: &'a R, window: Coord) -> Self {
+    pub fn new(rst: &'a Rst, window: Coord) -> Self {
         let rastsize = Coord::new(rst.rows() as i64, rst.cols() as i64);
         let gridsize = Coord::new(2 + rastsize.r / window.r, 2 + rastsize.c / window.c);
         let gridlen = (gridsize.r * gridsize.c) as usize;
@@ -374,7 +374,7 @@ impl<'a, R: RasterTraits> Grid<'a, R> {
 
     /// `uint32_t get_tags_block32(const size_t bidx, const TRasterValue<Rst> v) const`
     /// (`:248-266`).
-    fn get_tags_block32(&self, bidx: usize, v: R::ValueType) -> u32 {
+    fn get_tags_block32(&self, bidx: usize, v: Rst::ValueType) -> u32 {
         // `Coord gcrd = coord(bidx * 32);` (`:250`).
         // PORT SRC: src/libslic3r/MarchingSquares.hpp:250
         let mut gcrd = self.coord(bidx * 32);
@@ -556,7 +556,7 @@ impl<'a, R: RasterTraits> Grid<'a, R> {
     }
 
     /// `Edge _edge(const Coord &ringvertex) const` (`:477-491`).
-    fn edge_raw(&self, ringvertex: &Coord) -> Edge<'a, R> {
+    fn edge_raw(&self, ringvertex: &Coord) -> Edge<'a, Rst> {
         let idx = ringvertex.r as usize;
         let cell = self.coord(idx);
         let d = Dir::from_bits(ringvertex.c as u8);
@@ -567,6 +567,10 @@ impl<'a, R: RasterTraits> Grid<'a, R> {
             Dir::Right => (self.br(&cell), Dir::Up, self.tr(&cell)),
             Dir::Up => (self.tr(&cell), Dir::Left, self.tl(&cell)),
             _ => {
+                // PORT NOTE: MarchingSquares.hpp:488's `default: assert(false);` is compiled out
+                // under the oracle's release build (NDEBUG), falling through to `return {};`
+                // (`:490`) with a default, null-grid `Edge`. This port makes that unreachable
+                // branch a live panic instead of silently returning a bogus `Edge`.
                 unreachable!("edge_raw: ringvertex direction must be one of the four resolved ones")
             }
         };
@@ -585,7 +589,7 @@ impl<'a, R: RasterTraits> Grid<'a, R> {
     }
 
     /// `Edge edge(const Coord &ringvertex) const` (`:493-504`).
-    fn edge(&self, ringvertex: &Coord) -> Edge<'a, R> {
+    fn edge(&self, ringvertex: &Coord) -> Edge<'a, Rst> {
         let mut e = self.edge_raw(ringvertex);
         e.to.dir = e.from.dir;
         e.to.advance(1);
@@ -603,7 +607,7 @@ impl<'a, R: RasterTraits> Grid<'a, R> {
     /// Rust iterator abstraction built solely to carry one call: the same technique
     /// `kd_tree_indirect.rs`'s `partition_input` uses for translating a `std::` algorithm call
     /// statement for statement.
-    fn interpolate_edge(&self, ecrd: &mut Coord, isoval: R::ValueType) {
+    fn interpolate_edge(&self, ecrd: &mut Coord, isoval: Rst::ValueType) {
         debug_assert!(ecrd.r >= 0 && (ecrd.r as usize) < self.m_gridlen);
         let d = Dir::from_bits(ecrd.c as u8);
         debug_assert!(matches!(d, Dir::Left | Dir::Down | Dir::Right | Dir::Up));
@@ -643,7 +647,7 @@ impl<'a, R: RasterTraits> Grid<'a, R> {
     /// is Rust's borrow checker forcing out explicitly what the vendored method leaves implicit
     /// (`this->m_tags[...]` written while `this->get_tags_block32` reads other fields of the
     /// same `this`), not a behaviour difference from the vendored two-pass body.
-    pub fn tag_grid<P: GridLoop>(&mut self, policy: &P, isoval: R::ValueType) {
+    pub fn tag_grid<P: GridLoop>(&mut self, policy: &P, isoval: Rst::ValueType) {
         let mut tags = std::mem::take(&mut self.m_tags);
         policy.for_each_idx(&mut tags, |tag_block, bidx| {
             *tag_block = self.get_tags_block32(bidx, isoval);
@@ -696,7 +700,7 @@ impl<'a, R: RasterTraits> Grid<'a, R> {
         &self,
         policy: &P,
         rings: &mut Vec<Ring>,
-        isov: R::ValueType,
+        isov: Rst::ValueType,
     ) {
         policy.for_each_idx(rings, |ring, _| {
             for e in ring.iter_mut() {
@@ -772,10 +776,10 @@ impl GridLoop for slic3r_execution::execution_tbb::ExecutionTbb {
 
 /// `execute_with_policy(ExecutionPolicy&&, const Raster&, TRasterValue<Raster>, Coord)`
 /// (`:620-643`).
-pub fn execute_with_policy<R: RasterTraits, P: GridLoop>(
+pub fn execute_with_policy<Rst: RasterTraits, P: GridLoop>(
     policy: &P,
-    raster: &R,
-    isoval: R::ValueType,
+    raster: &Rst,
+    isoval: Rst::ValueType,
     mut windowsize: Coord,
 ) -> Vec<Ring> {
     if raster.rows() == 0 || raster.cols() == 0 {
@@ -804,7 +808,11 @@ pub fn execute_with_policy<R: RasterTraits, P: GridLoop>(
 /// (`:645-648`): `execute_with_policy(nullptr, ...)`, which dispatches to the generic (non-TBB)
 /// `_Loop` default -- see the module doc's "`nullptr` policy" note for why this port runs that
 /// sequential default inline rather than through [`GridLoop`].
-pub fn execute<R: RasterTraits>(raster: &R, isoval: R::ValueType, windowsize: Coord) -> Vec<Ring> {
+pub fn execute<Rst: RasterTraits>(
+    raster: &Rst,
+    isoval: Rst::ValueType,
+    windowsize: Coord,
+) -> Vec<Ring> {
     struct Sequential;
     impl GridLoop for Sequential {}
     execute_with_policy(&Sequential, raster, isoval, windowsize)
