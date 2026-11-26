@@ -35,6 +35,9 @@ mod ffi {
         enum_keys_map: Vec<OracleEnumKeyValue>,
     }
 
+    // SAFETY: this is cxx's own unsafe-extern declaration block, not a hand-written unsafe
+    // expression (see src/clipper2.rs's identical note) -- it carries no body, and the only
+    // unsafety is in the bindings `cxx` generates from it.
     unsafe extern "C++" {
         include!("slic3r-ffi/cxx/proof_units/print_config.h");
 
