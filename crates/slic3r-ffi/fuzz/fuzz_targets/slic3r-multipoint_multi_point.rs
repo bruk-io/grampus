@@ -41,6 +41,10 @@ struct ArbInput {
     sin_angle: f64,
     line_a: ArbPoint,
     line_b: ArbPoint,
+    e: ArbPoint,
+    tolerance: f64,
+    angle: f64,
+    x_axis: i32,
 }
 
 /// The same `MultiPoint` implementor `crates/slic3r-multipoint/src/multi_point.rs`'s own tests
@@ -76,6 +80,8 @@ fuzz_target!(|input: ArbInput| {
     if !input.scale_factor.is_finite()
         || !input.cos_angle.is_finite()
         || !input.sin_angle.is_finite()
+        || !input.tolerance.is_finite()
+        || !input.angle.is_finite()
     {
         return;
     }
@@ -171,6 +177,71 @@ fuzz_target!(|input: ArbInput| {
         multi_point::area(r.points()),
         oracle::path2_area_free(&xs, &ys),
         "the free area(Points) diverged for {:?}",
+        input
+    );
+
+    // Arm 6: `MultiPoint::symmetric_y` (`:581-586`), proof path 1 -- the shim existed with no
+    // fuzz arm driving it (a review finding on this task's own pull request).
+    let mut r6 = ClosedRing { points: pts.clone() };
+    r6.symmetric_y(input.x_axis as i64);
+    let actual_sym: Vec<i64> = r6.points.iter().flat_map(|p| [p.x(), p.y()]).collect();
+    let expected_sym = oracle::path1_symmetric_y(&xs, &ys, input.x_axis as i64);
+    assert_eq!(
+        actual_sym, expected_sym,
+        "MultiPoint::symmetric_y diverged for {:?}",
+        input
+    );
+
+    // Arm 7: `MultiPoint::concave_hull_2d` (`:364-381`), proof path 1 -- a review finding on this
+    // task's own pull request: no comparison reached this function at all.
+    let e = Point::new(input.e.x as i64, input.e.y as i64);
+    let hull_pts = vec![pts[0], pts[1], pts[2], pts[3], e];
+    let hull_xs: Vec<i64> = hull_pts.iter().map(|p| p.x()).collect();
+    let hull_ys: Vec<i64> = hull_pts.iter().map(|p| p.y()).collect();
+    let actual_hull: Vec<i64> = multi_point::concave_hull_2d(&hull_pts, input.tolerance)
+        .iter()
+        .flat_map(|p| [p.x(), p.y()])
+        .collect();
+    let expected_hull = oracle::path1_concave_hull_2d(&hull_xs, &hull_ys, input.tolerance);
+    assert_eq!(
+        actual_hull, expected_hull,
+        "MultiPoint::concave_hull_2d diverged for {:?}",
+        input
+    );
+
+    // Arm 8: `MultiPoint::minimumDistanceBetweenLinesDefinedByPoints` (`:414-434`) and its only
+    // caller of the private `squaredDistanceToLineSegment` (`:393-404`), proof path 1 -- a review
+    // finding on this task's own pull request: neither had a comparison.
+    let min_dist_a: Points = vec![pts[0], pts[1]];
+    let min_dist_b: Points = vec![pts[2], pts[3]];
+    let actual_min_dist =
+        multi_point::minimum_distance_between_lines_defined_by_points(&min_dist_a, &min_dist_b);
+    let expected_min_dist = oracle::path1_min_distance_between_lines(
+        &[min_dist_a[0].x(), min_dist_a[1].x()],
+        &[min_dist_a[0].y(), min_dist_a[1].y()],
+        &[min_dist_b[0].x(), min_dist_b[1].x()],
+        &[min_dist_b[0].y(), min_dist_b[1].y()],
+    );
+    assert_eq!(
+        actual_min_dist, expected_min_dist,
+        "MultiPoint::minimumDistanceBetweenLinesDefinedByPoints diverged for {:?}",
+        input
+    );
+
+    // Arm 9: `get_extents_rotated(const Points&, double)` (`:550-574`), proof path 1 -- a review
+    // finding on this task's own pull request: no comparison reached this function.
+    let rotated_bb = multi_point::get_extents_rotated_points(r.points(), input.angle);
+    let actual_rotated = vec![
+        rotated_bb.min.x(),
+        rotated_bb.min.y(),
+        rotated_bb.max.x(),
+        rotated_bb.max.y(),
+        if rotated_bb.defined { 1 } else { 0 },
+    ];
+    let expected_rotated = oracle::path1_get_extents_rotated(&xs, &ys, input.angle);
+    assert_eq!(
+        actual_rotated, expected_rotated,
+        "get_extents_rotated(Points, angle) diverged for {:?}",
         input
     );
 });

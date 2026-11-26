@@ -36,6 +36,21 @@ rust::Vec<int64_t> path1_intersection(rust::Slice<const int64_t> xs,
                                        int64_t bx, int64_t by);
 rust::Vec<int64_t> path1_symmetric_y(rust::Slice<const int64_t> xs,
                                       rust::Slice<const int64_t> ys, int64_t x_axis);
+// `MultiPoint::concave_hull_2d(const Points&, double)` (`:364-381`), a `static` method called
+// directly -- no instance needed, `MultiPoint` need not be instantiated through `Polygon` here.
+rust::Vec<int64_t> path1_concave_hull_2d(rust::Slice<const int64_t> xs,
+                                          rust::Slice<const int64_t> ys, double tolerance);
+// `MultiPoint::minimumDistanceBetweenLinesDefinedByPoints(const Points&, const Points&)`
+// (`:414-434`), which is the only external caller of the `private` `squaredDistanceToLineSegment`
+// (`:393-404`) -- proving this proves that helper too.
+double path1_min_distance_between_lines(rust::Slice<const int64_t> a_xs,
+                                         rust::Slice<const int64_t> a_ys,
+                                         rust::Slice<const int64_t> b_xs,
+                                         rust::Slice<const int64_t> b_ys);
+// `get_extents_rotated(const Points&, double)` (`:550-574`), returning
+// `[min.x, min.y, max.x, max.y, defined (0/1)]`.
+rust::Vec<int64_t> path1_get_extents_rotated(rust::Slice<const int64_t> xs,
+                                              rust::Slice<const int64_t> ys, double angle);
 
 // Path 2: MultiPoint.hpp's own header-only inline methods and free functions, driven through the
 // same real `Slic3r::Polygon`.

@@ -448,14 +448,17 @@ impl Polygon {
     /// the last entry).
     pub fn parameter_by_length(&self) -> Vec<f32> {
         let n = self.points.len();
-        // PORT SRC: external: the vendored `std::vector<float> lengths(points.size()+1, 0.);`
-        // (`Polygon.cpp:374`) spells its own literal `0.` -- a trailing-dot float with no digit
-        // after the point -- and Rust's grammar forbids a type suffix directly after a
-        // trailing-dot float (`0.f32` does not parse; `0.0f32`/`0f32` are the only valid
-        // spellings, and neither's normalised text is `"0."`), so no Rust spelling of this
-        // value can match the cited line's text (`docs/PORTING.md` decision 8's closing
-        // paragraph).
-        let mut lengths = vec![0.0f32; n + 1];
+        // PORT SRC: src/libslic3r/Polygon.cpp:374 -- `0.`, a trailing-dot float with no digit
+        // after the point, is itself a valid Rust float literal (its type is inferred from this
+        // function's own `-> Vec<f32>` return, with no suffix needed), and its normalised text
+        // (`port/port-status`'s own `normalize_literal`, which only strips separators and a type
+        // suffix) is `"0."`, which occurs verbatim on the cited line
+        // (`std::vector<float> lengths(points.size()+1, 0.);`) -- so the ordinary vendored-line
+        // marker applies here; an earlier draft of this marker claimed no Rust spelling could
+        // match and used `docs/PORTING.md` decision 8's external form instead, which a review
+        // found factually wrong (decision 8's condition -- "no Rust spelling of a value can be
+        // made to match the cited line's text" -- is not met at this site).
+        let mut lengths = vec![0.; n + 1];
         for i in 1..n {
             let d = self.points[i] - self.points[i - 1];
             lengths[i] = lengths[i - 1] + ((d.x() as f32).powi(2) + (d.y() as f32).powi(2)).sqrt();
@@ -603,10 +606,37 @@ fn filter_convex_concave_points_by_angle_threshold<F: Fn((f64, f64), (f64, f64))
             if !convex_concave_filter(v1, v2) {
                 return false;
             }
-            let n1 = (v1.0 * v1.0 + v1.1 * v1.1).sqrt();
-            let n2 = (v2.0 * v2.0 + v2.1 * v2.1).sqrt();
-            let v1n = (v1.0 / n1, v1.1 / n1);
-            let v2n = (v2.0 / n2, v2.1 / n2);
+            // `v1.normalized()`/`v2.normalized()` (`Polygon.cpp:309`): Eigen's `normalized()`
+            // checks `squaredNorm() == 0` and returns the vector *unchanged* in that case
+            // (`Eigen/src/Core/Dot.h`'s own `MatrixBase::normalized()`), rather than dividing by
+            // a zero norm; a plain unconditional division would give NaN for a zero-length edge
+            // vector (two identical consecutive points) and always fail the `vec_dot <
+            // cos_threshold` comparison below, dropping a point the oracle keeps. Currently
+            // unreachable: `filter_points_by_vectors`' own `convex_concave_filter` (`cross2(v1,
+            // v2) {>,<} 0.`) runs first and a zero `v1`/`v2` makes `cross2` exactly `0.`, which
+            // is neither `> 0.` nor `< 0.`, so both the oracle and this port already drop the
+            // point before `normalized()` is ever reached -- disclosed as a fidelity fix for a
+            // divergence that cannot be demonstrated today, not a live bug.
+            let n1_sq = v1.0 * v1.0 + v1.1 * v1.1;
+            // PORT SRC: external: Eigen's own `squaredNorm() == 0` guard inside
+            // `MatrixBase::normalized()` -- not a value transcribed from a vendored literal at
+            // `Polygon.cpp:309` (that call site carries no numeric literal of its own), but the
+            // library-defined threshold this doc comment cites.
+            let v1n = if n1_sq == 0.0 {
+                v1
+            } else {
+                let n1 = n1_sq.sqrt();
+                (v1.0 / n1, v1.1 / n1)
+            };
+            let n2_sq = v2.0 * v2.0 + v2.1 * v2.1;
+            // PORT SRC: external: the same Eigen `normalized()` zero-norm guard as `v1n` above,
+            // for `v2`.
+            let v2n = if n2_sq == 0.0 {
+                v2
+            } else {
+                let n2 = n2_sq.sqrt();
+                (v2.0 / n2, v2.1 / n2)
+            };
             let vec_dot = v1n.0 * v2n.0 + v1n.1 * v2n.1;
             vec_dot < cos_threshold
         })
@@ -652,17 +682,28 @@ pub fn to_lines(poly: &Polygon) -> Lines {
     lines
 }
 
-/// `inline Lines to_lines(const Polygons &polys)` (`:215-226`).
+/// `inline Lines to_lines(const Polygons &polys)` (`:215-226`): **no** `size() > 2` guard --
+/// unlike the single-`Polygon` overload just above, which this crate's own [`to_lines`] already
+/// reproduces -- so this overload runs its edge loop and closing-edge push unconditionally for
+/// every contour, including a 1- or 2-point one (reachable from in-scope callers fed Clipper
+/// output, e.g. `IntersectionPoints.cpp:48`, `PerimeterGenerator.cpp:1135`).
 pub fn to_lines_polygons(polys: &Polygons) -> Lines {
     let mut lines = Lines::with_capacity(count_points(polys));
     for poly in polys {
         let pts = &poly.points;
-        if pts.len() > 2 {
-            for i in 0..pts.len() - 1 {
-                lines.push(Line::new(pts[i], pts[i + 1]));
-            }
-            lines.push(Line::new(pts[pts.len() - 1], pts[0]));
+        // PORT NOTE: src/libslic3r/Polygon.hpp:215-226 -- an empty contour's
+        // `poly.points.end() - 1` and `poly.points.back()` are themselves undefined behaviour at
+        // the pin (no size guard at all covers this overload); this guard turns that disclosed
+        // UB into "contribute zero lines for this contour" rather than a panic, and changes
+        // nothing for any non-empty contour (`0..pts.len() - 1` is already the empty range when
+        // `pts.len() == 1`, matching the vendored loop running zero times there too).
+        if pts.is_empty() {
+            continue;
         }
+        for i in 0..pts.len() - 1 {
+            lines.push(Line::new(pts[i], pts[i + 1]));
+        }
+        lines.push(Line::new(pts[pts.len() - 1], pts[0]));
     }
     lines
 }
@@ -735,12 +776,17 @@ pub fn polygon_is_convex(poly: &Points) -> bool {
     let mut p0 = poly[poly.len() - 2];
     let mut p1 = poly[poly.len() - 1];
     for &p2 in poly {
-        let v1 = p1 - p0;
-        let v2 = p2 - p1;
-        let det = v1
-            .x()
-            .wrapping_mul(v2.y())
-            .wrapping_sub(v1.y().wrapping_mul(v2.x()));
+        // `(p1 - p0).cast<int64_t>()` (`Polygon.cpp:486`): the subtraction itself is `coord_t`
+        // (`int64_t` at this pin -- `libslic3r.h:48`) arithmetic, not widened before
+        // subtracting, so `wrapping_sub` belongs on the subtraction too, not only on the
+        // `wrapping_mul`/`wrapping_sub` chain below it -- `Point`'s own `Sub` is a checked `i64`
+        // subtraction (a different crate's type, not this task's to change), so this computes
+        // the deltas directly on the coordinates instead of going through it.
+        let v1x = p1.x().wrapping_sub(p0.x());
+        let v1y = p1.y().wrapping_sub(p0.y());
+        let v2x = p2.x().wrapping_sub(p1.x());
+        let v2y = p2.y().wrapping_sub(p1.y());
+        let det = v1x.wrapping_mul(v2y).wrapping_sub(v1y.wrapping_mul(v2x));
         if det < 0 {
             return false;
         }
@@ -819,26 +865,29 @@ pub fn remove_same_neighbor_polygons(polygons: &mut Polygons) -> bool {
 /// (`Polygon.cpp:545-565`): file-scope `static`, kept module-private per the idiom map's
 /// "a `static` free function" row.
 fn is_stick(p1: Point, p2: Point, p3: Point) -> bool {
-    let v1 = p2 - p1;
-    let v2 = p3 - p2;
+    // `Point v1 = p2 - p1;`/`Point v2 = p3 - p2;` (`Polygon.cpp:549-550`): `coord_t` (`int64_t`)
+    // subtraction, the same reason [`polygon_is_convex`]'s doc gives for computing the deltas
+    // directly on the coordinates with `wrapping_sub` rather than through `Point`'s own checked
+    // `Sub`.
+    let v1x = p2.x().wrapping_sub(p1.x());
+    let v1y = p2.y().wrapping_sub(p1.y());
+    let v2x = p3.x().wrapping_sub(p2.x());
+    let v2y = p3.y().wrapping_sub(p2.y());
     // `wrapping_*`: see [`polygon_is_convex`]'s doc for why this `int64_t` arithmetic is kept
     // bit-for-bit equal to the oracle's own (possibly overflowing) result rather than panicking.
-    let dir = v1
-        .x()
-        .wrapping_mul(v2.x())
-        .wrapping_add(v1.y().wrapping_mul(v2.y()));
+    let dir = v1x.wrapping_mul(v2x).wrapping_add(v1y.wrapping_mul(v2y));
     if dir > 0 {
         return false;
     }
-    let l2_1 = (v1.x() as f64) * (v1.x() as f64) + (v1.y() as f64) * (v1.y() as f64);
-    let l2_2 = (v2.x() as f64) * (v2.x() as f64) + (v2.y() as f64) * (v2.y() as f64);
+    let l2_1 = (v1x as f64) * (v1x as f64) + (v1y as f64) * (v1y as f64);
+    let l2_2 = (v2x as f64) * (v2x as f64) + (v2y as f64) * (v2y as f64);
     if dir == 0 {
         // `0f64`: the vendored `return l2_1 == 0 || l2_2 == 0;` (`Polygon.cpp:558`) spells its
         // own literals as the bare integer `0`; see [`Polygon::length`]'s doc for why this
         // stays exempt.
         return l2_1 == 0f64 || l2_2 == 0f64;
     }
-    let cross = (v1.x() as f64) * (v2.y() as f64) - (v2.x() as f64) * (v1.y() as f64);
+    let cross = (v1x as f64) * (v2y as f64) - (v2x as f64) * (v1y as f64);
     let dist2 = cross * cross / l2_1.max(l2_2);
     dist2 < slic3r_libslic3r::libslic3r::EPSILON * slic3r_libslic3r::libslic3r::EPSILON
 }
@@ -1049,9 +1098,16 @@ fn point_in_polygon(pt: Point, path: &Points) -> i32 {
                 if ip_next.x() > pt.x() {
                     result = 1 - result;
                 } else {
-                    let d = (ip.x() - pt.x())
-                        .wrapping_mul(ip_next.y() - pt.y())
-                        .wrapping_sub((ip_next.x() - pt.x()).wrapping_mul(ip.y() - pt.y()));
+                    // `int64_t(ip.x() - pt.x())` (`Polygon.cpp:753`): the subtraction is
+                    // `coord_t` (`int64_t`) arithmetic before the (here, no-op) cast, so
+                    // `wrapping_sub` belongs on it too -- see [`polygon_is_convex`]'s doc for
+                    // the same point.
+                    let d = (ip.x().wrapping_sub(pt.x()))
+                        .wrapping_mul(ip_next.y().wrapping_sub(pt.y()))
+                        .wrapping_sub(
+                            (ip_next.x().wrapping_sub(pt.x()))
+                                .wrapping_mul(ip.y().wrapping_sub(pt.y())),
+                        );
                     if d == 0 {
                         return -1;
                     }
@@ -1060,9 +1116,12 @@ fn point_in_polygon(pt: Point, path: &Points) -> i32 {
                     }
                 }
             } else if ip_next.x() > pt.x() {
-                let d = (ip.x() - pt.x())
-                    .wrapping_mul(ip_next.y() - pt.y())
-                    .wrapping_sub((ip_next.x() - pt.x()).wrapping_mul(ip.y() - pt.y()));
+                let d = (ip.x().wrapping_sub(pt.x()))
+                    .wrapping_mul(ip_next.y().wrapping_sub(pt.y()))
+                    .wrapping_sub(
+                        (ip_next.x().wrapping_sub(pt.x()))
+                            .wrapping_mul(ip.y().wrapping_sub(pt.y())),
+                    );
                 if d == 0 {
                     return -1;
                 }
@@ -1532,6 +1591,31 @@ mod tests {
             oracle_dp,
         )
         .expect("MultiPoint::_douglas_peucker must match the oracle exactly");
+
+        // `to_lines(const Polygons&)` (review finding on this task's own pull request:
+        // `to_lines_polygons` wrongly carried the single-`Polygon` overload's `size() > 2`
+        // guard; the `Polygons` overload has none). A 1-point and a 2-point contour, the two
+        // sizes that guard wrongly dropped.
+        let one_pt = Polygon {
+            points: vec![Point::new(5, 7)],
+        };
+        let two_pt = Polygon {
+            points: vec![Point::new(0, 0), Point::new(10, 0)],
+        };
+        let polys = vec![one_pt.clone(), two_pt.clone()];
+        let actual_lines: Vec<i64> = to_lines_polygons(&polys)
+            .iter()
+            .flat_map(|l| [l.a.x(), l.a.y(), l.b.x(), l.b.y()])
+            .collect();
+        let oracle_lines = slic3r_proof::proof_units::polygon::path3_to_lines_polygons(
+            &[one_pt.points[0].x()],
+            &[one_pt.points[0].y()],
+            &[two_pt.points[0].x(), two_pt.points[1].x()],
+            &[two_pt.points[0].y(), two_pt.points[1].y()],
+        );
+        compare_unit("Polygon.hpp", Oracle::Built, actual_lines, oracle_lines).expect(
+            "to_lines(const Polygons&) must match the oracle exactly for 1- and 2-point contours",
+        );
     }
 }
 

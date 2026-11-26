@@ -43,6 +43,20 @@ mod ffi {
         ) -> Vec<i64>;
         /// `MultiPoint::symmetric_y(const coord_t&)` (`:581-586`).
         fn path1_symmetric_y(xs: &[i64], ys: &[i64], x_axis: i64) -> Vec<i64>;
+        /// `static MultiPoint::concave_hull_2d(const Points&, double)` (`:364-381`).
+        fn path1_concave_hull_2d(xs: &[i64], ys: &[i64], tolerance: f64) -> Vec<i64>;
+        /// `static MultiPoint::minimumDistanceBetweenLinesDefinedByPoints(const Points&, const
+        /// Points&)` (`:414-434`); the only caller of the `private`
+        /// `squaredDistanceToLineSegment` (`:393-404`), so this proves both.
+        fn path1_min_distance_between_lines(
+            a_xs: &[i64],
+            a_ys: &[i64],
+            b_xs: &[i64],
+            b_ys: &[i64],
+        ) -> f64;
+        /// `get_extents_rotated(const Points&, double)` (`:550-574`), returning
+        /// `[min.x, min.y, max.x, max.y, defined (0/1)]`.
+        fn path1_get_extents_rotated(xs: &[i64], ys: &[i64], angle: f64) -> Vec<i64>;
 
         /// `MultiPoint::front()`/`back()` (`MultiPoint.hpp:45-46`, inline), returning
         /// `[front.x, front.y, back.x, back.y]`.
@@ -63,7 +77,8 @@ mod ffi {
 }
 
 pub use ffi::{
-    path1_bounding_box, path1_find_point, path1_intersection, path1_length, path1_rotate_cos_sin,
+    path1_bounding_box, path1_concave_hull_2d, path1_find_point, path1_get_extents_rotated,
+    path1_intersection, path1_length, path1_min_distance_between_lines, path1_rotate_cos_sin,
     path1_scale, path1_symmetric_y, path1_translate, path2_area_free, path2_closest_point,
     path2_distance_to, path2_front_back, path2_is_valid, path2_length_free,
 };

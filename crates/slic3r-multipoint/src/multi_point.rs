@@ -440,8 +440,13 @@ pub trait MultiPoint {
     /// about the line `x = x_axis`).
     fn symmetric_y(&mut self, x_axis: i64) {
         for pt in self.points_mut() {
-            // PORT SRC: src/libslic3r/MultiPoint.cpp:584
-            *pt = Point::new(2 * x_axis - pt.x(), pt.y());
+            // PORT SRC: src/libslic3r/MultiPoint.cpp:584 -- `wrapping_*`, not plain `*`/`-`: the
+            // vendored `coord_t` (`int64_t`) arithmetic itself overflows for an `x_axis`/`pt.x()`
+            // pair large enough that `2 * x_axis` or the subtraction passes `i64::MAX`/`MIN`,
+            // which is a deterministic two's-complement wrap in the compiled oracle rather than a
+            // panic -- the same reasoning `crates/slic3r-polygon/src/polygon.rs`'s
+            // `polygon_is_convex` doc already states for the identical shape.
+            *pt = Point::new(2i64.wrapping_mul(x_axis).wrapping_sub(pt.x()), pt.y());
         }
     }
 }
@@ -459,6 +464,25 @@ fn diff_squared_norm(a: Point, b: Point) -> f64 {
     let dx = d.x() as f64;
     let dy = d.y() as f64;
     dx * dx + dy * dy
+}
+
+/// `(a - b).norm()` with **no** `.cast<double>()` -- Eigen's `norm()` on an integer-typed vector
+/// (`Vec2crd`/`Point`, `int64_t` components) returns `NumTraits<int64_t>::Real`, i.e. `int64_t`:
+/// `numext::sqrt(squaredNorm())`. `squaredNorm()` itself is **exact** `int64_t` arithmetic
+/// (`wrapping_*`, same reason as [`squared_distance_to_line_segment`]'s own `dot`/`l2`) --
+/// unlike [`diff_squared_norm`], which widens each coordinate to `f64` *before* squaring and so
+/// double-rounds (correct only where the vendored call site itself carries `.cast<double>()`,
+/// which first casts to `double` and so makes the two paths equivalent -- not the case here).
+/// `numext::sqrt` then converts that one exact integer to `double`, takes the true square root,
+/// and narrows back to `int64_t` by the function's own return type -- a single widen-then-sqrt-
+/// then-truncate, not a dedicated integer-square-root algorithm. The one call site that needs
+/// this is [`concave_hull_2d`]'s own divisor (`MultiPoint.cpp:372`); every other `norm()`/
+/// `squaredNorm()` call in this unit carries the vendored `.cast<double>()` and stays
+/// [`diff_norm`]/[`diff_squared_norm`].
+fn diff_norm_eigen_int_truncated(a: Point, b: Point) -> f64 {
+    let d = a - b;
+    let sq = (d.x().wrapping_mul(d.x())).wrapping_add(d.y().wrapping_mul(d.y()));
+    ((sq as f64).sqrt() as i64) as f64
 }
 
 /// `static Points _douglas_peucker(const Points &pts, const double tolerance);`
@@ -566,7 +590,15 @@ pub fn douglas_peucker3(pts: &Points3, tolerance: f64) -> Points3 {
 /// area was recomputed -- is detected by comparing against `area[idx]`'s current value, checked
 /// where entries are popped below), since a `vis_node*` pointer identity has no Rust counterpart
 /// for a value-typed heap entry.
-// FIDELITY(port): this port's heap breaks a tie between two equal-area entries by `idx`, a total
+// FIDELITY(port): two divergences from the vendored `vis_node`/heap shape, not one. First, the
+// restructuring: `MultiPoint.cpp:318-331` mutates a neighbour's `vis_node::area` *in place*
+// through its `vis_node*` pointer and then calls `std::make_heap` again over the same storage, so
+// each index holds exactly one live heap entry at all times; this port instead pushes a new
+// `VisHeapEntry` every time an index's area is recomputed (`:654-665` below) and treats an older
+// entry for the same `idx` as stale by comparing it against `area[idx]`'s current value at pop
+// time (`:644` below) -- lazy deletion in place of true in-place update, because a value-typed
+// Rust heap has no pointer identity to mutate through. Second, and only within that
+// restructuring: this port's heap breaks a tie between two equal-area entries by `idx`, a total
 // order; the vendored `std::make_heap`/`pop_heap` family breaks the same tie by heap position,
 // which depends on push/pop history and so is not reproducible without reimplementing
 // libstdc++'s own heap algorithm. `visivalingam` has no in-scope caller and no row of its own in
@@ -596,7 +628,12 @@ impl Ord for VisHeapEntry {
 /// own doc for why (the vendored body is undefined behaviour at the pin, reached by no in-scope
 /// or any caller).
 pub fn visivalingam(pts: &Points, tolerance: f64) -> Points {
-    assert!(pts.len() >= 2);
+    // PORT SRC: src/libslic3r/MultiPoint.cpp:268 -- an `assert` body (`docs/PORTING.md`'s
+    // Don't-translate list; its own cross-reference, `### Error sets`, gives the concrete
+    // rendering: "becomes `debug_assert!` and never a live `panic!`"), so this is
+    // `debug_assert!`, never a live `assert!`/`panic!` the oracle's NDEBUG release build has
+    // compiled out.
+    debug_assert!(pts.len() >= 2);
     let n = pts.len();
     let effective_area = |curr: usize, prev: usize, next: usize| -> f64 {
         let c = pts[curr];
@@ -701,7 +738,15 @@ pub fn concave_hull_2d(pts: &Points, tolerance: f64) -> Points {
                 // both normalise to the exempt `"0"` either way -- see the `find_point_eps`
                 // comment above for the same technique.
                 && pts[i].ccw(hull[k - 2], hull[k - 1]) <= 0f64
-                && -pts[i].ccw(hull[k - 2], hull[k - 1]) / diff_norm(pts[i], hull[k - 1])
+                // `(pts[i] - hull[k - 1]).norm()` (`MultiPoint.cpp:372`) carries no
+                // `.cast<double>()`, unlike every other `norm()`/`squaredNorm()` call in this
+                // unit's own `f64` arithmetic -- the operand is `Eigen::Matrix<int64_t, 2, 1>`,
+                // so `norm()` is `numext::sqrt(squaredNorm())` returning
+                // `NumTraits<int64_t>::Real`, i.e. `int64_t`: the true square root truncated back
+                // to an integer by the return type, not the exact `f64` `diff_norm` the rest of
+                // this module uses. `diff_norm_eigen_int_truncated` reproduces that truncation.
+                && -pts[i].ccw(hull[k - 2], hull[k - 1])
+                    / diff_norm_eigen_int_truncated(pts[i], hull[k - 1])
                     < tolerance
             {
                 k -= 1;
@@ -750,21 +795,49 @@ pub fn minimum_distance_between_lines_defined_by_points(a: &Points, b: &Points) 
 /// `InstanceLock::open_lock_file` -- kept module-private here too (idiom map: a `private` free/
 /// static function is a non-`pub` module function).
 fn squared_distance_to_line_segment(p: Point, v: Point, w: Point) -> f64 {
-    let l2 = diff_squared_norm(v, w);
+    // `double l2 = (v - w).squaredNorm();` (`MultiPoint.cpp:397`): **no** `.cast<double>()`
+    // -- `v - w` is `Eigen::Matrix<int64_t, 2, 1>`, so this `squaredNorm()` is exact `int64_t`
+    // arithmetic (`wrapping_*`, same reason as `dot` below), converted to `double` only once, at
+    // this assignment -- not [`diff_squared_norm`]'s "widen each coordinate to `f64`, then
+    // square" (which *this* module's own other call sites use precisely because their vendored
+    // counterparts do carry `.cast<double>()`). The two are not interchangeable here: for
+    // coordinates whose squared sum exceeds `f64`'s 53-bit exact-integer range, squaring each
+    // `f64`-widened coordinate separately and then adding rounds twice, which can differ from
+    // converting the one exact `int64_t` sum to `f64` a single time.
+    let dvw = v - w;
+    let l2 = (dvw.x().wrapping_mul(dvw.x())).wrapping_add(dvw.y().wrapping_mul(dvw.y())) as f64;
     // PORT SRC: src/libslic3r/MultiPoint.cpp:397
     if l2 == 0.0 {
-        return diff_squared_norm(p, v);
+        // `(p - v).squaredNorm()` (`:398`): the same uncast, exact `int64_t` squared norm as
+        // `l2` above, not [`diff_squared_norm`].
+        let dpv = p - v;
+        return (dpv.x().wrapping_mul(dpv.x())).wrapping_add(dpv.y().wrapping_mul(dpv.y())) as f64;
     }
     let pv = p - v;
     let wv = w - v;
-    let dot = (pv.x() * wv.x() + pv.y() * wv.y()) as f64;
+    // `(p - v).dot(w - v)` (`MultiPoint.cpp:399`): an exact `int64_t` dot product in the vendored
+    // Eigen expression (no `.cast<double>()`); `wrapping_*`, not plain `*`/`+`, for the same
+    // overflow-vs-panic reason `crates/slic3r-polygon/src/polygon.rs`'s `polygon_is_convex` doc
+    // states for its own `int64_t` cross product.
+    let dot = (pv.x().wrapping_mul(wv.x())).wrapping_add(pv.y().wrapping_mul(wv.y())) as f64;
     // PORT SRC: src/libslic3r/MultiPoint.cpp:399
     let t = 0.0_f64.max(1.0_f64.min(dot / l2));
-    let proj_x = v.x() as f64 + t * (w.x() - v.x()) as f64;
-    let proj_y = v.y() as f64 + t * (w.y() - v.y()) as f64;
-    let dx = p.x() as f64 - proj_x;
-    let dy = p.y() as f64 - proj_y;
-    dx * dx + dy * dy
+    // `Point projection{v.x() + t * (w.x() - v.x()), v.y() + t * (w.y() - v.y())};`
+    // (`MultiPoint.cpp:401`): both initialisers have type `double` (`int64_t + double`), so
+    // overload resolution selects the *rounding* `Point(double, double)` constructor
+    // (`Point.hpp:208`), not an unrounded `f64` point -- the same rounding
+    // `crates/slic3r-polygon/src/polygon.rs`'s `densify` already reproduces with
+    // `Point::from_f64_rounded` for the identical constructor shape.
+    let proj = Point::from_f64_rounded(
+        v.x() as f64 + t * (w.x() - v.x()) as f64,
+        v.y() as f64 + t * (w.y() - v.y()) as f64,
+    );
+    // `(p - projection).squaredNorm()` (`MultiPoint.cpp:403`): `projection` is now an integer
+    // `Point`, so this squared norm is exact `int64_t` arithmetic -- `wrapping_*`, matching `dot`
+    // above, not the `f64`-widening [`diff_squared_norm`] every other call in this unit uses on a
+    // genuinely `f64` difference.
+    let d = p - proj;
+    (d.x().wrapping_mul(d.x())).wrapping_add(d.y().wrapping_mul(d.y())) as f64
 }
 
 /// `extern BoundingBox get_extents(const MultiPoint &mp);` (`MultiPoint.hpp:177`, defined
@@ -798,7 +871,19 @@ pub fn get_extents_rotated_points(points: &Points, angle: f64) -> BoundingBox {
             min = Point::new(min.x().min(x), min.y().min(y));
             max = Point::new(max.x().max(x), max.y().max(y));
         }
-        bbox = BoundingBox::from_min_max(min, max);
+        // PORT SRC: src/libslic3r/MultiPoint.cpp:571 -- the vendored body default-constructs
+        // `bbox` (`defined = false`), assigns `min`/`max` componentwise, then sets
+        // `bbox.defined = true` unconditionally here, for *any* non-empty `points` -- including a
+        // single point or a rotated extent that is degenerate (zero-width or zero-height) in x
+        // or y. `BoundingBox::from_min_max` ports a *different* vendored constructor
+        // (`BoundingBox.hpp:25-26`, correctly strict-`<`, see that function's own doc) and is not
+        // this function's own assignment, so this constructs the box directly rather than
+        // borrowing that constructor's rule.
+        bbox = BoundingBox {
+            min,
+            max,
+            defined: true,
+        };
     }
     bbox
 }
@@ -1306,6 +1391,76 @@ mod tests {
             oracle,
         )
         .expect("MultiPoint::symmetric_y must match the oracle exactly");
+
+        // `concave_hull_2d` (review finding on this task's own pull request: no comparison
+        // reached this function). A concave input (a notch cut into one edge) so the pop branch
+        // actually runs.
+        let hull_input: Points = vec![
+            Point::new(0, 0),
+            Point::new(50, 0),
+            Point::new(50, 10),
+            Point::new(50, 0),
+            Point::new(100, 0),
+            Point::new(100, 100),
+            Point::new(0, 100),
+        ];
+        let hull_xs: Vec<i64> = hull_input.iter().map(|p| p.x()).collect();
+        let hull_ys: Vec<i64> = hull_input.iter().map(|p| p.y()).collect();
+        let actual_hull = flatten(&concave_hull_2d(&hull_input, 0.0));
+        let oracle_hull =
+            slic3r_proof::proof_units::multi_point::path1_concave_hull_2d(&hull_xs, &hull_ys, 0.0);
+        compare_unit("MultiPoint.cpp", Oracle::Built, actual_hull, oracle_hull)
+            .expect("MultiPoint::concave_hull_2d must match the oracle exactly");
+
+        // `minimumDistanceBetweenLinesDefinedByPoints` (review finding: no comparison reached
+        // this function or its only caller, `squaredDistanceToLineSegment`) -- the reviewer's
+        // own worked example, whose nearest foot (`t = 0.8`) does not land on an integer
+        // coordinate, so it discriminates the rounding this proof holds the port to.
+        let min_dist_a: Points = vec![Point::new(0, 0), Point::new(3, 1)];
+        let min_dist_b: Points = vec![Point::new(2, 2)];
+        let actual_min_dist =
+            minimum_distance_between_lines_defined_by_points(&min_dist_a, &min_dist_b);
+        let oracle_min_dist =
+            slic3r_proof::proof_units::multi_point::path1_min_distance_between_lines(
+                &[0, 3],
+                &[0, 1],
+                &[2],
+                &[2],
+            );
+        compare_unit(
+            "MultiPoint.cpp",
+            Oracle::Built,
+            actual_min_dist,
+            oracle_min_dist,
+        )
+        .expect(
+            "MultiPoint::minimumDistanceBetweenLinesDefinedByPoints (and the private \
+             squaredDistanceToLineSegment it alone calls) must match the oracle exactly",
+        );
+
+        // `get_extents_rotated(const Points&, double)` (review finding: no comparison reached
+        // this function) -- a single point, so `defined` is exercised at its own degenerate case.
+        let single = vec![Point::new(7, 9)];
+        let single_xs: Vec<i64> = single.iter().map(|p| p.x()).collect();
+        let single_ys: Vec<i64> = single.iter().map(|p| p.y()).collect();
+        let rotated = get_extents_rotated_points(&single, 0.3);
+        let actual_rotated = vec![
+            rotated.min.x(),
+            rotated.min.y(),
+            rotated.max.x(),
+            rotated.max.y(),
+            if rotated.defined { 1 } else { 0 },
+        ];
+        let oracle_rotated = slic3r_proof::proof_units::multi_point::path1_get_extents_rotated(
+            &single_xs, &single_ys, 0.3,
+        );
+        compare_unit(
+            "MultiPoint.cpp",
+            Oracle::Built,
+            actual_rotated,
+            oracle_rotated,
+        )
+        .expect("get_extents_rotated(Points, angle) must match the oracle exactly");
     }
 
     /// Proof path 2 (R19, `port/manifest.tsv`'s `MultiPoint.hpp` row): `front()`/`back()`/

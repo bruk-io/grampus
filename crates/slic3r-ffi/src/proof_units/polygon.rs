@@ -76,6 +76,9 @@ mod ffi {
         /// `MultiPoint::_douglas_peucker(const Points&, double)` (`MultiPoint.hpp:107`, defined
         /// `MultiPoint.cpp:175-241`), called directly as `Polygon::douglas_peucker` itself does.
         fn path3_douglas_peucker(xs: &[i64], ys: &[i64], tolerance: f64) -> Vec<i64>;
+        /// `inline Lines to_lines(const Polygons&)` (`Polygon.hpp:215-226`), over two contours;
+        /// returning each line's endpoints flattened as `[a0.x, a0.y, b0.x, b0.y, ...]`.
+        fn path3_to_lines_polygons(xs1: &[i64], ys1: &[i64], xs2: &[i64], ys2: &[i64]) -> Vec<i64>;
     }
 }
 
@@ -83,5 +86,5 @@ pub use ffi::{
     path3_area, path3_centroid, path3_contains, path3_densify, path3_douglas_peucker,
     path3_first_intersection, path3_intersection, path3_intersections, path3_is_counter_clockwise,
     path3_make_circle_num_segments, path3_parameter_by_length, path3_point_in_polygon,
-    path3_point_projection, path3_polygon_is_convex, path3_remove_sticks,
+    path3_point_projection, path3_polygon_is_convex, path3_remove_sticks, path3_to_lines_polygons,
 };

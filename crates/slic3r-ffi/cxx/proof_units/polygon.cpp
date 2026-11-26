@@ -187,6 +187,25 @@ rust::Vec<int64_t> path3_douglas_peucker(rust::Slice<const int64_t> xs,
     return pack_points(Slic3r::MultiPoint::_douglas_peucker(pts, tolerance));
 }
 
+rust::Vec<int64_t> path3_to_lines_polygons(rust::Slice<const int64_t> xs1,
+                                            rust::Slice<const int64_t> ys1,
+                                            rust::Slice<const int64_t> xs2,
+                                            rust::Slice<const int64_t> ys2) {
+    Slic3r::Polygons polys;
+    polys.push_back(make_polygon(xs1, ys1));
+    polys.push_back(make_polygon(xs2, ys2));
+    Slic3r::Lines lines = Slic3r::to_lines(polys);
+    rust::Vec<int64_t> out;
+    out.reserve(lines.size() * 4);
+    for (const Slic3r::Line &l : lines) {
+        out.push_back(static_cast<int64_t>(l.a.x()));
+        out.push_back(static_cast<int64_t>(l.a.y()));
+        out.push_back(static_cast<int64_t>(l.b.x()));
+        out.push_back(static_cast<int64_t>(l.b.y()));
+    }
+    return out;
+}
+
 } // namespace polygon
 } // namespace proof_units
 } // namespace slic3r_ffi

@@ -44,6 +44,13 @@ rust::Vec<int64_t> path3_intersections(rust::Slice<const int64_t> xs,
                                         int64_t bx, int64_t by);
 rust::Vec<int64_t> path3_douglas_peucker(rust::Slice<const int64_t> xs,
                                           rust::Slice<const int64_t> ys, double tolerance);
+// `inline Lines to_lines(const Polygons&)` (`Polygon.hpp:215-226`), over **two** contours
+// (`xs1`/`ys1`, `xs2`/`ys2`), returning each line's endpoints flattened as
+// `[a0.x, a0.y, b0.x, b0.y, a1.x, a1.y, b1.x, b1.y, ...]`.
+rust::Vec<int64_t> path3_to_lines_polygons(rust::Slice<const int64_t> xs1,
+                                            rust::Slice<const int64_t> ys1,
+                                            rust::Slice<const int64_t> xs2,
+                                            rust::Slice<const int64_t> ys2);
 
 } // namespace polygon
 } // namespace proof_units

@@ -102,6 +102,42 @@ rust::Vec<int64_t> path1_symmetric_y(rust::Slice<const int64_t> xs,
     return pack_points(poly.points);
 }
 
+namespace {
+Slic3r::Points to_points(rust::Slice<const int64_t> xs, rust::Slice<const int64_t> ys) {
+    Slic3r::Points pts;
+    pts.reserve(xs.size());
+    for (size_t i = 0; i < xs.size(); ++i)
+        pts.emplace_back(xs[i], ys[i]);
+    return pts;
+}
+} // namespace
+
+rust::Vec<int64_t> path1_concave_hull_2d(rust::Slice<const int64_t> xs,
+                                          rust::Slice<const int64_t> ys, double tolerance) {
+    Slic3r::Points hull = Slic3r::MultiPoint::concave_hull_2d(to_points(xs, ys), tolerance);
+    return pack_points(hull);
+}
+
+double path1_min_distance_between_lines(rust::Slice<const int64_t> a_xs,
+                                         rust::Slice<const int64_t> a_ys,
+                                         rust::Slice<const int64_t> b_xs,
+                                         rust::Slice<const int64_t> b_ys) {
+    return Slic3r::MultiPoint::minimumDistanceBetweenLinesDefinedByPoints(
+        to_points(a_xs, a_ys), to_points(b_xs, b_ys));
+}
+
+rust::Vec<int64_t> path1_get_extents_rotated(rust::Slice<const int64_t> xs,
+                                              rust::Slice<const int64_t> ys, double angle) {
+    Slic3r::BoundingBox bb = Slic3r::get_extents_rotated(to_points(xs, ys), angle);
+    rust::Vec<int64_t> out;
+    out.push_back(static_cast<int64_t>(bb.min.x()));
+    out.push_back(static_cast<int64_t>(bb.min.y()));
+    out.push_back(static_cast<int64_t>(bb.max.x()));
+    out.push_back(static_cast<int64_t>(bb.max.y()));
+    out.push_back(bb.defined ? 1 : 0);
+    return out;
+}
+
 rust::Vec<int64_t> path2_front_back(rust::Slice<const int64_t> xs,
                                      rust::Slice<const int64_t> ys) {
     Slic3r::Polygon poly = make_polygon(xs, ys);
