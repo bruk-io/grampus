@@ -10,12 +10,14 @@
 //! `utils.cpp` declares roughly 90 functions across logging, OS process/memory introspection,
 //! file-copy and atomic-write machinery, vendor-bundle installation and plain string/path
 //! helpers. This module ports the pure, deterministic, OS-independent half faithfully and
-//! leaves the rest as `// TODO(port):` markers naming the vendored line, for four distinct
-//! reasons stated once here rather than repeated at each site:
+//! leaves the rest unported, named individually below with a `// TODO(port): <vendored
+//! path>:<line>` marker naming each declaration (grep this file for `TODO(port)` to find every
+//! one), for three distinct reasons plus one honestly-disclosed non-reason:
 //!
 //! 1. **Reaches a dependency no port crate may add.** `boost::log` (the whole logging family:
-//!    [`Slic3r::set_logging_level`] and its siblings, `trace`, `set_log_path_and_level`,
-//!    `flush_logs`, `get_log_file_name`, `shutdown_console_logging`), OpenSSL's MD5
+//!    `set_logging_level`, `set_logging_file`, `level_string_to_boost`,
+//!    `get_string_logging_level`, `get_logging_level`, `trace`, `set_log_path_and_level`,
+//!    `flush_logs`, `shutdown_console_logging`, `get_log_file_name`), OpenSSL's MD5
 //!    (`bbl_calc_md5`), and `boost::locale`'s NFC normaliser (`normalize_utf8_nfc`) have no
 //!    workspace dependency to bind against, and a port task may not add one
 //!    (`docs/WORKFLOW.md`, "Conflict discipline").
@@ -32,25 +34,36 @@
 //!    concrete type unless the manifest row's unit only ever instantiates one") argues against
 //!    guessing a pair of concrete types here. The three fixed-width overloads
 //!    (`uint16_t`/`uint32_t`/`uint64_t`) that `Utils.hpp` itself also declares are concrete and
-//!    are ported.
-//! 4. **Deferred for this task's own time budget, not for a rule above** -- recorded honestly
-//!    rather than silently dropped: `total_physical_memory`/`log_memory_info` (platform sysctl/
-//!    sysconf probing feeding one log line), `get_process_name` (three more platform branches
-//!    of the same shape), `string_printf`/`header_slic3r_generated`/`header_gcodeviewer_generated`
-//!    (a variadic-`printf` engine and a build-time version macro this workspace does not
-//!    expose yet), `xdg_config_dir`/`is_running_in_flatpak`/`wayland_socket_available`/
-//!    `default_data_dir` (Linux desktop-environment probing), `get_bbl_monitor_end_time_dhm`
-//!    (wall-clock-dependent, needs a timezone-aware local-time source this workspace has none
-//!    of), and the whole file-mutation family -- `makedir`, `save_string_file`,
+//!    are ported. `IsTriviallyCopyable` and the `SLIC3R_STDVEC_MEMSIZE`/
+//!    `SLIC3R_STDUNORDEREDSET_MEMSIZE` macros it backs are the same shape -- a compile-time
+//!    predicate/macro pair with no fixed instantiation in scope -- and are deferred with it.
+//! 4. **Deferred for this task's own time budget -- disclosed here as exactly that, not as a
+//!    rule above, because `docs/PORTING.md`'s don't-translate list has no "ran out of time"
+//!    entry.** This task did not reach: the eight pure `sprintf`/`sscanf`-based time formatters
+//!    (`short_time`, `get_time_dhms`, `get_bbl_time_dhms`, `get_timezone_utc_hm`,
+//!    `get_time_dhm`, `get_time_hms`, `get_bbl_monitor_time_dhm`, `get_bbl_remain_time_dhms`),
+//!    each of which needs C `sprintf`'s own field-width/precision rules (`%f`'s default 6
+//!    decimals, `sscanf`'s literal-text matching between `%d` conversions) reproduced and
+//!    checked against the real oracle one by one rather than guessed; `get_process_name`
+//!    (platform process-table probing); `string_printf`/`header_slic3r_generated`/
+//!    `header_gcodeviewer_generated`/`debug_out_path` (a variadic-`printf` engine with no
+//!    direct Rust equivalent and a build-time version macro this workspace does not expose
+//!    yet); `total_physical_memory`/`log_memory_info`/`disable_multi_threading` (platform
+//!    sysctl/sysconf probing and a global threading flag); `xdg_config_dir`/
+//!    `is_running_in_flatpak`/`wayland_socket_available`/`default_data_dir` (Linux
+//!    desktop-environment probing); `get_bbl_monitor_end_time_dhm` (wall-clock-dependent, needs
+//!    a timezone-aware local-time source this workspace has none of); `CopyFileResult` and the
+//!    whole file-mutation family it serves -- `makedir`, `save_string_file`,
 //!    `load_string_file`, `copy_file`/`copy_file_inner`/`copy_framework`/`check_copy`,
 //!    `rename_file`, `write_file_atomically` (and its `write_whole_file`/`write_in_place`
 //!    helpers) and `copy_directory_recursively` -- each of which needs the same care this task
-//!    gave the pure helpers below (exact errno/retry semantics, atomic-rename fallbacks) and is
-//!    named individually in this task's pull request body as not finished, rather than ported
-//!    thin and untested. `is_path_within_root`, `is_symlink_target_within_root` and
-//!    `is_absolute_path_within_root` are deferred with them: their security property depends on
-//!    `boost::filesystem::weakly_canonical`'s exact symlink-chasing semantics, which this task
-//!    did not have the budget to reproduce and verify to the same bar.
+//!    gave the pure helpers below (exact errno/retry semantics, atomic-rename fallbacks); and
+//!    `is_path_within_root`, `is_symlink_target_within_root` and `is_absolute_path_within_root`,
+//!    whose security property depends on `boost::filesystem::weakly_canonical`'s exact
+//!    symlink-chasing semantics, which this task did not have the budget to reproduce and
+//!    verify to the same bar as the rest. **Because none of these has a rule-based excuse, this
+//!    unit is not substantively "ported" while they remain undone -- see this task's pull
+//!    request body for the honest completion state.**
 //!
 //! None of the above is stubbed with `todo!()`/`unimplemented!()`: each is simply not emitted,
 //! so `port/port-status`'s per-commit check (which fails on a live `todo!()`/`unimplemented!()`
@@ -75,15 +88,21 @@ use std::sync::Mutex;
 
 /// `Slic3r::FilePtr` (`Utils.hpp:535-545`): "a very lightweight RAII wrapper around a C FILE"
 /// (the vendored comment, `:534`). `port/ownership.tsv` classifies its one field, `FilePtr::f`
-/// (`Utils.hpp:544`, `FILE *`, class `owned`), as `std::fs::File` verbatim -- the type map's
-/// rule for an owned raw-pointer field -- so this wraps `std::fs::File` directly rather than
-/// reinventing a buffered-C-file idiom around a raw pointer.
+/// (`Utils.hpp:544`, `FILE *`, class `owned`), as `std::fs::File` -- the type map's rule for an
+/// owned raw-pointer field. The field's vendored type is nullable (`FILE* f = nullptr`,
+/// `:544`), and every in-scope construction site relies on that: `GCodeReader.cpp:152` and
+/// `GCode/GCodeProcessor.cpp:1171`, `:1177`, `:2049`, `:2054` all build a `FilePtr` directly
+/// from a possibly-failed `fopen`/`boost::nowide::fopen` result, with `close()`'s own null
+/// guard (`:538-543`) as the only check. So this wraps the ownership row's `std::fs::File` cell
+/// in `Option` to carry that null state, rather than the cell verbatim -- disclosed here and in
+/// this task's pull request body rather than reported as the cell unchanged.
 pub struct FilePtr(Option<std::fs::File>);
 
 impl FilePtr {
-    /// `FilePtr(FILE *f)` (`Utils.hpp:536`).
-    pub fn new(f: std::fs::File) -> Self {
-        FilePtr(Some(f))
+    /// `FilePtr(FILE *f)` (`Utils.hpp:536`): `f` may be null (a failed `fopen`), matching the
+    /// vendored constructor, which takes the raw pointer -- including `nullptr` -- unchecked.
+    pub fn new(f: Option<std::fs::File>) -> Self {
+        FilePtr(f)
     }
 
     /// `FilePtr::close()` (`Utils.hpp:538-543`): closes the file now rather than waiting for
@@ -136,30 +155,61 @@ impl Drop for ScopeGuard {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Generic arithmetic helpers (Utils.hpp templates with no in-scope caller yet to fix a single
-// instantiation -- the sizes below are the ones a container index or a byte count takes in this
-// codebase, `usize`, chosen for that reason and not as a guess at a caller's own type).
+// Generic arithmetic helpers (Utils.hpp templates).
 // ---------------------------------------------------------------------------------------------
 
+/// The arithmetic bound `round_divide`/`round_up_divide` need: the three operators their own
+/// bodies use plus a lossless conversion from `u8` (so the literals `1`/`2` their bodies spell
+/// convert into any instantiation -- `u8` rather than `i32` because `usize: From<i32>` does not
+/// exist, while `usize: From<u8>` does), generic over every type an in-scope caller
+/// instantiates the vendored template with -- `f64` (`Support/TreeSupport.cpp:3703`, via
+/// `scale_()`'s `coordf_t` division), `usize` (`size_t`, `Support/TreeSupport3D.cpp:1942`) and
+/// `i32` (`coord_t`, `Support/TreeSupportCommon.hpp:297`) -- rather than force-collapsing the
+/// template to one concrete type the idiom map forbids guessing (`Utils.hpp:154-158`,
+/// `:477-481` are both `template<typename INDEX_TYPE/DataType>`, with no single fixed
+/// instantiation in scope).
+pub trait RoundDivide:
+    Copy
+    + std::ops::Add<Output = Self>
+    + std::ops::Sub<Output = Self>
+    + std::ops::Div<Output = Self>
+    + From<u8>
+{
+}
+
+impl<T> RoundDivide for T where
+    T: Copy
+        + std::ops::Add<Output = T>
+        + std::ops::Sub<Output = T>
+        + std::ops::Div<Output = T>
+        + From<u8>
+{
+}
+
 /// `round_divide<DataType>()` (`Utils.hpp:154-158`): `dividend` divided by `divisor`, rounded to
-/// the nearest integer.
-pub fn round_divide(dividend: usize, divisor: usize) -> usize {
-    (dividend + divisor / 2) / divisor
+/// the nearest integer -- `/` is the vendored `DataType`'s own division (truncating for an
+/// integer `DataType`, exact for `f64`), matching the template's own per-instantiation meaning.
+/// The literal `2` divided by (`:156`) is `0`/`1`/`2`-exempt from a `// PORT SRC:` marker (R16).
+pub fn round_divide<T: RoundDivide>(dividend: T, divisor: T) -> T {
+    (dividend + divisor / T::from(2)) / divisor
 }
 
 /// `round_up_divide<INDEX_TYPE>()` (`Utils.hpp:477-481`): `dividend` divided by `divisor`,
-/// rounded up.
-pub fn round_up_divide(dividend: usize, divisor: usize) -> usize {
-    (dividend + divisor - 1) / divisor
+/// rounded up. The literal `1` subtracted (`:479`) is `0`/`1`/`2`-exempt (R16), same as above.
+pub fn round_up_divide<T: RoundDivide>(dividend: T, divisor: T) -> T {
+    (dividend + divisor - T::from(1)) / divisor
 }
 
-/// `prev_idx_modulo<INDEX_TYPE>()` (`Utils.hpp:459-465`).
+/// `prev_idx_modulo<INDEX_TYPE>()` (`Utils.hpp:459-465`): the single-index overload. The
+/// `CONTAINER_TYPE` overload (`:483-486`) that resolves `count` from a container's own `size()`
+/// is [`prev_idx_modulo_of`], below.
 pub fn prev_idx_modulo(idx: usize, count: usize) -> usize {
     let idx = if idx == 0 { count } else { idx };
     idx - 1
 }
 
-/// `next_idx_modulo<INDEX_TYPE>()` (`Utils.hpp:467-473`).
+/// `next_idx_modulo<INDEX_TYPE>()` (`Utils.hpp:467-473`): the single-index overload. The
+/// `CONTAINER_TYPE` overload (`:489-492`) is [`next_idx_modulo_of`], below.
 pub fn next_idx_modulo(idx: usize, count: usize) -> usize {
     let idx = idx + 1;
     if idx == count {
@@ -167,6 +217,20 @@ pub fn next_idx_modulo(idx: usize, count: usize) -> usize {
     } else {
         idx
     }
+}
+
+/// `prev_idx_modulo<CONTAINER_TYPE>(idx, const CONTAINER_TYPE&)` (`Utils.hpp:483-486`): the
+/// container overload, which resolves `count` from `container.size()` rather than taking it as
+/// a second argument -- unlike [`prev_value_modulo`], this returns the wrapped *index*, not the
+/// element at it.
+pub fn prev_idx_modulo_of<T>(idx: usize, container: &[T]) -> usize {
+    prev_idx_modulo(idx, container.len())
+}
+
+/// `next_idx_modulo<CONTAINER_TYPE>(idx, const CONTAINER_TYPE&)` (`Utils.hpp:489-492`): same
+/// relationship to [`next_idx_modulo`] that [`prev_idx_modulo_of`] has to [`prev_idx_modulo`].
+pub fn next_idx_modulo_of<T>(idx: usize, container: &[T]) -> usize {
+    next_idx_modulo(idx, container.len())
 }
 
 /// `prev_value_modulo<CONTAINER_TYPE>(idx, const CONTAINER_TYPE&)` (`Utils.hpp:495-499`).
@@ -264,7 +328,89 @@ pub fn reserve_more_power_of_2<T>(vector: &mut Vec<T>, n: usize) {
 // `convert_vector<From, To>()` (`Utils.hpp:160-181`) is not ported: see this module's scope
 // note above (reason 3). No in-scope caller has instantiated it with a concrete `From`/`To`
 // pair yet.
-// TODO(port): Utils.hpp:160-181
+// TODO(port): src/libslic3r/Utils.hpp:160-181
+
+// ---------------------------------------------------------------------------------------------
+// CLI_* error-code constants (Utils.hpp:42-94)
+// ---------------------------------------------------------------------------------------------
+
+// Each `#define CLI_* <int>` (`Utils.hpp:42-94`) as a `const i32`, per the idiom map's rule for
+// a `#define` numeric constant ("a `const` item, carrying a `// PORT SRC:` marker"). Exit codes
+// returned by the CLI entry point this task does not reach; carried here as plain data with no
+// behaviour of its own.
+pub const CLI_SUCCESS: i32 = 0; // PORT SRC: src/libslic3r/Utils.hpp:42
+pub const CLI_ENVIRONMENT_ERROR: i32 = -1; // PORT SRC: src/libslic3r/Utils.hpp:43
+pub const CLI_INVALID_PARAMS: i32 = -2; // PORT SRC: src/libslic3r/Utils.hpp:44
+pub const CLI_FILE_NOTFOUND: i32 = -3; // PORT SRC: src/libslic3r/Utils.hpp:45
+pub const CLI_FILELIST_INVALID_ORDER: i32 = -4; // PORT SRC: src/libslic3r/Utils.hpp:46
+pub const CLI_CONFIG_FILE_ERROR: i32 = -5; // PORT SRC: src/libslic3r/Utils.hpp:47
+pub const CLI_DATA_FILE_ERROR: i32 = -6; // PORT SRC: src/libslic3r/Utils.hpp:48
+pub const CLI_INVALID_PRINTER_TECH: i32 = -7; // PORT SRC: src/libslic3r/Utils.hpp:49
+pub const CLI_UNSUPPORTED_OPERATION: i32 = -8; // PORT SRC: src/libslic3r/Utils.hpp:50
+pub const CLI_COPY_OBJECTS_ERROR: i32 = -9; // PORT SRC: src/libslic3r/Utils.hpp:52
+pub const CLI_SCALE_TO_FIT_ERROR: i32 = -10; // PORT SRC: src/libslic3r/Utils.hpp:53
+pub const CLI_EXPORT_STL_ERROR: i32 = -11; // PORT SRC: src/libslic3r/Utils.hpp:54
+pub const CLI_EXPORT_OBJ_ERROR: i32 = -12; // PORT SRC: src/libslic3r/Utils.hpp:55
+pub const CLI_EXPORT_3MF_ERROR: i32 = -13; // PORT SRC: src/libslic3r/Utils.hpp:56
+pub const CLI_OUT_OF_MEMORY: i32 = -14; // PORT SRC: src/libslic3r/Utils.hpp:57
+pub const CLI_3MF_NOT_SUPPORT_MACHINE_CHANGE: i32 = -15; // PORT SRC: src/libslic3r/Utils.hpp:58
+pub const CLI_3MF_NEW_MACHINE_NOT_SUPPORTED: i32 = -16; // PORT SRC: src/libslic3r/Utils.hpp:59
+pub const CLI_PROCESS_NOT_COMPATIBLE: i32 = -17; // PORT SRC: src/libslic3r/Utils.hpp:60
+pub const CLI_INVALID_VALUES_IN_3MF: i32 = -18; // PORT SRC: src/libslic3r/Utils.hpp:61
+pub const CLI_POSTPROCESS_NOT_SUPPORTED: i32 = -19; // PORT SRC: src/libslic3r/Utils.hpp:62
+pub const CLI_PRINTABLE_SIZE_REDUCED: i32 = -20; // PORT SRC: src/libslic3r/Utils.hpp:63
+pub const CLI_OBJECT_ARRANGE_FAILED: i32 = -21; // PORT SRC: src/libslic3r/Utils.hpp:64
+pub const CLI_OBJECT_ORIENT_FAILED: i32 = -22; // PORT SRC: src/libslic3r/Utils.hpp:65
+pub const CLI_MODIFIED_PARAMS_TO_PRINTER: i32 = -23; // PORT SRC: src/libslic3r/Utils.hpp:66
+pub const CLI_FILE_VERSION_NOT_SUPPORTED: i32 = -24; // PORT SRC: src/libslic3r/Utils.hpp:67
+pub const CLI_EXPORT_STATISTICS_ERROR: i32 = -25; // PORT SRC: src/libslic3r/Utils.hpp:68
+pub const CLI_NO_SUITABLE_OBJECTS: i32 = -50; // PORT SRC: src/libslic3r/Utils.hpp:71
+pub const CLI_VALIDATE_ERROR: i32 = -51; // PORT SRC: src/libslic3r/Utils.hpp:72
+pub const CLI_OBJECTS_PARTLY_INSIDE: i32 = -52; // PORT SRC: src/libslic3r/Utils.hpp:73
+pub const CLI_EXPORT_CACHE_DIRECTORY_CREATE_FAILED: i32 = -53; // PORT SRC: src/libslic3r/Utils.hpp:74
+pub const CLI_EXPORT_CACHE_WRITE_FAILED: i32 = -54; // PORT SRC: src/libslic3r/Utils.hpp:75
+pub const CLI_IMPORT_CACHE_NOT_FOUND: i32 = -55; // PORT SRC: src/libslic3r/Utils.hpp:76
+pub const CLI_IMPORT_CACHE_DATA_CAN_NOT_USE: i32 = -56; // PORT SRC: src/libslic3r/Utils.hpp:77
+pub const CLI_IMPORT_CACHE_LOAD_FAILED: i32 = -57; // PORT SRC: src/libslic3r/Utils.hpp:78
+pub const CLI_SLICING_TIME_EXCEEDS_LIMIT: i32 = -58; // PORT SRC: src/libslic3r/Utils.hpp:79
+pub const CLI_TRIANGLE_COUNT_EXCEEDS_LIMIT: i32 = -59; // PORT SRC: src/libslic3r/Utils.hpp:80
+pub const CLI_NO_SUITABLE_OBJECTS_AFTER_SKIP: i32 = -60; // PORT SRC: src/libslic3r/Utils.hpp:81
+pub const CLI_FILAMENT_NOT_MATCH_BED_TYPE: i32 = -61; // PORT SRC: src/libslic3r/Utils.hpp:82
+pub const CLI_FILAMENTS_DIFFERENT_TEMP: i32 = -62; // PORT SRC: src/libslic3r/Utils.hpp:83
+pub const CLI_OBJECT_COLLISION_IN_SEQ_PRINT: i32 = -63; // PORT SRC: src/libslic3r/Utils.hpp:84
+pub const CLI_OBJECT_COLLISION_IN_LAYER_PRINT: i32 = -64; // PORT SRC: src/libslic3r/Utils.hpp:85
+pub const CLI_SPIRAL_MODE_INVALID_PARAMS: i32 = -65; // PORT SRC: src/libslic3r/Utils.hpp:86
+pub const CLI_FILAMENT_CAN_NOT_MAP: i32 = -66; // PORT SRC: src/libslic3r/Utils.hpp:87
+pub const CLI_ONLY_ONE_TPU_SUPPORTED: i32 = -67; // PORT SRC: src/libslic3r/Utils.hpp:88
+pub const CLI_FILAMENTS_NOT_SUPPORTED_BY_EXTRUDER: i32 = -68; // PORT SRC: src/libslic3r/Utils.hpp:89
+pub const CLI_MIXED_FILAMENT_INVALID: i32 = -69; // PORT SRC: src/libslic3r/Utils.hpp:90
+pub const CLI_SLICING_ERROR: i32 = -100; // PORT SRC: src/libslic3r/Utils.hpp:92
+pub const CLI_GCODE_PATH_CONFLICTS: i32 = -101; // PORT SRC: src/libslic3r/Utils.hpp:93
+pub const CLI_GCODE_PATH_IN_UNPRINTABLE_AREA: i32 = -102; // PORT SRC: src/libslic3r/Utils.hpp:94
+
+// ---------------------------------------------------------------------------------------------
+// local_encoded_string (Utils.hpp:239) / CopyFileResult (Utils.hpp:274-281)
+// ---------------------------------------------------------------------------------------------
+
+/// `Slic3r::local_encoded_string` (`Utils.hpp:239`): `typedef std::string local_encoded_string;`
+/// -- a plain alias, kept distinct from `String` only to flag a value as locally-encoded text
+/// (the comment at its declaration: "only needed for Perl bindings to relay that the string is
+/// raw, not UTF-8 encoded"). [`encode_path`]'s return type.
+pub type LocalEncodedString = String;
+
+/// `Slic3r::CopyFileResult` (`Utils.hpp:274-281`): the result of the file-copy family. The
+/// functions that return it (`copy_file`, `copy_file_inner`, `check_copy`) are themselves
+/// deferred (see this module's scope note, reason 4); the enum is carried here as plain data so
+/// the fan-out that eventually ports them does not also have to invent it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyFileResult {
+    Success = 0,
+    FailCopyFile,
+    FailFilesDifferent,
+    FailRenaming,
+    FailCheckOriginNotOpened,
+    FailCheckTargetNotOpened,
+}
 
 // ---------------------------------------------------------------------------------------------
 // convert_to_full_version (Utils.hpp:136-153)
@@ -342,31 +488,65 @@ pub fn is_supported_open_protocol(url: &str) -> bool {
     is_orca_open(url) || is_prusaslicer_open(url) || is_bambustudio_open(url) || is_cura_open(url)
 }
 
-/// `is_printables_link(const std::string&)` (`utils.cpp:2374-2378`).
-///
-/// PORT NOTE: the vendored regex is `(http|https)://printables.com` matched with
-/// `std::regex_match` (whole-string match), but the `.` before `com` is an *unescaped* regex
-/// metacharacter -- it matches any single character, not only a literal dot. This port matches
-/// the literal domain (`"http://printables.com"`/`"https://printables.com"`, case-insensitive)
-/// rather than reproducing that almost-certainly-unintended wildcard; this is a deliberate,
-/// documented divergence, named in this task's pull request body, not a silent "fix".
+/// Reproduces `std::regex_match(url, std::regex("(http|https)://" + pattern, icase))` where
+/// `pattern` is a sequence of literal `labels` joined by a bare `.` -- an *unescaped* regex
+/// metacharacter in every one of the three vendored patterns (`utils.cpp:2376`, `:2382`,
+/// `:2388`), so it matches any single byte, not only a literal dot (measured against the real
+/// built oracle: `is_printables_link("https://printablesXcom")` and `("http://printables-com")`
+/// both return `true`). `std::regex_match` requires the whole target string to match, which
+/// this reproduces by requiring every byte of `url` after the scheme to be consumed.
+fn matches_site_link_pattern(url: &str, labels: &[&str]) -> bool {
+    for scheme in ["http://", "https://"] {
+        if url.len() < scheme.len() {
+            continue;
+        }
+        if !url.as_bytes()[..scheme.len()].eq_ignore_ascii_case(scheme.as_bytes()) {
+            continue;
+        }
+        let mut rest = &url.as_bytes()[scheme.len()..];
+        let mut matched = true;
+        for (i, label) in labels.iter().enumerate() {
+            if i > 0 {
+                // The unescaped `.` between two labels: any single byte, consumed unconditionally.
+                if rest.is_empty() {
+                    matched = false;
+                    break;
+                }
+                rest = &rest[1..];
+            }
+            if rest.len() < label.len()
+                || !rest[..label.len()].eq_ignore_ascii_case(label.as_bytes())
+            {
+                matched = false;
+                break;
+            }
+            rest = &rest[label.len()..];
+        }
+        if matched && rest.is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+/// `is_printables_link(const std::string&)` (`utils.cpp:2374-2378`): `(http|https)://printables.com`,
+/// whole-string, case-insensitive, with the `.` before `com` matching any single byte (see
+/// [`matches_site_link_pattern`]).
 pub fn is_printables_link(url: &str) -> bool {
-    url.eq_ignore_ascii_case("http://printables.com")
-        || url.eq_ignore_ascii_case("https://printables.com")
+    matches_site_link_pattern(url, &["printables", "com"])
 }
 
-/// `is_makerworld_link(const std::string&)` (`utils.cpp:2380-2384`). Same PORT NOTE as
-/// [`is_printables_link`] about the unescaped `.` in the vendored regex.
+/// `is_makerworld_link(const std::string&)` (`utils.cpp:2380-2384`): same shape as
+/// [`is_printables_link`], for `(http|https)://makerworld.com`.
 pub fn is_makerworld_link(url: &str) -> bool {
-    url.eq_ignore_ascii_case("http://makerworld.com")
-        || url.eq_ignore_ascii_case("https://makerworld.com")
+    matches_site_link_pattern(url, &["makerworld", "com"])
 }
 
-/// `is_thingiverse_link(const std::string&)` (`utils.cpp:2386-2390`). Same PORT NOTE as
-/// [`is_printables_link`] about the unescaped `.`s in the vendored regex.
+/// `is_thingiverse_link(const std::string&)` (`utils.cpp:2386-2390`): same shape as
+/// [`is_printables_link`], for `(http|https)://www.thingiverse.com` -- two unescaped `.`s, one
+/// between `www` and `thingiverse` and one between `thingiverse` and `com`.
 pub fn is_thingiverse_link(url: &str) -> bool {
-    url.eq_ignore_ascii_case("http://www.thingiverse.com")
-        || url.eq_ignore_ascii_case("https://www.thingiverse.com")
+    matches_site_link_pattern(url, &["www", "thingiverse", "com"])
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -409,9 +589,18 @@ pub fn sanitize_file_basename(name: &str) -> String {
 // ---------------------------------------------------------------------------------------------
 
 /// `filter_characters(const std::string&, const std::string&)` (`Utils.hpp:783-794`): `str`
-/// with every character that appears in `filter_chars` removed.
+/// with every character that appears in `filter_chars` removed. The vendored `remove_if`
+/// (`:789`) tests one `char` (one byte) of the `std::string` at a time, so this filters bytes,
+/// not Rust `char`s -- the two differ whenever either argument holds a non-ASCII character
+/// (a multi-byte `char`'s bytes are tested, and can be removed, individually). The byte-wise
+/// result is re-validated as UTF-8 and lossily repaired if filtering split a multi-byte
+/// sequence, since `String` (unlike `std::string`) cannot hold arbitrary bytes; no caller in
+/// scope passes a non-ASCII `filter_chars`, so this case is undocumented behaviour rather than
+/// a divergence from a real call site.
 pub fn filter_characters(s: &str, filter_chars: &str) -> String {
-    s.chars().filter(|c| !filter_chars.contains(*c)).collect()
+    let filter_bytes = filter_chars.as_bytes();
+    let bytes: Vec<u8> = s.bytes().filter(|b| !filter_bytes.contains(b)).collect();
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -625,13 +814,13 @@ pub fn get_utf8_sequence_length_at(text: &str, pos: usize) -> usize {
 /// `Slic3r::encode_path(const char*)` (`utils.cpp:1455-1470`): on every platform this port
 /// targets, the `#else` branch (`:1468`) is the live one -- an identity copy. The Windows branch
 /// (code-page conversion via `WideCharToMultiByte`) is not ported.
-/// TODO(port): utils.cpp:1457-1466 (Windows local-code-page conversion)
+/// TODO(port): src/libslic3r/utils.cpp:1457-1466 (Windows local-code-page conversion)
 pub fn encode_path(src: &str) -> String {
     src.to_string()
 }
 
 /// `Slic3r::decode_path(const char*)` (`utils.cpp:1474-1489`): same note as [`encode_path`].
-/// TODO(port): utils.cpp:1476-1485 (Windows local-code-page conversion)
+/// TODO(port): src/libslic3r/utils.cpp:1476-1485 (Windows local-code-page conversion)
 pub fn decode_path(src: &str) -> String {
     src.to_string()
 }
@@ -702,14 +891,17 @@ pub fn download_marker_path(dest_folder: &Path, filename: &str) -> PathBuf {
 }
 
 /// `Slic3r::find_unused_filename(...)` (`utils.cpp:1567-1585`): the non-`const` `std::string&
-/// result` out-parameter plus `bool` success return is ported as a return value
-/// (`Some(name)`/`None`) instead, per the idiom map's rule for a non-`const` reference
-/// out-parameter.
+/// result` out-parameter plus `bool` success return is ported as a tuple return,
+/// `(bool, String)`, per the idiom map's rule for a non-`const` reference out-parameter ("a
+/// return value, or a tuple of return values") -- a single `Option<String>` would drop the
+/// declaration's own documented failure contract (`Utils.hpp:351-353`): "Returns true and the
+/// name in result, **or false and the last name tried**." The second element of the tuple is
+/// that last name on both outcomes, matching `result`'s own vendored lifetime.
 pub fn find_unused_filename(
     dest_folder: &Path,
     filename: &str,
     ignored_marker: &Path,
-) -> Option<String> {
+) -> (bool, String) {
     let sanitized = sanitize_filename(filename);
     let extension = Path::new(&sanitized)
         .extension()
@@ -725,12 +917,12 @@ pub fn find_unused_filename(
     while is_used(&result) {
         // PORT SRC: src/libslic3r/utils.cpp:1580
         if version > 999 {
-            return None;
+            return (false, result);
         }
         result = format!("{stem}({version}){extension}");
         version += 1;
     }
-    Some(result)
+    (true, result)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -780,22 +972,44 @@ pub fn resolve_cli_input_path(path: &str) -> String {
         .into_owned()
 }
 
-/// A small, allocation-light stand-in for `boost::filesystem::path::lexically_normal()`: purely
-/// lexical, no filesystem access, collapsing `.` components and resolving `..` against a
-/// preceding non-`..` component -- exactly what `lexically_normal` documents, and all
-/// [`resolve_cli_input_path`] needs after joining against the (already-resolved) current
-/// directory.
+/// A small, allocation-light stand-in for `boost::filesystem::path::lexically_normal()` (the
+/// vendored call's own algorithm, not the unrelated C++17 `std::filesystem` one of the same
+/// name, which this does **not** reproduce -- measured directly against boost 1.84, the
+/// version this port's oracle links, with a small harness under `oracle/.cache/tmp`, not
+/// assumed from either library's documentation, or from the C++17 algorithm's own published
+/// spec): purely lexical, no filesystem access, dropping a `.` component and resolving `..`
+/// against a preceding `Normal` component -- except for two things boost 1.84 does that a
+/// naive "drop every `.`, pop on every `..`" port misses, both measured rather than assumed:
+///
+/// - A path whose **last** lexical component is `.` keeps exactly one trailing `.` in the
+///   result (`lexically_normal("/private/tmp/a/b/.")` is `"/private/tmp/a/b/."`,
+///   `("/private/tmp/./")` is `"/private/tmp/."`, and even several trailing dots collapse to
+///   one: `("a/./.")` is `"a/."`), while an interior or leading `.` is simply dropped
+///   (`("a/./b")` is `"a/b"`, `("././a")` is `"a"`). `std::path::Components` normalises every
+///   `.` away except a leading one as it parses (confirmed directly: it never yields a `CurDir`
+///   for a trailing or interior `.` at all), so this reads the *original* path's own text to
+///   decide whether to append one, rather than trying to special-case a component the parser
+///   has already discarded.
+/// - A `..` is only resolved against a preceding **`Normal`** component, not merely "anything
+///   but root": `lexically_normal("/../../b")` is `"/../../b"` and `("/..")` is `"/.."`, keeping
+///   every `..` literally once the output no longer ends in a removable `Normal` component
+///   (root, or an earlier kept `..`, both count as unremovable), while
+///   `("/private/tmp/../../x")` is `"/x"`, resolving both `..`s against the two `Normal`
+///   components that precede them. Checking only "is the previous component root" gets the
+///   first `..` right but not a second one immediately behind it.
 fn lexically_normal(path: &Path) -> PathBuf {
     use std::path::Component;
+    let ends_in_dot_component = {
+        let s = path.as_os_str().to_string_lossy();
+        let trimmed = s.trim_end_matches('/');
+        trimmed == "." || trimmed.ends_with("/.")
+    };
     let mut out = PathBuf::new();
     for component in path.components() {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                if !matches!(
-                    out.components().next_back(),
-                    Some(Component::RootDir) | None
-                ) {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
                     out.pop();
                 } else {
                     out.push("..");
@@ -803,6 +1017,9 @@ fn lexically_normal(path: &Path) -> PathBuf {
             }
             other => out.push(other.as_os_str()),
         }
+    }
+    if ends_in_dot_component {
+        out.push(".");
     }
     out
 }
@@ -868,16 +1085,17 @@ pub fn format_memsize(bytes: usize, decimals: usize) -> String {
 pub fn format_diameter_to_str(diameter: f64, precision: usize) -> String {
     // PORT SRC: src/libslic3r/utils.cpp:1814
     const CANDIDATES: &[f64] = &[0.2, 0.4, 0.6, 0.8];
-    let best = CANDIDATES
-        .iter()
-        .copied()
-        .min_by(|a, b| {
-            (a - diameter)
-                .abs()
-                .partial_cmp(&(b - diameter).abs())
-                .unwrap()
-        })
-        .unwrap();
+    // `std::min_element`'s own comparator, `std::abs(a - diameter) < std::abs(b - diameter)`
+    // (`utils.cpp:1815`), is simply `false` whenever either side is NaN -- so `min_element`
+    // (and this fold, which replicates its "replace only on a strictly-smaller candidate"
+    // rule) returns the first candidate rather than panicking the way `Iterator::min_by`'s
+    // `partial_cmp(..).unwrap()` would.
+    let mut best = CANDIDATES[0];
+    for &candidate in &CANDIDATES[1..] {
+        if (candidate - diameter).abs() < (best - diameter).abs() {
+            best = candidate;
+        }
+    }
     format!("{best:.precision$}")
 }
 
@@ -1072,19 +1290,41 @@ pub fn is_img_file(path: &str) -> bool {
     lower.ends_with(".png") || lower.ends_with(".svg")
 }
 
+/// `boost::filesystem::path::extension()`, dot included (e.g. `".stl"`), compared
+/// case-insensitively against `extension_type` -- the exact comparison
+/// `strcasecmp(dir_entry.path().extension().string().c_str(), type)` makes, where boost's
+/// `path::extension()` carries the leading dot that Rust's dot-free `Path::extension()` does
+/// not. Distinct from [`has_extension_ci`], which compares a dot-free extension and is correct
+/// for its own two callers ([`is_ini_file`]/[`is_idx_file`], which pass a dot-free
+/// `extension_type` on both sides of the comparison).
+fn has_extension_dot_inclusive_ci(path: &Path, extension_type: &str) -> bool {
+    match path.extension() {
+        Some(e) => format!(".{}", e.to_string_lossy()).eq_ignore_ascii_case(extension_type),
+        None => false,
+    }
+}
+
 /// `Slic3r::is_gallery_file(const boost::filesystem::directory_entry&, char const*)`
-/// (`utils.cpp:1358-1361`).
+/// (`utils.cpp:1358-1361`): `strcasecmp(dir_entry.path().extension().string().c_str(), type)`,
+/// so `extension_type` is matched dot-inclusive (e.g. `".stl"`), the same convention its
+/// sibling [`is_gallery_file_suffix`] uses -- the vendored pair agree with each other at
+/// dot-inclusive (measured against the real built oracle: `is_gallery_file(dir_entry, ".stl")`
+/// is `true` and `(dir_entry, "stl")` is `false`), so this is not an open convention question
+/// left to whichever caller the fan-out first gives these functions.
 pub fn is_gallery_file_at(path: &Path, extension_type: &str) -> bool {
-    is_plain_file(path) && has_extension_ci(path, extension_type)
+    is_plain_file(path) && has_extension_dot_inclusive_ci(path, extension_type)
 }
 
 /// `Slic3r::is_gallery_file(const std::string&, char const*)` (`utils.cpp:1363-1366`): a plain
-/// suffix check, unlike [`is_gallery_file_at`] -- `extension_type` here is matched as a raw
-/// case-insensitive suffix (e.g. `".stl"`, dot included), the same as the vendored
-/// `boost::iends_with(path, type)`.
+/// suffix check, unlike [`is_gallery_file_at`]'s extension compare -- `extension_type` here is
+/// matched as a raw case-insensitive suffix (e.g. `".stl"`, dot included), the same as the
+/// vendored `boost::iends_with(path, type)`. Compared byte-wise (not by slicing the `&str`,
+/// which would panic were `path.len() - extension_type.len()` not a UTF-8 char boundary, where
+/// `boost::iends_with` -- a byte-wise comparison -- would simply return `false`).
 pub fn is_gallery_file_suffix(path: &str, extension_type: &str) -> bool {
     path.len() >= extension_type.len()
-        && path[path.len() - extension_type.len()..].eq_ignore_ascii_case(extension_type)
+        && path.as_bytes()[path.len() - extension_type.len()..]
+            .eq_ignore_ascii_case(extension_type.as_bytes())
 }
 
 /// `Slic3r::is_safe_to_open_file_name(const std::string&)` (`utils.cpp:1337-1351`): true iff
@@ -1116,14 +1356,17 @@ pub fn is_safe_to_open_file_name(file_name: &str) -> bool {
 /// names `dir` holds, one per `.json` or `.opc` file, by file stem, sorted (`std::set` is
 /// key-ordered; `BTreeSet<String>` orders the same way, lexicographically by byte/codepoint
 /// value, so no `// FIDELITY(port):` divergence marker applies here).
-pub fn vendor_names_in(dir: &Path) -> std::collections::BTreeSet<String> {
+///
+/// `boost::filesystem::directory_iterator(dir)` (`:2080`) is the throwing constructor -- no
+/// `error_code` overload, no surrounding `try` -- so a missing or unreadable `dir` propagates a
+/// `filesystem_error` out of the vendored function. Propagating `std::fs::read_dir`'s own
+/// `io::Error` the same way (rather than reading it as "no vendors", an empty set) keeps that
+/// error set from narrowing, per `docs/PORTING.md`'s "Error sets" rule.
+pub fn vendor_names_in(dir: &Path) -> std::io::Result<std::collections::BTreeSet<String>> {
     let mut names = std::collections::BTreeSet::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return names;
-    };
-    for entry in entries.flatten() {
+    for entry in std::fs::read_dir(dir)?.flatten() {
         let path = entry.path();
-        let is_json = path.to_str().map(|p| is_json_file(p)).unwrap_or(false);
+        let is_json = path.to_str().map(is_json_file).unwrap_or(false);
         let is_opc = path.extension().map(|e| e == "opc").unwrap_or(false);
         if is_json || is_opc {
             if let Some(stem) = path.file_stem() {
@@ -1131,19 +1374,61 @@ pub fn vendor_names_in(dir: &Path) -> std::collections::BTreeSet<String> {
             }
         }
     }
-    names
+    Ok(names)
 }
 
 // ---------------------------------------------------------------------------------------------
 // check_layer_id_pattern (utils.cpp:2247-2331)
 // ---------------------------------------------------------------------------------------------
 
+/// Reproduces `std::stoi`'s own parse, which every `std::stoi` call in
+/// `check_layer_id_pattern` relies on (`utils.cpp:2281`, `:2285`, `:2289`, `:2312`, `:2314`,
+/// `:2317`, each wrapped in the `try`/`catch (...)` at `:2278`/`:2295` or `:2310`/`:2319` that
+/// turns a throw into "ignore this token"/"return false"): parse the longest leading
+/// `[+-]?[0-9]+` run and ignore any trailing characters (measured against the real built
+/// oracle: `stoi("5x")` is `5`, `stoi("5abc")` is `5`, `stoi("0x10")` is `0`), returning `None`
+/// -- the `catch`'s branch -- when no digit is present or the value does not fit in `i32`
+/// (`std::stoi`'s own `out_of_range`, thrown for the same reason past `INT_MAX`/`INT_MIN`).
+/// `str::parse::<i64>()`, which this replaces, rejects any trailing character and accepts
+/// values far past `i32`, so it disagreed with the oracle in both directions.
+fn stoi_prefix(s: &str) -> Option<i32> {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    let negative = match bytes.first() {
+        Some(b'+') => {
+            i += 1;
+            false
+        }
+        Some(b'-') => {
+            i += 1;
+            true
+        }
+        _ => false,
+    };
+    let digits_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i == digits_start {
+        return None;
+    }
+    let magnitude: i64 = s[digits_start..i].parse().ok()?;
+    let value = if negative { -magnitude } else { magnitude };
+    if value < i32::MIN as i64 || value > i32::MAX as i64 {
+        None
+    } else {
+        Some(value as i32)
+    }
+}
+
 /// `Slic3r::check_layer_id_pattern(const std::string&, int)` (`utils.cpp:2250-2331`): whether
 /// 0-based `layer_id` matches `pattern`, which is either an explicit, comma-separated list of
 /// 1-based layer numbers (optionally with a `#count` repeat suffix per entry, e.g. `"5,9#2,18"`),
 /// or a single `interval[#count]` form (e.g. `"5"` meaning every 5th layer, or `"5#2"` meaning
-/// layers 5 and 6, 10 and 11, ...).
-pub fn check_layer_id_pattern(pattern: &str, layer_id: i64) -> bool {
+/// layers 5 and 6, 10 and 11, ...). `layer_id` is `i32`, matching the vendored `int` (`:2250`)
+/// -- not `i64`, which would also widen the error set `std::stoi`'s own `out_of_range` cuts off
+/// at `i32`'s range for every token below.
+pub fn check_layer_id_pattern(pattern: &str, layer_id: i32) -> bool {
     if pattern.is_empty() || layer_id < 0 {
         return false;
     }
@@ -1170,14 +1455,13 @@ pub fn check_layer_id_pattern(pattern: &str, layer_id: i64) -> bool {
                 continue;
             }
             if let Some(hash_pos) = token.find('#') {
-                let (Ok(base_layer), count_str) =
-                    (token[..hash_pos].parse::<i64>(), &token[hash_pos + 1..])
-                else {
+                let Some(base_layer) = stoi_prefix(&token[..hash_pos]) else {
                     continue;
                 };
+                let count_str = &token[hash_pos + 1..];
                 let local_count = if count_str.is_empty() {
                     1
-                } else if let Ok(c) = count_str.parse::<i64>() {
+                } else if let Some(c) = stoi_prefix(count_str) {
                     c
                 } else {
                     continue;
@@ -1189,7 +1473,7 @@ pub fn check_layer_id_pattern(pattern: &str, layer_id: i64) -> bool {
                 {
                     return true;
                 }
-            } else if let Ok(value) = token.parse::<i64>() {
+            } else if let Some(value) = stoi_prefix(token) {
                 if value == layer_id {
                     return true;
                 }
@@ -1199,21 +1483,21 @@ pub fn check_layer_id_pattern(pattern: &str, layer_id: i64) -> bool {
     }
 
     let (interval, count) = match p.find('#') {
-        None => match p.parse::<i64>() {
-            Ok(v) => (v, 1),
-            Err(_) => return false,
+        None => match stoi_prefix(&p) {
+            Some(v) => (v, 1),
+            None => return false,
         },
         Some(hash_pos) => {
-            let Ok(interval) = p[..hash_pos].parse::<i64>() else {
+            let Some(interval) = stoi_prefix(&p[..hash_pos]) else {
                 return false;
             };
             let count_str = &p[hash_pos + 1..];
             let count = if count_str.is_empty() {
                 1
             } else {
-                match count_str.parse::<i64>() {
-                    Ok(c) => c,
-                    Err(_) => return false,
+                match stoi_prefix(count_str) {
+                    Some(c) => c,
+                    None => return false,
                 }
             };
             (interval, count)
@@ -1235,10 +1519,91 @@ pub fn check_layer_id_pattern(pattern: &str, layer_id: i64) -> bool {
 /// `Slic3r::extended_path(const boost::filesystem::path&)` (`utils.cpp:2333-2372`): on every
 /// platform this port targets, the `#else` branch (`:2370`) is the live one -- an identity copy.
 /// The Windows branch (the `"\\?\"`/`"\\?\UNC\"` extended-length-path prefix) is not ported.
-/// TODO(port): utils.cpp:2334-2368 (Windows extended-length-path prefixing)
+/// TODO(port): src/libslic3r/utils.cpp:2334-2368 (Windows extended-length-path prefixing)
 pub fn extended_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
+
+// ---------------------------------------------------------------------------------------------
+// Deferred declarations -- every remaining unported item of this module's scope note, one
+// marker per declaration (grep this file for `TODO(port)` or `PORT NOTE` to find them all),
+// naming the vendored line where it lives. None is a live `todo!()`/`unimplemented!()`: each
+// is simply absent from the functions above.
+// ---------------------------------------------------------------------------------------------
+
+// Scope note reason 1 (no dependency a port crate may add): the boost::log family.
+// TODO(port): src/libslic3r/Utils.hpp:101 (set_logging_level)
+// TODO(port): src/libslic3r/Utils.hpp:102 (set_logging_file)
+// TODO(port): src/libslic3r/Utils.hpp:103 (level_string_to_boost)
+// TODO(port): src/libslic3r/Utils.hpp:104 (get_string_logging_level)
+// TODO(port): src/libslic3r/Utils.hpp:105 (get_logging_level)
+// TODO(port): src/libslic3r/Utils.hpp:106 (trace)
+// TODO(port): src/libslic3r/Utils.hpp:232 (set_log_path_and_level)
+// TODO(port): src/libslic3r/Utils.hpp:233 (flush_logs)
+// TODO(port): src/libslic3r/Utils.hpp:234 (shutdown_console_logging)
+// TODO(port): src/libslic3r/Utils.hpp:235 (get_log_file_name)
+// Scope note reason 1: OpenSSL MD5 and boost::locale NFC normalisation.
+// TODO(port): src/libslic3r/Utils.hpp:781 (bbl_calc_md5)
+// TODO(port): src/libslic3r/Utils.hpp:251 (normalize_utf8_nfc)
+
+// Scope note reason 2 (reaches the out-of-scope preset layer, R11): the vendor-bundle install
+// family. `// PORT NOTE:` rather than `// TODO(port):`, per the don't-translate list's rule for
+// out-of-scope code reached from an in-scope file -- these declarations' own bodies are the
+// boundary, since none has an in-scope caller to mark the call site of instead.
+// PORT NOTE: src/libslic3r/Utils.hpp:810 (is_vendor_installed; reaches Preset.hpp)
+// PORT NOTE: src/libslic3r/Utils.hpp:815 (installed_vendor_version; reaches Preset.hpp)
+// PORT NOTE: src/libslic3r/Utils.hpp:819 (remove_installed_vendor; reaches PresetCacheFormat.hpp)
+// PORT NOTE: src/libslic3r/Utils.hpp:828 (resource_vendor_version; reaches PresetCacheFormat.hpp)
+// PORT NOTE: src/libslic3r/utils.cpp:2096 (installable_cache_version; reaches PresetCacheFormat.hpp)
+// PORT NOTE: src/libslic3r/utils.cpp:2041 (cache_covers; reaches PresetCacheFormat.hpp)
+// PORT NOTE: src/libslic3r/Utils.hpp:837 (install_vendor_bundles_from_resources; reaches Preset.hpp)
+
+// Scope note reason 3 (no in-scope caller has fixed an instantiation).
+// TODO(port): src/libslic3r/Utils.hpp:528 (IsTriviallyCopyable, GCC < 5 branch)
+// TODO(port): src/libslic3r/Utils.hpp:530 (IsTriviallyCopyable, the live branch)
+// TODO(port): src/libslic3r/Utils.hpp:857 (SLIC3R_STDVEC_MEMSIZE, WIN32 branch)
+// TODO(port): src/libslic3r/Utils.hpp:859 (SLIC3R_STDUNORDEREDSET_MEMSIZE, WIN32 branch)
+// TODO(port): src/libslic3r/Utils.hpp:861 (SLIC3R_STDVEC_MEMSIZE, non-WIN32 branch)
+// TODO(port): src/libslic3r/Utils.hpp:863 (SLIC3R_STDUNORDEREDSET_MEMSIZE, non-WIN32 branch)
+
+// Scope note reason 4 (this task's own time budget, with no excuse from a rule above -- see
+// the module doc comment and this task's pull request body for why the unit is not
+// substantively complete while these remain).
+// TODO(port): src/libslic3r/Utils.hpp:578 (short_time)
+// TODO(port): src/libslic3r/Utils.hpp:624 (get_time_dhms)
+// TODO(port): src/libslic3r/Utils.hpp:648 (get_bbl_time_dhms)
+// TODO(port): src/libslic3r/Utils.hpp:670 (get_timezone_utc_hm)
+// TODO(port): src/libslic3r/Utils.hpp:688 (get_time_dhm)
+// TODO(port): src/libslic3r/Utils.hpp:709 (get_time_hms)
+// TODO(port): src/libslic3r/Utils.hpp:722 (get_bbl_monitor_time_dhm)
+// TODO(port): src/libslic3r/Utils.hpp:744 (get_bbl_monitor_end_time_dhm)
+// TODO(port): src/libslic3r/Utils.hpp:759 (get_bbl_remain_time_dhms)
+// TODO(port): src/libslic3r/Utils.hpp:387 (get_process_name)
+// TODO(port): src/libslic3r/Utils.hpp:367 (string_printf)
+// TODO(port): src/libslic3r/Utils.hpp:371 (header_slic3r_generated)
+// TODO(port): src/libslic3r/Utils.hpp:375 (header_gcodeviewer_generated)
+// TODO(port): src/libslic3r/Utils.hpp:230 (debug_out_path)
+// TODO(port): src/libslic3r/Utils.hpp:115 (total_physical_memory)
+// TODO(port): src/libslic3r/Utils.hpp:112 (log_memory_info)
+// TODO(port): src/libslic3r/Utils.hpp:113 (disable_multi_threading)
+// TODO(port): src/libslic3r/utils.cpp:379 (xdg_config_dir)
+// TODO(port): src/libslic3r/utils.cpp:403 (is_running_in_flatpak)
+// TODO(port): src/libslic3r/utils.cpp:409 (wayland_socket_available)
+// TODO(port): src/libslic3r/utils.cpp:432 (default_data_dir)
+// TODO(port): src/libslic3r/Utils.hpp:225 (makedir)
+// TODO(port): src/libslic3r/Utils.hpp:842 (save_string_file)
+// TODO(port): src/libslic3r/Utils.hpp:843 (load_string_file)
+// TODO(port): src/libslic3r/Utils.hpp:283 (copy_file_inner)
+// TODO(port): src/libslic3r/Utils.hpp:288 (copy_file)
+// TODO(port): src/libslic3r/Utils.hpp:289 (copy_framework)
+// TODO(port): src/libslic3r/Utils.hpp:291 (check_copy)
+// TODO(port): src/libslic3r/Utils.hpp:257 (rename_file)
+// TODO(port): src/libslic3r/Utils.hpp:270 (write_file_atomically, the chunked overload)
+// TODO(port): src/libslic3r/Utils.hpp:271 (write_file_atomically, the single-string overload)
+// TODO(port): src/libslic3r/Utils.hpp:796 (copy_directory_recursively)
+// TODO(port): src/libslic3r/Utils.hpp:308 (is_path_within_root)
+// TODO(port): src/libslic3r/Utils.hpp:311 (is_symlink_target_within_root)
+// TODO(port): src/libslic3r/Utils.hpp:314 (is_absolute_path_within_root)
 
 #[cfg(test)]
 mod tests {
@@ -1278,11 +1643,21 @@ mod tests {
             std::process::id()
         ));
         let f = std::fs::File::create(&path).unwrap();
-        let mut fp = FilePtr::new(f);
+        let mut fp = FilePtr::new(Some(f));
         assert!(fp.get().is_some());
         fp.close();
         assert!(fp.get().is_none());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn file_ptr_accepts_a_null_file_like_the_vendored_constructor_does() {
+        // Every in-scope construction site builds a `FilePtr` straight from a possibly-failed
+        // `fopen`; this is that case.
+        let mut fp = FilePtr::new(None);
+        assert!(fp.get().is_none());
+        fp.close(); // no-op, matching the vendored null guard
+        assert!(fp.get().is_none());
     }
 
     #[test]
@@ -1300,11 +1675,31 @@ mod tests {
     }
 
     #[test]
+    fn round_divide_and_round_up_divide_work_across_every_in_scope_instantiation() {
+        // `f64` (`scale_()`'s own division, `Support/TreeSupport.cpp:3703`): true division, not
+        // integer truncation -- the bug a force-collapse to `usize` would have reintroduced.
+        assert_eq!(round_up_divide(10.0_f64, 4.0_f64), 3.25); // (10+4-1)/4
+        assert_eq!(round_divide(10.0_f64, 4.0_f64), 3.0); // (10+4/2)/4
+                                                          // `i32` (`coord_t`, `Support/TreeSupportCommon.hpp:297`).
+        assert_eq!(round_up_divide(10_i32, 3_i32), 4);
+        assert_eq!(round_divide(10_i32, 3_i32), 3);
+        // `usize` (`size_t`, `Support/TreeSupport3D.cpp:1942`).
+        assert_eq!(round_up_divide(10_usize, 3_usize), 4);
+    }
+
+    #[test]
     fn idx_modulo_wraps_both_directions() {
         assert_eq!(prev_idx_modulo(0, 5), 4);
         assert_eq!(prev_idx_modulo(3, 5), 2);
         assert_eq!(next_idx_modulo(4, 5), 0);
         assert_eq!(next_idx_modulo(1, 5), 2);
+    }
+
+    #[test]
+    fn idx_modulo_of_resolves_count_from_the_container() {
+        let v = [10, 20, 30, 40, 50];
+        assert_eq!(prev_idx_modulo_of(0, &v), 4);
+        assert_eq!(next_idx_modulo_of(4, &v), 0);
     }
 
     #[test]
@@ -1384,6 +1779,23 @@ mod tests {
     }
 
     #[test]
+    fn site_link_checks_reproduce_the_vendored_regexs_unescaped_dot() {
+        // Measured against the real built oracle (`oracle/.cache/tmp/clip-review-57b.cpp`):
+        // `is_printables_link("https://printablesXcom")` and `("http://printables-com")` are
+        // both `true`, because the vendored pattern's `.` before the TLD is an unescaped regex
+        // metacharacter -- any single byte, not only a literal dot.
+        assert!(is_printables_link("https://printablesXcom"));
+        assert!(is_printables_link("http://printables-com"));
+        assert!(is_makerworld_link("https://makerworldXcom"));
+        // `is_thingiverse_link` has two unescaped dots (`www.thingiverse.com`): any one byte
+        // stands in for each.
+        assert!(is_thingiverse_link("https://wwwXthingiverseYcom"));
+        // Still false when the byte count does not line up with the pattern's own shape.
+        assert!(!is_printables_link("https://printablescom")); // missing the wildcard byte
+        assert!(!is_printables_link("https://printablesXYcom")); // one byte too many
+    }
+
+    #[test]
     fn sanitize_filename_replaces_every_special_character() {
         assert_eq!(
             sanitize_filename("a/b\\c:d*e?f\"g<h>i|j"),
@@ -1405,6 +1817,22 @@ mod tests {
     fn filter_characters_drops_every_listed_character() {
         assert_eq!(filter_characters("a-b-c", "-"), "abc");
         assert_eq!(filter_characters("hello world", "lo"), "he wrd");
+    }
+
+    #[test]
+    fn filter_characters_is_byte_wise_like_the_vendored_remove_if() {
+        // The vendored `remove_if` tests one byte of the `std::string` at a time
+        // (`Utils.hpp:787-791`), not one Rust `char`. `'\u{20AC}'` ('€') and `'\u{2014}'` ('—')
+        // are both 3-byte UTF-8 sequences and happen to share a leading byte (0xE2); filtering
+        // by '—' removes only '€'s *first* byte, leaving its two continuation bytes orphaned --
+        // invalid UTF-8, which `filter_characters` repairs lossily rather than panicking.
+        assert_eq!("\u{20AC}".as_bytes()[0], "\u{2014}".as_bytes()[0]);
+        assert_eq!(
+            filter_characters("\u{20AC}", "\u{2014}"),
+            "\u{fffd}\u{fffd}"
+        );
+        // A filter set that fully covers a multi-byte character's bytes removes it cleanly.
+        assert_eq!(filter_characters("a\u{20AC}b", "\u{20AC}"), "ab");
     }
 
     #[test]
@@ -1504,11 +1932,13 @@ mod tests {
         std::fs::write(dir.join("model.stl"), b"x").unwrap();
 
         let ignored = PathBuf::new();
-        let result = find_unused_filename(&dir, "model.stl", &ignored).unwrap();
+        let (ok, result) = find_unused_filename(&dir, "model.stl", &ignored);
+        assert!(ok);
         assert_eq!(result, "model(1).stl");
 
         std::fs::write(dir.join("model(1).stl"), b"x").unwrap();
-        let result = find_unused_filename(&dir, "model.stl", &ignored).unwrap();
+        let (ok, result) = find_unused_filename(&dir, "model.stl", &ignored);
+        assert!(ok);
         assert_eq!(result, "model(2).stl");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1523,9 +1953,29 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let ignored = PathBuf::new();
         assert_eq!(
-            find_unused_filename(&dir, "fresh.stl", &ignored).unwrap(),
-            "fresh.stl"
+            find_unused_filename(&dir, "fresh.stl", &ignored),
+            (true, "fresh.stl".to_string())
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_unused_filename_returns_false_and_the_last_name_tried_past_999() {
+        // The documented failure contract (`Utils.hpp:351-353`): "Returns true and the name in
+        // result, or false and the last name tried" -- not just `false`.
+        let dir = std::env::temp_dir().join(format!(
+            "slic3r-utils-find-unused-exhausted-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("model.stl"), b"x").unwrap();
+        for v in 1..=999 {
+            std::fs::write(dir.join(format!("model({v}).stl")), b"x").unwrap();
+        }
+        let ignored = PathBuf::new();
+        let (ok, last_tried) = find_unused_filename(&dir, "model.stl", &ignored);
+        assert!(!ok);
+        assert_eq!(last_tried, "model(999).stl");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1582,6 +2032,14 @@ mod tests {
         assert_eq!(format_diameter_to_str(0.0, 1), "0.2");
         assert_eq!(format_diameter_to_str(0.41, 1), "0.4");
         assert_eq!(format_diameter_to_str(0.39, 2), "0.40");
+    }
+
+    #[test]
+    fn format_diameter_to_str_does_not_panic_on_nan() {
+        // `std::min_element`'s comparator is `false` for any NaN comparison, so it keeps the
+        // first candidate (`0.2`) rather than the vendored code throwing or this port's
+        // `partial_cmp(..).unwrap()` panicking.
+        assert_eq!(format_diameter_to_str(f64::NAN, 1), "0.2");
     }
 
     // The five tests below are deliberately merged into one `#[test]` function, run in
@@ -1672,6 +2130,32 @@ mod tests {
     }
 
     #[test]
+    fn is_gallery_file_suffix_does_not_panic_on_a_non_boundary_offset() {
+        // `path.len() - extension_type.len()` need not be a UTF-8 char boundary; the vendored
+        // `boost::iends_with` is a byte-wise compare and would simply return `false` here, not
+        // panic. ("é" is 2 UTF-8 bytes; slicing a `&str` at byte 1 would split it.)
+        assert!(!is_gallery_file_suffix("é", "l"));
+    }
+
+    #[test]
+    fn is_gallery_file_at_compares_a_dot_inclusive_extension() {
+        let dir =
+            std::env::temp_dir().join(format!("slic3r-utils-gallery-at-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shape = dir.join("shape.stl");
+        std::fs::write(&shape, b"x").unwrap();
+
+        // Measured against the real built oracle: `is_gallery_file(dir_entry, ".stl")` is
+        // `true` and `(dir_entry, "stl")` is `false` -- the vendored pair agree at
+        // dot-inclusive, so this is not an open caller convention.
+        assert!(is_gallery_file_at(&shape, ".stl"));
+        assert!(!is_gallery_file_at(&shape, "stl"));
+        assert!(!is_gallery_file_at(&shape, ".stp"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn is_safe_to_open_file_name_checks_extension_and_rejects_path_separators() {
         assert!(is_safe_to_open_file_name("photo.JPG"));
         assert!(is_safe_to_open_file_name("model.stl"));
@@ -1690,13 +2174,25 @@ mod tests {
         std::fs::write(dir.join("Prusa.opc"), b"x").unwrap();
         std::fs::write(dir.join("readme.txt"), b"x").unwrap();
 
-        let names = vendor_names_in(&dir);
+        let names = vendor_names_in(&dir).unwrap();
         assert_eq!(
             names,
             std::collections::BTreeSet::from(["Creality".to_string(), "Prusa".to_string()])
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vendor_names_in_propagates_a_missing_directory_as_an_error() {
+        // `boost::filesystem::directory_iterator(dir)` throws on a missing directory with no
+        // `error_code` overload catching it; this must not read that as "no vendors".
+        let missing = std::env::temp_dir().join(format!(
+            "slic3r-utils-vendor-names-missing-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&missing);
+        assert!(vendor_names_in(&missing).is_err());
     }
 
     #[test]
@@ -1733,8 +2229,57 @@ mod tests {
     }
 
     #[test]
+    fn stoi_prefix_matches_the_real_stois_leading_prefix_parse() {
+        // Measured against the real built oracle: `std::stoi("5x")` is `5`, `("5abc")` is `5`,
+        // `("0x10")` is `0` (stops at 'x'), `("+5")` is `5`, `("007")` is `7`.
+        assert_eq!(stoi_prefix("5x"), Some(5));
+        assert_eq!(stoi_prefix("5abc"), Some(5));
+        assert_eq!(stoi_prefix("0x10"), Some(0));
+        assert_eq!(stoi_prefix("+5"), Some(5));
+        assert_eq!(stoi_prefix("007"), Some(7));
+        assert_eq!(stoi_prefix("-5"), Some(-5));
+        assert_eq!(stoi_prefix("abc"), None); // no leading digit: std::stoi throws
+        assert_eq!(stoi_prefix(""), None);
+        assert_eq!(stoi_prefix("3000000000"), None); // past i32::MAX: std::stoi::out_of_range
+    }
+
+    #[test]
+    fn check_layer_id_pattern_matches_stois_leading_prefix_parse() {
+        // Measured against the real built oracle (`oracle/.cache/tmp/clip-review-57.cpp`):
+        // `check_layer_id_pattern("5x", 4)`, `("5abc", 4)`, `("1,7x,9", 6)` and `("1-5", 0)` are
+        // all `true`, and `("0x10", 0)` is `false` -- `std::stoi` parses the leading numeric
+        // prefix of each token and ignores the rest, where `str::parse` would reject the whole
+        // token.
+        assert!(check_layer_id_pattern("5x", 4)); // interval "5x" -> stoi gives interval 5
+        assert!(check_layer_id_pattern("5abc", 4));
+        assert!(check_layer_id_pattern("1,7x,9", 6)); // explicit-list token "7x" -> stoi gives 7
+        assert!(check_layer_id_pattern("1-5", 0)); // interval "1-5" -> stoi gives interval 1
+        assert!(!check_layer_id_pattern("0x10", 0)); // interval "0x10" -> stoi gives interval 0
+    }
+
+    #[test]
     fn extended_path_is_the_identity_on_this_ports_targets() {
         assert_eq!(extended_path(Path::new("/a/b/c")), Path::new("/a/b/c"));
+    }
+
+    #[test]
+    fn cli_constants_match_the_vendored_defines() {
+        assert_eq!(CLI_SUCCESS, 0);
+        assert_eq!(CLI_ENVIRONMENT_ERROR, -1);
+        assert_eq!(CLI_GCODE_PATH_IN_UNPRINTABLE_AREA, -102);
+        assert_eq!(CLI_MIXED_FILAMENT_INVALID, -69);
+    }
+
+    #[test]
+    fn copy_file_result_variants_are_in_the_vendored_order() {
+        assert_eq!(CopyFileResult::Success as i32, 0);
+        assert_eq!(CopyFileResult::FailCheckTargetNotOpened as i32, 5);
+    }
+
+    #[test]
+    fn local_encoded_string_is_a_plain_string_alias() {
+        let s: LocalEncodedString = "x".to_string();
+        assert_eq!(s, "x");
     }
 }
 
