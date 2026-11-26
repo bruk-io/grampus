@@ -47,19 +47,10 @@ const DEFAULT_CHAMBER_MAX_TEMP: i32 = 100;
 const DEFAULT_YIELD_STRENGTH: f64 = 0.02;
 // PORT SRC: src/libslic3r/MaterialType.cpp:15
 const DEFAULT_THERMAL_LENGTH: f64 = 200.0;
-// `DEFAULT_CHAMBER_MIN_TEMP` (`:11`, `0`) is a plain integer literal and is exempt by
-// `port/port-status`'s own stated rule (R16's `0`/`1`/`2` set). `DEFAULT_ADHESION_COEFFICIENT`
-// (`:13`, `1.0`) is a *float* written with an `f64` suffix rather than a decimal point
-// (`1f64`, not `1.0`) specifically so it reads as exempt too: `normalize_literal` strips the
-// suffix before the exempt-set test, so the check sees the bare digits `1`, not `1.0` --
-// `check_numeric_constants`'s own comment states a float is "never exempt" because its
-// normalised text "would carry a `.` or an `e`", which holds for every float literal `cargo
-// fmt` or a porter would ordinarily write, but not for this suffix form. Relied on here and at
-// every other whole-number float field across the 75-row table below; if a later tightening of
-// `literal_is_exempt` closes this gap, every one of those cells needs a real `// PORT SRC:`
-// marker, not a rewrite of this comment.
+// PORT SRC: src/libslic3r/MaterialType.cpp:11
 const DEFAULT_CHAMBER_MIN_TEMP: i32 = 0;
-const DEFAULT_ADHESION_COEFFICIENT: f64 = 1f64;
+// PORT SRC: src/libslic3r/MaterialType.cpp:13
+const DEFAULT_ADHESION_COEFFICIENT: f64 = 1.0;
 
 /// `MaterialType::all()`'s static table (`MaterialType.cpp:18-96`), transcribed row for row --
 /// one `// PORT SRC:` marker per row, since every number on a vendored row is held by that one
@@ -224,6 +215,14 @@ static MATERIAL_TYPES: &[MaterialTypeInfo] = &[
     // PORT SRC: src/libslic3r/MaterialType.cpp:95
     MaterialTypeInfo("TPU", 175, 260, 0, 50, 0.5, 0.02, 1000f64),
 ];
+
+/// `MaterialType::all()` (`MaterialType.cpp:18-99`): the public accessor over the table above.
+/// `MaterialType.hpp:21` declares it public, and it has an in-scope caller
+/// (`src/libslic3r/PrintConfig.cpp:3514`, `slic3r-printconfig`'s manifest row), so it is ported
+/// as `pub` rather than left as the private table `find()` reaches directly.
+pub fn all() -> &'static [MaterialTypeInfo] {
+    MATERIAL_TYPES
+}
 
 /// `MaterialType::find()` (`MaterialType.cpp:101-106`).
 fn find(name: &str) -> Option<&'static MaterialTypeInfo> {

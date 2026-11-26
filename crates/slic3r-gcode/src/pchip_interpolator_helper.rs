@@ -97,6 +97,11 @@ impl PchipInterpolatorHelper {
     fn sort_data(&mut self) {
         let mut data: Vec<(f64, f64)> =
             self.x.iter().copied().zip(self.y.iter().copied()).collect();
+        // PORT NOTE: a NaN here makes the vendored `std::sort` (`PchipInterpolatorHelper.cpp:48`)
+        // undefined behaviour -- `std::pair<double,double>::operator<` gives no total order
+        // across a NaN, which violates `std::sort`'s strict-weak-ordering precondition with no
+        // throw. The port cannot reproduce "undefined" as a value, so it panics instead: a
+        // live divergence (UB vs. a panic) from a vendored source with no check of its own here.
         data.sort_unstable_by(|a, b| a.partial_cmp(b).expect("PCHIP input must not be NaN"));
         for (i, (xi, yi)) in data.into_iter().enumerate() {
             self.x[i] = xi;
@@ -139,6 +144,11 @@ impl PchipInterpolatorHelper {
 
     /// `interpolate(double) const` (`PchipInterpolatorHelper.cpp:86-104`): interpolates the
     /// value at a given point.
+    // PORT NOTE: the four `.expect(...)` calls below panic on a default-constructed (empty)
+    // helper; the vendored source calls `x_.front()`/`y_.front()` (`:87-88`) on an empty vector
+    // with no check, which is undefined behaviour, not a throw. Same divergence as `sort_data`'s
+    // NaN panic above: the port turns an unchecked vendored precondition into a live panic
+    // rather than reproducing undefined behaviour it has no way to express.
     pub fn interpolate(&self, xi: f64) -> f64 {
         if xi
             <= *self
