@@ -723,7 +723,8 @@ as a divergence.
 
 The three port tasks merged as pull requests #54, #56 and #57 each carried forward a finding they
 were not allowed to fix: every file that would have to change was on their own must-not-write
-list. These four decisions close those findings. Every one was made by Claude acting for Bruk
+list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision
+1. Every one was made by Claude acting for Bruk
 Habtu, under the delegation for this intent, on 2026-11-26; the owner was away and had handed
 over this intent's decisions. Like the section above, this is a record: where a decision changes
 a rule above, the rule's own text says so and points here.
@@ -760,6 +761,12 @@ still not a differential comparison.
 and the `proof-differential-annotated-binding` fixture holds the derivation itself. Both bite:
 with the cut removed, that fixture derives `drafted` with a `proof-marker-not-differential`
 finding and the Rust test panics on the first of the four shapes.
+
+**And it moves no row that is already ported**, measured rather than inferred: `--per-commit`'s
+whole output over the real tree is byte-identical run with `main`'s `port/port-status` and with
+this one, and `cargo test -p oracle-compare`'s
+`row_is_ported_agrees_with_port_status_on_every_ported_row_of_the_real_manifest` still passes. The
+cut only clears false negatives.
 
 ### 2. What a `proof path: 2` cell commits a task to
 
@@ -844,3 +851,23 @@ corollary — "A task whose unit list names a file `port/manifest.tsv` now marks
 that unit, says so in the pull request body, and does not count the task's `ported` line against
 itself" (`docs/WORKFLOW.md:155-156`). #54 said so in its own pull request body; this is the
 record it asked for.
+
+### 5. `port/port-status --self-test` runs in `just port-check`
+
+**The gap.** Every rule `port/port-status` enforces is pinned by its own `--self-test`: 45 fixture
+trees, the differential rule's 20 accept/reject shapes, the `enclosing:` cases and the
+external-marker cases. It ran in no `justfile` recipe and no CI job — measured by grep over the
+`justfile` and `.github/workflows/` — so nothing in the repository ever asked whether the checker
+still held its own rules, and decision 1's new fixture would have bitten only for whoever ran it by
+hand. This was found while fixing decision 1, not reported by a task.
+
+**The decision.** `just port-check` runs it, as its second line. That recipe is the right home and
+not a new one: its stated entry condition is "the code checks that need neither the oracle binary
+nor a built libslic3r", and `--self-test` reads the fixture trees under `port/tests/port-status/`
+plus the pinned `vendor/OrcaSlicer/` that a fixture's `source:` lines resolve against — which the
+recipe's first line already reads. It takes about a tenth of a second. The recipe's own header
+comment accounts for every line that has joined it, including this one, and points here.
+
+This is a strengthening, not a narrowing: no existing check's rule moved, and a port task that
+passed `just port-check` before passes it now unless `port/port-status` itself has stopped holding
+one of its own rules.
