@@ -735,7 +735,8 @@ were not allowed to fix: every file that would have to change was on their own m
 list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1;
 decision 6 closes one `57-foundation-utils` (#60) carried forward for the same reason; and
 decision 7 reconciles the section decision 6 corrected, whose older text contradicted it; and
-decision 8 is task `35-trial-run`'s own trial-run finding, recorded here by that task.
+decision 8 is task `35-trial-run`'s own trial-run finding, recorded here by that task; and
+decision 9 accepts `60-foundation-trees-grids` with one unit left drafted.
 Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
 2026-11-26; the owner was away and had handed over this intent's decisions. Like the section
 above, this is a record: where a decision changes a rule above, the rule's own text says so and
@@ -986,3 +987,32 @@ criterion, which does not apply — and the module's own comment says so plainly
 constant actually comes from and the reviewer's job of checking that disclosure rather than taking
 the external form's usual meaning on faith. This document's idiom map (the `#define` numeric
 constant row) and decision 2 of 2026-11-25 are read together with this rule, not in place of it.
+
+### 9. `60-foundation-trees-grids` is accepted with three of its four units ported
+
+**The gap.** #70 ports `KDTreeIndirect.hpp`, `MarchingSquares.hpp` and `AABBTreeIndirect.hpp`, each
+proven against the oracle through its own proof unit. Three things in it are outside what the task
+text allows, and the task could settle none of them itself:
+
+- `MeshSplitImpl.hpp` is translated in full but left `drafted`, with no `mod` line. Every function
+  it exports takes the concrete `indexed_triangle_set` of `TriangleMesh.hpp`, and
+  `slic3r-meshsplitimpl` has no dependency on `slic3r-trianglemesh` in `port/cut.tsv`; a port task
+  may add none. Four of the task's "Done when" lines name this unit and are therefore not met.
+- `AABBTreeIndirect.hpp`'s `BoundingBoxWrapper` is not ported, for the same kind of reason: it needs
+  `Point`, `BoundingBox` and `SCALED_EPSILON`, and its crate has no dependency on `slic3r-point`.
+  `intersect_triangle_epsilon` is not ported either: it has no caller anywhere in the vendored tree
+  and does not compile when instantiated.
+- `crates/slic3r-ffi/build.rs` gains one include path, `deps_src/libigl`, because
+  `AABBTreeIndirect.hpp:25` includes `<igl/Hit.h>` unconditionally. That file is not on the task's
+  list.
+
+**The decision.** #70 is accepted as it stands. `mesh_split_impl.rs` stays `drafted`, and its row
+stays in `port-status`'s remaining count, until `70-foundation-triangle-mesh` has landed; whichever
+of that task or the regeneration pass first has `indexed_triangle_set` in reach finishes the unit,
+either by giving the crate the dependency in `port/cut.tsv` or by making the module generic over
+the mesh type, and adds its `mod` line and `// PROOF:` test. `BoundingBoxWrapper` is finished the
+same way once its crate can see `slic3r-point`. `intersect_triangle_epsilon` is not ported at all:
+dead code that cannot be instantiated has no behaviour to preserve. The `build.rs` include path is
+accepted; an include path a vendored header needs unconditionally is part of reaching the oracle,
+not a change to the harness. Made by Claude acting for Bruk Habtu under the delegation for this
+intent, on 2026-11-26.
