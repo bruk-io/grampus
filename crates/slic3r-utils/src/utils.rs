@@ -89,6 +89,18 @@
 //! cell verbatim. `crates/slic3r-ffi/cxx/proof_units/utils.cpp`'s header comment records the
 //! measurement (99 externally-linked symbols in `utils.cpp.o`) that rules the literal path-3
 //! `#include` out, and this task's pull request body repeats it.
+//!
+//! The shim carries 22 further entry points, each the same shape and each compared in
+//! `crates/slic3r-utils/tests/utils_proof_path_3.rs`: the eight time formatters, the three
+//! path-root checks, and `makedir`, `rename_file`, `write_file_atomically`, `check_copy`,
+//! `copy_file_inner`, `copy_file`, `copy_framework`, `copy_directory_recursively`,
+//! `save_string_file`, `load_string_file` and `is_running_in_flatpak`. The eight formatters are
+//! reached a third way again, and the most direct one available: they are `inline` in
+//! `Utils.hpp`, so the shim's own `#include "Utils.hpp"` compiles the **pinned header's bodies**
+//! into the shim translation unit -- nothing is retyped and there is no link question at all.
+//! The filesystem comparisons build two identical sibling subtrees under a scratch directory and
+//! run the oracle on one and this module on the other, then compare both the returned result and
+//! the resulting tree.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
