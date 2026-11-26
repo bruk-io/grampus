@@ -17,15 +17,17 @@
 //! initialisation and no `unsafe`, which a raw mutable static or an `AtomicPtr` cast back to a
 //! function pointer would.
 //!
-//! **Proof path 2 could not be honoured as a real proof (a finding for this pull request, not a
-//! tolerance or a stand-in invented on this branch).** Exactly `crates/slic3r-commondefs/src/common_defs.rs`'s
-//! doc comment states for `CommonDefs.hpp`: `port/manifest.tsv` seeds this row's `proof path` as
-//! `2` from its `pipeline stage` cell (`posSlice`) alone, and no field across the committed stage
-//! dump corpus (`port/dumps/*/*.dump`) carries a translated string or any other I18N-derived
-//! value -- the corpus's full field set is `fill_surfaces, fills, height, lslices, object_skirt,
-//! perimeters, print_z, raw_slices, skirt, skirt_brim_groups, slice_z, slices, thin_fills,
-//! wipe_tower_*`, checked the same way. This module therefore carries no `// PROOF:` marker;
-//! `port/port-status` derives it as `drafted`, not `ported`.
+//! **Proof path 2, reached via `slic3r-proof`'s re-export of `slic3r-ffi`'s per-unit proof
+//! bridges (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decisions 1 and 4).** Exactly
+//! as `crates/slic3r-commondefs/src/common_defs.rs`'s doc comment states for `CommonDefs.hpp`:
+//! `port/manifest.tsv` seeds this row's `proof path` as `2` from its `pipeline stage` cell
+//! (`posSlice`) alone, and no field across the committed stage dump corpus carries a translated
+//! string or any other I18N-derived value. Decision 4 names the per-unit proof bridges, not only
+//! the dump corpus, as a "2" row's oracle entry point, so this unit's shim
+//! (`crates/slic3r-ffi/cxx/proof_units/i18_n.{h,cpp}`, `crates/slic3r-ffi/src/proof_units/i18_n.rs`)
+//! drives the vendored header's own inline code directly, at its default
+//! (`translate_fn == nullptr`) state -- see the shim's own comment for why it never calls
+//! `set_translate_callback`.
 
 use std::sync::Mutex;
 
@@ -83,14 +85,14 @@ fn _u8l(s: &str) -> String {
 mod tests {
     use super::*;
 
-    /// Not a `// PROOF:` marker (see this module's doc comment: no dump field holds this
-    /// unit's output, so proof path 2 cannot be honoured here) -- a plain correctness check of
-    /// `translate`'s identity fallback (`translate_fn == nullptr`, `I18N.hpp:18-19`'s own case)
-    /// and of `set_translate_callback` actually installing a callback `translate` then uses. One
-    /// test, not two: [`TRANSLATE_FN`] is one process-global `static`, exactly as the vendored
-    /// `translate_fn` is, so a second `#[test]` touching it could race this one under `cargo
-    /// test`'s default multi-threaded runner -- the same reason this file never calls
-    /// `set_translate_callback` outside this one function.
+    /// Not a `// PROOF:` marker (see `crates/slic3r-i18n/tests/i18_n_proof_path_2.rs` for that) --
+    /// a plain correctness check of `translate`'s identity fallback (`translate_fn == nullptr`,
+    /// `I18N.hpp:18-19`'s own case) and of `set_translate_callback` actually installing a
+    /// callback `translate` then uses. One test, not two in this file: [`TRANSLATE_FN`] is one
+    /// process-global `static`, exactly as the vendored `translate_fn` is, so a second `#[test]`
+    /// touching it in this binary could race this one under `cargo test`'s default
+    /// multi-threaded runner -- the same reason the oracle-comparing proof test lives in its own
+    /// binary under `tests/` rather than beside this one.
     #[test]
     fn i18_n_translate_falls_back_to_identity_then_uses_a_set_callback() {
         assert_eq!(translate("hello"), "hello");
