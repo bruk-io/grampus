@@ -14,6 +14,7 @@ namespace int128 {
 int64_t multiply_hi(int64_t lhs, int64_t rhs);
 uint64_t multiply_lo(int64_t lhs, int64_t rhs);
 double multiply_as_double(int64_t lhs, int64_t rhs);
+int32_t multiply_sign(int64_t lhs, int64_t rhs);
 int32_t sign_determinant_2x2(int64_t a11, int64_t a12, int64_t a21, int64_t a22);
 int32_t compare_rationals(int64_t p1, int64_t q1, int64_t p2, int64_t q2);
 int32_t sign_determinant_2x2_filtered(int64_t a11, int64_t a12, int64_t a21, int64_t a22);

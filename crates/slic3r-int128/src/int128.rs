@@ -349,9 +349,9 @@ mod tests {
     use super::Int128;
     use slic3r_proof::proof_units::int128::{
         add_assign_hi, add_assign_lo, add_hi, add_lo, compare_rationals,
-        compare_rationals_filtered, multiply_as_double, multiply_hi, multiply_lo, neg_hi, neg_lo,
-        sign_determinant_2x2, sign_determinant_2x2_filtered, sub_assign_hi, sub_assign_lo, sub_hi,
-        sub_lo,
+        compare_rationals_filtered, multiply_as_double, multiply_hi, multiply_lo, multiply_sign,
+        neg_hi, neg_lo, sign_determinant_2x2, sign_determinant_2x2_filtered, sub_assign_hi,
+        sub_assign_lo, sub_hi, sub_lo,
     };
 
     const PAIRS: &[(i64, i64)] = &[
@@ -378,6 +378,10 @@ mod tests {
             let expected_hi = multiply_hi(lhs, rhs);
             let expected_lo = multiply_lo(lhs, rhs);
             let expected_f64 = multiply_as_double(lhs, rhs);
+            // `sign()` (Int128.hpp:89) on a genuinely 128-bit value, not a bare `int64_t`
+            // construction -- adversarial review (this task) found this method had no
+            // oracle-verified test of its own.
+            let expected_sign = multiply_sign(lhs, rhs);
             let actual = Int128::multiply(lhs, rhs);
             assert_eq!(actual.hi(), expected_hi, "hi() for multiply({lhs}, {rhs})");
             assert_eq!(actual.lo(), expected_lo, "lo() for multiply({lhs}, {rhs})");
@@ -385,6 +389,11 @@ mod tests {
                 actual.as_f64().to_bits(),
                 expected_f64.to_bits(),
                 "as_f64() for multiply({lhs}, {rhs})"
+            );
+            assert_eq!(
+                actual.sign(),
+                expected_sign,
+                "sign() for multiply({lhs}, {rhs})"
             );
         }
     }

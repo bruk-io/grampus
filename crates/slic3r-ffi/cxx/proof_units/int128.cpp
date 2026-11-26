@@ -30,6 +30,13 @@ double multiply_as_double(int64_t lhs, int64_t rhs) {
     return static_cast<double>(Int128::multiply(lhs, rhs));
 }
 
+// `int sign() const { return (value > 0) - (value < 0); }` (Int128.hpp:89), called on a genuinely
+// 128-bit value rather than on a bare `int64_t` construction -- an adversarial-review finding
+// (this task) that `sign()` itself had no oracle-verified test.
+int32_t multiply_sign(int64_t lhs, int64_t rhs) {
+    return static_cast<int32_t>(Int128::multiply(lhs, rhs).sign());
+}
+
 int32_t sign_determinant_2x2(int64_t a11, int64_t a12, int64_t a21, int64_t a22) {
     return static_cast<int32_t>(Int128::sign_determinant_2x2(a11, a12, a21, a22));
 }

@@ -18,6 +18,7 @@ mod ffi {
         fn multiply_hi(lhs: i64, rhs: i64) -> i64;
         fn multiply_lo(lhs: i64, rhs: i64) -> u64;
         fn multiply_as_double(lhs: i64, rhs: i64) -> f64;
+        fn multiply_sign(lhs: i64, rhs: i64) -> i32;
         fn sign_determinant_2x2(a11: i64, a12: i64, a21: i64, a22: i64) -> i32;
         fn compare_rationals(p1: i64, q1: i64, p2: i64, q2: i64) -> i32;
         fn sign_determinant_2x2_filtered(a11: i64, a12: i64, a21: i64, a22: i64) -> i32;
@@ -37,6 +38,7 @@ mod ffi {
 
 pub use ffi::{
     add_assign_hi, add_assign_lo, add_hi, add_lo, compare_rationals, compare_rationals_filtered,
-    multiply_as_double, multiply_hi, multiply_lo, neg_hi, neg_lo, sign_determinant_2x2,
-    sign_determinant_2x2_filtered, sub_assign_hi, sub_assign_lo, sub_hi, sub_lo,
+    multiply_as_double, multiply_hi, multiply_lo, multiply_sign, neg_hi, neg_lo,
+    sign_determinant_2x2, sign_determinant_2x2_filtered, sub_assign_hi, sub_assign_lo, sub_hi,
+    sub_lo,
 };
