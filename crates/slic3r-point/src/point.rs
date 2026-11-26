@@ -198,6 +198,15 @@ pub type Vec4d = Vec4<f64>;
 // (Eigen::Transform); no in-scope caller in this task's own units.
 // TODO(port): src/libslic3r/Point.hpp:106-108,170,179,187-194 -- identity<N,T>/identity3f/
 // identity3d, has_reflection and the get_base family, all over the deferred Transform type above.
+// TODO(port): src/libslic3r/Point.hpp:759-770 -- `std::hash<Vec2ds>`/`std::hash<vector<int>>`
+// specialisations for `ConfigOptionPointsGroups`; no in-scope caller in this task's own units.
+// TODO(port): src/libslic3r/Point.hpp:786-813 -- the Boost.Polygon `geometry_concept`/
+// `point_traits`/`point_mutable_traits` specialisations for `Point`; no in-scope caller.
+// TODO(port): src/libslic3r/Point.hpp:816-833 -- the Cereal `serialize`/`load`/`save`
+// specialisations for the Eigen vector/matrix/transform aliases; no in-scope caller, and the
+// `Matrix2f`/`Transform3d` arms need the deferred Transform/Matrix types above regardless.
+// TODO(port): src/libslic3r/Point.hpp:836-848 -- the `Eigen::begin`/`Eigen::end` range-for
+// helpers over the deferred generic `Mat<N, M, T>` above; no in-scope caller.
 
 /// `inline typename Derived::Scalar cross2(const Eigen::MatrixBase<Derived> &v1, const
 /// Eigen::MatrixBase<Derived2> &v2)` (`:121-126`), narrowed to the one instantiation
@@ -567,6 +576,16 @@ impl std::fmt::Display for Point {
     }
 }
 
+/// `std::ostream& operator<<(std::ostream &stm, const Vec2d &pointf)` (`Point.cpp:248-251`):
+/// writes the raw components as stored, comma-separated -- unlike [`Point`]'s own `Display`
+/// above, this does **not** unscale, exactly matching the vendored body's own plain `pointf(0)`/
+/// `pointf(1)` reads.
+impl std::fmt::Display for Vec2<f64> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{},{}", self.x(), self.y())
+    }
+}
+
 // -------------------------------------------------------------------------------------------
 // Point3 (Point.hpp:283-377, Point.cpp)
 // -------------------------------------------------------------------------------------------
@@ -721,6 +740,24 @@ pub fn unscale3(x: i64, y: i64, z: i64) -> Vec3d {
 /// `inline Vec3d unscale(const Vec3crd &pt)` (`:162`).
 pub fn unscale3_pt(pt: Vec3crd) -> Vec3d {
     unscale3(pt.x(), pt.y(), pt.z())
+}
+/// `inline Vec2d unscale(const Vec2d &pt)` (`:160`): `unscale<double>(Q)` with `Q = double`,
+/// so `T(v) * T(SCALING_FACTOR)` is a plain `f64` multiplication of an already-`f64` input --
+/// `slic3r_libslic3r::unscale` is narrowed to a `CoordT` (`i64`) input (that crate's own doc
+/// explains why), so this overload is written out directly rather than reused.
+pub fn unscale2_f64(pt: Vec2d) -> Vec2d {
+    Vec2d::new(
+        pt.x() * slic3r_libslic3r::libslic3r::SCALING_FACTOR,
+        pt.y() * slic3r_libslic3r::libslic3r::SCALING_FACTOR,
+    )
+}
+/// `inline Vec3d unscale(const Vec3d &pt)` (`:163`); see [`unscale2_f64`]'s doc.
+pub fn unscale3_f64(pt: Vec3d) -> Vec3d {
+    Vec3d::new(
+        pt.x() * slic3r_libslic3r::libslic3r::SCALING_FACTOR,
+        pt.y() * slic3r_libslic3r::libslic3r::SCALING_FACTOR,
+        pt.z() * slic3r_libslic3r::libslic3r::SCALING_FACTOR,
+    )
 }
 
 // TODO(port): src/libslic3r/Point.hpp:165-168 -- the four `to_string` overloads, need
@@ -891,7 +928,7 @@ pub fn align_to_grid_point_based(coord: Point, spacing: Point, base: Point) -> P
 /// vendored `coord_t(SCALED_EPSILON)` cast exactly.
 pub fn is_approx_point(p1: Point, p2: Point, epsilon: i64) -> bool {
     let d = p2 - p1;
-    d.x().unsigned_abs() < (epsilon as u64) && d.y().unsigned_abs() < (epsilon as u64)
+    d.x().abs() < epsilon && d.y().abs() < epsilon
 }
 /// [`is_approx_point`]'s default `epsilon`, computed once per call rather than as a `const` --
 /// see that function's own doc for why.
