@@ -83,6 +83,25 @@ ProofUnescapeStringsResult path3_unescape_strings_cstyle(rust::Str value) {
     return ProofUnescapeStringsResult{ok, std::move(rust_out)};
 }
 
+rust::String path3_serialize_float(double value) {
+    Slic3r::ConfigOptionFloat opt(value);
+    return rust::String(opt.serialize());
+}
+
+ProofDeserializeFloatResult path3_deserialize_float(rust::Str value) {
+    std::string cpp_value(value);
+    Slic3r::ConfigOptionFloat opt(-999.0);
+    bool ok = opt.deserialize(cpp_value);
+    return ProofDeserializeFloatResult{ok, opt.value};
+}
+
+ProofDeserializeIntResult path3_deserialize_int(rust::Str value) {
+    std::string cpp_value(value);
+    Slic3r::ConfigOptionInt opt(-999);
+    bool ok = opt.deserialize(cpp_value);
+    return ProofDeserializeIntResult{ok, opt.value};
+}
+
 } // namespace config
 } // namespace proof_units
 } // namespace slic3r_ffi

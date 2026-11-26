@@ -57,12 +57,19 @@
 //! `SetDeserializeItem` float/double constructors) is in a crate `34-foundation-spike` cut but no
 //! task has ported yet (`port/manifest.tsv`: `LocalesUtils.cpp`/`.hpp` are `not-started`). Per
 //! this task's own instruction for an unported dependency, [`float_to_string_decimal_point`]
-//! below is a narrow local stand-in (Rust's `f64`/`i32` `Display` is already locale-independent,
-//! which is the exact property `LocalesUtils.hpp`'s helper exists to guarantee over
-//! locale-dependent `operator<<`), named here and in the pull request.
+//! below is a narrow local stand-in -- **not** Rust's `f64` `Display`, which an earlier commit on
+//! this branch used and a reviewer measured as wrong (`format!("{value}")` is Rust's own
+//! shortest-round-trip digit count, up to 17 significant digits, where `LocalesUtils.cpp:119`/
+//! `:129` and every vendored `serialize()` this stand-in backs are general format at precision 6;
+//! see the pull request body). The stand-in's `precision < 0` path is
+//! [`cpp_general_format_f64`], which reproduces that precision-6 general format, verified against
+//! this machine's own libc++, not merely described; its `precision >= 0` path (`format!("{value
+//! :.*}", p)`, unexercised by any call site in this module) is still unverified against
+//! `LocalesUtils.cpp`'s fixed-format branch and is named here rather than claimed.
 // TODO(port): src/libslic3r/LocalesUtils.hpp:48 -- float_to_string_decimal_point's real
-// implementation (precision handling, rounding) is pending slic3r-localesutils's own ported
-// module; the stand-in below reproduces only its locale-independence, not its precision argument.
+// implementation is pending slic3r-localesutils's own ported module; the stand-in below
+// reproduces the vendored general-format (precision < 0) behaviour, verified against the oracle,
+// but its fixed-format (precision >= 0) branch is unverified and unused by this module.
 //!
 //! **Proof path 3** (`Config.cpp`'s and `Config.hpp`'s one shared cell): `Config.cpp` has no
 //! externally-linked symbol with no exported declaration elsewhere to call through an ordinary
@@ -141,19 +148,419 @@ impl std::error::Error for ConfigError {}
 // =================================================================================================
 
 /// Stand-in for `Slic3r::float_to_string_decimal_point` (`LocalesUtils.hpp:48`) -- see the module
-/// doc. `precision < 0` (the header's own default) means "shortest round-tripping
-/// representation", which `f64`'s `Display` already is.
+/// doc. `precision < 0` (the header's own default, and every call site in this module) does
+/// **not** mean "shortest round-tripping representation": `LocalesUtils.cpp:119`/`:129` are
+/// `std::to_chars(..., chars_format::general, 6)` / `snprintf("%.*g", 6, value)`, and every
+/// vendored `serialize()` this stand-in is reached from (`ss << this->value` at, among others,
+/// `Config.hpp:840`, `:976`, `:1259`, `:1555`) is `std::ostringstream`'s own default-precision
+/// `operator<<`, whose precision is also 6 -- the two are the same format. Reproducing Rust's
+/// `Display` here was wrong (see the pull request body); `precision < 0` now goes through
+/// [`cpp_general_format_f64`], general format at precision 6.
 pub fn float_to_string_decimal_point(value: f64, precision: Option<i32>) -> String {
     match precision {
         Some(p) if p >= 0 => format!("{value:.*}", p as usize),
-        _ => {
-            if value == value.trunc() && value.is_finite() {
-                format!("{value}")
-            } else {
-                format!("{value}")
+        _ => cpp_general_format_f64(value),
+    }
+}
+
+/// Reproduces `%.*g` at precision 6 / `std::ostringstream << double` (the vendored tree's own
+/// default stream precision) bit-for-digit: round to 6 significant digits, then scientific when
+/// the resulting decimal exponent `X` is `< -4` or `>= 6` (5 fractional digits, signed two-digit
+/// exponent), otherwise fixed with `5 - X` fractional digits -- either way with trailing zeros
+/// and a bare trailing point stripped, exactly as `%g` strips them. `0`/`-0`/`inf`/`-inf`/`nan`
+/// are the stream's own literal spellings.
+///
+/// Not derived from the description above and trusted blind: verified against this machine's own
+/// `clang++`/libc++ (`std::ostringstream << double`) over 51,961 values spanning the full `f64`
+/// range (random bit patterns, scaled randoms across every decimal exponent, and small integers
+/// and simple fractions), byte-for-byte identical on every one -- see the pull request body for
+/// the probe script.
+fn cpp_general_format_f64(value: f64) -> String {
+    if value.is_nan() {
+        return "nan".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            "-inf".to_string()
+        } else {
+            "inf".to_string()
+        };
+    }
+    let negative = value.is_sign_negative();
+    let v = value.abs();
+    // No separate zero special-case: `{:.5e}` on a zero `v` gives an all-zero mantissa
+    // ("0.00000e0"), and the trailing-zero-stripping general path below already collapses that
+    // to a bare "0" on its own (`digits[1..]` is all zeros, `trim_end_matches('0')` empties it),
+    // without a `0.0` comparison this file's own numeric-constant marker rule would otherwise
+    // require a citation for.
+    // Six significant digits, correctly rounded (ties-to-even) -- Rust's own scientific
+    // formatting already performs the carry a rounding-up can cause (`9999995.0` -> `1.00000e7`).
+    // The precision is stated here, where `{:.5e}` applies it, rather than as a separate numeric
+    // constant the code would then have to keep in sync with this literal; `digits.len()` below
+    // reads the same fact back instead of restating a second "6" (same idiom as
+    // `crates/slic3r-format/src/format.rs`'s own `float_to_string_general`).
+    let sci = format!("{v:.5e}");
+    let (mantissa, exp_str) = sci
+        .split_once('e')
+        .expect("Rust's own `{:e}` format always contains 'e'");
+    let exponent: i32 = exp_str
+        .parse()
+        .expect("Rust's own `{:e}` format always has an integer exponent");
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+
+    // PORT SRC: external: ISO/IEC 9899:2018 7.21.6.1p8 -- %g renders in scientific notation when
+    // the converted value's exponent is less than -4 (this port's own threshold, not an
+    // OrcaSlicer literal, same citation `crates/slic3r-format/src/format.rs` uses for the
+    // identical rule).
+    let use_scientific = exponent < -4 || exponent >= digits.len() as i32;
+    let body = if use_scientific {
+        let first = &digits[0..1];
+        let rest = digits[1..].trim_end_matches('0');
+        let mantissa = if rest.is_empty() {
+            first.to_string()
+        } else {
+            format!("{first}.{rest}")
+        };
+        let exp_sign = if exponent < 0 { '-' } else { '+' };
+        format!("{mantissa}e{exp_sign}{:02}", exponent.abs())
+    } else if exponent >= 0 {
+        let split = (exponent + 1) as usize;
+        let int_part = &digits[..split];
+        let frac_part = digits[split..].trim_end_matches('0');
+        if frac_part.is_empty() {
+            int_part.to_string()
+        } else {
+            format!("{int_part}.{frac_part}")
+        }
+    } else {
+        let leading_zeros = "0".repeat((-exponent - 1) as usize);
+        let frac_part = format!("{leading_zeros}{digits}");
+        let frac_part = frac_part.trim_end_matches('0');
+        format!("0.{frac_part}")
+    };
+    if negative {
+        format!("-{body}")
+    } else {
+        body
+    }
+}
+
+const CPP_ISTREAM_WHITESPACE: &[char] = &[' ', '\t', '\n', '\x0b', '\x0c', '\r'];
+
+fn cpp_hex_digit_value(b: u8) -> Option<u32> {
+    match b {
+        b'0'..=b'9' => Some((b - b'0') as u32),
+        // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.1 -- the hexadecimal digits 'a'-'f' have
+        // the values 10-15.
+        b'a'..=b'f' => Some((b - b'a' + 10) as u32),
+        // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.1 -- 'A'-'F' are the same digit values,
+        // uppercase.
+        b'A'..=b'F' => Some((b - b'A' + 10) as u32),
+        _ => None,
+    }
+}
+
+/// `strtod`'s hex-float grammar (`[sign] "0x" hexdigits ["." hexdigits] [("p"|"P") [sign]
+/// digits]`), required to consume the whole of `buf` or the overall extraction fails -- see
+/// [`cpp_istream_extract_f64`].
+fn cpp_parse_hex_float(buf: &str) -> Option<f64> {
+    let bytes = buf.as_bytes();
+    let mut i = 0usize;
+    let mut negative = false;
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        negative = bytes[i] == b'-';
+        i += 1;
+    }
+    // PORT SRC: external: ASCII (ISO/IEC 646) -- bit 0x20 is the one bit that differs between an
+    // uppercase and a lowercase Latin letter's code point; `| 0x20` folds either case of 'x' to
+    // the same comparison without a second branch.
+    if i + 1 >= bytes.len() || bytes[i] != b'0' || (bytes[i + 1] | 0x20) != b'x' {
+        return None;
+    }
+    i += 2;
+    let mut mantissa: f64 = Default::default();
+    let mut any_digit = false;
+    while i < bytes.len() {
+        match cpp_hex_digit_value(bytes[i]) {
+            Some(d) => {
+                // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- a hexadecimal-floating-point
+                // mantissa's digits are base 16.
+                mantissa = mantissa * 16.0 + d as f64;
+                i += 1;
+                any_digit = true;
+            }
+            None => break,
+        }
+    }
+    let mut frac_scale: i32 = 0;
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        while i < bytes.len() {
+            match cpp_hex_digit_value(bytes[i]) {
+                Some(d) => {
+                    // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- same base-16 mantissa
+                    // digit as the integer-part loop above.
+                    mantissa = mantissa * 16.0 + d as f64;
+                    // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- each hexadecimal digit
+                    // after the point scales the mantissa by a further 2**-4 (4 bits per digit).
+                    frac_scale -= 4;
+                    i += 1;
+                    any_digit = true;
+                }
+                None => break,
             }
         }
     }
+    if !any_digit {
+        return None;
+    }
+    let mut exp: i32 = 0;
+    // PORT SRC: external: ASCII (ISO/IEC 646) -- same case-folding bit as the 'x'/'X' check
+    // above, here for 'p'/'P'.
+    if i < bytes.len() && (bytes[i] | 0x20) == b'p' {
+        i += 1;
+        let mut exp_neg = false;
+        if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+            exp_neg = bytes[i] == b'-';
+            i += 1;
+        }
+        let start = i;
+        let mut e: i64 = 0;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- the hex-float binary exponent
+            // after 'p'/'P' is itself written in ordinary base-10 decimal digits.
+            e = e * 10 + (bytes[i] - b'0') as i64;
+            i += 1;
+        }
+        if i == start {
+            return None;
+        }
+        exp = if exp_neg { -(e as i32) } else { e as i32 };
+    }
+    if i != bytes.len() {
+        return None;
+    }
+    let value = mantissa * 2f64.powi(frac_scale + exp);
+    Some(if negative { -value } else { value })
+}
+
+/// The character-collection loop of libc++'s `__num_get<char>::__stage2_float_loop`
+/// (`libcxx/include/__locale_dir/num.h`), against the default "C" locale (decimal point `.`,
+/// no thousands separator): permissively collects a prefix made of `0-9`, `a-f`, `A-F`, `x`/`X`,
+/// `+`/`-` and `p`/`P` -- stopping only on a second decimal point, a sign in a position other
+/// than the very start or immediately after the active exponent marker, or a character outside
+/// that set. A letter like `a` outside hex mode is *not* rejected at this stage: it is collected,
+/// and whether the collected text as a whole is a valid number is decided afterwards (requiring
+/// the whole of it to be consumed), exactly as the vendored algorithm defers to `strtod`.
+fn cpp_collect_float_atoms(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut buffer = String::new();
+    let mut in_units = true;
+    let mut exp_marker: char = 'E';
+    let mut leading_parsed = false;
+    const ATOMS: &str = "0123456789abcdefABCDEFxX+-pP";
+    for &ct in &chars {
+        if ct == '.' {
+            if !in_units {
+                break;
+            }
+            in_units = false;
+            buffer.push('.');
+        } else if ATOMS.contains(ct) {
+            if ct == '+' || ct == '-' {
+                let accept = buffer.is_empty()
+                    || buffer
+                        .chars()
+                        .last()
+                        .map(|c| c.to_ascii_uppercase() == exp_marker.to_ascii_uppercase())
+                        .unwrap_or(false);
+                if !accept {
+                    break;
+                }
+                buffer.push(ct);
+            } else {
+                if ct == 'x' || ct == 'X' {
+                    exp_marker = 'P';
+                } else if ct.to_ascii_uppercase() == exp_marker {
+                    exp_marker = exp_marker.to_ascii_lowercase();
+                    in_units = false;
+                }
+                buffer.push(ct);
+            }
+        } else {
+            break;
+        }
+
+        if !leading_parsed {
+            let b: Vec<char> = buffer.chars().collect();
+            if !b.is_empty() && b[0] != '-' && b[0] != '+' {
+                if b[0].is_ascii_digit() || b[0] == '.' {
+                    leading_parsed = true;
+                } else {
+                    break;
+                }
+            } else if b.len() >= 2 && (b[0] == '-' || b[0] == '+') {
+                if b[1].is_ascii_digit() || b[1] == '.' {
+                    leading_parsed = true;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    buffer
+}
+
+/// Reproduces `std::istringstream >> double` (`Config.hpp:845-855` and every other `iss >>
+/// value` float extraction in this unit): `None` means the stream's sentry never entered
+/// extraction at all -- there was only whitespace, or nothing -- so `iss.fail()` is true but the
+/// destination `double` is left **completely untouched** (not forced to any particular value);
+/// `Some((fail, value))` is what extraction actually assigned -- forced to `0.0` when nothing
+/// parseable was collected, or the overflowing `+-inf` `strtod` itself returns on `ERANGE`
+/// (`iss.fail()` is still true in that case too) -- paired with `iss.fail()`.
+///
+/// Verified, not trusted from the algorithm's description alone: fuzzed against this machine's
+/// own `clang++`/libc++ over 80,000+ generated strings (random atom-alphabet soup plus the
+/// adversarial cases the findings measured -- `"0x10"`, `"1abc"`, `"inf"`, `"5%"`, `"0.0.1"`,
+/// hex floats with a `p` exponent, repeated signs, repeated decimal points and exponent markers,
+/// overflow), byte-for-byte identical on every one -- see the pull request body for the probe
+/// script.
+///
+/// **Known, named gap**: `strtod` sets `ERANGE` (failbit) on *underflow* too (a value too small
+/// to represent, rounded to `0.0`), which this function does not detect -- it only recognises
+/// *overflow* (`v.is_infinite()`, below). Measured: `"1e-400"` fails in the oracle (value forced
+/// to `0.0`) and succeeds here (value `0.0`, no failure) -- the end value happens to agree, but
+/// `fail` does not. Telling a genuine underflow apart from a legitimately tiny parsed value would
+/// need `strtod`'s own `errno`, which this hand-written parser has no equivalent of; named here
+/// and in the pull request body rather than silently left uncovered by the differential proof.
+fn cpp_istream_extract_f64(s: &str) -> Option<(bool, f64)> {
+    let trimmed = s.trim_start_matches(CPP_ISTREAM_WHITESPACE);
+    if trimmed.is_empty() {
+        return None;
+    }
+    let buffer = cpp_collect_float_atoms(trimmed);
+    if buffer.is_empty() {
+        // PORT SRC: external: libcxx/include/__locale_dir/num.h, __num_get_float's own final
+        // fallback ("__a != __a_end" is false) -- "__err = ios_base::failbit; return 0;".
+        return Some((true, 0.0));
+    }
+    let is_hex = {
+        let b = buffer.strip_prefix(['+', '-']).unwrap_or(&buffer);
+        // PORT SRC: external: ASCII (ISO/IEC 646) -- the same case-folding bit
+        // `cpp_parse_hex_float` uses for its own 'x'/'X' and 'p'/'P' checks.
+        b.len() >= 2 && b.as_bytes()[0] == b'0' && (b.as_bytes()[1] | 0x20) == b'x'
+    };
+    let parsed = if is_hex {
+        cpp_parse_hex_float(&buffer)
+    } else {
+        buffer.parse::<f64>().ok()
+    };
+    match parsed {
+        // Overflow: `strtod` sets `ERANGE` and returns `+-HUGE_VAL`, which
+        // `__num_get_float` (`libcxx/include/__locale_dir/num.h`) turns into failbit *with* that
+        // infinite value kept, not forced to 0.
+        Some(v) if v.is_infinite() => Some((true, v)),
+        Some(v) => Some((false, v)),
+        // PORT SRC: external: libcxx/include/__locale_dir/num.h, __num_get_float's
+        // "if (__p2 != __a_end) { __err = ios_base::failbit; return 0; }" -- the collected
+        // buffer did not parse as a complete number.
+        None => Some((true, 0.0)),
+    }
+}
+
+/// Reproduces `std::istringstream >> int` (`Config.hpp:1040-1050` and every other `iss >> value`
+/// integer extraction in this unit). Far more permissive than the float path: with
+/// `std::ios_base::dec` the default base, only `0`-`9` and a leading sign are ever examined, so a
+/// character that is not a decimal digit simply ends extraction right there -- `"1abc"` succeeds
+/// at `1`, `"0x10"` succeeds at `0` (`"x"` is not a base-10 digit, consumed or not). `None` means
+/// the sentry never entered extraction (same meaning as [`cpp_istream_extract_f64`]'s `None`);
+/// `Some((fail, value))` pairs what was assigned (clamped to `i32::MIN`/`i32::MAX` with `fail` on
+/// overflow, exactly as `strtol`'s own `ERANGE` clamp) with `iss.fail()`.
+///
+/// Verified against this machine's own `clang++`/libc++ over 60,000+ fuzzed strings, byte-for-
+/// byte identical on every one -- see the pull request body for the probe script.
+fn cpp_istream_extract_i32(s: &str) -> Option<(bool, i32)> {
+    let trimmed = s.trim_start_matches(CPP_ISTREAM_WHITESPACE);
+    if trimmed.is_empty() {
+        return None;
+    }
+    let bytes = trimmed.as_bytes();
+    let mut i = 0usize;
+    let mut neg = false;
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        neg = bytes[i] == b'-';
+        i += 1;
+    }
+    let digits_start = i;
+    let mut acc: i64 = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        // PORT SRC: external: this port's own `i64` overflow guard, not a transcribed constant
+        // -- any digit string long enough to push `acc` past this point is already far beyond
+        // `i32::MAX`, so growth stops (the final clamp to `i32::MIN`/`i32::MAX` below fires
+        // either way) rather than risking `acc * 10` overflowing `i64` itself on a pathological
+        // input with thousands of digits.
+        if acc <= 10_000_000_000i64 {
+            // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.1 -- decimal digits accumulate in
+            // base 10.
+            acc = acc * 10 + (bytes[i] - b'0') as i64;
+        }
+        i += 1;
+    }
+    if i == digits_start {
+        return Some((true, 0));
+    }
+    let signed: i64 = if neg { -acc } else { acc };
+    if signed > i32::MAX as i64 {
+        Some((true, i32::MAX))
+    } else if signed < i32::MIN as i64 {
+        Some((true, i32::MIN))
+    } else {
+        Some((false, signed as i32))
+    }
+}
+
+/// Reproduces `std::getline(is, item, ',')` used in a `while (std::getline(...))` loop (every
+/// comma/`#`/`x`-separated split in this unit, e.g. `Config.hpp:943`, `Config.cpp:1770`): unlike
+/// `str::split`, a trailing delimiter yields no final empty field, because the `getline` call
+/// that would produce it finds nothing before EOF and fails outright, so the loop simply never
+/// runs that last time. An empty `s` yields no fields at all (the very first `getline` call fails
+/// immediately), where `str::split` would yield one empty field.
+///
+/// Verified against this machine's own `clang++`/libc++ (`std::getline`) across the empty
+/// string, a lone delimiter, leading/trailing/doubled delimiters and ordinary fields.
+fn cpp_getline_split(s: &str, delim: char) -> Vec<&str> {
+    if s.is_empty() {
+        return Vec::new();
+    }
+    let mut parts: Vec<&str> = s.split(delim).collect();
+    if s.ends_with(delim) {
+        parts.pop();
+    }
+    parts
+}
+
+/// Shared by `ConfigOptionPoints`/`ConfigOptionPointsGroups::deserialize` (`Config.hpp:1629-1639`,
+/// `:1783-1794`) for one `"<x>x<y>"` point substring, exactly as the vendored nested
+/// `std::getline(iss, coord_str, 'x')` chain parses it: at most two `x`-separated coordinate
+/// tokens (`cpp_getline_split`), each extracted with `cpp_istream_extract_f64` and assigned
+/// **unconditionally** (no `iss.fail()` check, same as the float vector paths) -- a coordinate
+/// token that doesn't appear at all, or that extraction leaves untouched (an empty/whitespace
+/// token), leaves that axis at `Vec2d::Zero()`'s `0.0`, since the vendored `Vec2d
+/// point(Vec2d::Zero())` is simply never reassigned on that axis.
+fn cpp_parse_x_separated_point(point_str: &str) -> Vec2d {
+    let coords = cpp_getline_split(point_str, 'x');
+    let coord_or_zero = |c: &str| match cpp_istream_extract_f64(c) {
+        Some((_, v)) => v,
+        // PORT SRC: external: Eigen's `Vector::Zero()` -- every component is `0.0`, this axis's
+        // starting value when the vendored `Vec2d point(Vec2d::Zero())` is never reassigned.
+        None => 0.0,
+    };
+    // PORT SRC: external: Eigen's `Vector::Zero()` -- same starting value as above, for a
+    // missing `x` coordinate token.
+    let x = coords.first().map(|c| coord_or_zero(c)).unwrap_or(0.0);
+    // PORT SRC: external: Eigen's `Vector::Zero()` -- same starting value, for a missing `y`.
+    let y = coords.get(1).map(|c| coord_or_zero(c)).unwrap_or(0.0);
+    Vec2d::new(x, y)
 }
 
 // =================================================================================================
@@ -426,16 +833,25 @@ pub trait ConfigOption: fmt::Debug {
     }
     /// `virtual bool overriden_by(const ConfigOption *rhs) const` (`:309-312`): the oracle's
     /// `assert` is compiled out of its release build, so `debug_assert!` here (`### Error sets`).
+    /// This base-trait default is this method's whole body for every **scalar**
+    /// (`ConfigOptionSingle<T>`-based) type, which the vendored tree never overrides it for.
+    /// **Review finding, fixed here**: an earlier version of this doc comment claimed "no
+    /// override of this method exists anywhere in the vendored tree" at all, which
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`) directly contradicts -- every
+    /// vector type overrides this (and `apply_override` below) with [`vector_overridden_by`]
+    /// (and [`vector_apply_override`]), not this default.
     fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
         debug_assert!(!self.nullable() && !rhs.nullable());
         Ok(!self.eq_dyn(rhs)?)
     }
     /// `virtual bool apply_override(const ConfigOption *rhs, std::vector<int>& default_index)`
     /// (`:314-319`). The vendored body's `*this = *rhs` assigns only through the base-class
-    /// slice -- `ConfigOption` itself declares no data member, and no override of this method
-    /// exists anywhere in the vendored tree, so that assignment touches no derived type's real
-    /// data. Reproduced faithfully as the no-op it actually is, not "corrected" into copying
-    /// `rhs`'s value (`docs/WORKFLOW.md` "The rejection rule": port what the source does).
+    /// slice -- `ConfigOption` itself declares no data member -- so for a **scalar** type, which
+    /// the vendored tree never overrides this method for, that assignment touches no derived
+    /// type's real data; reproduced faithfully here as the no-op it actually is for a scalar
+    /// type, not "corrected" into copying `rhs`'s value (`docs/WORKFLOW.md` "The rejection rule":
+    /// port what the source does). See `overridden_by`'s doc comment just above for where the
+    /// vendored tree *does* override this (every vector type).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -456,6 +872,111 @@ impl Clone for Box<dyn ConfigOption> {
     fn clone(&self) -> Self {
         self.clone_box()
     }
+}
+
+/// Shared by every `ConfigOptionVector<T>`-based concrete type's `overridden_by`
+/// (`Config.hpp:746-764`) -- generic over the vector's own element type `T`, since the vendored
+/// method is one `template <class T> class ConfigOptionVector` body every instantiation reuses
+/// unchanged. **Review finding, fixed here**: an earlier version of this module ported neither
+/// this override nor [`vector_apply_override`], leaving every vector type on `ConfigOption`'s
+/// own no-op/exact-equality base-trait defaults.
+fn vector_overridden_by<T: PartialEq>(
+    self_values: &[T],
+    self_nullable: bool,
+    rhs_values: &[T],
+    rhs_nullable: bool,
+    rhs_is_nil: impl Fn(usize) -> bool,
+) -> Result<bool, ConfigError> {
+    if self_nullable {
+        return Err(ConfigError::Configuration(
+            "Cannot override a nullable ConfigOption.".to_string(),
+        ));
+    }
+    if !rhs_nullable {
+        // Overridding a non-nullable object with another non-nullable object.
+        return Ok(self_values != rhs_values);
+    }
+    let mut i = 0usize;
+    let cnt = self_values.len().min(rhs_values.len());
+    while i < cnt {
+        if !rhs_is_nil(i) && self_values[i] != rhs_values[i] {
+            return Ok(true);
+        }
+        i += 1;
+    }
+    while i < rhs_values.len() {
+        if !rhs_is_nil(i) {
+            return Ok(true);
+        }
+        i += 1;
+    }
+    Ok(false)
+}
+
+/// Shared by every `ConfigOptionVector<T>`-based concrete type's `apply_override`
+/// (`Config.hpp:767-814`) -- see [`vector_overridden_by`]'s doc comment. `default_index` is
+/// 0-based, exactly as the vendored parameter is documented. The vendored `this->values.empty()`
+/// branch (`:787-788`) is not reachable here or there: `cnt = min(size, rhs.size())` returning
+/// `< 1` whenever either side is empty already returns early (`:784-785`), so a genuinely empty
+/// `self_values` never reaches the resize below -- transcribed as the single branch that *can*
+/// run, not the dead one, rather than adding a `T: Default` bound this module's other vector
+/// types do not all satisfy for a branch that cannot execute.
+fn vector_apply_override<T: PartialEq + Clone>(
+    self_values: &mut Vec<T>,
+    self_nullable: bool,
+    rhs_values: &[T],
+    rhs_nullable: bool,
+    rhs_is_nil: impl Fn(usize) -> bool,
+    default_index: &[i32],
+) -> Result<bool, ConfigError> {
+    if self_nullable {
+        return Err(ConfigError::Configuration(
+            "Cannot override a nullable ConfigOption.".to_string(),
+        ));
+    }
+    if !rhs_nullable {
+        // Overridding a non-nullable object with another non-nullable object.
+        if self_values.as_slice() != rhs_values {
+            self_values.clear();
+            self_values.extend_from_slice(rhs_values);
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+
+    let cnt = self_values.len().min(rhs_values.len());
+    if cnt < 1 {
+        return Ok(false);
+    }
+
+    let default_value = self_values.clone();
+    // `self_values` is non-empty here: `cnt >= 1` with `cnt = min(self.len(), rhs.len())` means
+    // both sides have at least one element (see this function's own doc comment).
+    let front = self_values[0].clone();
+    self_values.resize(rhs_values.len(), front);
+
+    let mut modified = false;
+    for (i, rv) in rhs_values.iter().enumerate() {
+        if !rhs_is_nil(i) {
+            self_values[i] = rv.clone();
+            modified = true;
+        } else {
+            // Orca: a negative slot (failed variant lookup) must not silently collapse the
+            // whole array to the first slot's value -- the int-vs-size_t comparison used to
+            // promote -1 past the bounds check. Keep the slot's own value (get_at-style clamp)
+            // when no valid index is available.
+            let fallback = if i < default_index.len()
+                && default_index[i] >= 0
+                && (default_index[i] as usize) < default_value.len()
+            {
+                default_index[i] as usize
+            } else {
+                i.min(default_value.len() - 1)
+            };
+            self_values[i] = default_value[fallback].clone();
+        }
+    }
+    Ok(modified)
 }
 
 /// `bool operator!=(const ConfigOption &rhs) const { return !(*this == rhs); }` (`:299`): a
@@ -601,6 +1122,13 @@ impl<T: Clone> ConfigOptionVector<T> {
     /// `T& get_at(size_t i)` (declared per concrete type below, via this shared helper): reads
     /// index `i`, or the first element if `i` is out of range -- every concrete type's own
     /// `get_at` repeats this same "front() if out of range" fallback the vendored source uses.
+    // PORT NOTE: src/libslic3r/Config.hpp:676-679 -- `assert(! this->values.empty());` guards an
+    // empty vector in the oracle's debug build only; the oracle's release build (this unit's
+    // own equality tier is proven against the release-built oracle) compiles that assertion out
+    // and then reads `values.front()` on an empty vector, undefined behaviour. `self.values[0]`
+    // here is a live `panic!` on the same input instead of UB, which `docs/PORTING.md`'s
+    // banned-substitution list names explicitly -- named here, at every concrete vector type's
+    // own repeat of this same fallback, rather than silently matched or silently left as a panic.
     pub fn get_at(&self, i: usize) -> T {
         if i < self.values.len() {
             self.values[i].clone()
@@ -624,13 +1152,17 @@ impl ConfigOption for ConfigOptionFloat {
     fn serialize(&self) -> String {
         float_to_string_decimal_point(self.value, None)
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:845-855 -- `std::istringstream >> double`, not Rust's
+    // `str::parse`; see `cpp_istream_extract_f64`'s own doc comment for the semantics and how
+    // they were verified. On failure `this->value` is left untouched, exactly as the vendored
+    // `if (iss.fail()) return false;` leaves the local `value` never copied into it.
     fn deserialize(&mut self, s: &str, _append: bool) -> bool {
-        match s.trim().parse::<f64>() {
-            Ok(v) => {
+        match cpp_istream_extract_f64(s) {
+            Some((false, v)) => {
                 self.value = v;
                 true
             }
-            Err(_) => false,
+            _ => false,
         }
     }
     fn clone_box(&self) -> Box<dyn ConfigOption> {
@@ -742,6 +1274,16 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
         }
         parts.join(",")
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:938-955 -- `std::getline(is, item_str, ',')`, not
+    // `str::split` (see `cpp_getline_split`), and `iss >> value` with **no** `iss.fail()` check:
+    // the vendored body pushes whatever `value` ends up holding even on a failed extraction
+    // (forced to 0, or the overflowing `+-inf` `strtod` returns on `ERANGE`), unlike the scalar
+    // `ConfigOptionFloat::deserialize` above. The one case the vendored `double value;` leaves
+    // genuinely uninitialised -- an all-whitespace/empty item, where `iss`'s sentry never enters
+    // extraction at all -- is undefined behaviour at the pin; this substitutes `0.0`, the value a
+    // freshly-initialised `double` would hold, as the nearest honest stand-in for reading
+    // uninitialised memory (not a value measured from the oracle, since there is none to measure
+    // deterministically).
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if !append {
             self.values.clear();
@@ -750,7 +1292,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
             self.values.push(0_f64);
             return true;
         }
-        for item in s.split(',') {
+        for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
                 if !NULLABLE {
@@ -758,10 +1300,14 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
                 }
                 self.values.push(Self::nil_value());
             } else {
-                // PORT SRC: external: ISO/IEC 14882 (C++ standard), [istream.formatted.arithmetic] --
-                // on extraction failure of an arithmetic type, the extracted value is set to 0 and
-                // failbit is set.
-                self.values.push(item.parse::<f64>().unwrap_or(0.0));
+                let v = match cpp_istream_extract_f64(item) {
+                    Some((_, v)) => v,
+                    // PORT SRC: external: this port's own substitute for the vendored
+                    // `double value;`'s uninitialised-memory case -- see this method's own doc
+                    // comment.
+                    None => 0.0,
+                };
+                self.values.push(v);
             }
         }
         true
@@ -809,6 +1355,62 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
                 )
             })?;
         Ok(Self::vectors_equal(&self.values, &o.values))
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`) -- see
+    /// [`vector_overridden_by`]'s doc comment.
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        if rhs.option_type() != self.option_type() {
+            return Err(ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            ));
+        }
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                 (or vice versa) is not representable by this downcast; both share one \
+                 ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                 one type regardless of NULLABLE (see the module doc's known limitation)."
+                    .to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`) -- see
+    /// [`vector_apply_override`]'s doc comment.
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        if rhs.option_type() != self.option_type() {
+            return Err(ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            ));
+        }
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                 (or vice versa) is not representable by this downcast; both share one \
+                 ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                 one type regardless of NULLABLE (see the module doc's known limitation)."
+                    .to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         NULLABLE
@@ -1152,13 +1754,15 @@ impl ConfigOption for ConfigOptionInt {
     fn serialize(&self) -> String {
         self.value.to_string()
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:1040-1050 -- `std::istringstream >> int`, not Rust's
+    // `str::parse`; see `cpp_istream_extract_i32`'s own doc comment.
     fn deserialize(&mut self, s: &str, _append: bool) -> bool {
-        match s.trim().parse::<i32>() {
-            Ok(v) => {
+        match cpp_istream_extract_i32(s) {
+            Some((false, v)) => {
                 self.value = v;
                 true
             }
-            Err(_) => false,
+            _ => false,
         }
     }
     fn clone_box(&self) -> Box<dyn ConfigOption> {
@@ -1245,11 +1849,17 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
             .collect::<Vec<_>>()
             .join(",")
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:1115-1131 -- `std::getline(is, item_str, ',')` (see
+    // `cpp_getline_split`), not `str::split`; unlike `ConfigOptionFloatsTempl`, this type's
+    // vendored `deserialize` has **no** empty-string special case at all, so an empty `str`
+    // leaves `values` untouched (0 pushes), where `str::split(',')` on `""` would wrongly push
+    // one spurious `0`. `iss >> value` also has no `iss.fail()` check, same as the float vector
+    // path.
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if !append {
             self.values.clear();
         }
-        for item in s.split(',') {
+        for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
                 if !NULLABLE {
@@ -1257,7 +1867,11 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
                 }
                 self.values.push(Self::nil_value());
             } else {
-                self.values.push(item.parse::<i32>().unwrap_or(0));
+                let v = match cpp_istream_extract_i32(item) {
+                    Some((_, v)) => v,
+                    None => 0,
+                };
+                self.values.push(v);
             }
         }
         true
@@ -1305,6 +1919,60 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
                 )
             })?;
         Ok(self.values == o.values)
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        if rhs.option_type() != self.option_type() {
+            return Err(ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            ));
+        }
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                 (or vice versa) is not representable by this downcast; both share one \
+                 ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                 one type regardless of NULLABLE (see the module doc's known limitation)."
+                    .to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        if rhs.option_type() != self.option_type() {
+            return Err(ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            ));
+        }
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                 (or vice versa) is not representable by this downcast; both share one \
+                 ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                 one type regardless of NULLABLE (see the module doc's known limitation)."
+                    .to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         NULLABLE
@@ -1768,6 +2436,42 @@ impl ConfigOption for ConfigOptionStrings {
         })?;
         Ok(self.values == o.values)
     }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
+    }
     fn is_nil(&self) -> bool {
         false
     }
@@ -2021,16 +2725,18 @@ impl ConfigOptionVectorBase for ConfigOptionStrings {
 /// `pub type ConfigOptionPercent = ConfigOptionSingle<f64>;`, which is the exact same Rust type
 /// as `ConfigOptionFloat` (also `ConfigOptionSingle<f64>`) -- `ConfigOptionPercent::option_type()`
 /// would have resolved to `ConfigOptionFloat`'s `impl ConfigOption` and returned `Float`, not
-/// `Percent`. Named `ConfigOptionPercentValue` here (not `ConfigOptionPercent`) only to read
-/// distinctly from the type map's own `coPercent` row in prose elsewhere in this file; it is the
-/// one and only Rust type this module exports for `coPercent`.
+/// `Percent`. Named `ConfigOptionPercent`, matching the vendored name: a reviewer measured the
+/// earlier `ConfigOptionPercentValue` spelling as its own small divergence (every fan-out call
+/// site would otherwise need a name the vendored tree does not contain), and the one reason the
+/// earlier name gave for differing -- reading distinctly from the type map's own `coPercent` row
+/// in prose -- does not hold once this is a struct of its own rather than a type alias.
 #[derive(Debug, Clone, Default)]
-pub struct ConfigOptionPercentValue {
+pub struct ConfigOptionPercent {
     pub value: f64,
 }
-impl ConfigOptionPercentValue {
+impl ConfigOptionPercent {
     pub fn new(value: f64) -> Self {
-        ConfigOptionPercentValue { value }
+        ConfigOptionPercent { value }
     }
     /// `get_abs_value(double ratio_over)` (`:1251`).
     pub fn get_abs_value(&self, ratio_over: f64) -> f64 {
@@ -2038,7 +2744,7 @@ impl ConfigOptionPercentValue {
         ratio_over * self.value / 100_f64
     }
 }
-impl ConfigOption for ConfigOptionPercentValue {
+impl ConfigOption for ConfigOptionPercent {
     fn option_type(&self) -> ConfigOptionType {
         ConfigOptionType::Percent
     }
@@ -2046,29 +2752,57 @@ impl ConfigOption for ConfigOptionPercentValue {
     fn serialize(&self) -> String {
         format!("{}%", float_to_string_decimal_point(self.value, None))
     }
-    /// `deserialize()` (`:1262-1273`): the trailing `%` is optional and ignored on input.
+    /// `deserialize()` (`:1262-1273`): the vendored body is `iss >> value`, the exact same
+    /// extraction `ConfigOptionFloat::deserialize` performs, with **no** manual stripping of a
+    /// trailing `%` at all -- the comment at the site says why: `istream`'s own extraction
+    /// already stops at the first non-numeric character, so a trailing `%` is simply never
+    /// consumed, with no special-casing needed. A prior version of this method *did*
+    /// `trim_end_matches('%')` by hand, which is not equivalent: `"5%3"` or `"5%mm"` (`%` not at
+    /// the very end) would fail to strip anything and so fail to parse at all, where the
+    /// vendored extraction (and `cpp_istream_extract_f64`, faithfully) stops cleanly at the `%`
+    /// and succeeds with `5`.
     fn deserialize(&mut self, s: &str, _append: bool) -> bool {
-        let trimmed = s.trim().trim_end_matches('%');
-        match trimmed.trim().parse::<f64>() {
-            Ok(v) => {
+        match cpp_istream_extract_f64(s) {
+            Some((false, v)) => {
                 self.value = v;
                 true
             }
-            Err(_) => false,
+            _ => false,
         }
     }
     fn clone_box(&self) -> Box<dyn ConfigOption> {
         Box::new(self.clone())
     }
+    /// `:333-339` (`ConfigOptionSingle<T>::set`, inherited, not overridden): throws on a type
+    /// mismatch. **Review finding, fixed here**: an earlier version of this method had no such
+    /// check at all, so a plain `coFloat` operand would silently overwrite a `coPercent`.
     fn set(&mut self, other: &dyn ConfigOption) -> Result<(), ConfigError> {
+        if other.option_type() != self.option_type() {
+            return Err(ConfigError::Configuration(
+                "ConfigOptionSingle: Assigning an incompatible type".to_string(),
+            ));
+        }
         self.value = other.get_float()?;
         Ok(())
     }
     fn get_float(&self) -> Result<f64, ConfigError> {
         Ok(self.value)
     }
+    /// `using ConfigOptionFloat::operator==;` (`:1247`) resolves `operator==(const
+    /// ConfigOption&)` to `ConfigOptionFloat`'s own (`:856-862`): a type check, then
+    /// `ConfigOptionFloat::operator==(const ConfigOptionFloat&)` = `is_approx` (`:834`), not
+    /// exact equality. **Review finding, fixed here**: an earlier version had neither the type
+    /// check nor `is_approx`, comparing `self.value == rhs.get_float()?` directly.
     fn eq_dyn(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
-        Ok(self.value == rhs.get_float()?)
+        if rhs.option_type() != self.option_type() {
+            return Err(ConfigError::Configuration(
+                "ConfigOptionPercent: Comparing incompatible types".to_string(),
+            ));
+        }
+        Ok(slic3r_libslic3r::libslic3r::is_approx_default(
+            self.value,
+            rhs.get_float()?,
+        ))
     }
     fn hash_value(&self) -> u64 {
         use std::hash::{Hash, Hasher};
@@ -2122,11 +2856,22 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionPercentsTempl<NULLABLE> 
             .collect::<Vec<_>>()
             .join(",")
     }
+    // PORT NOTE: Config.hpp:1325 -- `ConfigOptionPercentsTempl` declares no `deserialize`
+    // override at all (the comment at the site: "The float's deserialize function shall ignore
+    // the trailing optional %."); it inherits `ConfigOptionFloatsTempl<NULLABLE>::deserialize`
+    // (`:938-955`) unchanged, which already stops cleanly at a `%` the same way it stops at any
+    // other non-numeric trailing character (see `cpp_istream_extract_f64`). A prior version of
+    // this method manually `trim_end_matches('%')`ed and used `str::split`/`str::parse` --
+    // see `ConfigOptionPercent::deserialize`'s own doc comment for why that is not equivalent.
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if !append {
             self.values.clear();
         }
-        for item in s.split(',') {
+        if s.is_empty() {
+            self.values.push(0_f64);
+            return true;
+        }
+        for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
                 if !NULLABLE {
@@ -2134,11 +2879,14 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionPercentsTempl<NULLABLE> 
                 }
                 self.values.push(f64::NAN);
             } else {
-                self.values
-                    // PORT SRC: external: ISO/IEC 14882 (C++ standard), [istream.formatted.arithmetic] --
-                    // on extraction failure of an arithmetic type, the extracted value is set to 0 and
-                    // failbit is set.
-                    .push(item.trim_end_matches('%').parse::<f64>().unwrap_or(0.0));
+                let v = match cpp_istream_extract_f64(item) {
+                    Some((_, v)) => v,
+                    // PORT SRC: external: this port's own substitute for the vendored
+                    // `double value;`'s uninitialised-memory case -- see this method's own doc
+                    // comment.
+                    None => 0.0,
+                };
+                self.values.push(v);
             }
         }
         true
@@ -2165,6 +2913,42 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionPercentsTempl<NULLABLE> 
             &self.values,
             &o.values,
         ))
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         NULLABLE
@@ -2434,14 +3218,18 @@ impl ConfigOption for ConfigOptionFloatOrPercent {
             body
         }
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:1380-1390 -- `iss >> value` on the raw string (see
+    // `cpp_istream_extract_f64`'s doc comment), then `percent = str.find_first_of("%") !=
+    // npos` on the *whole original* string, not the numeric prefix -- already how `self.percent`
+    // below is computed.
     fn deserialize(&mut self, s: &str, _append: bool) -> bool {
-        match s.trim().trim_end_matches('%').trim().parse::<f64>() {
-            Ok(v) => {
+        match cpp_istream_extract_f64(s) {
+            Some((false, v)) => {
                 self.value = v;
                 self.percent = s.contains('%');
                 true
             }
-            Err(_) => false,
+            _ => false,
         }
     }
     fn clone_box(&self) -> Box<dyn ConfigOption> {
@@ -2534,11 +3322,17 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsOrPercentsTempl<NU
             .collect::<Vec<_>>()
             .join(",")
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:1453-1478 -- `std::getline(is, item_str, ',')` (see
+    // `cpp_getline_split`), no empty-string special case (same as `ConfigOptionIntsTempl`),
+    // `item_str.find_first_of("%")` on the whole item (not the numeric prefix) for `percent`, and
+    // `iss >> value` with **no** `iss.fail()` check -- pushed unconditionally, same as the float
+    // vector path (see `ConfigOptionFloatsTempl::deserialize`'s own doc comment for the
+    // uninitialised-item substitution of `0.0`).
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if !append {
             self.values.clear();
         }
-        for item in s.split(',') {
+        for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
                 if !NULLABLE {
@@ -2547,10 +3341,13 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsOrPercentsTempl<NU
                 self.values.push(Self::nil_value());
             } else {
                 let percent = item.contains('%');
-                // PORT SRC: external: ISO/IEC 14882 (C++ standard), [istream.formatted.arithmetic] --
-                // on extraction failure of an arithmetic type, the extracted value is set to 0 and
-                // failbit is set.
-                let v = item.trim_end_matches('%').parse::<f64>().unwrap_or(0.0);
+                let v = match cpp_istream_extract_f64(item) {
+                    Some((_, v)) => v,
+                    // PORT SRC: external: this port's own substitute for the vendored
+                    // `double value;`'s uninitialised-memory case -- see this method's own doc
+                    // comment.
+                    None => 0.0,
+                };
                 self.values.push(FloatOrPercent::new(v, percent));
             }
         }
@@ -2586,6 +3383,42 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsOrPercentsTempl<NU
         } else {
             Ok(self.values == o.values)
         }
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         NULLABLE
@@ -2932,13 +3765,23 @@ impl ConfigOption for ConfigOptionPoints {
     fn serialize(&self) -> String {
         self.values
             .iter()
-            .map(|p| format!("{}x{}", p.x(), p.y()))
+            .map(|p| {
+                format!(
+                    "{}x{}",
+                    float_to_string_decimal_point(p.x(), None),
+                    float_to_string_decimal_point(p.y(), None)
+                )
+            })
             .collect::<Vec<_>>()
             .join(",")
     }
     /// `deserialize()` (`:1619-1643`). The extended exclusion-volume syntax (`|`, `;`, `..`)
     /// belongs to a different, dedicated string option; rejecting it here makes a caller that
     /// mistakenly reaches this type fail loudly instead of silently misparsing it.
+    // PORT NOTE: src/libslic3r/Config.hpp:1629-1639 -- `std::getline(is, point_str, ',')` (see
+    // `cpp_getline_split`), not `str::split`, and each point's `x`/`y` via the nested
+    // `std::getline(iss, coord_str, 'x')` chain (see `cpp_parse_x_separated_point`'s own doc
+    // comment), not `str::split('x')` + `str::parse`.
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if s.contains('|') || s.contains(';') || s.contains("..") {
             return false;
@@ -2946,23 +3789,8 @@ impl ConfigOption for ConfigOptionPoints {
         if !append {
             self.values.clear();
         }
-        for point_str in s.split(',') {
-            let mut it = point_str.split('x');
-            let x = it
-                .next()
-                .and_then(|v| v.trim().parse::<f64>().ok())
-                // PORT SRC: external: ISO/IEC 14882 (C++ standard), [istream.formatted.arithmetic] --
-                // on extraction failure of an arithmetic type, the extracted value is set to 0 and
-                // failbit is set.
-                .unwrap_or(0.0);
-            let y = it
-                .next()
-                .and_then(|v| v.trim().parse::<f64>().ok())
-                // PORT SRC: external: ISO/IEC 14882 (C++ standard), [istream.formatted.arithmetic] --
-                // on extraction failure of an arithmetic type, the extracted value is set to 0 and
-                // failbit is set.
-                .unwrap_or(0.0);
-            self.values.push(Vec2d::new(x, y));
+        for point_str in cpp_getline_split(s, ',') {
+            self.values.push(cpp_parse_x_separated_point(point_str));
         }
         true
     }
@@ -2985,6 +3813,42 @@ impl ConfigOption for ConfigOptionPoints {
             )
         })?;
         Ok(self.values == o.values)
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn is_nil(&self) -> bool {
         false
@@ -3009,7 +3873,13 @@ impl ConfigOptionVectorBase for ConfigOptionPoints {
     fn vserialize(&self) -> Vec<String> {
         self.values
             .iter()
-            .map(|p| format!("{}x{}", p.x(), p.y()))
+            .map(|p| {
+                format!(
+                    "{}x{}",
+                    float_to_string_decimal_point(p.x(), None),
+                    float_to_string_decimal_point(p.y(), None)
+                )
+            })
             .collect()
     }
     fn set_from_vec(&mut self, rhs: &[&dyn ConfigOption]) -> Result<(), ConfigError> {
@@ -3298,7 +4168,13 @@ impl ConfigOptionPointsGroups {
     }
     fn serialize_single_value(v: &[Vec2d]) -> String {
         v.iter()
-            .map(|p| format!("{}x{}", p.x(), p.y()))
+            .map(|p| {
+                format!(
+                    "{}x{}",
+                    float_to_string_decimal_point(p.x(), None),
+                    float_to_string_decimal_point(p.y(), None)
+                )
+            })
             .collect::<Vec<_>>()
             .join(",")
     }
@@ -3314,32 +4190,21 @@ impl ConfigOption for ConfigOptionPointsGroups {
             .collect::<Vec<_>>()
             .join("#")
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:1746-1767 -- nested `std::getline`: groups split on
+    // `'#'`, points within a group on `','`, each point's `x`/`y` via the `'x'`-splitting chain
+    // (see `cpp_getline_split` and `cpp_parse_x_separated_point`'s own doc comments), none of
+    // them `str::split`. The vendored loop does **not** skip an empty `point_str` (two adjacent
+    // commas, or a group with none at all): it pushes `Vec2d::Zero()` for it, same as
+    // `cpp_parse_x_separated_point` already does for an empty input; a prior version of this
+    // method's `if point_str.is_empty() { continue; }` silently dropped that point instead.
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if !append {
             self.values.clear();
         }
-        for group_str in s.split('#') {
+        for group_str in cpp_getline_split(s, '#') {
             let mut group = Vec2ds::new();
-            for point_str in group_str.split(',') {
-                if point_str.is_empty() {
-                    continue;
-                }
-                let mut it = point_str.split('x');
-                let x = it
-                    .next()
-                    .and_then(|v| v.trim().parse::<f64>().ok())
-                    // PORT SRC: external: ISO/IEC 14882 (C++ standard), [istream.formatted.arithmetic] --
-                    // on extraction failure of an arithmetic type, the extracted value is set to 0 and
-                    // failbit is set.
-                    .unwrap_or(0.0);
-                let y = it
-                    .next()
-                    .and_then(|v| v.trim().parse::<f64>().ok())
-                    // PORT SRC: external: ISO/IEC 14882 (C++ standard), [istream.formatted.arithmetic] --
-                    // on extraction failure of an arithmetic type, the extracted value is set to 0 and
-                    // failbit is set.
-                    .unwrap_or(0.0);
-                group.push(Vec2d::new(x, y));
+            for point_str in cpp_getline_split(group_str, ',') {
+                group.push(cpp_parse_x_separated_point(point_str));
             }
             self.values.push(group);
         }
@@ -3364,6 +4229,42 @@ impl ConfigOption for ConfigOptionPointsGroups {
             )
         })?;
         Ok(self.values == o.values)
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         false
@@ -3624,15 +4525,22 @@ impl ConfigOption for ConfigOptionIntsGroups {
             .collect::<Vec<_>>()
             .join("#")
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:1858-1874 -- nested `std::getline` (groups on `'#'`,
+    // values within a group on `','`, see `cpp_getline_split`), not `str::split`, and `iss >>
+    // value` pushed unconditionally (no `iss.fail()` check, same as every other vector
+    // `deserialize` in this unit); a prior version filtered out empty tokens instead of pushing
+    // `0` for one, same divergence `ConfigOptionPointsGroups::deserialize` had.
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if !append {
             self.values.clear();
         }
-        for group_str in s.split('#') {
-            let group: Vec<i32> = group_str
-                .split(',')
-                .filter(|s| !s.is_empty())
-                .map(|v| v.trim().parse::<i32>().unwrap_or(0))
+        for group_str in cpp_getline_split(s, '#') {
+            let group: Vec<i32> = cpp_getline_split(group_str, ',')
+                .into_iter()
+                .map(|v| match cpp_istream_extract_i32(v) {
+                    Some((_, n)) => n,
+                    None => 0,
+                })
                 .collect();
             self.values.push(group);
         }
@@ -3657,6 +4565,42 @@ impl ConfigOption for ConfigOptionIntsGroups {
             )
         })?;
         Ok(self.values == o.values)
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         false
@@ -4068,6 +5012,42 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionBoolsTempl<NULLABLE> {
             )
         })?;
         Ok(self.values == o.values)
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         NULLABLE
@@ -4580,11 +5560,13 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
             .collect::<Vec<_>>()
             .join(",")
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:2266-2285 -- `std::getline(is, item_str, ',')` (see
+    // `cpp_getline_split`), not `str::split`.
     fn deserialize(&mut self, s: &str, append: bool) -> bool {
         if !append {
             self.values.clear();
         }
-        for item in s.split(',') {
+        for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
                 if !NULLABLE {
@@ -4624,6 +5606,44 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
             )
         })?;
         Ok(self.values == o.values)
+    }
+    /// `ConfigOptionVector<T>::overriden_by` (`Config.hpp:746-764`) -- inherited unchanged
+    /// (neither `ConfigOptionInts` nor this type overrides it).
+    fn overridden_by(&self, rhs: &dyn ConfigOption) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.overriden_by() applied to different types.".to_string(),
+            )
+        })?;
+        vector_overridden_by(
+            &self.values,
+            self.nullable(),
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+        )
+    }
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`) -- see `overridden_by`
+    /// just above.
+    fn apply_override(
+        &mut self,
+        rhs: &dyn ConfigOption,
+        default_index: &mut Vec<i32>,
+    ) -> Result<bool, ConfigError> {
+        let o = rhs.as_any().downcast_ref::<Self>().ok_or_else(|| {
+            ConfigError::Configuration(
+                "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+            )
+        })?;
+        let self_nullable = self.nullable();
+        vector_apply_override(
+            &mut self.values,
+            self_nullable,
+            &o.values,
+            o.nullable(),
+            |i| o.is_nil_at(i),
+            default_index,
+        )
     }
     fn nullable(&self) -> bool {
         NULLABLE
@@ -5446,7 +6466,7 @@ impl ConfigOptionDef {
                 Ints => Box::new(ConfigOptionInts::new()),
                 String => Box::new(ConfigOptionString::default()),
                 Strings => Box::new(ConfigOptionStrings::new()),
-                Percent => Box::new(ConfigOptionPercentValue::default()),
+                Percent => Box::new(ConfigOptionPercent::default()),
                 Percents => Box::new(ConfigOptionPercentsTempl::<false>::default()),
                 FloatOrPercent => Box::new(ConfigOptionFloatOrPercent::default()),
                 FloatsOrPercents => Box::new(ConfigOptionFloatsOrPercentsTempl::<false>::default()),
@@ -5517,6 +6537,19 @@ impl ConfigOptionDef {
 /// `t_optiondef_map` (`Config.hpp:2650`).
 pub type TOptiondefMap = BTreeMap<String, ConfigOptionDef>;
 
+/// `serialization_key_ordinal_last` (`Config.cpp:365`): a function-local `static`, so one
+/// counter is shared by every `ConfigDef` in the process -- ordinals are globally unique, not
+/// per-instance. **Review finding, fixed here**: an earlier version of this module scoped the
+/// counter to each `ConfigDef` (`self.next_serialization_key_ordinal`), with a `// PORT NOTE:`
+/// justifying it on the claim that "the ordinal is read back only from its own ConfigDef's own
+/// `by_serialization_key_ordinal`" -- `PrintConfig.hpp:2534-2538`'s `PrintAndCLIConfigDef` merges
+/// the options of four *other* `ConfigDef`s into one map and then builds
+/// `by_serialization_key_ordinal` from their ordinals, which is cross-instance by construction
+/// and would collide under per-instance scoping.
+// PORT SRC: src/libslic3r/Config.cpp:365 -- initial value 0, matching `serialization_key_ordinal_last`'s.
+static NEXT_SERIALIZATION_KEY_ORDINAL: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 /// `ConfigDef` (`:2655-2683`).
 ///
 /// **Reported, not silently routed around: `by_serialization_key_ordinal` is not carried as a
@@ -5526,18 +6559,26 @@ pub type TOptiondefMap = BTreeMap<String, ConfigOptionDef>;
 /// the very struct that owns `self.options` and can still mutate it. That is a self-referential
 /// struct, which safe Rust has no representation for (no lifetime `'a` can simultaneously name
 /// "borrowed from `self.options`" and let `self.options` keep being `&mut`-accessed, the way
-/// `ConfigDef::add` already needs to while this map is being built). No module invents a Rust
-/// type for a row whose cell is filled (`docs/PORTING.md`), so this type is not invented as a
-/// stored field either: [`by_serialization_key_ordinal`](ConfigDef::by_serialization_key_ordinal)
-/// below is a *method*, computed on demand by scanning `self.options` for the matching
-/// `serialization_key_ordinal`, which gives every external caller the same lookup the vendored
-/// field gives without storing a type this crate cannot express safely. This task's
-/// corresponding `Done when` line ("each of the six raw-pointer fields ... carries the `rust
-/// type` cell ... verbatim") is **not met** for this one row; see the pull request body.
+/// `ConfigDef::add` already needs to while this map is being built). **Review finding, fixed
+/// here**: an earlier version of this module routed around the gap with a *method* that scanned
+/// `self.options` for the matching `serialization_key_ordinal` instead -- `docs/PORTING.md`'s
+/// "Raw-pointer fields"/"Decisions recorded on 2026-11-26" decision 6 is "no module invents a
+/// Rust type for a row whose cell is filled", and a method that gives every caller the field's
+/// lookup *is* inventing a differing representation for it, which `docs/WORKFLOW.md`'s rejection
+/// rule does not accept just because it is disclosed. There is no field here at all: this task's
+/// `Done when` line ("each of the six raw-pointer fields ... carries the `rust type` cell ...
+/// verbatim") is **not met** for this one row, named in the pull request body rather than routed
+/// around on this branch -- the cell is corrected by an amendment to `port/ownership.tsv` on
+/// `main` (decision 6's own route), or the field is left exactly where it would be with a
+/// `// TODO(port): src/libslic3r/Config.hpp:2659` marker, which is what follows.
+// TODO(port): src/libslic3r/Config.hpp:2659 -- `by_serialization_key_ordinal`,
+// `BTreeMap<usize, &'a ConfigOptionDef>` per port/ownership.tsv, is a map of references into this
+// same struct's own `options` field: self-referential, which safe Rust cannot express as a
+// stored field without `unsafe` or reference counting this unit's own design did not choose.
+// Not carried; see this struct's own doc comment and the pull request body.
 #[derive(Debug, Default)]
 pub struct ConfigDef {
     pub options: TOptiondefMap,
-    next_serialization_key_ordinal: usize,
 }
 
 impl ConfigDef {
@@ -5560,30 +6601,23 @@ impl ConfigDef {
     pub fn is_empty(&self) -> bool {
         self.options.is_empty()
     }
-    /// `add()` (`Config.cpp:363-372`). The vendored `serialization_key_ordinal_last` is a
-    /// function-local `static` shared by every `ConfigDef` -- this port scopes the counter to
-    /// `self` instead, since nothing in the compared surface reads `serialization_key_ordinal`
-    /// across two different `ConfigDef` instances.
-    // PORT NOTE: src/libslic3r/Config.cpp:365 -- `serialization_key_ordinal_last` is a
-    // function-local `static`, one counter shared by every ConfigDef in the process; this port
-    // scopes it per-ConfigDef (`self.next_serialization_key_ordinal`) instead, since the ordinal
-    // is read back only from its own ConfigDef's own `by_serialization_key_ordinal`.
+    /// `add()` (`Config.cpp:363-372`): `&this->options[opt_key]` -- `std::map::operator[]`
+    /// returns the *existing* entry when the key is already present, so a second `add` of the
+    /// same key keeps every field already set on it (tooltip, enum values, min/max, aliases, ...)
+    /// and only overwrites `opt_key`, `type` and `serialization_key_ordinal`, exactly as the
+    /// vendored body's three assignments do. **Review finding, fixed here**: an earlier version
+    /// built a fresh `ConfigOptionDef::default()` and `insert`ed it unconditionally, wiping every
+    /// field a previous `add` of the same key had set -- live at the pin, not theoretical:
+    /// `PrintConfig.cpp` re-`add`s `retract_lift_above` and `scale` under the same key more than
+    /// once.
     pub fn add(&mut self, opt_key: &str, option_type: ConfigOptionType) -> &mut ConfigOptionDef {
-        self.next_serialization_key_ordinal += 1;
-        let ordinal = self.next_serialization_key_ordinal;
-        let mut def = ConfigOptionDef::default();
+        let ordinal =
+            NEXT_SERIALIZATION_KEY_ORDINAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let def = self.options.entry(opt_key.to_string()).or_default();
         def.opt_key = opt_key.to_string();
         def.option_type = option_type;
         def.serialization_key_ordinal = ordinal;
-        self.options.insert(opt_key.to_string(), def);
-        self.options.get_mut(opt_key).expect("just inserted")
-    }
-    /// `ConfigDef::by_serialization_key_ordinal` (`:2659`) -- see the struct's own doc comment
-    /// for why this is a method, not a stored field, and the `Done when` line it leaves unmet.
-    pub fn by_serialization_key_ordinal(&self, ordinal: usize) -> Option<&ConfigOptionDef> {
-        self.options
-            .values()
-            .find(|d| d.serialization_key_ordinal == ordinal)
+        def
     }
     /// `add_nullable()` (`Config.cpp:374-379`).
     pub fn add_nullable(
@@ -5873,15 +6907,35 @@ pub trait ConfigBase: ConfigOptionResolver {
                         .unwrap_or(false);
                     if has_vec {
                         if let Some(other_opt) = other_opt {
-                            // `set_at()` pads from the first value, which an empty vector lacks
-                            // (`Config.cpp:507-509`'s own `resize(1, other_opt)` first).
-                            let my = self.option_throw_mut(opt_key2, true)?;
-                            if is_vector_empty(my) {
-                                resize_dyn(my, 1, Some(other_opt))?;
+                            // `Config.cpp:502-505` -- when the *source* vector is empty, the
+                            // whole option is assigned (`my_opt2->set(other_opt)`); only
+                            // otherwise does the vendored body resize-then-`set_at`.
+                            // **Review finding, fixed here**: an earlier version always took the
+                            // resize/`set_at` path, which `resize_dyn`/`set_at_dyn` then fail on
+                            // for a genuinely empty source ("Assigning from an empty vector"),
+                            // where the oracle assigns successfully.
+                            if other_opt.is_vector() && is_vector_empty(other_opt) {
+                                self.option_throw_mut(opt_key2, true)?.set(other_opt)?;
+                            } else {
+                                // `set_at()` pads from the first value, which an empty vector
+                                // lacks (`Config.cpp:507-509`'s own `resize(1, other_opt)` first).
+                                let my = self.option_throw_mut(opt_key2, true)?;
+                                if is_vector_empty(my) {
+                                    resize_dyn(my, 1, Some(other_opt))?;
+                                }
+                                // `std::atoi(opt_key.c_str() + n + 1)` (`Config.cpp:510`): parses
+                                // a leading run of digits (with an optional sign), `0` on no
+                                // valid prefix at all -- not Rust `str::parse`, which rejects a
+                                // trailing non-digit suffix such as `"3abc"` outright where
+                                // `atoi` reads `3`.
+                                let index: usize =
+                                    match cpp_istream_extract_i32(&opt_key[hash_pos + 1..]) {
+                                        Some((_, v)) => v.max(0) as usize,
+                                        None => 0,
+                                    };
+                                let my = self.option_throw_mut(opt_key2, true)?;
+                                set_at_dyn(my, other_opt, index, index)?;
                             }
-                            let index: usize = opt_key[hash_pos + 1..].parse().unwrap_or(0);
-                            let my = self.option_throw_mut(opt_key2, true)?;
-                            set_at_dyn(my, other_opt, index, index)?;
                         }
                         continue;
                     }
@@ -6187,7 +7241,7 @@ pub trait ConfigBase: ConfigOptionResolver {
             ConfigOptionType::Bool => return Ok(if raw.get_bool()? { 1_f64 } else { 0_f64 }),
             _ => {}
         }
-        let cast_opt: Option<ConfigOptionPercentValue>;
+        let cast_opt: Option<ConfigOptionPercent>;
         if raw.option_type() == ConfigOptionType::FloatOrPercent {
             let fop = raw
                 .as_any()
@@ -6199,11 +7253,11 @@ pub trait ConfigBase: ConfigOptionResolver {
             if !fop.percent {
                 return Ok(fop.value);
             }
-            cast_opt = Some(ConfigOptionPercentValue::new(fop.value));
+            cast_opt = Some(ConfigOptionPercent::new(fop.value));
         } else if raw.option_type() == ConfigOptionType::Percent {
             let p = raw
                 .as_any()
-                .downcast_ref::<ConfigOptionPercentValue>()
+                .downcast_ref::<ConfigOptionPercent>()
                 .expect("coPercent");
             cast_opt = Some(p.clone());
         } else {
@@ -6285,12 +7339,19 @@ pub trait ConfigBase: ConfigOptionResolver {
     fn save(&self, file: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         let mut f = std::fs::File::create(file)?;
-        // `Slic3r::header_slic3r_generated()` (`Utils.hpp:371`) is in a crate
-        // (`slic3r-utils`) that has not ported that function yet.
-        // TODO(port): src/libslic3r/Utils.hpp:371 -- header_slic3r_generated()'s real text is
-        // pending slic3r-utils's own ported module; this stand-in names the gap rather than
-        // guessing the format string.
-        writeln!(f, "# generated by OrcaSlicer")?;
+        // `Config.cpp:1611` is `c << "# " << Slic3r::header_slic3r_generated() << std::endl;`.
+        // `header_slic3r_generated()` itself (`Utils.cpp:1543-1546`) is not a runtime-formatted
+        // string at all -- it is `SLIC3R_APP_NAME " " SoftFever_VERSION`, a compile-time macro
+        // concatenation baked in from `version.inc`. **Review finding, fixed here**: an earlier
+        // version invented the literal `"# generated by OrcaSlicer"`, matching neither the
+        // vendored text nor its version. `slic3r-utils` has not ported the *function* yet (its
+        // own `// TODO(port):` at `Utils.hpp:371` says so), but the two macros it would return
+        // are pinned constants of the vendored submodule's own checked-in `version.inc`, not
+        // something that function computes at runtime, so this unit names them directly rather
+        // than waiting on a port that would just restate them.
+        // PORT SRC: vendor/OrcaSlicer/version.inc:4 -- SLIC3R_APP_NAME "OrcaSlicer"
+        // PORT SRC: vendor/OrcaSlicer/version.inc:10 -- SoftFever_VERSION "2.5.2"
+        writeln!(f, "# OrcaSlicer 2.5.2")?;
         for key in self.keys() {
             writeln!(f, "{key} = {}", self.opt_serialize(&key))?;
         }
@@ -6574,6 +7635,26 @@ fn vector_is_empty_dyn(opt: &dyn ConfigOption) -> bool {
                     .map(|v| v.values.is_empty())
             })
             .unwrap_or(true),
+        Enums => opt
+            .as_any()
+            .downcast_ref::<ConfigOptionEnumsGeneric>()
+            .map(|v| v.values.is_empty())
+            .or_else(|| {
+                opt.as_any()
+                    .downcast_ref::<ConfigOptionEnumsGenericNullable>()
+                    .map(|v| v.values.is_empty())
+            })
+            .unwrap_or(true),
+        PointsGroups => opt
+            .as_any()
+            .downcast_ref::<ConfigOptionPointsGroups>()
+            .map(|v| v.values.is_empty())
+            .unwrap_or(true),
+        IntsGroups => opt
+            .as_any()
+            .downcast_ref::<ConfigOptionIntsGroups>()
+            .map(|v| v.values.is_empty())
+            .unwrap_or(true),
         _ => true,
     }
 }
@@ -6626,6 +7707,12 @@ pub fn resize_dyn(
             try_resize!(ConfigOptionBools);
             try_resize!(ConfigOptionBoolsNullable);
         }
+        Enums => {
+            try_resize!(ConfigOptionEnumsGeneric);
+            try_resize!(ConfigOptionEnumsGenericNullable);
+        }
+        PointsGroups => try_resize!(ConfigOptionPointsGroups),
+        IntsGroups => try_resize!(ConfigOptionIntsGroups),
         _ => {}
     }
     Err(ConfigError::Configuration(
@@ -6673,6 +7760,12 @@ pub fn set_at_dyn(
             try_set_at!(ConfigOptionBools);
             try_set_at!(ConfigOptionBoolsNullable);
         }
+        Enums => {
+            try_set_at!(ConfigOptionEnumsGeneric);
+            try_set_at!(ConfigOptionEnumsGenericNullable);
+        }
+        PointsGroups => try_set_at!(ConfigOptionPointsGroups),
+        IntsGroups => try_set_at!(ConfigOptionIntsGroups),
         _ => {}
     }
     Err(ConfigError::Configuration(
@@ -6722,6 +7815,12 @@ pub fn clear_dyn(opt: &mut dyn ConfigOption) {
             try_clear!(ConfigOptionBools);
             try_clear!(ConfigOptionBoolsNullable);
         }
+        Enums => {
+            try_clear!(ConfigOptionEnumsGeneric);
+            try_clear!(ConfigOptionEnumsGenericNullable);
+        }
+        PointsGroups => try_clear!(ConfigOptionPointsGroups),
+        IntsGroups => try_clear!(ConfigOptionIntsGroups),
         _ => {}
     }
 }
@@ -7280,7 +8379,12 @@ impl<'a> DynamicConfig<'a> {
             .downcast_ref::<ConfigOptionBoolsNullable>()
             .map(|b| b.get_at(idx))
     }
-    /// `read_cli()` (`Config.cpp:1784-1921`).
+    /// `read_cli()` (`Config.cpp:1784-1921`). `argv` includes argument 0, the program name,
+    /// exactly as the vendored `(int argc, const char* const argv[])` does -- the loop starts at
+    /// index 1 (`Config.cpp:1793`), not 0, and so does `std::env::args()`'s own iterator, which
+    /// is what a fan-out caller on this surface is expected to pass through. **Review finding,
+    /// fixed here**: an earlier version started at index 0 with no marker noting the changed
+    /// contract, so the program name itself would have landed in `extra`.
     pub fn read_cli(
         &mut self,
         argv: &[String],
@@ -7298,11 +8402,18 @@ impl<'a> DynamicConfig<'a> {
         }
 
         let mut parse_options = true;
-        let mut i = 0usize;
+        let mut i = 1usize;
         while i < argv.len() {
             let token_orig = &argv[i];
             if !parse_options || !token_orig.starts_with('-') {
                 extra.push(token_orig.clone());
+                i += 1;
+                continue;
+            }
+            // PORT SRC: src/libslic3r/Config.cpp:1800-1803 -- `#ifdef __APPLE__`, live at the
+            // pin: the oracle is the arm64 macOS build. The OSX launcher's "process serial
+            // number" token is ignored outright, not even counted as an option or an `extra`.
+            if token_orig.starts_with("-psn_") {
                 i += 1;
                 continue;
             }
@@ -7727,7 +8838,11 @@ mod tests {
             }));
         let mut cfg = DynamicConfig::with_def(&def);
         let mut extra = Vec::new();
-        let argv: Vec<String> = vec!["--speeds".to_string(), "99".to_string()];
+        let argv: Vec<String> = vec![
+            "program".to_string(),
+            "--speeds".to_string(),
+            "99".to_string(),
+        ];
         assert!(cfg.read_cli(&argv, &mut extra, &mut None));
         let opt = cfg
             .option("speeds")
@@ -7736,6 +8851,52 @@ mod tests {
         // The bug this test pins would leave this `vec![10.0, 20.0, 99.0]` (appended onto the
         // unlcared defaults) instead of replacing them.
         assert_eq!(opt.values, vec![99.0]);
+    }
+
+    /// Reviewer finding on the fix above: `coFloats` is one of the seven vector types
+    /// `clear_dyn`/`resize_dyn`/`set_at_dyn`/`vector_is_empty_dyn` already covered before this
+    /// fix, so the test just above cannot fail on the bug it was supposedly written for --
+    /// `coEnums`, `coPointsGroups` and `coIntsGroups` fell into each dispatch function's `_ => {}`
+    /// arm and were silently unreachable. This exercises `coIntsGroups`, one of the three.
+    #[test]
+    fn read_cli_replaces_an_intsgroups_options_defaults() {
+        let mut def = ConfigDef::new();
+        def.add("groups", ConfigOptionType::IntsGroups)
+            .set_default_value(Box::new(ConfigOptionIntsGroups {
+                values: vec![vec![1, 2], vec![3, 4]],
+            }));
+        let mut cfg = DynamicConfig::with_def(&def);
+        let mut extra = Vec::new();
+        let argv: Vec<String> = vec![
+            "program".to_string(),
+            "--groups".to_string(),
+            "9,8".to_string(),
+        ];
+        assert!(cfg.read_cli(&argv, &mut extra, &mut None));
+        let opt = cfg
+            .option("groups")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionIntsGroups>())
+            .expect("groups is coIntsGroups");
+        // Before the fix, `clear_dyn`'s `_ => {}` arm left the defaults in place, appending the
+        // CLI value onto `vec![vec![1, 2], vec![3, 4]]` instead of replacing it.
+        assert_eq!(opt.values, vec![vec![9, 8]]);
+    }
+
+    /// Review finding, fixed in [`DynamicConfig::read_cli`]: `argv[0]` is the program name
+    /// (`Config.cpp:1793` starts its loop at index 1) and a macOS `-psn_...` launcher token is
+    /// ignored outright (`Config.cpp:1800-1803`, live at this pin) -- neither landing in `extra`.
+    #[test]
+    fn read_cli_skips_argv0_and_a_macos_psn_token() {
+        let def = ConfigDef::new();
+        let mut cfg = DynamicConfig::with_def(&def);
+        let mut extra = Vec::new();
+        let argv: Vec<String> = vec![
+            "/path/to/program".to_string(),
+            "-psn_0_989382".to_string(),
+            "plain-arg".to_string(),
+        ];
+        assert!(cfg.read_cli(&argv, &mut extra, &mut None));
+        assert_eq!(extra, vec!["plain-arg".to_string()]);
     }
 
     /// `// PROOF: 3` -- this unit's one cell (both of this task's manifest rows carry it; one
@@ -7852,6 +9013,108 @@ mod tests {
                     ported_unescaped.unwrap(),
                     "unescape_strings_cstyle round trip for {case:?}"
                 );
+            }
+        }
+
+        // Added after both reviewers' blockers: the proof above exercised none of this unit's
+        // own numeric serialize()/deserialize() -- the surface the measured divergences were
+        // actually on. `ConfigOptionFloat`/`ConfigOptionInt` are header-defined and reachable
+        // from this same translation unit (the reviewers' own measurement), so there is no
+        // linkage obstacle to proving them directly through `Slic3r::ConfigOptionFloat`/`::Int`.
+        use slic3r_proof::proof_units::config::{
+            path3_deserialize_float, path3_deserialize_int, path3_serialize_float,
+        };
+
+        let float_serialize_cases: &[f64] = &[
+            1.0 / 3.0,
+            0.1 + 0.2,
+            1e20,
+            1e-7,
+            1234567.0,
+            123456789.0,
+            0.0,
+            -0.0,
+            9999995.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        for v in float_serialize_cases {
+            let oracle = path3_serialize_float(*v);
+            let ported = float_to_string_decimal_point(*v, None);
+            assert_eq!(oracle, ported, "ConfigOptionFloat::serialize({v:?})");
+        }
+
+        // "1e-400" (underflow, not overflow) is deliberately not in this list: `strtod` sets
+        // `ERANGE` on underflow too, which `cpp_istream_extract_f64` does not reproduce (it
+        // only detects overflow, by checking whether the parsed value is infinite) -- a known,
+        // narrow gap named in the pull request body rather than silently left uncovered here.
+        let float_deserialize_cases: &[&str] = &[
+            "1abc", "0x10", "1.5e2mm", "12%", "inf", "nan", "INF", "NAN", "5%", "100 mm", "0.0.1",
+            "1_000", "0x1p4", "+5", "-5", "  5", "5.", ".5", "5e", "1e", "1.", "1e5", "0x1.8p3",
+            "abc", "", "   ", "0", "1e400", "-1e400",
+        ];
+        for s in float_deserialize_cases {
+            let oracle = path3_deserialize_float(s);
+            let ported = cpp_istream_extract_f64(s);
+            match ported {
+                // The sentry never enters extraction (only whitespace, or nothing): `iss.fail()`
+                // is true and `deserialize` returns `false`, but the value is left completely
+                // untouched -- still the -999.0 sentinel this test seeded the oracle's option
+                // with, not forced to 0 or anything else.
+                None => assert!(
+                    !oracle.ok && oracle.value == -999.0,
+                    "ConfigOptionFloat::deserialize({s:?}): oracle left the value untouched"
+                ),
+                Some((fail, v)) => {
+                    assert_eq!(
+                        !oracle.ok, fail,
+                        "ConfigOptionFloat::deserialize({s:?}) fail"
+                    );
+                    if !fail {
+                        assert_eq!(
+                            oracle.value, v,
+                            "ConfigOptionFloat::deserialize({s:?}) value"
+                        );
+                    }
+                }
+            }
+        }
+
+        let int_deserialize_cases: &[&str] = &[
+            "1abc",
+            "0x10",
+            "1a",
+            "5",
+            "-5",
+            "+5",
+            "007",
+            "08",
+            "1_000",
+            "1.5",
+            "2147483648",
+            "-2147483649",
+            "5%",
+            "0x",
+            "abc",
+            "0",
+            "1g",
+            "",
+        ];
+        for s in int_deserialize_cases {
+            let oracle = path3_deserialize_int(s);
+            let ported = cpp_istream_extract_i32(s);
+            match ported {
+                None => assert!(
+                    !oracle.ok && oracle.value == -999,
+                    "ConfigOptionInt::deserialize({s:?}): oracle left the value untouched"
+                ),
+                Some((fail, v)) => {
+                    assert_eq!(!oracle.ok, fail, "ConfigOptionInt::deserialize({s:?}) fail");
+                    if !fail {
+                        assert_eq!(oracle.value, v, "ConfigOptionInt::deserialize({s:?}) value");
+                    }
+                }
             }
         }
     }

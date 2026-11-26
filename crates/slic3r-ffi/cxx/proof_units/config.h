@@ -32,6 +32,13 @@ rust::String path3_escape_strings_cstyle(rust::Vec<rust::String> values);
 
 ProofUnescapeStringsResult path3_unescape_strings_cstyle(rust::Str value);
 
+// `ConfigOptionFloat::serialize`/`::deserialize` (`Config.hpp:840-854`) -- this unit's own
+// primary surface, proving the float serialisation/deserialisation format directly rather than
+// only the string-escaping fan-in.
+rust::String path3_serialize_float(double value);
+ProofDeserializeFloatResult path3_deserialize_float(rust::Str value);
+ProofDeserializeIntResult path3_deserialize_int(rust::Str value);
+
 } // namespace config
 } // namespace proof_units
 } // namespace slic3r_ffi
