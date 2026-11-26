@@ -454,6 +454,7 @@ dependencies = [
  "arbitrary",
  "libfuzzer-sys",
  "slic3r-arachne-utils",
+ "slic3r-boundingbox",
  "slic3r-ffi",
  "slic3r-point",
 ]
