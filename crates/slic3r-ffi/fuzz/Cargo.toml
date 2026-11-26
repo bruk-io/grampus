@@ -60,6 +60,18 @@ path = "../../slic3r-boundingbox"
 [[bin]]
 name = "slic3r-boundingbox_bounding_box"
 path = "fuzz_targets/slic3r-boundingbox_bounding_box.rs"
+
+# `slic3r-arachne-utils`, added by task `72-foundation-arachne-grids` for its one `ported`
+# module, `linear_alg2_d` (`Arachne/utils/linearAlg2D.hpp`, `fuzz target: required`) --
+# `docs/WORKFLOW.md`'s "A `required` fuzz target" rule names this file as the one crate manifest
+# a foundation task may touch; appended here, at the end, so two branches conflict textually
+# rather than reordering silently.
+[dependencies.slic3r-arachne-utils]
+path = "../../slic3r-arachne-utils"
+
+[[bin]]
+name = "slic3r-arachne-utils_linear_alg2_d"
+path = "fuzz_targets/slic3r-arachne-utils_linear_alg2_d.rs"
 test = false
 doc = false
 bench = false
