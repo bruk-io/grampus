@@ -456,6 +456,7 @@ dependencies = [
  "slic3r-arachne-utils",
  "slic3r-boundingbox",
  "slic3r-ffi",
+ "slic3r-line",
  "slic3r-point",
 ]
 
