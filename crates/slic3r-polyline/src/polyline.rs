@@ -1459,13 +1459,21 @@ mod tests {
     /// `ThickPolyline`, never touching the subclass's extra fields).
     #[test]
     fn thick_polyline_clip_end_matches_polyline_and_leaves_width_alone() {
+        // Chained to `polyline_clip_end_matches_the_oracle` (`// PROOF: 1`) below rather than
+        // to a hand-computed expectation: build a `Polyline` from the same points and compare
+        // `ThickPolyline::clip_end`'s result to *it*, so this test's own correctness rests on
+        // `Polyline::clip_end` already being proven against the oracle, not on arithmetic
+        // worked out by hand here.
+        let points = vec![Point::new(0, 0), Point::new(1_000_000, 0)];
+        let mut pl = Polyline::from_points(points.clone());
+        pl.clip_end(400_000.0);
         let mut tp = ThickPolyline {
-            points: vec![Point::new(0, 0), Point::new(1_000_000, 0)],
+            points,
             width: vec![1.0, 2.0],
             endpoints: (true, false),
         };
         tp.clip_end(400_000.0);
-        assert_eq!(tp.points, vec![Point::new(0, 0), Point::new(600_000, 0)]);
+        assert_eq!(tp.points, pl.points);
         assert_eq!(tp.width, vec![1.0, 2.0]);
         assert_eq!(tp.endpoints, (true, false));
     }
