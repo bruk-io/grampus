@@ -668,6 +668,14 @@ fn main() {
     let deps_prefix_eigen3_include = deps_prefix_include.join("eigen3");
     let deps_prefix_occt_include = deps_prefix_include.join("occt");
     let deps_prefix_opencv4_include = deps_prefix_include.join("opencv4");
+    // `AABBTreeIndirect.hpp:25`'s `#include <igl/Hit.h>` is unconditional (every proof shim that
+    // includes that header at all needs it resolvable, not only one that calls a ray-intersection
+    // function) -- the vendored copy sits at `deps_src/libigl/igl/Hit.h`, one level deeper than
+    // `deps_src` itself resolves (task `60-foundation-trees-grids`, measured: compiling without
+    // this entry fails with `'igl/Hit.h' file not found`, and `deps_src/libigl` is exactly the
+    // directory that makes `<igl/Hit.h>` resolve, the same one-line-deeper pattern
+    // `admesh_include` above states for `deps_src/admesh`).
+    let libigl_include = workspace_root.join("vendor/OrcaSlicer/deps_src/libigl");
     // `libslic3r.h:4`'s `#include "libslic3r_version.h"` is a CMake-generated file that lands in
     // the build directory, not the source tree (`CMAKE_CURRENT_BINARY_DIR`, the same `-I
     // .../build/arm64/src/libslic3r` entry on `ClipperUtils.cpp.o`'s own `INCLUDES` line) --
@@ -698,6 +706,7 @@ fn main() {
         deps_prefix_eigen3_include.clone(),
         deps_prefix_occt_include.clone(),
         deps_prefix_opencv4_include.clone(),
+        libigl_include.clone(),
     ];
     // Plain `-I`: this crate's own directory (for `cxx/...` includes), the vendored libslic3r
     // source directory and the build tree's generated-header directory -- the three the oracle
