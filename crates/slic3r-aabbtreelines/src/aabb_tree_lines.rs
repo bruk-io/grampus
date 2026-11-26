@@ -715,6 +715,55 @@ mod tests {
             "LinesDistancer::outside must match the oracle"
         );
     }
+
+    /// `LinesDistancer::all_lines_in_radius`/`intersections_with_line<true>` -- added on
+    /// review: the first version of this test proved only `distance_from_lines_extra`/
+    /// `outside`, leaving these two ported-but-unproven.
+    #[test]
+    fn aabb_tree_lines_radius_and_intersections_match_the_oracle() {
+        let lines = square_lines();
+        let ax: Vec<f64> = lines.iter().map(|l| l.a.x()).collect();
+        let ay: Vec<f64> = lines.iter().map(|l| l.a.y()).collect();
+        let bx: Vec<f64> = lines.iter().map(|l| l.b.x()).collect();
+        let by: Vec<f64> = lines.iter().map(|l| l.b.y()).collect();
+
+        let distancer = LinesDistancer::new(lines);
+
+        let mut actual_radius = distancer.all_lines_in_radius([5.0, -1.0], 2.0);
+        actual_radius.sort_unstable();
+        let oracle_radius = slic3r_proof::proof_units::aabb_tree_lines::path2_all_lines_in_radius(
+            &ax, &ay, &bx, &by, 5.0, -1.0, 2.0,
+        );
+        assert_eq!(
+            actual_radius.iter().map(|&i| i as i64).collect::<Vec<_>>(),
+            oracle_radius,
+            "LinesDistancer::all_lines_in_radius must match the oracle exactly"
+        );
+
+        // A probe line crossing two sides of the square at different distances from its own
+        // `a` endpoint, so the sorted order is unambiguous (no tie for `std::sort`/`sort_by` to
+        // break differently).
+        let probe = Linef::new(Vec2d::new(-5.0, 3.0), Vec2d::new(15.0, 3.0));
+        let actual_hits = distancer.intersections_with_line(probe, true);
+        let oracle_hits = slic3r_proof::proof_units::aabb_tree_lines::path2_intersections_with_line(
+            &ax,
+            &ay,
+            &bx,
+            &by,
+            probe.a.x(),
+            probe.a.y(),
+            probe.b.x(),
+            probe.b.y(),
+        );
+        let actual_flat: Vec<f64> = actual_hits
+            .iter()
+            .flat_map(|(p, idx)| [p[0], p[1], *idx as f64])
+            .collect();
+        assert_eq!(
+            actual_flat, oracle_hits,
+            "LinesDistancer::intersections_with_line<true> must match the oracle exactly"
+        );
+    }
 }
 
 // PORT STATUS

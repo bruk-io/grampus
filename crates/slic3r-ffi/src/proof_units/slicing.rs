@@ -51,9 +51,24 @@ mod ffi {
             object_print_z_max: f64,
             object_print_z_uncompensated_max: f64,
         ) -> Vec<f64>;
+
+        /// `Slic3r::smooth_height_profile(profile, params, smoothing_params)`
+        /// (`Slicing.cpp:419-526`), with `params`/`smoothing_params` constructed from the given
+        /// scalar fields.
+        #[allow(clippy::too_many_arguments)]
+        fn path1_smooth_height_profile(
+            profile: &[f64],
+            first_object_layer_height: f64,
+            layer_height: f64,
+            min_layer_height: f64,
+            max_layer_height: f64,
+            radius: u32,
+            keep_min: bool,
+        ) -> Vec<f64>;
     }
 }
 
 pub use ffi::{
-    path1_check_object_layers_fixed, path1_generate_object_layers, path2_slicing_params_header_only,
+    path1_check_object_layers_fixed, path1_generate_object_layers, path1_smooth_height_profile,
+    path2_slicing_params_header_only,
 };

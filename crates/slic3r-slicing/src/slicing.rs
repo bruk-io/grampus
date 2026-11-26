@@ -855,6 +855,34 @@ mod tests {
         }
     }
 
+    /// `smooth_height_profile`/`gauss_kernel`/`gauss_blur` (`Slicing.cpp:419-497`), proven
+    /// against the oracle through the per-unit bridge -- added on review: this unit's
+    /// `// PROOF: 1` marker above proves `generate_object_layers`/`check_object_layers_fixed`,
+    /// not this function, which had no oracle comparison at all until this test. Not itself a
+    /// `// PROOF:` marker (the manifest row needs only one per proof-path cell, already
+    /// satisfied), but a second, real differential comparison against the same proof path.
+    #[test]
+    fn smooth_height_profile_matches_the_oracle() {
+        let params = params_with(0.2, 0.2);
+        // A varying profile, so a real interpolation/weighting bug in `gauss_blur` would show.
+        let profile = vec![
+            0f64, 0.2, 0.2, 0.2, 2f64, 0.35, 4.0, 0.15, 6.0, 0.3, 8.0, 0.2, 10.0, 0.25,
+        ];
+        let smoothing = HeightProfileSmoothingParams::new(3, false);
+        let actual = smooth_height_profile(&profile, &params, &smoothing);
+        let oracle = slic3r_proof::proof_units::slicing::path1_smooth_height_profile(
+            &profile,
+            params.first_object_layer_height,
+            params.layer_height,
+            params.min_layer_height,
+            params.max_layer_height,
+            smoothing.radius,
+            smoothing.keep_min,
+        );
+        compare_unit("Slicing.cpp", Oracle::Built, actual, oracle)
+            .expect("smooth_height_profile must match the oracle exactly");
+    }
+
     #[test]
     fn generate_layer_height_texture_paints_the_cell_at_the_first_layer_opaque() {
         let params = params_with(0.2, 0.2);
@@ -884,9 +912,15 @@ mod tests {
     #[test]
     fn slicing_generate_object_layers_matches_the_oracle() {
         let params = params_with(0.2, 0.2);
-        let profile = vec![0f64, 0.2, 10.0, 0.2];
+        // A varying (not flat) profile with `is_precise_z_height: true`, so this proof exercises
+        // both `generate_object_layers`'s own `lerp` interpolation (a flat `h1 == h2` profile
+        // would return the same height for every `t`, hiding an interpolation bug) and, through
+        // it, `adjust_layer_series_to_align_object_height` (reached only when
+        // `is_precise_z_height` is set) -- found on review: an earlier version of this test used
+        // a flat profile and `false`, leaving both unproven.
+        let profile = vec![0f64, 0.2, 5.0, 0.3, 10.0, 0.1];
 
-        let actual = generate_object_layers(&params, &profile, false);
+        let actual = generate_object_layers(&params, &profile, true);
         let oracle = slic3r_proof::proof_units::slicing::path1_generate_object_layers(
             params.base_raft_layers as i64,
             params.interface_raft_layers as i64,
@@ -898,10 +932,16 @@ mod tests {
             params.object_print_z_max,
             params.object_shrinkage_compensation_z,
             &profile,
-            false,
+            true,
+        );
+        assert!(
+            actual.len() >= 12,
+            "the output must be long enough for adjust_layer_series_to_align_object_height's \
+             own 12-entry floor to actually run, got {} entries",
+            actual.len()
         );
         compare_unit("Slicing.cpp", Oracle::Built, actual, oracle)
-            .expect("generate_object_layers must match the oracle exactly");
+            .expect("generate_object_layers (with adjust_layer_series_to_align_object_height) must match the oracle exactly");
 
         let fixed_profile = vec![0f64, 0.2, 10.0, 0.2];
         let actual_fixed = check_object_layers_fixed(&params, &fixed_profile);

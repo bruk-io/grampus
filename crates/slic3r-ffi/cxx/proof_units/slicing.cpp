@@ -17,6 +17,12 @@
 // field that is any one of these calls' own output in isolation, so this proof reaches the
 // oracle through the per-unit bridge instead, the same `proof path: 2`-with-no-dump-coverage
 // shape `docs/PORTING.md`'s "Decisions recorded on 2026-11-26", decision 2, accepts.
+//
+// `path1_smooth_height_profile` calls `Slic3r::smooth_height_profile` (`Slicing.cpp:419-526`),
+// genuinely linked `Slicing.cpp` code, proof path 1 -- added on review: the first version of
+// this shim file proved `generate_object_layers`/`check_object_layers_fixed` but left
+// `smooth_height_profile` (and the `gauss_kernel`/`gauss_blur` lambdas it alone calls) with no
+// oracle comparison at all.
 #include "slicing.h"
 
 #include "Slicing.hpp"
@@ -82,6 +88,30 @@ rust::Vec<double> path2_slicing_params_header_only(int64_t base_raft_layers,
     out.push_back(params.object_print_z_height());
     out.push_back(params.object_print_z_uncompensated_height());
     return out;
+}
+
+rust::Vec<double> path1_smooth_height_profile(rust::Slice<const double> profile,
+                                               double first_object_layer_height,
+                                               double layer_height, double min_layer_height,
+                                               double max_layer_height, uint32_t radius,
+                                               bool keep_min) {
+    Slic3r::SlicingParameters params;
+    params.first_object_layer_height = first_object_layer_height;
+    params.layer_height = layer_height;
+    params.min_layer_height = min_layer_height;
+    params.max_layer_height = max_layer_height;
+
+    std::vector<double> layer_height_profile(profile.begin(), profile.end());
+    Slic3r::HeightProfileSmoothingParams smoothing_params(radius, keep_min);
+    std::vector<double> out =
+        Slic3r::smooth_height_profile(layer_height_profile, params, smoothing_params);
+
+    rust::Vec<double> result;
+    result.reserve(out.size());
+    for (double v : out) {
+        result.push_back(v);
+    }
+    return result;
 }
 
 } // namespace slicing

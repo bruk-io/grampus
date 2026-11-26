@@ -512,9 +512,20 @@ impl Line {
         }
     }
 
-    /// `Vector vector() const { return this->b - this->a; }` (`:182`).
+    /// `Vector vector() const { return this->b - this->a; }` (`:182`). Integer `wrapping_sub`,
+    /// not `Point`'s own `Sub` -- see [`delta_f64`]'s doc for why the oracle's own
+    /// `Vec2crd::operator-` wraps in two's complement on adversarial coordinates rather than
+    /// trapping, and [`Line::normal`]'s identical note; `self.b - self.a` through `Point::sub`
+    /// would panic on exactly the inputs this reproduces instead.
+    // FIDELITY(port): src/libslic3r/Line.hpp:182 -- see [`delta_f64`]'s doc; this site
+    // subtracts two `coord_t` values with the result kept as `coord_t` (no `f64` cast), so it
+    // reproduces the oracle's own wraparound with `wrapping_sub` rather than `Point`'s own
+    // (non-wrapping) `Sub`.
     pub fn vector(&self) -> Point {
-        self.b - self.a
+        Point::new(
+            self.b.x().wrapping_sub(self.a.x()),
+            self.b.y().wrapping_sub(self.a.y()),
+        )
     }
 
     /// `Vector normal() const` (`:183`). Integer `wrapping_sub`/`wrapping_neg`, not plain `-` --
@@ -692,9 +703,17 @@ impl Line3 {
         (dx * dx + dy * dy + dz * dz).sqrt()
     }
 
-    /// `Point3 vector() const` (`:236`).
+    /// `Point3 vector() const` (`:236`). Integer `wrapping_sub`, not `Point3`'s own `Sub` --
+    /// see [`Line::vector`]'s identical note.
+    // FIDELITY(port): src/libslic3r/Line.hpp:236 -- see [`delta_f64`]'s doc; reproduces the
+    // oracle's own wraparound with `wrapping_sub` rather than `Point3`'s own (non-wrapping)
+    // `Sub`.
     pub fn vector(&self) -> Point3 {
-        self.b - self.a
+        Point3::new(
+            self.b.x().wrapping_sub(self.a.x()),
+            self.b.y().wrapping_sub(self.a.y()),
+            self.b.z().wrapping_sub(self.a.z()),
+        )
     }
 
     /// `Point3 midpoint() const` (`:237`): each component divided by the vendored body's own

@@ -16,6 +16,18 @@ rust::Vec<double> path2_distance_and_outside(rust::Slice<const double> ax,
                                               rust::Slice<const double> bx,
                                               rust::Slice<const double> by, double qx, double qy);
 
+rust::Vec<int64_t> path2_all_lines_in_radius(rust::Slice<const double> ax,
+                                              rust::Slice<const double> ay,
+                                              rust::Slice<const double> bx,
+                                              rust::Slice<const double> by, double qx, double qy,
+                                              double radius);
+
+rust::Vec<double> path2_intersections_with_line(rust::Slice<const double> ax,
+                                                 rust::Slice<const double> ay,
+                                                 rust::Slice<const double> bx,
+                                                 rust::Slice<const double> by, double lax,
+                                                 double lay, double lbx, double lby);
+
 } // namespace aabb_tree_lines
 } // namespace proof_units
 } // namespace slic3r_ffi

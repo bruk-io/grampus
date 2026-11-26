@@ -27,6 +27,12 @@ rust::Vec<double> path2_slicing_params_header_only(int64_t base_raft_layers,
                                                     double object_print_z_max,
                                                     double object_print_z_uncompensated_max);
 
+rust::Vec<double> path1_smooth_height_profile(rust::Slice<const double> profile,
+                                               double first_object_layer_height,
+                                               double layer_height, double min_layer_height,
+                                               double max_layer_height, uint32_t radius,
+                                               bool keep_min);
+
 } // namespace slicing
 } // namespace proof_units
 } // namespace slic3r_ffi
