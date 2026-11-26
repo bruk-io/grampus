@@ -1120,11 +1120,41 @@ fn names_oracle_path(text: &str) -> bool {
     text.contains("proof_units::") || text.contains("dumps::")
 }
 
+/// `pattern` with a `let`'s type annotation cut off: the text before its first `:` at bracket
+/// depth 0 that is not part of a `::` path. A type annotation binds nothing, so reading it as
+/// part of the pattern made every type word a proof wrote in its own annotations an oracle
+/// name, and the fixed point then carried that taint on to the ported side. Only a `let`
+/// carries an annotation; a `for` pattern is passed through untouched. Mirrors
+/// `port/port-status`'s `let_binding_pattern`.
+fn let_binding_pattern(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut depth = 0i64;
+    let mut i = 0usize;
+    while i < chars.len() {
+        match chars[i] {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth -= 1,
+            ':' if depth <= 0 => {
+                if chars.get(i + 1) == Some(&':') {
+                    i += 2;
+                    continue;
+                }
+                // Collected rather than sliced: `i` counts characters, not bytes, and a
+                // pattern is not guaranteed to be ASCII.
+                return chars[..i].iter().collect();
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    pattern.to_string()
+}
+
 /// Every `(pattern, right-hand side)` pair in `view`: a `let <pattern> = <expr>;` and a
 /// `for <pattern> in <expr>` (which `if let`/`while let` also match, since both write
 /// `let <pattern> = <expr>`). Scanned with a bracket-depth counter, so a `;` or an `=` inside
-/// the pattern's own brackets does not end it early. Mirrors `port/port-status`'s
-/// `_find_bindings`.
+/// the pattern's own brackets does not end it early. A `let`'s pattern is returned without its
+/// type annotation (`let_binding_pattern`). Mirrors `port/port-status`'s `_find_bindings`.
 fn find_bindings(view: &str) -> Vec<(String, String)> {
     let chars: Vec<char> = view.chars().collect();
     let mut out: Vec<(String, String)> = Vec::new();
@@ -1187,7 +1217,10 @@ fn find_bindings(view: &str) -> Vec<(String, String)> {
             i += 4;
             continue;
         }
-        let pattern: String = chars[pattern_start..j].iter().collect();
+        let mut pattern: String = chars[pattern_start..j].iter().collect();
+        if keyword == "let" {
+            pattern = let_binding_pattern(&pattern);
+        }
         let rhs_start = if keyword == "let" { j + 1 } else { j + 3 };
         let mut k = rhs_start.min(chars.len());
         depth = 0;
@@ -2648,7 +2681,7 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let cases: [(&str, bool, &str); 16] = [
+        let cases: [(&str, bool, &str); 20] = [
             (
                 "let expected: u32 = 0b111;\nassert_eq!(actual, expected);",
                 false,
@@ -2731,6 +2764,34 @@ mod tests {
                  assert_eq!(oracle.iter().collect::<String>(), ported());",
                 true,
                 "a turbofish type argument is not the ported side, but `ported()` is",
+            ),
+            // A `let`'s type annotation binds no name, so no type word in it becomes an oracle
+            // name (`let_binding_pattern`). Each of the three accepted shapes below derived
+            // `drafted` before that cut; the fourth pins that the cut refuses what it refused
+            // before.
+            (
+                "let oracle: Mask = path1_flags();\nlet ported: Mask = Mask::ALL;\n\
+                 assert_eq!(oracle, ported);",
+                true,
+                "a type annotation's own word does not taint the ported side",
+            ),
+            (
+                "let oracle: Vec<Mask> = path1_flags();\nlet ported: Vec<Mask> = vec![Mask::ALL];\n\
+                 assert_eq!(oracle, ported);",
+                true,
+                "nor does a type argument inside the annotation's brackets",
+            ),
+            (
+                "let (a, b): (u32, u32) = oracle_call();\nassert_eq!(PORTED, a);",
+                true,
+                "the annotation is cut after the tuple pattern, not at the `:` the pattern \
+                 could hold",
+            ),
+            (
+                "let oracle: Mask = path1_flags();\nassert_eq!(oracle, Mask::ALL);",
+                false,
+                "cutting the annotation does not make either end of a path a value this port \
+                 computed",
             ),
         ];
         for (body, want, why) in cases {
