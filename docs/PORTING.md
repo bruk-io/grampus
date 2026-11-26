@@ -711,3 +711,46 @@ Foundation task bodies enumerate exactly which files `git diff main` may touch, 
 `docs/WORKFLOW.md`'s "Decisions that govern over a task's file list" states the rule: this
 document governs, the builder says so in the pull request body, and a reviewer does not count it
 as a divergence.
+
+## Decisions recorded on 2026-11-26
+
+### 6. A transcribed literal must be spelled so its own text, not only its value, matches the cited line
+
+**The gap.** Task `35-trial-run` found a transcribed numeric constant that carries a real
+`// PORT SRC: <vendored path>:<line>` marker and still gets no mechanical benefit from it, because
+`port/port-status`'s `check_numeric_constants` matches a cited line by the literal's *normalised
+text*, not its numeric value: `_vendored_line_holds` is a text search for the normalised digits,
+not a numeric-equality check. Two concrete ways a porter can get this wrong while believing a
+marker is honest and sufficient:
+
+- Writing a whole-number float with a type suffix instead of a decimal point (`1f64` rather than
+  `1.0`) when the vendored line spells it `1.0`. `normalize_literal` strips the suffix, so the
+  check reads the bare digits `1` — which lands in R16's exempt `0`/`1`/`2` set and needs no marker
+  at all, silently. The constant is correctly transcribed and the marker, if written, would even
+  be correctly placed; the literal's *spelling* is what defeats the check, not its value.
+- Writing an octal literal in Rust's `0o` syntax (`0o644`) to transcribe a C octal literal spelled
+  without the `o` (`0644`). The two denote the same value, but `0o644`'s normalised text is not a
+  substring of a line that writes `0644`, so a marker citing that exact line fails
+  `_vendored_line_holds` and the porter is left with no vendored-line marker that can pass — the
+  external form is the only one `port-status` currently accepts, even though the constant's origin
+  is not outside the vendored tree (decision 2's criterion), only differently spelled.
+
+**The decision.** A transcribed numeric constant's Rust spelling must be chosen, among the
+spellings that type-check and have the correct value, so its normalised text (after
+`normalize_literal` strips digit separators and a type suffix) occurs verbatim on the cited
+vendored line — never relying on landing in the `0`/`1`/`2` exempt set as a way to skip writing a
+marker for a value that *is* transcribed from a vendored line. The 75-row `MaterialType` table
+(`crates/slic3r-materialtype/src/material_type.rs`) is the sanctioned instance of the suffix
+technique: every whole-number float field there is written with an explicit `f64` suffix (`100f64`,
+not `100.0`) specifically because the *vendored* line spells the value as a bare integer, so the
+suffix form is what makes the normalised text match — every one of those cells also carries its
+own `// PORT SRC:` marker, so the suffix is chosen for a textual match, not to reach the exempt
+set un-marked.
+
+Where no Rust spelling of a value can be made to match the cited line's text (the octal case
+above, until `port-status` gains a numeric-equality fallback), the external marker form is used as
+a stated workaround — not under decision 2's "origin outside the vendored tree" criterion, which
+does not apply — and the module's own comment says so plainly, naming the vendored line the
+constant actually comes from and the reviewer's job of checking that disclosure rather than taking
+the external form's usual meaning on faith. This document's idiom map (the `#define` numeric
+constant row) and decision 2 are read together with this rule, not in place of it.
