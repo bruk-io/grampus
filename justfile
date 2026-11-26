@@ -28,6 +28,15 @@ check:
 # `--per-commit`, the completion gate that runs in the macOS job instead.
 port-check:
     just port-status --per-commit
+    # `./port/port-status --self-test` is where every one of this script's own rules is pinned --
+    # 45-odd fixture trees, the differential rule's 20 accept/reject shapes, the `enclosing:`
+    # cases and the external-marker cases -- and until now it ran in no recipe and no CI job, so
+    # nothing in the repository ever asked whether the checker still held its own rules
+    # (docs/PORTING.md, "Decisions recorded on 2026-11-26", decision 1, whose fixture would
+    # otherwise bite only for whoever ran it by hand). It reads only the fixtures under
+    # port/tests/port-status/ and needs no build and no oracle, which is exactly this recipe's
+    # own entry condition, and it takes about a tenth of a second.
+    ./port/port-status --self-test
     just inventory-check
     just ownership-check
     ./oracle/provenance --check port/goldens/ 'port/dumps/*/*.dump' port/reports/determinism.md port/reports/oracle-parity.md
