@@ -23,11 +23,25 @@ check:
 # touches no code still passes with this recipe alone, and it never waits on a build. Two more
 # lines join it later, each added by the task that makes it pass: Step 17's substitute and
 # -ffp-contract=off drift checks and Step 18's mock check (task 24-port-check-ci does not add
-# either). `just audit-check` and the perf-backlog whole-file diff are deliberately not here --
+# either). A third joined from no task: `./port/port-status --self-test`, added by the pull
+# request that fixed a scanner bug and found that the self-test ran nowhere -- see
+# docs/PORTING.md, "Decisions recorded on 2026-11-26", decision 5, which is the accounting for
+# it. `just audit-check` and the perf-backlog whole-file diff are deliberately not here --
 # see their own recipes' docstrings -- and neither is `just port-status` without
 # `--per-commit`, the completion gate that runs in the macOS job instead.
 port-check:
     just port-status --per-commit
+    # `./port/port-status --self-test` is where every one of this script's own rules is pinned --
+    # all 50 fixture trees, the differential rule's 20 accept/reject shapes, the `enclosing:`
+    # cases and the external-marker cases -- and until now it ran in no recipe and no CI job, so
+    # nothing in the repository ever asked whether the checker still held its own rules
+    # (docs/PORTING.md, "Decisions recorded on 2026-11-26", decisions 1 and 5; decision 1's
+    # fixture would otherwise bite only for whoever ran it by hand). It reads the fixture trees
+    # under port/tests/port-status/ and the pinned vendor/OrcaSlicer/ (which a fixture's
+    # `source:` lines resolve against, and which the line above already reads), so it needs no
+    # build and no oracle -- exactly this recipe's own entry condition -- and takes about a
+    # tenth of a second.
+    ./port/port-status --self-test
     just inventory-check
     just ownership-check
     ./oracle/provenance --check port/goldens/ 'port/dumps/*/*.dump' port/reports/determinism.md port/reports/oracle-parity.md

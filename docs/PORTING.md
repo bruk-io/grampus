@@ -2,8 +2,9 @@
 
 `just port-status` reads the twelve headings below — the six `##` sections and the six `###`
 rules under `## Rules` — to check that this document says what it must (R29); renaming one
-breaks that check. `## Decisions recorded on 2026-11-25` is a later addition and is not one of
-the twelve; adding a heading does not break the check, renaming one of the twelve does.
+breaks that check. `## Decisions recorded on 2026-11-25` and `## Decisions recorded on
+2026-11-26` are later additions and are not among the twelve; adding a heading does not break
+the check, renaming one of the twelve does.
 This document is committed before any unit is ported.
 Every unit of Phase A and Phase B — `port/manifest.tsv`'s 408 in-scope files — is held to
 it, and a porter is given their task, this repository and nothing else: this document is written
@@ -392,7 +393,10 @@ The port fixes one spelling for this value: `slic3r_libslic3r::SCALING_FACTOR`, 
 carrying `// PORT SRC: src/libslic3r/libslic3r.h:65`, in the `slic3r-libslic3r` crate (crate map
 above, level 2). `libslic3r.h` is one of the headers whose manifest row is `template-heavy=yes`,
 so it is part of the set plan step 20 hand-designs before fan-out (see "Foundation types" above);
-`34-foundation-spike` defines this constant once, in that crate's module, and no fan-out module
+`55-foundation-libslic3r-execution` defines this constant once, in that crate's module —
+`34-foundation-spike` committed only the crate skeletons, each with no `mod` line
+(`git show b5b404b:crates/slic3r-libslic3r/src/lib.rs`), so it never defined this or any other
+value; see `## Decisions recorded on 2026-11-26`, decision 3. No fan-out module
 may declare a second spelling or write the literal `0.000001` inline. It is a `const`, not a
 `static` the port can reassign: the only mutator found above is `Plater.cpp`'s branch, and R10
 puts the whole GUI out of scope, so nothing in the port ever needs the large-printer value and the
@@ -678,10 +682,13 @@ writes `port/manifest.tsv`, never by a port task.
 the **oracle** produced against a value this port computed.
 
 The oracle's own entry points are the per-unit proof bridges `slic3r-proof` re-exports and the
-committed stage dumps (decision 1's route), plus an `extern "C"` declaration. A name holds an
+committed stage dumps (decision 1's route), plus an `extern "C"` declaration. That list is not
+narrowed by the row's own `proof path` cell (`## Decisions recorded on 2026-11-26`, decision 2).
+A name holds an
 oracle value when it is bound — by a `let`, a tuple pattern or a `for` pattern — off an
 expression that reaches one of those, whether by an imported name or by a fully-qualified
-`proof_units::`/`dumps::` path. A comparison counts when it names an oracle value and a value of
+`proof_units::`/`dumps::` path; a `let`'s type annotation is not part of its pattern and binds
+no name (`## Decisions recorded on 2026-11-26`, decision 1). A comparison counts when it names an oracle value and a value of
 this port's own, **in two different arguments**, or in one argument that itself makes a call (so
 `assert!(agrees(ported, oracle))` counts and `assert_eq!(oracle[index], 5)`, where the loop
 variable merely shares an argument with the oracle value, does not). The port's side must be a
@@ -711,3 +718,166 @@ Foundation task bodies enumerate exactly which files `git diff main` may touch, 
 `docs/WORKFLOW.md`'s "Decisions that govern over a task's file list" states the rule: this
 document governs, the builder says so in the pull request body, and a reviewer does not count it
 as a divergence.
+
+## Decisions recorded on 2026-11-26
+
+The three port tasks merged as pull requests #54, #56 and #57 each carried forward a finding they
+were not allowed to fix: every file that would have to change was on their own must-not-write
+list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1.
+Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
+2026-11-26; the owner was away and had handed
+over this intent's decisions. Like the section above, this is a record: where a decision changes
+a rule above, the rule's own text says so and points here.
+
+### 1. A `let`'s type annotation is not part of its binding
+
+**The gap.** `## Decisions recorded on 2026-11-25`, decision 4, says a name holds an oracle value
+when it is bound "by a `let`, a tuple pattern or a `for` pattern" off an expression reaching an
+oracle entry point. `port/port-status` read the whole of a `let`'s pattern as the names it bound,
+type annotation included, so `let oracle: Vec<u32> = path1_x();` made `Vec` and `u32` oracle
+names as well as `oracle`. The taint then spread through the fixed point to any later binding
+whose right-hand side spelled one of those words, and a genuinely differential proof read as
+having no ported side at all: its marker became a `proof-marker-not-differential` finding and its
+row stayed `drafted`. #56 measured it (`port/port-status:511` as that branch read it) and worked
+around it by dropping its proof's type annotations rather than by fixing the scanner, which it
+could not write.
+
+**The decision.** A type annotation names types and binds nothing, so it is cut off before the
+pattern's names are taken: `let_binding_pattern` keeps the pattern's text up to its first `:` at
+bracket depth 0 that is not part of a `::` path. A `for` pattern is passed through untouched,
+since only a `let` carries an annotation. The depth counter is what keeps a struct pattern's own
+`:` (`let Foo { a: x }: Foo`) and an array length (`let oracle: [i64; 3]`) from cutting in the wrong
+place, and the `::` test is what keeps a path pattern (`let Enum::V(x)`) from reading as an
+annotation.
+
+This widens nothing else. A proof still needs an oracle value and a value of its own in two
+different arguments (or in one that makes a call), and the ported side is still read with the
+narrower view that refuses a macro name, either end of a path, a field or method name and a
+turbofish's type argument — so `let oracle: Mask = path1_x(); assert_eq!(oracle, Mask::ALL);` is
+still not a differential comparison.
+
+**Proof.** Four accept/reject shapes are pinned in `port/port-status --self-test` and in
+`crates/oracle-compare/src/stages.rs`'s own test, in the same order in both (16 shapes to 20),
+and the `proof-differential-annotated-binding` fixture holds the derivation itself. Both bite:
+with the cut removed, that fixture derives `drafted` with a `proof-marker-not-differential`
+finding and the Rust test panics on the first of the four shapes.
+
+**And it moves no row that is already ported**, measured rather than inferred: `--per-commit`'s
+whole output over the real tree is byte-identical run with `main`'s `port/port-status` and with
+this one, and `cargo test -p oracle-compare`'s
+`row_is_ported_agrees_with_port_status_on_every_ported_row_of_the_real_manifest` still passes. The
+cut only clears false negatives.
+
+### 2. What a `proof path: 2` cell commits a task to
+
+**The gap.** #54 and #57 each reported that a row's `proof path` cell of `2` — R19's "the
+committed stage dumps (R5), for whole pipeline steps" — names a mechanism that cannot reach their
+unit, and that the cell should arguably read `1`. Four merged rows carry the finding in their
+module doc comments: `LifecycleEvents.hpp`
+(`crates/slic3r-lifecycleevents/src/lifecycle_events.rs`), `enum_bitmask.hpp`, `format.hpp` and
+`Execution/Execution.hpp`. The finding's premise is correct and was measured again here:
+`port/inventory`'s `seed_judgement_cells` seeds `2` from the row's own
+`pipeline stage or none` cell, and that cell means only "some stage's `#include` closure
+reaches this file" (`compute_pipeline_stages`' own docstring says header rows are dominated by the
+earliest stage that reaches the hub `Print.hpp`) — not "this file is that pipeline step". 85
+in-scope rows carry `proof path: 2`. Seven of them name a stage the committed corpus holds no dump
+for at all: `posContouring` fires only for a belt printer and does not fire for either committed
+fixture (`oracle/stage-dump/README.md:145`), and `psGCodeExport` and `psConflictCheck` are not on
+`dump_seams.cpp`'s `kSeamRoster` at all.
+
+**The decision — the cell is not amended, and a bridge proof under a `2` cell is conforming.**
+The oracle's entry points are the ones decision 4 of 2026-11-25 names — the per-unit proof bridges
+`slic3r-proof` re-exports, the committed stage dumps, and an `extern "C"` declaration — and that
+list is **not restricted by the row's `proof path` cell**. A `// PROOF:` marker must match its
+row's cell verbatim, because that is how `port/port-status` pairs a marker with a row; which
+oracle route the proof body then takes is governed by the entry-point list, not by the cell's
+number. So a `proof path: 2` row whose unit writes nothing any dump records is proven through its
+per-unit bridge, keeps its `// PROOF: 2` marker, and is conforming. `ObjectID.hpp` is the merged
+precedent, and the four rows above follow it.
+
+**Why the cells are not corrected here, with the measurement.** Editing a judgement cell is an
+amendment pull request's prerogative (decision 4 of 2026-11-25 says so for the `enclosing:` form,
+and `port/inventory` carries all six judgement columns forward verbatim and `just inventory-check`
+does not diff them), so this pull request could have done it. It is wrong to do it in this one:
+
+- Changing a *ported* row's cell to `1` without editing its merged module in the same commit
+  regresses it. Measured through `derive_row_status` itself, with only the cell changed: all four
+  of `Execution/Execution.hpp`, `LifecycleEvents.hpp`, `enum_bitmask.hpp` and `format.hpp` go from
+  `ported` to `drafted`, because each module's marker still reads `// PROOF: 2`.
+- Changing a *not-yet-ported* row's cell breaks whichever in-flight port branch holds that unit:
+  its builder reads the cell from `main` as it stood when the task was cut, writes that marker, and
+  its row derives `drafted` once merged. This is not hypothetical. `Execution/ExecutionSeq.hpp`
+  and `Execution/ExecutionTBB.hpp` are two of the seven dumpless-stage rows, and both are units
+  of `56-foundation-point`, which is being built now.
+- Correcting 4 rows of the 85 would leave the column less consistent than it is now, and deciding
+  the other 81 is a per-row reading of whether a unit's output reaches a dump field, which no text
+  rule derives.
+
+Re-deriving the whole `proof path` column against R19's "for whole pipeline steps" is therefore
+regeneration-pass work, to be done in one pass with the markers of every ported row it moves. The
+four module doc comments that call this an open finding are left as they are, deliberately: they
+are in port units' own files, which in-flight branches are editing, and this decision is where the
+finding is answered.
+
+### 3. `34-foundation-spike` did not define `SCALING_FACTOR`
+
+**The gap.** The "Scaling and coordinates" section above attributed defining
+`slic3r_libslic3r::SCALING_FACTOR` to `34-foundation-spike`. #57 reported that this is false and
+could not fix it: that spike committed only the crate skeletons, each carrying a doc comment and
+no `mod` line (`git show b5b404b:crates/slic3r-libslic3r/src/lib.rs`), so it defined no value at
+all.
+
+**The decision.** The sentence now names `55-foundation-libslic3r-execution`, which defines the
+constant in `crates/slic3r-libslic3r/src/libslic3r.rs` (commit `3255b4a`). The section's two other
+references to the spike — the hand-designed foundation types and the one-time `indexmap`
+workspace dependency — are correct and are unchanged: both are the crate-skeleton task's own work.
+
+### 4. `53-foundation-int128-queue` delivered three of its four units
+
+**The gap.** That task's `task.md` names four units, the fourth being `MacUtils.hpp`, and three of
+its Done-when lines ask for `crates/slic3r-macutils/src/mac_utils.rs`. Decision 3 of 2026-11-25
+then deducted `MacUtils.hpp` out of scope — a declaration-only header whose every definition is in
+the out-of-scope `MacUtils.mm` — and the regeneration that followed removed `slic3r-macutils` from
+`port/cut.tsv` and the crate from the tree. The task file on `main` is not edited after
+acceptance, so those three lines cannot be struck where they are written.
+
+**The decision.** The task is complete at three units. `port/manifest.tsv:365` reads
+`MacUtils.hpp root 10 0 out: ...` and no `slic3r-macutils` crate exists, so there is no in-scope
+body to port and no in-scope symbol to prove against; building the unit would have meant writing
+`port/manifest.tsv`, which that task may not write, or inventing a crate the generated cut does
+not hold. This is decision 5 of 2026-11-25 applied to a unit list rather than a file list, and
+`docs/WORKFLOW.md`'s "Decisions that govern over a task's file list" already states its second
+corollary — "A task whose unit list names a file `port/manifest.tsv` now marks out of scope drops
+that unit, says so in the pull request body, and does not count the task's `ported` line against
+itself" (`docs/WORKFLOW.md:155-156`). #54 said so in its own pull request body; this is the
+record it asked for.
+
+### 5. `port/port-status --self-test` runs in `just port-check`
+
+**The gap.** Every rule `port/port-status` enforces is pinned by its own `--self-test`: all 50
+fixture trees, the differential rule's 20 accept/reject shapes, the `enclosing:` cases and the
+external-marker cases. It ran in no `justfile` recipe and no CI job — measured by grep over the
+`justfile` and `.github/workflows/` — so nothing in the repository ever asked whether the checker
+still held its own rules, and decision 1's new fixture would have bitten only for whoever ran it by
+hand. This was found while fixing decision 1, not reported by a task.
+
+**The decision.** `just port-check` runs it, as its second line. That recipe is the right home and
+not a new one: its stated entry condition is "the code checks that need neither the oracle binary
+nor a built libslic3r", and it takes about a tenth of a second. The recipe's own header comment
+accounts for every line that has joined it, including this one, and points here.
+
+**Measured, because this line is added to a gate three branches are building against.** A port
+branch's `crates/` and `port/manifest.tsv` differ from `main`'s, so "the self-test reads only its
+own fixtures" has to be a measurement and not a reading of the code. `run_selftest()` was called
+with `Path.read_text`, `Path.read_bytes`, `Path.is_file`, `Path.iterdir`, `Path.glob`,
+`Path.rglob`, `builtins.open` and `subprocess` wrapped to record every path: **348 distinct paths
+touched, and exactly two of them outside `port/tests/port-status/` and the pinned
+`vendor/OrcaSlicer/`** — a `port/manifest.tsv` in each of two scratch trees the self-test itself
+creates under the system temporary directory. It touches no file of the real `crates/` tree and
+not the real `port/manifest.tsv`. (`vendor/OrcaSlicer/` is in the set because a fixture's
+`source:` lines resolve against the pin, which the recipe's first line already reads.)
+
+So this is a strengthening and not a narrowing: no existing check's rule moved, and a port task
+that passed `just port-check` before passes it now unless `port/port-status` itself has stopped
+holding one of its own rules. `git grep -- --self-test` also confirms nothing else in the
+repository — no other recipe, workflow, hook or script — invoked it before this.
