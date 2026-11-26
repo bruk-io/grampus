@@ -1854,19 +1854,24 @@ pub fn short_time(time: &str) -> String {
         seconds = f_seconds as i32;
     }
 
-    // Round to full minutes (`:596-605`). `++minutes`/`++hours`/`++days` are plain `int`
-    // increments on values that cannot be near `INT_MAX` after the comparisons above.
+    // Round to full minutes (`:596-605`). `days`, `hours`, `minutes` and `seconds` are whatever
+    // `sscanf` read out of caller-supplied text, so each of these four `int` arithmetic sites can
+    // overflow -- `days + hours` for `"2147483647d 1h 0m 0s"`, and each `++` for a field already
+    // at `INT_MAX`. The compiled oracle wraps (it has no trap on signed overflow); Rust panics
+    // under `cargo test`'s overflow-checked profile, which would be a live panic at a site the
+    // oracle has no check at (the banned-substitution list). `wrapping_*` reproduces the
+    // oracle's two's-complement result instead.
     // PORT SRC: src/libslic3r/Utils.hpp:597
-    if days + hours > 0 && seconds >= 30 {
-        minutes += 1;
+    if days.wrapping_add(hours) > 0 && seconds >= 30 {
+        minutes = minutes.wrapping_add(1);
         // PORT SRC: src/libslic3r/Utils.hpp:598
         if minutes == 60 {
             minutes = 0;
-            hours += 1;
+            hours = hours.wrapping_add(1);
             // PORT SRC: src/libslic3r/Utils.hpp:600
             if hours == 24 {
                 hours = 0;
-                days += 1;
+                days = days.wrapping_add(1);
             }
         }
     }

@@ -811,3 +811,25 @@ fn utils_save_and_load_string_file_match_the_oracle() {
         "save_string_file onto a directory"
     );
 }
+
+/// `short_time` does not panic where the vendored body wraps. `days`, `hours`, `minutes` and
+/// `seconds` come straight out of `sscanf` over caller-supplied text, so `days + hours` and the
+/// three `++` sites at `Utils.hpp:597-603` can each overflow `int`. The compiled oracle wraps;
+/// Rust would panic under this profile's overflow checks, which is itself a divergence. Not a
+/// differential assertion: signed overflow is undefined in C++, so there is no oracle answer to
+/// compare against -- only the panic to rule out.
+#[test]
+fn utils_short_time_wraps_rather_than_panicking_on_an_int_max_field() {
+    let inputs: &[&str] = &[
+        "2147483647d 1h 0m 30s",
+        "2147483647d 2147483647h 59m 30s",
+        "1d 2147483647h 59m 30s",
+        "1d 23h 2147483647m 30s",
+        "-2147483648d 0h 0m 30s",
+    ];
+    for input in inputs {
+        // The call itself is the assertion: a panic fails the test.
+        let answer = port::short_time(input);
+        assert!(!answer.is_empty(), "short_time({input:?}) answered nothing");
+    }
+}
