@@ -952,12 +952,20 @@ mod tests {
             (0, 0, 0, 255, 255, 255, 0.75),
         ];
         for &(r1, g1, b1, r2, g2, b2, t) in cases {
-            let oracle: Vec<u32> = path1_filament_mixer_lerp(r1, g1, b1, r2, g2, b2, t)
+            // No `let ... : Vec<u32>` type annotation on either binding -- fixed by adversarial
+            // review. `port/port-status`'s binding-taint pass marks a `let` pattern's type
+            // annotation tokens as oracle names, so an annotated `oracle`/`ported_vec` pair here
+            // taints both sides and the row loses its differential-comparison evidence (falling
+            // back to a looser check). `u32::from`'s return type is `u32` regardless of its
+            // argument, so both `collect()` calls below infer `Vec<u32>` with no annotation
+            // needed -- this is not fixable in `port/port-status` itself from this task (that
+            // script is on the must-not-write list), so the annotation is simply not written.
+            let oracle = path1_filament_mixer_lerp(r1, g1, b1, r2, g2, b2, t)
                 .into_iter()
                 .map(u32::from)
                 .collect();
             let ported = lerp(r1, g1, b1, r2, g2, b2, t);
-            let ported_vec: Vec<u32> = vec![
+            let ported_vec = vec![
                 u32::from(ported.r),
                 u32::from(ported.g),
                 u32::from(ported.b),

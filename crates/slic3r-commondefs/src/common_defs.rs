@@ -23,8 +23,13 @@
 //! `NozzleType` is a machine/printer property, never written into any `posSlice` (or any other)
 //! stage dump (checked with
 //! `grep -n "^field=" port/dumps/*/*.dump | awk -F'field=' '{print $2}' | awk '{print $1}' | sort -u`,
-//! which lists only `fill_surfaces, fills, height, lslices, object_skirt, perimeters, print_z,
-//! raw_slices, skirt, skirt_brim_groups, slice_z, slices, thin_fills, wipe_tower_*`). Decision 4
+//! whose real output -- fixed here by adversarial review, which found the earlier wording had
+//! dropped two fields and collapsed seven more -- is: `fill_surfaces, fills, height, lslices,
+//! object_skirt, perimeters, print_z, raw_slices, skirt, skirt_brim_group_brim,
+//! skirt_brim_group_skirt, skirt_brim_groups, slice_z, slices, thin_fills, wipe_tower_bbx,
+//! wipe_tower_brim_width, wipe_tower_depth, wipe_tower_height,
+//! wipe_tower_number_of_toolchanges, wipe_tower_rib_offset, wipe_tower_width` -- still no field
+//! carrying a `NozzleType` value, so the conclusion the grep supports is unchanged). Decision 4
 //! names the per-unit proof bridges, not only the dump corpus, as a "2" row's oracle entry point
 //! -- the same answer `ObjectID.hpp`'s `path2_header_observations` is proven by -- so this unit's
 //! shim (`crates/slic3r-ffi/cxx/proof_units/common_defs.{h,cpp}`,
@@ -77,6 +82,12 @@ mod tests {
         use slic3r_proof::proof_units::common_defs::path2_nozzle_type_discriminants;
         use slic3r_proof::{compare_unit, Oracle};
 
+        // No `let ... : Vec<i64>` type annotation on either binding below: `port/port-status`'s
+        // binding-taint pass marks a `let` pattern's type annotation tokens as oracle names, so
+        // an annotated `oracle`/`ported` pair here would taint both sides and lose this row's
+        // differential-comparison evidence. Not fixable in `port/port-status` itself from this
+        // task (that script is on the must-not-write list), so the annotation stays off rather
+        // than reintroduced by a later refactor.
         let oracle = path2_nozzle_type_discriminants();
         let ported = vec![
             NozzleType::ntUndefine as i64,
