@@ -281,6 +281,25 @@ loop's steady state.
   the record above says so rather than claiming a direct comparison that was not made.
 - **Fixer:** no fix needed; both passes agreed.
 
+## What the two review passes did not catch
+
+Recorded for the same reason the review methodology note above is: `just port-check` (R16's
+`// PORT SRC:` marker checks, R19's proof-marker-differential check), run after both review
+passes above had already signed off on all three units, found 545 findings across all three --
+markers missing the `src/libslic3r/` path prefix `resolve_vendored` requires, float literals
+written in a decimal form that does not textually match the vendored line's bare-integer
+spelling, two symbolic POSIX flag values and one octal-notation mismatch needing the external
+marker form instead, and both `MaterialType`'s and `InstanceLock`'s proofs reading as
+non-differential to the text scanner because their `use ... as oracle;` import is invisible to
+it. None of this was a *behavioural* divergence the "assume the module is wrong, cite
+`source:line` against `module:line`" review loop is built to find — every value both review
+passes checked was already correct — it was a mechanical-convention gap neither review pass
+checked for, because neither read `port/port-status`'s own source before reviewing. Fixed in this
+branch's "Fix `// PORT SRC:` markers and proof-marker detection" commit, with `just port-check`
+confirming 0 findings and `cargo test` confirming every proof still passes. A later task's
+reviewers should run `just port-check` as part of their own review, not only `cargo test`, given
+this measured gap.
+
 ## Corrections to `docs/PORTING.md`
 
 None. Every rule this trial actually exercised — the idiom map's "non-const reference
