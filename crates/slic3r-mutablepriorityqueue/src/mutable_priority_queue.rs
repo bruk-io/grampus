@@ -9,15 +9,29 @@
 //! same property structurally (a `T` that is not `Copy` fails to compile against this bound), so
 //! no runtime or const-time assertion is needed to reproduce it.
 //!
-//! **NDEBUG/Release semantics only.** The oracle this task's proof links is built
-//! `-DCMAKE_BUILD_TYPE=Release` (`just oracle-build`), which defines `NDEBUG`. Three vendored
-//! methods (`clear`, `pop`, `remove` on both classes) read differently depending on `NDEBUG`: the
-//! `#ifdef NDEBUG` / `#endif` pair around `if (ResetIndexWhenRemoved)` means that guard is live
-//! only in a Release build, and in a Debug build the preprocessor instead deletes just that `if`
-//! line, leaving the mark-as-removed loop unconditional. This port ports the Release reading --
-//! `if RESET_INDEX_WHEN_REMOVED { ... }` -- because that is the only configuration its proof can
-//! ever observe; the unconditional Debug reading is not a second code path this module keeps in
-//! sync with.
+//! **NDEBUG/Release semantics chosen, not yet proven.** The normative oracle
+//! (`vendor/OrcaSlicer/build/arm64`) is built `-DCMAKE_BUILD_TYPE=Release`, which defines
+//! `NDEBUG`. Three vendored methods (`clear`, `pop`, `remove` on both classes) read differently
+//! depending on `NDEBUG`: the `#ifdef NDEBUG` / `#endif` pair around `if (ResetIndexWhenRemoved)`
+//! means that guard is live only in a Release build, and in a Debug build the preprocessor
+//! instead deletes just that `if` line, leaving the mark-as-removed loop unconditional. This port
+//! ports the Release reading -- `if RESET_INDEX_WHEN_REMOVED { ... }` -- because the Release
+//! library is the normative oracle. **An earlier version of this sentence claimed the Release
+//! reading "is the only configuration its proof can ever observe"; that is false, and the
+//! opposite is true.** The proof's own translation unit (`crates/slic3r-ffi/cxx/proof_units/
+//! mutable_priority_queue.cpp`) `#include`s this header fresh into a `cxx_build` TU that never
+//! links `liblibslic3r.a`, and that TU is compiled under `cargo build`/`cargo test`'s `dev`/`test`
+//! profile, which (`crates/slic3r-ffi/build.rs`'s own measured comment) adds no `-DNDEBUG`. So
+//! the proof's own oracle side compiles the *unconditional* (Debug) reading of this guard, not
+//! the Release one this module implements -- and no committed test tells the two apart: the
+//! `ResetIndexWhenRemoved = true` destructor-marks comparisons (below) coincide under either
+//! reading, and the `= false` order comparisons never read the index marks at all. The port's
+//! choice of the Release reading is still right, because the Release library is what this task's
+//! proof is supposed to be normative against -- but that choice is unproven by anything committed
+//! here, and a comparison that did witness `ResetIndexWhenRemoved = false`'s index marks would
+//! fail. Giving the proof's cxx translation unit NDEBUG parity with the oracle is out of this
+//! task's write list (`build.rs` is not a file a foundation task may touch) and is recorded there
+//! as a named hazard already; this module's own doc previously mischaracterised it as resolved.
 
 /// `constexpr auto InvalidQueueID = std::numeric_limits<size_t>::max();`
 ///
@@ -30,8 +44,15 @@ pub const INVALID_QUEUE_ID: usize = usize::MAX;
 /// `IndexSetter` mirrors a C++ callable of signature `void(T&, size_t)` (`FnMut`, since the
 /// vendored callable may itself carry mutable state -- none of the call sites below need `T`
 /// itself to be mutated through any path other than this setter, matching the original's own
-/// `m_index_setter(item, idx)` calls). `LessPredicate` mirrors `bool(const T&, const T&) const`
-/// (`Fn`, never `FnMut`: the original takes it by `const LessPredicate&` everywhere it is called).
+/// `m_index_setter(item, idx)` calls). `LessPredicate` mirrors `bool(const T&, const T&) const`.
+/// **`Fn`, never `FnMut`, is this port's own narrowing choice, not one the vendored source
+/// requires**: `m_less_predicate` is a plain, non-`const` data member
+/// (`src/libslic3r/MutablePriorityQueue.hpp:52`), called from the non-`const` methods
+/// `update_heap_up`/`update_heap_down` (`:150`, `:181`), and no `const LessPredicate&` appears
+/// anywhere in the file -- the original places no const requirement on it at all. `Fn` only
+/// restricts what callers may pass (no predicate that itself needs `&mut self`), never a
+/// behaviour divergence, so it is kept as the simpler bound, stated here as the port's own
+/// choice rather than attributed to a source constraint that does not exist.
 ///
 /// // PORT SRC: src/libslic3r/MutablePriorityQueue.hpp:12
 pub struct MutablePriorityQueue<
@@ -143,6 +164,17 @@ where
     /// `void push(const T &item)` / `void push(T &&item)` -- `T: Copy` collapses the two
     /// overloads (a copy and a move of a trivially copyable type are the same bits) into one
     /// by-value method.
+    ///
+    /// **Statement-order divergence, undocumented until now.** The vendored body is
+    /// `m_heap.emplace_back(item); m_index_setter(m_heap.back(), idx);` (`:81`-`:82`) -- the
+    /// setter runs on the element already inside the vector, after the push. This port calls the
+    /// setter on the caller's local copy first and pushes afterward. Equivalent for every `T` and
+    /// setter shape this unit's own proof uses (both the item-field setters and the external-
+    /// array setters), but it is a real reordering of two observable side effects, unlike
+    /// `update_heap_up`/`update_heap_down`'s by-index rewrite, which changes *how* the same two
+    /// writes happen rather than their order (see that method's own doc). Named here rather than
+    /// restored, since restoring it needs no behaviour change, only a style the rest of this
+    /// module does not otherwise use.
     ///
     /// // PORT SRC: src/libslic3r/MutablePriorityQueue.hpp:26
     pub fn push(&mut self, mut item: T) {
@@ -730,6 +762,10 @@ where
     /// `void push(const T &item)` / `void push(T &&item)` -- see `MutablePriorityQueue::push`'s
     /// own doc for why `T: Copy` collapses the two overloads into one.
     ///
+    /// Same statement-order divergence as the base queue's `push` -- see that method's own doc.
+    /// Vendored: `m_heap.emplace_back(item); m_index_setter(m_heap.back(), idx);`
+    /// (`:335`-`:336`).
+    ///
     /// // PORT SRC: src/libslic3r/MutablePriorityQueue.hpp:276
     pub fn push(&mut self, item: T) {
         if Address::<BLOCK_SIZE>::is_padding(self.heap.len()) {
@@ -1064,7 +1100,7 @@ mod tests {
     use super::*;
     use slic3r_proof::proof_units::mutable_priority_queue::{
         destructor_marks_base, destructor_marks_skip_heap, push_pop_order, remove_then_pop_order,
-        skip_heap_push_pop_order,
+        skip_heap_push_pop_order, skip_heap_remove_then_pop_order,
     };
 
     /// The proof's one shared instantiation, on both the Rust and the C++ side
@@ -1284,6 +1320,42 @@ mod tests {
                 oracle,
                 "skip-heap push/pop order for {keys:?}"
             );
+        }
+    }
+
+    // PROOF: 1
+    //
+    // Adversarial review (this task, third pass): `remove` on the skip heap had no oracle
+    // comparison -- it is the only path that reaches `pop_back`'s double-pop padding logic
+    // (`MutablePriorityQueue.hpp:291-297`) from a non-top index, and it is what the real call
+    // sites (`ShortestPath.cpp`, `AStar.hpp`) hit. `remove_at` skips index `0`, the always-
+    // padding slot for every `KEY_SETS` entry (none reaches the 32-element block boundary).
+    #[test]
+    fn mutable_skip_heap_priority_queue_remove_then_pop_order_matches_oracle() {
+        for &keys in KEY_SETS {
+            for remove_at in 1..=keys.len() {
+                let mut q = make_miniheap_mutable_priority_queue::<
+                    ProofItem,
+                    DEFAULT_BLOCK_SIZE,
+                    false,
+                    _,
+                    _,
+                >(set_idx, less);
+                for &key in keys {
+                    q.push(ProofItem { key, idx: 0 });
+                }
+                q.remove(remove_at);
+                let mut actual = Vec::with_capacity(keys.len() - 1);
+                while !q.empty() {
+                    actual.push(q.top().key);
+                    q.pop();
+                }
+                let oracle = skip_heap_remove_then_pop_order(&keys.to_vec(), remove_at);
+                assert_eq!(
+                    actual, oracle,
+                    "skip-heap remove({remove_at}) then pop order for {keys:?}"
+                );
+            }
         }
     }
 

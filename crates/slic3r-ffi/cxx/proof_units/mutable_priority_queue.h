@@ -14,6 +14,7 @@ namespace mutable_priority_queue {
 rust::Vec<int64_t> push_pop_order(const rust::Vec<int64_t> &keys);
 rust::Vec<int64_t> remove_then_pop_order(const rust::Vec<int64_t> &keys, size_t remove_at);
 rust::Vec<int64_t> skip_heap_push_pop_order(const rust::Vec<int64_t> &keys);
+rust::Vec<int64_t> skip_heap_remove_then_pop_order(const rust::Vec<int64_t> &keys, size_t remove_at);
 rust::Vec<int64_t> destructor_marks_base(const rust::Vec<int64_t> &keys);
 rust::Vec<int64_t> destructor_marks_skip_heap(const rust::Vec<int64_t> &keys);
 

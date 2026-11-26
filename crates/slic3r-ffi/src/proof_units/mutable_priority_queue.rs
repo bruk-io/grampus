@@ -23,6 +23,10 @@ mod ffi {
         fn remove_then_pop_order(keys: &Vec<i64>, remove_at: usize) -> Vec<i64>;
         /// Same as `push_pop_order`, for `MutableSkipHeapPriorityQueue<_, _, _, 32, false>`.
         fn skip_heap_push_pop_order(keys: &Vec<i64>) -> Vec<i64>;
+        /// Same as `remove_then_pop_order`, for `MutableSkipHeapPriorityQueue<_, _, _, 32,
+        /// false>` -- the only committed proof path that reaches the skip heap's
+        /// `pop_back()` double-pop padding logic from a non-top index.
+        fn skip_heap_remove_then_pop_order(keys: &Vec<i64>, remove_at: usize) -> Vec<i64>;
         /// Pushes every key into a `ResetIndexWhenRemoved = true` base queue, drops it without
         /// calling `clear()` explicitly, and returns the external index-setter mark each slot was
         /// left with by the destructor.
@@ -34,5 +38,5 @@ mod ffi {
 
 pub use ffi::{
     destructor_marks_base, destructor_marks_skip_heap, push_pop_order, remove_then_pop_order,
-    skip_heap_push_pop_order,
+    skip_heap_push_pop_order, skip_heap_remove_then_pop_order,
 };

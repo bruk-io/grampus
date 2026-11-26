@@ -90,6 +90,28 @@ rust::Vec<int64_t> skip_heap_push_pop_order(const rust::Vec<int64_t> &keys) {
     return out;
 }
 
+// Adversarial review (task 53-foundation-int128-queue, third pass): `skip_heap_push_pop_order`
+// above never calls `MutableSkipHeapPriorityQueue::remove`, the only path that reaches
+// `pop_back()`'s double-pop padding logic (`MutablePriorityQueue.hpp:291-297`) from a
+// non-top index -- the real call sites this unit exists for (`ShortestPath.cpp`, `AStar.hpp`)
+// hit exactly this path. Same shape as `remove_then_pop_order` above, for the skip heap.
+rust::Vec<int64_t> skip_heap_remove_then_pop_order(const rust::Vec<int64_t> &keys, size_t remove_at) {
+    auto queue = make_miniheap_mutable_priority_queue<ProofItem, 32, false>(
+        set_proof_item_index, proof_item_less);
+    for (int64_t key : keys) {
+        ProofItem item;
+        item.key = key;
+        queue.push(item);
+    }
+    queue.remove(remove_at);
+    rust::Vec<int64_t> out;
+    while (!queue.empty()) {
+        out.push_back(queue.top().key);
+        queue.pop();
+    }
+    return out;
+}
+
 } // namespace mutable_priority_queue
 } // namespace proof_units
 } // namespace slic3r_ffi
