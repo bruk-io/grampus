@@ -50,11 +50,11 @@ extern "C" {
 /// `flock(2)`'s operation flags. `flock()` and its `LOCK_*` flags are not in POSIX at all --
 /// they are a 4.2BSD extension, carried forward by two different headers on the two platforms
 /// `just oracle-build` targets: BSD/macOS defines them in `<sys/fcntl.h>` (reached through
-/// `<sys/file.h>`), glibc directly in `<sys/file.h>` itself. Their values are
-/// platform-defined rather than standardised, the same way `O_CREAT`'s numeric value is
-/// (`std::fs::OpenOptions` is used for the open call
-/// for exactly that reason, below) -- it merely happens to agree across the platforms
-/// `just oracle-build` targets. The vendored source writes the symbolic macro names
+/// `<sys/file.h>`), glibc directly in `<sys/file.h>` itself. Each value is therefore
+/// platform-defined rather than standardised -- the same footing as `O_CREAT`'s numeric value,
+/// which is why `std::fs::OpenOptions` is used for the open call below rather than a
+/// hand-written `open(2)` -- and it merely happens that all four agree on both of these
+/// platforms. The vendored source writes the symbolic macro names
 /// (`LOCK_EX | LOCK_NB`, `InstanceLock.cpp:47`; `LOCK_UN`, `:54`), never these numbers, so there
 /// is no vendored line to cite -- each gets the "constant whose origin is outside the vendored
 /// tree" marker form instead (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 2).
