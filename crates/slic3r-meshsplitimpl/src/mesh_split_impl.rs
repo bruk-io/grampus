@@ -8,27 +8,46 @@
 //! concrete type `indexed_triangle_set` -- `its_split`'s own `const indexed_triangle_set &its =
 //! ItsWithNeighborsIndex_<Its>::get_its(m);` (`:147`), and `create_face_neighbors_index`'s
 //! parameter is `const indexed_triangle_set &its` outright (`:233`), not a second template
-//! parameter. `indexed_triangle_set` is `TriangleMesh.hpp`'s own type, whose manifest row is
-//! `template-heavy: no` -- an ordinary fan-out module, in `slic3r-trianglemesh` (crate map,
-//! level 12), that a later Phase A/B task writes, not this one (task.md, "An included in-scope
-//! file whose manifest row is `template-heavy: no` is a fan-out module ... Its Rust module is
-//! written by Phase A and Phase B, not here"). Measured, not assumed: this crate's generated
-//! `Cargo.toml` (`34-foundation-spike`, from `port/cut.tsv`'s `dep` rows) carries
-//! `slic3r-execution`, `slic3r-libslic3r` and `slic3r-point` as dependencies and *no*
-//! `slic3r-trianglemesh` -- and a port task may add no dependency (`docs/WORKFLOW.md`,
-//! "Conflict discipline"). So `indexed_triangle_set` cannot be named by any module this crate
-//! could ever land, until a regeneration pass changes the cut.
+//! parameter.
 //!
-//! **The translation below is otherwise complete**, written at this file's final path with a
-//! `PORT STATUS` trailer, exactly as `docs/WORKFLOW.md`'s "Unit of work"/"The two phases" ask of
-//! a draft: every `// TODO(port):` marker below names the one missing item
-//! (`IndexedTriangleSet`, standing in for the real `indexed_triangle_set`) rather than guessing a
-//! shape for it, and the module is left unreached by any `mod` line so `cargo build --workspace`
-//! never reads it and `cargo fmt --check` never visits it (`docs/WORKFLOW.md`, "The two
-//! phases") -- `just port-status` derives this row `drafted`. **Named as a finding in this
-//! task's pull request**, together with the `mod` line, the `// PROOF: 2` marker and the real
-//! `IndexedTriangleSet` import the task that adds `slic3r-trianglemesh` as a dependency (or that
-//! regenerates `port/cut.tsv` to include it) should give this module.
+//! **Correction (second review pass): `indexed_triangle_set`'s owner is not a fan-out module.**
+//! An earlier pass of this doc said `TriangleMesh.hpp`'s manifest row is `template-heavy: no`,
+//! "an ordinary fan-out module" this task does not write. `port/manifest.tsv:575` actually reads
+//! `template-heavy: yes`, and `port/foundation.tsv:20` assigns it to `foundation-19` -- a sibling
+//! *step-20* hand-design, cut and built the same way this task is, not a Phase A/B fan-out unit.
+//! That does not change what this module can do about it: `foundation-19` is a concurrent sibling
+//! task in its own worktree, unmerged as this is written, so there is still no crate this one may
+//! depend on that exports the real type (this crate's generated `Cargo.toml`, from
+//! `port/cut.tsv`'s `dep` rows, carries `slic3r-execution`, `slic3r-libslic3r` and `slic3r-point`
+//! and no `slic3r-trianglemesh`), and `port/cut.tsv:1082` runs the dependency the other
+//! direction -- `slic3r-trianglemesh` depends on `slic3r-meshsplitimpl`, not the reverse -- so
+//! adding `slic3r-trianglemesh` here would close a cycle, not resolve one. [`IndexedTriangleSet`]
+//! below is therefore still this task's own stand-in, not foundation-19's real type: it is a
+//! guess (admesh's `struct indexed_triangle_set`, `deps_src/admesh/stl.h:219`, also carries a
+//! third field, `properties`, that this stand-in omits because no function in this header reads
+//! it), named here only so the translation below has something to type-check against for review,
+//! and it must be deleted in favour of whichever crate ends up owning the real type -- either
+//! `foundation-19`'s `slic3r-trianglemesh` once this crate can depend on it, or this module made
+//! generic over a mesh trait instead (the shape the vendored `ItsWithNeighborsIndex_<Its>`
+//! template already has), whichever a regeneration or amendment pull request chooses. **Still
+//! named as a finding in this task's pull request.**
+//!
+//! **Correction (second review pass): the translation below is not complete.**
+//! [`NeighborVisitor`], [`its_split`]/[`its_split_collect`], [`its_is_splittable`] and
+//! [`its_number_of_patches`] are translated in full. [`create_face_neighbors_index`]'s body is
+//! **not translated at all** -- it is written at this file's final path with a `PORT STATUS`
+//! trailer, exactly as `docs/WORKFLOW.md`'s "Unit of work"/"The two phases" ask of a draft, and
+//! its `// TODO(port):` marker names the three missing items (`VertexFaceIndex`,
+//! `its_triangle_edge`, `its_triangle_vertex_index`), but the function's own body is a bare
+//! `todo!()`: no per-edge loop (`:252`), no `vertex_triangles` scan (`:260`), no
+//! `other_face <= face_idx` skip (`:261`), no opposite-direction test (`:267`) and no
+//! `neighbors[other_face][vertex_index]` write (`:275`) is present. The module is left unreached
+//! by any `mod` line so `cargo build --workspace` never reads it and `cargo fmt --check` never
+//! visits it (`docs/WORKFLOW.md`, "The two phases") -- `just port-status` derives this row
+//! `drafted`. **Named as a finding in this task's pull request**, together with the `mod` line,
+//! the `// PROOF: 2` marker and the real `IndexedTriangleSet` import the task that adds
+//! `slic3r-trianglemesh` as a dependency (or that regenerates `port/cut.tsv` to include it)
+//! should give this module.
 //!
 //! **`Vec3i32`/`Vec2i32`** (the Eigen vector aliases `Point.hpp:52-69` hand-designs,
 //! `55-foundation-libslic3r-execution`'s sibling foundation task) are real: `slic3r-point` is a
@@ -43,9 +62,12 @@ pub use slic3r_point::point::Vec3i32;
 
 // TODO(port): src/libslic3r/TriangleMesh.hpp -- `indexed_triangle_set` (used throughout this
 // header: `ItsWithNeighborsIndex_<indexed_triangle_set>`, `its_split`, `create_face_neighbors_index`,
-// ...). `template-heavy: no` in `port/manifest.tsv`; a fan-out module this task does not write
-// (see the module doc). Everywhere this module doc says `IndexedTriangleSet` below is that type,
-// standing in so this draft's shape is reviewable before the real type exists.
+// ...). `template-heavy: yes` in `port/manifest.tsv:575`; owned by `foundation-19`
+// (`port/foundation.tsv:20`), a sibling step-20 task, not a fan-out module this task could
+// write around (see the module doc's correction). Everywhere this module doc says
+// `IndexedTriangleSet` below is that type, standing in so this draft's shape is reviewable
+// before the real type exists -- not foundation-19's own spelling, and missing the real type's
+// third field (`properties`, `deps_src/admesh/stl.h:219`), which no function below reads.
 pub struct IndexedTriangleSet {
     pub vertices: Vec<slic3r_point::point::Vec3f>,
     pub indices: Vec<Vec3i32>,
@@ -325,10 +347,13 @@ pub fn its_number_of_patches<Its: ItsWithNeighborsIndex>(m: &Its) -> usize {
 /// `template<class ExPolicy> std::vector<Vec3i32> create_face_neighbors_index(ExPolicy &&ex,
 /// const indexed_triangle_set &its)` (`:232-282`): one neighboring-face index per facet, `-1`
 /// where an edge has no (or not-yet-discovered) neighbor.
-// TODO(port): src/libslic3r/TriangleMesh.hpp -- `VertexFaceIndex`, `its_triangle_edge`,
-// `its_triangle_vertex_index`. The body below is written against the real vendored algorithm
-// (`:235-280`) but cannot be made to compile without these three names; left in place, not
-// stubbed with a guess, per the module doc's own finding.
+// TODO(port): src/libslic3r/TriangleMesh.hpp -- `VertexFaceIndex` (`:241`), `its_triangle_edge`
+// (`:258`) and `its_triangle_vertex_index` (`:263`). Not translated below: this function's body
+// needs all three names to write the real algorithm (the per-edge loop at `:252`, the
+// `vertex_triangles` scan at `:260`, the `other_face <= face_idx` skip at `:261`, the opposite-
+// direction test at `:267` and the `neighbors[other_face][vertex_index]` write at `:275`), and
+// none of it is attempted here -- a bare `todo!()` stands in for the whole loop body, not a
+// partial or best-effort translation, per the module doc's own finding.
 pub fn create_face_neighbors_index<P: slic3r_execution::execution::ExecutionPolicy>(
     _ex: &P,
     its: &IndexedTriangleSet,
