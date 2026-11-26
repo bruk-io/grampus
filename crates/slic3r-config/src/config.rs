@@ -1268,15 +1268,16 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
         ConfigOptionType::Floats
     }
     // PORT NOTE: src/libslic3r/Config.hpp:971-977 -- throws `ConfigurationError("Serializing
-    // NaN")`/`("Serializing invalid number")` for a non-nullable NaN/an infinity;
-    // `serialize_single_value` already returns `Result<String, ConfigError>` to carry that, but
-    // the `ConfigOption::serialize` trait method this overrides returns a bare `String`
-    // (matching the vendored `std::string serialize() const` signature, which the same
-    // narrowing applies to for every type in this unit, not only this one -- `serialize()`
-    // itself cannot throw in this trait's shape), so the error is swallowed to an empty string
-    // here rather than silently matched or quietly left unmentioned. Named, not fixed: fixing it
-    // for real needs `ConfigOption::serialize` to return `Result<String, ConfigError>`, a
-    // trait-wide signature change this task's remaining scope did not reach.
+    // NaN")`/`("Serializing invalid number")` for a non-nullable NaN/an infinity. Weaker than
+    // `deserialize()`'s own narrowing just below (`Config.hpp:945-946`): a `bool`-returning
+    // `deserialize` already has an ordinary non-throwing failure path, so collapsing a throw
+    // into that same `false` loses only which error it would have been. `serialize()` has *no*
+    // ordinary failure path at all in the vendored tree -- it returns a string or it throws --
+    // so this port's `String`-returning trait method emits `""` where the oracle would never
+    // produce output at all; `ConfigBase::save` writing `"key = "` for such an option is wrong
+    // bytes, not merely an under-specified error. Named, not fixed: fixing it for real needs
+    // `ConfigOption::serialize` to return `Result<String, ConfigError>`, a trait-wide signature
+    // change this task's remaining scope did not reach.
     fn serialize(&self) -> String {
         let mut parts = Vec::with_capacity(self.values.len());
         for v in &self.values {
@@ -4973,7 +4974,9 @@ impl<const NULLABLE: bool> ConfigOptionBoolsTempl<NULLABLE> {
             self.values.clear();
         }
         let mut substituted = false;
-        for item in s.split(',') {
+        // PORT NOTE: src/libslic3r/Config.hpp:2023 -- `std::getline(is, item_str, ',')` (see
+        // `cpp_getline_split`), not `str::split`.
+        for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             let new_value: u8 = if item == "nil" {
                 if NULLABLE {
@@ -8046,13 +8049,17 @@ pub mod gcode_scan {
 }
 
 /// `normalize_cli_bool_value` (`Config.cpp:1758-1782`).
+// PORT NOTE: src/libslic3r/Config.cpp:1770 -- `std::getline(is, item_str, ',')` (see
+// `cpp_getline_split`'s own doc comment), not `str::split`: a reviewer measured
+// `normalize_cli_bool_value("1,")` as `"1"` in the oracle (the trailing empty field after the
+// last comma is dropped) against `"1,"` from an earlier `str::split`-based version here.
 pub fn normalize_cli_bool_value(value: &str) -> String {
     const TRUE_VALUES: &[&str] = &["1", "true", "yes", "on", "enabled"];
     const FALSE_VALUES: &[&str] = &["0", "false", "no", "off", "disabled"];
     let matches =
         |item: &str, candidates: &[&str]| candidates.iter().any(|c| item.eq_ignore_ascii_case(c));
     let mut normalized = String::new();
-    for item in value.split(',') {
+    for item in cpp_getline_split(value, ',') {
         let item = item.trim();
         if !normalized.is_empty() {
             normalized.push(',');
@@ -8963,6 +8970,11 @@ mod tests {
             assert_eq!(oracle_eow, ported_eow, "is_end_of_word({c})");
         }
 
+        // Review finding: the trailing-comma cases below are the ones this test originally
+        // lacked -- `normalize_cli_bool_value` used `str::split(',')` where the vendored body is
+        // `std::getline(is, item, ',')` (`Config.cpp:1770`), and `str::split` keeps the trailing
+        // empty field after a trailing delimiter where `getline` drops it; measured,
+        // `normalize_cli_bool_value("1,")` is `"1"` in the oracle.
         let bool_cases = [
             "1",
             "0",
@@ -8976,6 +8988,10 @@ mod tests {
             "disabled",
             "maybe",
             "true,no,maybe",
+            "1,",
+            "1,0,",
+            ",",
+            "",
         ];
         for case in bool_cases {
             let oracle_normalized = path3_normalize_cli_bool_value(case);
