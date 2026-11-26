@@ -437,7 +437,8 @@ three units in this pass, recorded as each reviewer actually gave it:**
   "glibc's `<bits/file.h>`", that does not exist — glibc has no `bits/file.h`; it defines all
   four `LOCK_*` macros directly in `misc/sys/file.h` (installed as `<sys/file.h>`), and again in
   `sysdeps/unix/sysv/linux/bits/fcntl-linux.h` under `#ifdef __USE_MISC`, both verified against
-  glibc's own source. A false cited origin in an external marker is the same defect class this
+  glibc's own source. The false clause stood on `crates/slic3r-instancelock/src/instance_lock.rs:60`,
+  `:66` and `:71` as `233c6d9` left them. A false cited origin in an external marker is the same defect class this
   unit had already been rejected over twice, so the three markers and the doc comment above them
   now name glibc's `misc/sys/file.h` (the macOS SDK half, `usr/include/sys/fcntl.h:506-508`,
   was re-verified against this machine's SDK and is unchanged). Separately, `fresh_lock_path`
@@ -449,9 +450,10 @@ three units in this pass, recorded as each reviewer actually gave it:**
   rules name as an anti-pattern, and this unit is the exemplar the fan-out copies. The helper now
   calls `std::fs::create_dir_all` before canonicalizing, the pattern its two siblings
   (`crates/slic3r-proof/tests/manifest_env.rs:29`, `crates/slic3r-proof/tests/dumps_proof.rs:118`)
-  already use. Neither fix changes a line of ported logic; the live `module:line` citations at the
-  top of this unit were re-derived against the file as committed, because the marker fix shifted
-  every line after `:58` by five.
+  already use; it stood at `:479-482` before the fix. Neither fix changes a line of ported logic;
+  the live `module:line` citations at the top of this unit were re-derived against the file as
+  committed, because the doc comment gained two lines and each of the three markers one, which
+  shifts every line after the old `:71` by five.
 - **LOCK_EX and the `0o644` open mode, two related findings also raised on this pass (majors, not
   blockers): fixed and recorded, respectively.** `LOCK_EX`'s value (`2`) carries no `// PORT SRC:`
   marker even though the module's own doc comment claimed all three flock flags had one — `2` is
