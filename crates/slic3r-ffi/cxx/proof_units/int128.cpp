@@ -30,9 +30,13 @@ double multiply_as_double(int64_t lhs, int64_t rhs) {
     return static_cast<double>(Int128::multiply(lhs, rhs));
 }
 
-// `int sign() const { return (value > 0) - (value < 0); }` (Int128.hpp:89), called on a genuinely
-// 128-bit value rather than on a bare `int64_t` construction -- an adversarial-review finding
-// (this task) that `sign()` itself had no oracle-verified test.
+// `int sign() const { return (value > 0) - (value < 0); }` (Int128.hpp:89) -- an adversarial-
+// review finding (this task) that `sign()` itself had no oracle-verified test. **Not a genuinely
+// 128-bit value**: `multiply()` narrows every result through `Int128(int64_t lo = 0)` (see
+// Int128.hpp:106's own doc on the Rust side), so this is still effectively a bare `int64_t`
+// construction for `sign()`'s purposes -- `add_assign_sign` below, driven through the
+// non-narrowing `operator+=`, is this unit's real coverage of `sign()` outside the
+// sign-extended-`i64` range.
 int32_t multiply_sign(int64_t lhs, int64_t rhs) {
     return static_cast<int32_t>(Int128::multiply(lhs, rhs).sign());
 }
@@ -91,6 +95,27 @@ uint64_t add_assign_lo(int64_t lhs, int64_t rhs) {
     Int128 v(lhs);
     v += Int128(rhs);
     return v.lo();
+}
+
+// Adversarial review (task 53-foundation-int128-queue, third pass): `multiply_sign` above drives
+// `sign()`'s oracle comparison through `multiply()`, which (see Int128.hpp:106's own doc on the
+// Rust side) narrows every result through the class's only viable constructor,
+// `Int128(int64_t lo = 0)`, so every value it can return is, bit for bit, a sign-extended i64 --
+// "a genuinely 128-bit value, not a bare int64_t construction" was therefore not actually true of
+// that test. `operator+=` does not narrow (see its own doc), and reaches a value outside the i64
+// range at, e.g., `lhs = rhs = INT64_MAX` (true sum `2^64 - 2`, far past `INT64_MAX`). These two
+// functions close the gap for real, driving `sign()`/`operator double()` through that same
+// non-narrowed value.
+int32_t add_assign_sign(int64_t lhs, int64_t rhs) {
+    Int128 v(lhs);
+    v += Int128(rhs);
+    return static_cast<int32_t>(v.sign());
+}
+
+double add_assign_as_double(int64_t lhs, int64_t rhs) {
+    Int128 v(lhs);
+    v += Int128(rhs);
+    return static_cast<double>(v);
 }
 
 int64_t sub_assign_hi(int64_t lhs, int64_t rhs) {

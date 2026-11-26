@@ -153,12 +153,17 @@ impl Int128 {
     ///
     /// `(a11 + (1 << 31)) >> 32`: in the vendored C++, `1 << 31` is an `int` (32-bit) literal
     /// shift that sets the sign bit, so its *value*, sign-extended to `int64_t` by the following
-    /// addition, is `-2147483648` -- not `+2147483648`. Measured directly against the real oracle
-    /// (`crates/slic3r-ffi/cxx/proof_units/int128.cpp`'s `sign_determinant_2x2_filtered`, called
-    /// from this module's own `#[cfg(test)]` proof below) rather than assumed: the two hypotheses
-    /// disagree at inputs that straddle the filter's `abs(det) > err` branch, and the committed
-    /// test below is what the oracle actually returns. `ROUND_BIAS` is `i32::MIN as i64`, the
-    /// same bit pattern `1 << 31` produces as a 32-bit `int`.
+    /// addition, is `-2147483648` -- not `+2147483648`. This is measured directly from the C++
+    /// compiler's own evaluation of `1 << 31` as a 32-bit `int` (`-2147483648`), not assumed, and
+    /// `ROUND_BIAS` below is that exact bit pattern as an `i64`. **What the committed test does
+    /// not establish**: re-running both rounding-bias hypotheses (`+2^31` and `-2^31`) against
+    /// the real oracle over every committed `QUADS` entry and over several million structured
+    /// random inputs gives zero disagreements between them either way -- the `<< 1` factor in
+    /// `err` below absorbs the uniform off-by-one the two biases would otherwise produce, so the
+    /// filter's fast path stays sign-correct under either convention and the committed test
+    /// cannot tell them apart. The chosen bias is still the right one, because it is the actual
+    /// bit pattern the vendored expression evaluates to, not because any committed comparison
+    /// would catch a swap.
     ///
     /// `wrapping_add`, not `+`: at `a11 == i64::MIN` (and a handful of other inputs this task's
     /// own test commits), `a11 + ROUND_BIAS` is a C++ signed-integer overflow -- formally
@@ -180,24 +185,18 @@ impl Int128 {
         // PORT SRC: src/libslic3r/Int128.hpp:267
         let a22s = a22.wrapping_add(ROUND_BIAS) >> 32;
         let det = a11s * a22s - a12s * a21s;
-        // `err` is always `>= 1` (the `+ 1` below is unconditional), which is the unstated
-        // invariant `i32::from(det > 0) - i32::from(det < 0)` below relies on: the vendored
-        // branch is `(det > 0) ? 1 : -1` (Int128.hpp:274), which is `-1` at `det == 0` and
-        // therefore diverges from `i32::from(det > 0) - i32::from(det < 0)` (`0` at `det == 0`)
-        // -- but this branch is only ever taken when `det.abs() > err >= 1`, so `det == 0` never
-        // reaches it on either side. Verified equivalent over 300,000 inputs (adversarial
-        // review, this task), not merely argued; written this way rather than transcribing the
-        // ternary literally because the two differ (wrongly, for a `det` that could be zero) at
-        // this one value, and the invariant that makes them agree here is worth a comment rather
-        // than left to be rediscovered.
         let err = ((a11s.abs() + a12s.abs() + a21s.abs() + a22s.abs()) << 1) + 1;
-        debug_assert!(
-            det.abs() <= err
-                || (i32::from(det > 0) - i32::from(det < 0))
-                    == Self::sign_determinant_2x2(a11, a12, a21, a22)
-        );
         if det.abs() > err {
-            i32::from(det > 0) - i32::from(det < 0)
+            // `(det > 0) ? 1 : -1` -- transcribed literally (Int128.hpp:274), not rendered via
+            // the strict-sign formula used elsewhere in this file: a workaround needing a
+            // paragraph to justify it is wrong code (`docs/WORKFLOW.md`, "The rejection rule"),
+            // and this ternary is directly transcribable.
+            // PORT SRC: src/libslic3r/Int128.hpp:274
+            if det > 0 {
+                1
+            } else {
+                -1
+            }
         } else {
             Self::sign_determinant_2x2(a11, a12, a21, a22)
         }
@@ -220,17 +219,12 @@ impl Int128 {
             // PORT SRC: src/libslic3r/Int128.hpp:288
             let p2s = p2.wrapping_add(ROUND_BIAS) >> 32;
             let det = p1s * q2s - p2s * q1s;
-            // Same unstated invariant as `sign_determinant_2x2_filtered` above: `err >= 1`
-            // always, so `i32::from(det > 0) - i32::from(det < 0)` below only runs where
-            // `det != 0`, which is where it agrees with the vendored `(det > 0) ? 1 : -1`.
             let err = ((p1s.abs() + q1s.abs() + p2s.abs() + q2s.abs()) << 1) + 1;
-            debug_assert!(
-                det.abs() <= err
-                    || (i32::from(det > 0) - i32::from(det < 0)) * invert
-                        == Self::compare_rationals(p1, q1, p2, q2)
-            );
             if det.abs() > err {
-                return (i32::from(det > 0) - i32::from(det < 0)) * invert;
+                // `(det > 0) ? 1 : -1` -- transcribed literally (Int128.hpp:295), same
+                // rejection-rule reasoning as `sign_determinant_2x2_filtered` above.
+                // PORT SRC: src/libslic3r/Int128.hpp:295
+                return (if det > 0 { 1 } else { -1 }) * invert;
             }
         }
         Self::sign_determinant_2x2(p1, q1, p2, q2) * invert
@@ -348,10 +342,10 @@ impl std::ops::Neg for Int128 {
 mod tests {
     use super::Int128;
     use slic3r_proof::proof_units::int128::{
-        add_assign_hi, add_assign_lo, add_hi, add_lo, compare_rationals,
-        compare_rationals_filtered, multiply_as_double, multiply_hi, multiply_lo, multiply_sign,
-        neg_hi, neg_lo, sign_determinant_2x2, sign_determinant_2x2_filtered, sub_assign_hi,
-        sub_assign_lo, sub_hi, sub_lo,
+        add_assign_as_double, add_assign_hi, add_assign_lo, add_assign_sign, add_hi, add_lo,
+        compare_rationals, compare_rationals_filtered, multiply_as_double, multiply_hi,
+        multiply_lo, multiply_sign, neg_hi, neg_lo, sign_determinant_2x2,
+        sign_determinant_2x2_filtered, sub_assign_hi, sub_assign_lo, sub_hi, sub_lo,
     };
 
     const PAIRS: &[(i64, i64)] = &[
@@ -378,9 +372,14 @@ mod tests {
             let expected_hi = multiply_hi(lhs, rhs);
             let expected_lo = multiply_lo(lhs, rhs);
             let expected_f64 = multiply_as_double(lhs, rhs);
-            // `sign()` (Int128.hpp:89) on a genuinely 128-bit value, not a bare `int64_t`
-            // construction -- adversarial review (this task) found this method had no
-            // oracle-verified test of its own.
+            // `sign()` (Int128.hpp:89) -- adversarial review (this task) found this method had
+            // no oracle-verified test of its own. **Not a genuinely 128-bit value**: `multiply`
+            // narrows through `Int128(int64_t lo = 0)` (see its own doc above), so every result
+            // it returns is a sign-extended i64 -- effectively still "a bare `int64_t`
+            // construction" for `sign()`'s purposes. `int128_add_sub_neg_match_oracle` below
+            // asserts `sign()`/`as_f64()` again on `operator+=`'s result, which does not narrow
+            // and genuinely reaches a value outside the `i64` range -- that is this method's
+            // real oracle-verified coverage outside the sign-extended range.
             let expected_sign = multiply_sign(lhs, rhs);
             let actual = Int128::multiply(lhs, rhs);
             assert_eq!(actual.hi(), expected_hi, "hi() for multiply({lhs}, {rhs})");
@@ -438,6 +437,23 @@ mod tests {
                 add_assigned.lo(),
                 expected_add_assign_lo,
                 "lo() for {lhs} += {rhs}"
+            );
+            // `sign()`/`as_f64()` on a value `operator+=` genuinely reaches outside the `i64`
+            // range (e.g. `i64::MAX += i64::MAX`, true sum `2^64 - 2`) -- adversarial review
+            // (this task, third pass) found the earlier `multiply_sign` assertion above did not
+            // actually exercise this, since `multiply`'s narrowing keeps every result it returns
+            // inside the sign-extended-`i64` range.
+            let expected_add_assign_sign = add_assign_sign(lhs, rhs);
+            let expected_add_assign_as_f64 = add_assign_as_double(lhs, rhs);
+            assert_eq!(
+                add_assigned.sign(),
+                expected_add_assign_sign,
+                "sign() for {lhs} += {rhs}"
+            );
+            assert_eq!(
+                add_assigned.as_f64().to_bits(),
+                expected_add_assign_as_f64.to_bits(),
+                "as_f64() for {lhs} += {rhs}"
             );
 
             let mut sub_assigned = a;

@@ -27,6 +27,8 @@ int64_t neg_hi(int64_t lhs);
 uint64_t neg_lo(int64_t lhs);
 int64_t add_assign_hi(int64_t lhs, int64_t rhs);
 uint64_t add_assign_lo(int64_t lhs, int64_t rhs);
+int32_t add_assign_sign(int64_t lhs, int64_t rhs);
+double add_assign_as_double(int64_t lhs, int64_t rhs);
 int64_t sub_assign_hi(int64_t lhs, int64_t rhs);
 uint64_t sub_assign_lo(int64_t lhs, int64_t rhs);
 

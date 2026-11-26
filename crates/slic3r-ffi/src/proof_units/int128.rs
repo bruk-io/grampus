@@ -31,14 +31,16 @@ mod ffi {
         fn neg_lo(lhs: i64) -> u64;
         fn add_assign_hi(lhs: i64, rhs: i64) -> i64;
         fn add_assign_lo(lhs: i64, rhs: i64) -> u64;
+        fn add_assign_sign(lhs: i64, rhs: i64) -> i32;
+        fn add_assign_as_double(lhs: i64, rhs: i64) -> f64;
         fn sub_assign_hi(lhs: i64, rhs: i64) -> i64;
         fn sub_assign_lo(lhs: i64, rhs: i64) -> u64;
     }
 }
 
 pub use ffi::{
-    add_assign_hi, add_assign_lo, add_hi, add_lo, compare_rationals, compare_rationals_filtered,
-    multiply_as_double, multiply_hi, multiply_lo, multiply_sign, neg_hi, neg_lo,
-    sign_determinant_2x2, sign_determinant_2x2_filtered, sub_assign_hi, sub_assign_lo, sub_hi,
-    sub_lo,
+    add_assign_as_double, add_assign_hi, add_assign_lo, add_assign_sign, add_hi, add_lo,
+    compare_rationals, compare_rationals_filtered, multiply_as_double, multiply_hi, multiply_lo,
+    multiply_sign, neg_hi, neg_lo, sign_determinant_2x2, sign_determinant_2x2_filtered,
+    sub_assign_hi, sub_assign_lo, sub_hi, sub_lo,
 };
