@@ -48,9 +48,16 @@ extern "C" {
 
 /// `flock(2)`'s operation flags (POSIX-standardised values, not platform-specific the way
 /// `O_CREAT`'s numeric value is -- `std::fs::OpenOptions` is used for the open call for exactly
-/// that reason, below).
+/// that reason, below). The vendored source writes the symbolic macro names
+/// (`LOCK_EX | LOCK_NB`, `InstanceLock.cpp:44`; `LOCK_UN`, `:43`), never these numbers, so there
+/// is no vendored line to cite -- each gets the "constant whose origin is outside the vendored
+/// tree" marker form instead (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 2).
 const LOCK_EX: i32 = 2;
+// PORT SRC: external: POSIX.1-2017 (IEEE Std 1003.1-2017) <sys/file.h> -- LOCK_NB, the
+// non-blocking flag bit for flock(2), value 4 on every platform `just oracle-build` targets
 const LOCK_NB: i32 = 4;
+// PORT SRC: external: POSIX.1-2017 (IEEE Std 1003.1-2017) <sys/file.h> -- LOCK_UN, the unlock
+// operation for flock(2), value 8 on every platform `just oracle-build` targets
 const LOCK_UN: i32 = 8;
 
 /// `flock(2)` rather than an `fcntl` lock: it belongs to this open file description, so any
@@ -72,6 +79,9 @@ impl NativeFileLock {
             .read(true)
             .write(true)
             .create(true)
+            // PORT SRC: external: matches src/libslic3r/InstanceLock.cpp:39's literal `0644`
+            // (C octal notation) -- the same permission value, written in Rust's `0o` octal
+            // syntax, so the digits do not appear verbatim on the cited line for a plain lookup
             .mode(0o644)
             .open(path)?;
         Ok(NativeFileLock { file })
@@ -104,10 +114,12 @@ impl NativeFileLock {
 }
 
 /// How long a guard waits for the file lock before giving up and starting the cool-down
-/// (`InstanceLock.hpp:34-35`, `default_timeout`).
+/// (`InstanceLock.hpp:34`, `default_timeout`).
+// PORT SRC: src/libslic3r/InstanceLock.hpp:34
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(1000);
-/// `cooldown` (`InstanceLock.hpp:38`): for this long after a failed open/lock attempt, guards
+/// `cooldown` (`InstanceLock.hpp:37`): for this long after a failed open/lock attempt, guards
 /// leave the file alone.
+// PORT SRC: src/libslic3r/InstanceLock.hpp:37
 const COOLDOWN: Duration = Duration::from_millis(10_000);
 
 /// `InstanceLock::Slot` (`InstanceLock.cpp:70-79`): one per lock file path, shared by every
@@ -147,7 +159,9 @@ impl SlotState {
 fn slot_for(lock_file_path: &str) -> &'static Slot {
     static REGISTRY: OnceLock<Mutex<HashMap<String, &'static Slot>>> = OnceLock::new();
     let registry = REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut registry = registry.lock().expect("the slot registry mutex is never poisoned");
+    let mut registry = registry
+        .lock()
+        .expect("the slot registry mutex is never poisoned");
     if let Some(&slot) = registry.get(lock_file_path) {
         return slot;
     }
@@ -252,6 +266,7 @@ impl InstanceLock {
                     );
                     break;
                 }
+                // PORT SRC: src/libslic3r/InstanceLock.cpp:146
                 std::thread::sleep(Duration::from_millis(5));
             }
             if !taken {
@@ -398,7 +413,7 @@ impl<T> Drop for ReentrantGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slic3r_proof::proof_units::instance_lock as oracle;
+    use slic3r_proof::proof_units::instance_lock;
     use slic3r_proof::{compare_unit, Oracle};
 
     /// A fresh, process-unique path under the system temp directory -- a real file this proof
@@ -458,13 +473,21 @@ mod tests {
         let oracle_path = fresh_lock_path("oracle");
         let port_path = fresh_lock_path("port");
 
-        let oracle_obs = oracle::path1_observations(&oracle_path);
+        let oracle_obs = instance_lock::path1_observations(&oracle_path);
         let ported_obs = ported_observations(&port_path);
 
-        compare_unit("InstanceLock.cpp", Oracle::Built, ported_obs.clone(), oracle_obs.clone())
-            .expect("the port's locked()-sequence must match the oracle's, observation for observation");
-        compare_unit("InstanceLock.hpp", Oracle::Built, ported_obs, oracle_obs)
-            .expect("the port's locked()-sequence must match the oracle's, observation for observation");
+        compare_unit(
+            "InstanceLock.cpp",
+            Oracle::Built,
+            ported_obs.clone(),
+            oracle_obs.clone(),
+        )
+        .expect(
+            "the port's locked()-sequence must match the oracle's, observation for observation",
+        );
+        compare_unit("InstanceLock.hpp", Oracle::Built, ported_obs, oracle_obs).expect(
+            "the port's locked()-sequence must match the oracle's, observation for observation",
+        );
 
         let _ = std::fs::remove_file(&oracle_path);
         let _ = std::fs::remove_file(&port_path);

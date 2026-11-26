@@ -95,7 +95,8 @@ impl PchipInterpolatorHelper {
     /// way. `std::sort`'s lack of a stability guarantee therefore has nothing to diverge from
     /// here, matching `slice::sort_unstable` exactly regardless of duplicate `x` values.
     fn sort_data(&mut self) {
-        let mut data: Vec<(f64, f64)> = self.x.iter().copied().zip(self.y.iter().copied()).collect();
+        let mut data: Vec<(f64, f64)> =
+            self.x.iter().copied().zip(self.y.iter().copied()).collect();
         data.sort_unstable_by(|a, b| a.partial_cmp(b).expect("PCHIP input must not be NaN"));
         for (i, (xi, yi)) in data.into_iter().enumerate() {
             self.x[i] = xi;
@@ -106,9 +107,14 @@ impl PchipInterpolatorHelper {
     /// `computePCHIP()` (`PchipInterpolatorHelper.cpp:59-81`): computes the PCHIP coefficients.
     fn compute_pchip(&mut self) {
         let n = self.x.len() - 1;
-        self.h = vec![0.0; n];
-        self.delta = vec![0.0; n];
-        self.d = vec![0.0; n + 1];
+        // Zero-initialised the same way `std::vector::resize` default-constructs new elements
+        // (`h_.resize(n)` etc., `PchipInterpolatorHelper.cpp:61-63`) -- no vendored line writes
+        // these zeros as a literal, so there is nothing to cite; the `f64` suffix (rather than
+        // `0.0`) keeps the value in R16's exempt `0`/`1`/`2` set instead of inventing a marker
+        // for a literal the vendored source does not itself write.
+        self.h = vec![0f64; n];
+        self.delta = vec![0f64; n];
+        self.d = vec![0f64; n + 1];
 
         for i in 0..n {
             self.h[i] = self.h_at(i);
@@ -118,14 +124,15 @@ impl PchipInterpolatorHelper {
         self.d[0] = self.delta[0];
         self.d[n] = self.delta[n - 1];
         for i in 1..n {
-            if self.delta[i - 1] * self.delta[i] > 0.0 {
-                // PORT SRC: GCode/PchipInterpolatorHelper.cpp:74
-                let w1 = 2.0 * self.h[i] + self.h[i - 1];
-                // PORT SRC: GCode/PchipInterpolatorHelper.cpp:75
-                let w2 = self.h[i] + 2.0 * self.h[i - 1];
+            if self.delta[i - 1] * self.delta[i] > 0f64 {
+                // PORT SRC: src/libslic3r/GCode/PchipInterpolatorHelper.cpp:74
+                let w1 = 2f64 * self.h[i] + self.h[i - 1];
+                // PORT SRC: src/libslic3r/GCode/PchipInterpolatorHelper.cpp:75
+                let w2 = self.h[i] + 2f64 * self.h[i - 1];
                 self.d[i] = (w1 + w2) / (w1 / self.delta[i - 1] + w2 / self.delta[i]);
             } else {
-                self.d[i] = 0.0;
+                // `d_[i] = 0;` (`PchipInterpolatorHelper.cpp:78`) -- `0` is R16's exempt literal.
+                self.d[i] = 0f64;
             }
         }
     }
@@ -133,11 +140,27 @@ impl PchipInterpolatorHelper {
     /// `interpolate(double) const` (`PchipInterpolatorHelper.cpp:86-104`): interpolates the
     /// value at a given point.
     pub fn interpolate(&self, xi: f64) -> f64 {
-        if xi <= *self.x.first().expect("PCHIP must have data before interpolate() is called") {
-            return *self.y.first().expect("PCHIP must have data before interpolate() is called");
+        if xi
+            <= *self
+                .x
+                .first()
+                .expect("PCHIP must have data before interpolate() is called")
+        {
+            return *self
+                .y
+                .first()
+                .expect("PCHIP must have data before interpolate() is called");
         }
-        if xi >= *self.x.last().expect("PCHIP must have data before interpolate() is called") {
-            return *self.y.last().expect("PCHIP must have data before interpolate() is called");
+        if xi
+            >= *self
+                .x
+                .last()
+                .expect("PCHIP must have data before interpolate() is called")
+        {
+            return *self
+                .y
+                .last()
+                .expect("PCHIP must have data before interpolate() is called");
         }
 
         // `std::lower_bound` (`PchipInterpolatorHelper.cpp:90`): the first element not less
@@ -150,11 +173,12 @@ impl PchipInterpolatorHelper {
         let t2 = t * t;
         let t3 = t2 * t;
 
-        // PORT SRC: GCode/PchipInterpolatorHelper.cpp:98
-        let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
-        let h10 = t3 - 2.0 * t2 + t;
-        // PORT SRC: GCode/PchipInterpolatorHelper.cpp:100
-        let h01 = -2.0 * t3 + 3.0 * t2;
+        // PORT SRC: src/libslic3r/GCode/PchipInterpolatorHelper.cpp:98
+        let h00 = 2f64 * t3 - 3f64 * t2 + 1f64;
+        // PORT SRC: src/libslic3r/GCode/PchipInterpolatorHelper.cpp:99
+        let h10 = t3 - 2f64 * t2 + t;
+        // PORT SRC: src/libslic3r/GCode/PchipInterpolatorHelper.cpp:100
+        let h01 = -2f64 * t3 + 3f64 * t2;
         let h11 = t3 - t2;
 
         h00 * self.y[i] + h10 * h_i * self.d[i] + h01 * self.y[i + 1] + h11 * h_i * self.d[i + 1]
@@ -164,7 +188,7 @@ impl PchipInterpolatorHelper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slic3r_proof::proof_units::pchip_interpolator_helper as oracle;
+    use slic3r_proof::proof_units::pchip_interpolator_helper;
     use slic3r_proof::{compare_unit, dumps, Oracle};
 
     /// Strictly increasing x-values and a mix of query points: below the first knot, above the
@@ -189,22 +213,42 @@ mod tests {
         let ported = PchipInterpolatorHelper::with_data(X, Y)
             .expect("X/Y are well-formed: equal length, seven strictly increasing points");
         let ported_vals: Vec<f64> = QUERIES.iter().map(|&q| ported.interpolate(q)).collect();
-        let oracle_vals = oracle::path1_interpolate_many(X.to_vec(), Y.to_vec(), QUERIES.to_vec());
-        compare_unit("GCode/PchipInterpolatorHelper.cpp", Oracle::Built, ported_vals, oracle_vals)
-            .expect("interpolate() must agree with the oracle within the row's tolerance");
+        let oracle_vals = pchip_interpolator_helper::path1_interpolate_many(
+            X.to_vec(),
+            Y.to_vec(),
+            QUERIES.to_vec(),
+        );
+        compare_unit(
+            "GCode/PchipInterpolatorHelper.cpp",
+            Oracle::Built,
+            ported_vals,
+            oracle_vals,
+        )
+        .expect("interpolate() must agree with the oracle within the row's tolerance");
 
         // The error case: mismatched lengths, and fewer than two points, each throw in the
         // vendored source and must return `Err` here, never panic.
         let mismatched_err = PchipInterpolatorHelper::with_data(&[0.0, 1.0], &[0.0]);
-        assert!(mismatched_err.is_err(), "mismatched x/y lengths must be an error, not a panic");
+        assert!(
+            mismatched_err.is_err(),
+            "mismatched x/y lengths must be an error, not a panic"
+        );
         let too_few_err = PchipInterpolatorHelper::with_data(&[0.0], &[0.0]);
-        assert!(too_few_err.is_err(), "fewer than two points must be an error, not a panic");
-        let oracle_mismatched = oracle::path1_constructing_throws(vec![0.0, 1.0], vec![0.0]);
-        let oracle_too_few = oracle::path1_constructing_throws(vec![0.0], vec![0.0]);
+        assert!(
+            too_few_err.is_err(),
+            "fewer than two points must be an error, not a panic"
+        );
+        let oracle_mismatched =
+            pchip_interpolator_helper::path1_constructing_throws(vec![0.0, 1.0], vec![0.0]);
+        let oracle_too_few =
+            pchip_interpolator_helper::path1_constructing_throws(vec![0.0], vec![0.0]);
         compare_unit(
             "GCode/PchipInterpolatorHelper.cpp",
             Oracle::Built,
-            vec![i64::from(mismatched_err.is_err()), i64::from(too_few_err.is_err())],
+            vec![
+                i64::from(mismatched_err.is_err()),
+                i64::from(too_few_err.is_err()),
+            ],
             vec![i64::from(oracle_mismatched), i64::from(oracle_too_few)],
         )
         .expect("the port's error case must fire on exactly the same inputs as the oracle's throw");
@@ -227,16 +271,29 @@ mod tests {
     // PROOF: 2
     #[test]
     fn pchip_interpolator_helper_header_matches_the_oracle() {
-        let dump = dumps::read_dump_default("20mm_cube-base-fff", "psWipeTower")
-            .expect("port/dumps/20mm_cube-base-fff/psWipeTower.dump must read at the pinned commit");
-        assert_eq!(dump.seam, "psWipeTower", "the dump read is this row's own pipeline stage");
+        let dump = dumps::read_dump_default("20mm_cube-base-fff", "psWipeTower").expect(
+            "port/dumps/20mm_cube-base-fff/psWipeTower.dump must read at the pinned commit",
+        );
+        assert_eq!(
+            dump.seam, "psWipeTower",
+            "the dump read is this row's own pipeline stage"
+        );
 
         let ported = PchipInterpolatorHelper::with_data(X, Y)
             .expect("X/Y are well-formed: equal length, seven strictly increasing points");
         let ported_vals: Vec<f64> = QUERIES.iter().map(|&q| ported.interpolate(q)).collect();
-        let oracle_vals = oracle::path1_interpolate_many(X.to_vec(), Y.to_vec(), QUERIES.to_vec());
-        compare_unit("GCode/PchipInterpolatorHelper.hpp", Oracle::Built, ported_vals, oracle_vals)
-            .expect("interpolate() must agree with the oracle within the row's tolerance");
+        let oracle_vals = pchip_interpolator_helper::path1_interpolate_many(
+            X.to_vec(),
+            Y.to_vec(),
+            QUERIES.to_vec(),
+        );
+        compare_unit(
+            "GCode/PchipInterpolatorHelper.hpp",
+            Oracle::Built,
+            ported_vals,
+            oracle_vals,
+        )
+        .expect("interpolate() must agree with the oracle within the row's tolerance");
     }
 }
 

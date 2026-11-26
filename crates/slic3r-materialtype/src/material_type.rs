@@ -19,29 +19,34 @@
 //! preserving the "always set, even on a miss" behaviour a caller that ignores the bool still
 //! observes in the vendored source.
 
-/// `Slic3r::MaterialTypeInfo` (`MaterialType.hpp:8-16`).
+/// `Slic3r::MaterialTypeInfo` (`MaterialType.hpp:8-16`): `(name, min_temp, max_temp,
+/// chamber_min_temp, chamber_max_temp, adhesion_coefficient, yield_strength, thermal_length)`,
+/// in the vendored struct's own field order. A tuple struct rather than named fields so the
+/// 75-row table below stays one row per source line (`cargo fmt` wraps a long named-field
+/// literal across several lines, which would separate a row's own `// PORT SRC:` marker -- the
+/// one directly above it -- from the later fields R16 holds to the same citation).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MaterialTypeInfo {
-    pub name: &'static str,
-    pub min_temp: i32,
-    pub max_temp: i32,
-    pub chamber_min_temp: i32,
-    pub chamber_max_temp: i32,
-    pub adhesion_coefficient: f64,
-    pub yield_strength: f64,
-    pub thermal_length: f64,
-}
+pub struct MaterialTypeInfo(
+    pub &'static str,
+    pub i32,
+    pub i32,
+    pub i32,
+    pub i32,
+    pub f64,
+    pub f64,
+    pub f64,
+);
 
-// PORT SRC: MaterialType.cpp:9
+// PORT SRC: src/libslic3r/MaterialType.cpp:9
 const DEFAULT_MIN_TEMP: i32 = 190;
-// PORT SRC: MaterialType.cpp:10
+// PORT SRC: src/libslic3r/MaterialType.cpp:10
 const DEFAULT_MAX_TEMP: i32 = 300;
-// PORT SRC: MaterialType.cpp:12
+// PORT SRC: src/libslic3r/MaterialType.cpp:12
 const DEFAULT_CHAMBER_MAX_TEMP: i32 = 100;
-// PORT SRC: MaterialType.cpp:14
+// PORT SRC: src/libslic3r/MaterialType.cpp:14
 const DEFAULT_YIELD_STRENGTH: f64 = 0.02;
-// PORT SRC: MaterialType.cpp:15
-const DEFAULT_THERMAL_LENGTH: f64 = 200f64;
+// PORT SRC: src/libslic3r/MaterialType.cpp:15
+const DEFAULT_THERMAL_LENGTH: f64 = 200.0;
 // `DEFAULT_CHAMBER_MIN_TEMP` (`:11`) and `DEFAULT_ADHESION_COEFFICIENT` (`:13`) are both `0`/`1`
 // (R16's exempt literal set) and need no `// PORT SRC:` marker of their own.
 const DEFAULT_CHAMBER_MIN_TEMP: i32 = 0;
@@ -55,162 +60,165 @@ const DEFAULT_ADHESION_COEFFICIENT: f64 = 1f64;
 /// `chamber_min_temp`/`chamber_max_temp`, and an `adhesion_coefficient`/`thermal_length` that
 /// happens to be a whole number) is written with an explicit `f64` suffix rather than a decimal
 /// point, so its normalised text still matches the vendored line's bare integer digits.
-static MATERIAL_TYPES: [MaterialTypeInfo; 75] = [
-    // PORT SRC: MaterialType.cpp:21
-    MaterialTypeInfo { name: "ABS", min_temp: 190, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.1, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:22
-    MaterialTypeInfo { name: "ABS-CF", min_temp: 220, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.1, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:23
-    MaterialTypeInfo { name: "ABS-GF", min_temp: 240, max_temp: 280, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.1, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:24
-    MaterialTypeInfo { name: "ASA", min_temp: 220, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.1, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:25
-    MaterialTypeInfo { name: "ASA-CF", min_temp: 230, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.1, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:26
-    MaterialTypeInfo { name: "ASA-GF", min_temp: 240, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.1, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:27
-    MaterialTypeInfo { name: "ASA-AERO", min_temp: 240, max_temp: 280, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.1, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:28
-    MaterialTypeInfo { name: "BVOH", min_temp: 190, max_temp: 240, chamber_min_temp: 0, chamber_max_temp: 70, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:29
-    MaterialTypeInfo { name: "CoPE", min_temp: 190, max_temp: 240, chamber_min_temp: 0, chamber_max_temp: 45, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:30
-    MaterialTypeInfo { name: "EVA", min_temp: 175, max_temp: 220, chamber_min_temp: 0, chamber_max_temp: 50, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:31
-    MaterialTypeInfo { name: "FLEX", min_temp: 210, max_temp: 230, chamber_min_temp: 0, chamber_max_temp: 50, adhesion_coefficient: 0.5, yield_strength: 0.02, thermal_length: 1000f64 },
-    // PORT SRC: MaterialType.cpp:32
-    MaterialTypeInfo { name: "HIPS", min_temp: 220, max_temp: 270, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:33
-    MaterialTypeInfo { name: "PA", min_temp: 235, max_temp: 280, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:34
-    MaterialTypeInfo { name: "PA-CF", min_temp: 240, max_temp: 315, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:35
-    MaterialTypeInfo { name: "PA-GF", min_temp: 240, max_temp: 290, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:36
-    MaterialTypeInfo { name: "PA6", min_temp: 260, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:37
-    MaterialTypeInfo { name: "PA6-CF", min_temp: 230, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:38
-    MaterialTypeInfo { name: "PA6-GF", min_temp: 260, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:39
-    MaterialTypeInfo { name: "PA11", min_temp: 275, max_temp: 295, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:40
-    MaterialTypeInfo { name: "PA11-CF", min_temp: 275, max_temp: 295, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:41
-    MaterialTypeInfo { name: "PA11-GF", min_temp: 275, max_temp: 295, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:42
-    MaterialTypeInfo { name: "PA12", min_temp: 250, max_temp: 270, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:43
-    MaterialTypeInfo { name: "PA12-CF", min_temp: 250, max_temp: 300, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:44
-    MaterialTypeInfo { name: "PA12-GF", min_temp: 255, max_temp: 270, chamber_min_temp: 50, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:45
-    MaterialTypeInfo { name: "PAHT", min_temp: 260, max_temp: 310, chamber_min_temp: 55, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:46
-    MaterialTypeInfo { name: "PAHT-CF", min_temp: 270, max_temp: 310, chamber_min_temp: 55, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:47
-    MaterialTypeInfo { name: "PAHT-GF", min_temp: 270, max_temp: 310, chamber_min_temp: 55, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:48
-    MaterialTypeInfo { name: "PC", min_temp: 240, max_temp: 300, chamber_min_temp: 60, chamber_max_temp: 70, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 40f64 },
-    // PORT SRC: MaterialType.cpp:49
-    MaterialTypeInfo { name: "PC-ABS", min_temp: 230, max_temp: 270, chamber_min_temp: 60, chamber_max_temp: 70, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 80f64 },
-    // PORT SRC: MaterialType.cpp:50
-    MaterialTypeInfo { name: "PC-CF", min_temp: 270, max_temp: 295, chamber_min_temp: 60, chamber_max_temp: 70, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 80f64 },
-    // PORT SRC: MaterialType.cpp:51
-    MaterialTypeInfo { name: "PC-PBT", min_temp: 260, max_temp: 300, chamber_min_temp: 60, chamber_max_temp: 70, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 40f64 },
-    // PORT SRC: MaterialType.cpp:52
-    MaterialTypeInfo { name: "PCL", min_temp: 130, max_temp: 170, chamber_min_temp: 0, chamber_max_temp: 45, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:53
-    MaterialTypeInfo { name: "PCTG", min_temp: 220, max_temp: 300, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 2f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:54
-    MaterialTypeInfo { name: "PE", min_temp: 175, max_temp: 260, chamber_min_temp: 45, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:55
-    MaterialTypeInfo { name: "PE-CF", min_temp: 175, max_temp: 260, chamber_min_temp: 45, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:56
-    MaterialTypeInfo { name: "PE-GF", min_temp: 230, max_temp: 270, chamber_min_temp: 45, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:57
-    MaterialTypeInfo { name: "PEI-1010", min_temp: 370, max_temp: 430, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:58
-    MaterialTypeInfo { name: "PEI-1010-CF", min_temp: 380, max_temp: 430, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:59
-    MaterialTypeInfo { name: "PEI-1010-GF", min_temp: 380, max_temp: 430, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:60
-    MaterialTypeInfo { name: "PEI-9085", min_temp: 350, max_temp: 390, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:61
-    MaterialTypeInfo { name: "PEI-9085-CF", min_temp: 365, max_temp: 390, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:62
-    MaterialTypeInfo { name: "PEI-9085-GF", min_temp: 370, max_temp: 390, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:63
-    MaterialTypeInfo { name: "PEEK", min_temp: 350, max_temp: 460, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:64
-    MaterialTypeInfo { name: "PEEK-CF", min_temp: 380, max_temp: 410, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:65
-    MaterialTypeInfo { name: "PEEK-GF", min_temp: 375, max_temp: 410, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:66
-    MaterialTypeInfo { name: "PEKK", min_temp: 325, max_temp: 400, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:67
-    MaterialTypeInfo { name: "PEKK-CF", min_temp: 360, max_temp: 400, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:68
-    MaterialTypeInfo { name: "PES", min_temp: 340, max_temp: 390, chamber_min_temp: 80, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:69
-    MaterialTypeInfo { name: "PET", min_temp: 200, max_temp: 290, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 2f64, yield_strength: 0.3, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:70
-    MaterialTypeInfo { name: "PET-CF", min_temp: 240, max_temp: 320, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 2f64, yield_strength: 0.3, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:71
-    MaterialTypeInfo { name: "PET-GF", min_temp: 280, max_temp: 320, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 2f64, yield_strength: 0.3, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:72
-    MaterialTypeInfo { name: "PETG", min_temp: 190, max_temp: 260, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 2f64, yield_strength: 0.3, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:73
-    MaterialTypeInfo { name: "PETG-CF", min_temp: 230, max_temp: 290, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 1f64, yield_strength: 0.3, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:74
-    MaterialTypeInfo { name: "PETG-GF", min_temp: 210, max_temp: 270, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 1f64, yield_strength: 0.3, thermal_length: 100f64 },
-    // PORT SRC: MaterialType.cpp:75
-    MaterialTypeInfo { name: "PHA", min_temp: 190, max_temp: 250, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:76
-    MaterialTypeInfo { name: "PI", min_temp: 390, max_temp: 410, chamber_min_temp: 90, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:77
-    MaterialTypeInfo { name: "PLA", min_temp: 180, max_temp: 240, chamber_min_temp: 0, chamber_max_temp: 45, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:78
-    MaterialTypeInfo { name: "PLA-AERO", min_temp: 220, max_temp: 270, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:79
-    MaterialTypeInfo { name: "PLA-CF", min_temp: 190, max_temp: 250, chamber_min_temp: 0, chamber_max_temp: 50, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:80
-    MaterialTypeInfo { name: "POM", min_temp: 210, max_temp: 250, chamber_min_temp: 50, chamber_max_temp: 65, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:81
-    MaterialTypeInfo { name: "PP", min_temp: 200, max_temp: 240, chamber_min_temp: 45, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:82
-    MaterialTypeInfo { name: "PP-CF", min_temp: 210, max_temp: 250, chamber_min_temp: 45, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:83
-    MaterialTypeInfo { name: "PP-GF", min_temp: 220, max_temp: 260, chamber_min_temp: 45, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:84
-    MaterialTypeInfo { name: "PPA-CF", min_temp: 260, max_temp: 300, chamber_min_temp: 55, chamber_max_temp: 70, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:85
-    MaterialTypeInfo { name: "PPA-GF", min_temp: 260, max_temp: 290, chamber_min_temp: 55, chamber_max_temp: 70, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:86
-    MaterialTypeInfo { name: "PPS", min_temp: 300, max_temp: 345, chamber_min_temp: 90, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:87
-    MaterialTypeInfo { name: "PPS-CF", min_temp: 295, max_temp: 350, chamber_min_temp: 90, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:88
-    MaterialTypeInfo { name: "PPSU", min_temp: 360, max_temp: 420, chamber_min_temp: 90, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:89
-    MaterialTypeInfo { name: "PSU", min_temp: 350, max_temp: 380, chamber_min_temp: 90, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:90
-    MaterialTypeInfo { name: "PVA", min_temp: 185, max_temp: 250, chamber_min_temp: 0, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:91
-    MaterialTypeInfo { name: "PVB", min_temp: 190, max_temp: 250, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:92
-    MaterialTypeInfo { name: "PVDF", min_temp: 245, max_temp: 265, chamber_min_temp: 40, chamber_max_temp: 60, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:93
-    MaterialTypeInfo { name: "SBS", min_temp: 195, max_temp: 250, chamber_min_temp: 0, chamber_max_temp: 55, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:94
-    MaterialTypeInfo { name: "TPI", min_temp: 420, max_temp: 445, chamber_min_temp: 90, chamber_max_temp: 100, adhesion_coefficient: 1f64, yield_strength: 0.02, thermal_length: 200f64 },
-    // PORT SRC: MaterialType.cpp:95
-    MaterialTypeInfo { name: "TPU", min_temp: 175, max_temp: 260, chamber_min_temp: 0, chamber_max_temp: 50, adhesion_coefficient: 0.5, yield_strength: 0.02, thermal_length: 1000f64 },
+// No explicit element count: `75` is a count of table rows, not a value transcribed from any
+// one vendored line, so it is left for the compiler to infer from the initialiser's own length
+// rather than given a `// PORT SRC:` marker that would misattribute it to one row among many.
+static MATERIAL_TYPES: &[MaterialTypeInfo] = &[
+    // PORT SRC: src/libslic3r/MaterialType.cpp:21
+    MaterialTypeInfo("ABS", 190, 300, 50, 65, 1f64, 0.1, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:22
+    MaterialTypeInfo("ABS-CF", 220, 300, 50, 65, 1f64, 0.1, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:23
+    MaterialTypeInfo("ABS-GF", 240, 280, 50, 65, 1f64, 0.1, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:24
+    MaterialTypeInfo("ASA", 220, 300, 50, 65, 1f64, 0.1, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:25
+    MaterialTypeInfo("ASA-CF", 230, 300, 50, 65, 1f64, 0.1, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:26
+    MaterialTypeInfo("ASA-GF", 240, 300, 50, 65, 1f64, 0.1, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:27
+    MaterialTypeInfo("ASA-AERO", 240, 280, 50, 65, 1f64, 0.1, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:28
+    MaterialTypeInfo("BVOH", 190, 240, 0, 70, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:29
+    MaterialTypeInfo("CoPE", 190, 240, 0, 45, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:30
+    MaterialTypeInfo("EVA", 175, 220, 0, 50, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:31
+    MaterialTypeInfo("FLEX", 210, 230, 0, 50, 0.5, 0.02, 1000f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:32
+    MaterialTypeInfo("HIPS", 220, 270, 50, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:33
+    MaterialTypeInfo("PA", 235, 280, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:34
+    MaterialTypeInfo("PA-CF", 240, 315, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:35
+    MaterialTypeInfo("PA-GF", 240, 290, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:36
+    MaterialTypeInfo("PA6", 260, 300, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:37
+    MaterialTypeInfo("PA6-CF", 230, 300, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:38
+    MaterialTypeInfo("PA6-GF", 260, 300, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:39
+    MaterialTypeInfo("PA11", 275, 295, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:40
+    MaterialTypeInfo("PA11-CF", 275, 295, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:41
+    MaterialTypeInfo("PA11-GF", 275, 295, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:42
+    MaterialTypeInfo("PA12", 250, 270, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:43
+    MaterialTypeInfo("PA12-CF", 250, 300, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:44
+    MaterialTypeInfo("PA12-GF", 255, 270, 50, 60, 1f64, 0.02, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:45
+    MaterialTypeInfo("PAHT", 260, 310, 55, 65, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:46
+    MaterialTypeInfo("PAHT-CF", 270, 310, 55, 65, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:47
+    MaterialTypeInfo("PAHT-GF", 270, 310, 55, 65, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:48
+    MaterialTypeInfo("PC", 240, 300, 60, 70, 1f64, 0.02, 40f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:49
+    MaterialTypeInfo("PC-ABS", 230, 270, 60, 70, 1f64, 0.02, 80f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:50
+    MaterialTypeInfo("PC-CF", 270, 295, 60, 70, 1f64, 0.02, 80f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:51
+    MaterialTypeInfo("PC-PBT", 260, 300, 60, 70, 1f64, 0.02, 40f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:52
+    MaterialTypeInfo("PCL", 130, 170, 0, 45, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:53
+    MaterialTypeInfo("PCTG", 220, 300, 0, 55, 2f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:54
+    MaterialTypeInfo("PE", 175, 260, 45, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:55
+    MaterialTypeInfo("PE-CF", 175, 260, 45, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:56
+    MaterialTypeInfo("PE-GF", 230, 270, 45, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:57
+    MaterialTypeInfo("PEI-1010", 370, 430, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:58
+    MaterialTypeInfo("PEI-1010-CF", 380, 430, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:59
+    MaterialTypeInfo("PEI-1010-GF", 380, 430, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:60
+    MaterialTypeInfo("PEI-9085", 350, 390, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:61
+    MaterialTypeInfo("PEI-9085-CF", 365, 390, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:62
+    MaterialTypeInfo("PEI-9085-GF", 370, 390, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:63
+    MaterialTypeInfo("PEEK", 350, 460, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:64
+    MaterialTypeInfo("PEEK-CF", 380, 410, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:65
+    MaterialTypeInfo("PEEK-GF", 375, 410, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:66
+    MaterialTypeInfo("PEKK", 325, 400, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:67
+    MaterialTypeInfo("PEKK-CF", 360, 400, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:68
+    MaterialTypeInfo("PES", 340, 390, 80, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:69
+    MaterialTypeInfo("PET", 200, 290, 0, 55, 2f64, 0.3, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:70
+    MaterialTypeInfo("PET-CF", 240, 320, 0, 55, 2f64, 0.3, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:71
+    MaterialTypeInfo("PET-GF", 280, 320, 0, 55, 2f64, 0.3, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:72
+    MaterialTypeInfo("PETG", 190, 260, 0, 55, 2f64, 0.3, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:73
+    MaterialTypeInfo("PETG-CF", 230, 290, 0, 55, 1f64, 0.3, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:74
+    MaterialTypeInfo("PETG-GF", 210, 270, 0, 55, 1f64, 0.3, 100f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:75
+    MaterialTypeInfo("PHA", 190, 250, 0, 55, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:76
+    MaterialTypeInfo("PI", 390, 410, 90, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:77
+    MaterialTypeInfo("PLA", 180, 240, 0, 45, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:78
+    MaterialTypeInfo("PLA-AERO", 220, 270, 0, 55, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:79
+    MaterialTypeInfo("PLA-CF", 190, 250, 0, 50, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:80
+    MaterialTypeInfo("POM", 210, 250, 50, 65, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:81
+    MaterialTypeInfo("PP", 200, 240, 45, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:82
+    MaterialTypeInfo("PP-CF", 210, 250, 45, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:83
+    MaterialTypeInfo("PP-GF", 220, 260, 45, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:84
+    MaterialTypeInfo("PPA-CF", 260, 300, 55, 70, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:85
+    MaterialTypeInfo("PPA-GF", 260, 290, 55, 70, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:86
+    MaterialTypeInfo("PPS", 300, 345, 90, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:87
+    MaterialTypeInfo("PPS-CF", 295, 350, 90, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:88
+    MaterialTypeInfo("PPSU", 360, 420, 90, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:89
+    MaterialTypeInfo("PSU", 350, 380, 90, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:90
+    MaterialTypeInfo("PVA", 185, 250, 0, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:91
+    MaterialTypeInfo("PVB", 190, 250, 0, 55, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:92
+    MaterialTypeInfo("PVDF", 245, 265, 40, 60, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:93
+    MaterialTypeInfo("SBS", 195, 250, 0, 55, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:94
+    MaterialTypeInfo("TPI", 420, 445, 90, 100, 1f64, 0.02, 200f64),
+    // PORT SRC: src/libslic3r/MaterialType.cpp:95
+    MaterialTypeInfo("TPU", 175, 260, 0, 50, 0.5, 0.02, 1000f64),
 ];
 
 /// `MaterialType::find()` (`MaterialType.cpp:101-106`).
 fn find(name: &str) -> Option<&'static MaterialTypeInfo> {
-    MATERIAL_TYPES.iter().find(|info| info.name == name)
+    MATERIAL_TYPES.iter().find(|info| info.0 == name)
 }
 
 /// `MaterialType::get_temperature_range()` (`MaterialType.cpp:108-120`): returns
@@ -218,7 +226,7 @@ fn find(name: &str) -> Option<&'static MaterialTypeInfo> {
 /// pair first and then overwritten on a hit, exactly as the vendored function's out-params are.
 pub fn get_temperature_range(material_type: &str) -> (i32, i32, bool) {
     match find(material_type) {
-        Some(info) => (info.min_temp, info.max_temp, true),
+        Some(info) => (info.1, info.2, true),
         None => (DEFAULT_MIN_TEMP, DEFAULT_MAX_TEMP, false),
     }
 }
@@ -226,7 +234,7 @@ pub fn get_temperature_range(material_type: &str) -> (i32, i32, bool) {
 /// `MaterialType::get_chamber_temperature_range()` (`MaterialType.cpp:122-134`).
 pub fn get_chamber_temperature_range(material_type: &str) -> (i32, i32, bool) {
     match find(material_type) {
-        Some(info) => (info.chamber_min_temp, info.chamber_max_temp, true),
+        Some(info) => (info.3, info.4, true),
         None => (DEFAULT_CHAMBER_MIN_TEMP, DEFAULT_CHAMBER_MAX_TEMP, false),
     }
 }
@@ -234,7 +242,7 @@ pub fn get_chamber_temperature_range(material_type: &str) -> (i32, i32, bool) {
 /// `MaterialType::get_adhesion_coefficient()` (`MaterialType.cpp:136-146`).
 pub fn get_adhesion_coefficient(material_type: &str) -> (f64, bool) {
     match find(material_type) {
-        Some(info) => (info.adhesion_coefficient, true),
+        Some(info) => (info.5, true),
         None => (DEFAULT_ADHESION_COEFFICIENT, false),
     }
 }
@@ -242,7 +250,7 @@ pub fn get_adhesion_coefficient(material_type: &str) -> (f64, bool) {
 /// `MaterialType::get_yield_strength()` (`MaterialType.cpp:148-158`).
 pub fn get_yield_strength(material_type: &str) -> (f64, bool) {
     match find(material_type) {
-        Some(info) => (info.yield_strength, true),
+        Some(info) => (info.6, true),
         None => (DEFAULT_YIELD_STRENGTH, false),
     }
 }
@@ -250,7 +258,7 @@ pub fn get_yield_strength(material_type: &str) -> (f64, bool) {
 /// `MaterialType::get_thermal_length()` (`MaterialType.cpp:160-170`).
 pub fn get_thermal_length(material_type: &str) -> (f64, bool) {
     match find(material_type) {
-        Some(info) => (info.thermal_length, true),
+        Some(info) => (info.7, true),
         None => (DEFAULT_THERMAL_LENGTH, false),
     }
 }
@@ -258,12 +266,20 @@ pub fn get_thermal_length(material_type: &str) -> (f64, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use slic3r_proof::proof_units::material_type as oracle;
+    use slic3r_proof::proof_units::material_type;
     use slic3r_proof::{compare_unit, Oracle};
 
     /// A few real names, a prefix-only near-miss and a wholly unknown name, so both the hit and
     /// the miss (default-filled, `found: false`) path run against the oracle.
-    const SAMPLE_MATERIALS: &[&str] = &["ABS", "PLA", "PETG-CF", "TPU", "PEI-9085-GF", "AB", "Unobtainium"];
+    const SAMPLE_MATERIALS: &[&str] = &[
+        "ABS",
+        "PLA",
+        "PETG-CF",
+        "TPU",
+        "PEI-9085-GF",
+        "AB",
+        "Unobtainium",
+    ];
 
     /// Both the `MaterialType.cpp` and `MaterialType.hpp` manifest rows declare proof path `3`
     /// (see `cxx/proof_units/material_type.cpp`'s header comment for why the mechanism is a
@@ -276,17 +292,26 @@ mod tests {
     #[test]
     fn material_type_get_x_matches_the_oracle() {
         for &name in SAMPLE_MATERIALS {
-            let oracle_temp = oracle::path_temperature_range(name);
+            let oracle_temp = material_type::path_temperature_range(name);
             let (min_temp, max_temp, found) = get_temperature_range(name);
             let ported_temp = vec![min_temp as i64, max_temp as i64, i64::from(found)];
-            compare_unit("MaterialType.cpp", Oracle::Built, ported_temp.clone(), oracle_temp.clone())
-                .unwrap_or_else(|e| panic!("{name}: get_temperature_range: {e}"));
+            compare_unit(
+                "MaterialType.cpp",
+                Oracle::Built,
+                ported_temp.clone(),
+                oracle_temp.clone(),
+            )
+            .unwrap_or_else(|e| panic!("{name}: get_temperature_range: {e}"));
             compare_unit("MaterialType.hpp", Oracle::Built, ported_temp, oracle_temp)
                 .unwrap_or_else(|e| panic!("{name}: get_temperature_range: {e}"));
 
-            let oracle_chamber = oracle::path_chamber_temperature_range(name);
+            let oracle_chamber = material_type::path_chamber_temperature_range(name);
             let (chamber_min, chamber_max, chamber_found) = get_chamber_temperature_range(name);
-            let ported_chamber = vec![chamber_min as i64, chamber_max as i64, i64::from(chamber_found)];
+            let ported_chamber = vec![
+                chamber_min as i64,
+                chamber_max as i64,
+                i64::from(chamber_found),
+            ];
             compare_unit(
                 "MaterialType.cpp",
                 Oracle::Built,
@@ -294,10 +319,15 @@ mod tests {
                 oracle_chamber.clone(),
             )
             .unwrap_or_else(|e| panic!("{name}: get_chamber_temperature_range: {e}"));
-            compare_unit("MaterialType.hpp", Oracle::Built, ported_chamber, oracle_chamber)
-                .unwrap_or_else(|e| panic!("{name}: get_chamber_temperature_range: {e}"));
+            compare_unit(
+                "MaterialType.hpp",
+                Oracle::Built,
+                ported_chamber,
+                oracle_chamber,
+            )
+            .unwrap_or_else(|e| panic!("{name}: get_chamber_temperature_range: {e}"));
 
-            let oracle_adhesion = oracle::path_adhesion_coefficient(name);
+            let oracle_adhesion = material_type::path_adhesion_coefficient(name);
             let (adhesion, adhesion_found) = get_adhesion_coefficient(name);
             let ported_adhesion = vec![adhesion, if adhesion_found { 1.0 } else { 0.0 }];
             compare_unit(
@@ -307,18 +337,33 @@ mod tests {
                 oracle_adhesion.clone(),
             )
             .unwrap_or_else(|e| panic!("{name}: get_adhesion_coefficient: {e}"));
-            compare_unit("MaterialType.hpp", Oracle::Built, ported_adhesion, oracle_adhesion)
-                .unwrap_or_else(|e| panic!("{name}: get_adhesion_coefficient: {e}"));
+            compare_unit(
+                "MaterialType.hpp",
+                Oracle::Built,
+                ported_adhesion,
+                oracle_adhesion,
+            )
+            .unwrap_or_else(|e| panic!("{name}: get_adhesion_coefficient: {e}"));
 
-            let oracle_yield = oracle::path_yield_strength(name);
+            let oracle_yield = material_type::path_yield_strength(name);
             let (yield_strength, yield_found) = get_yield_strength(name);
             let ported_yield = vec![yield_strength, if yield_found { 1.0 } else { 0.0 }];
-            compare_unit("MaterialType.cpp", Oracle::Built, ported_yield.clone(), oracle_yield.clone())
-                .unwrap_or_else(|e| panic!("{name}: get_yield_strength: {e}"));
-            compare_unit("MaterialType.hpp", Oracle::Built, ported_yield, oracle_yield)
-                .unwrap_or_else(|e| panic!("{name}: get_yield_strength: {e}"));
+            compare_unit(
+                "MaterialType.cpp",
+                Oracle::Built,
+                ported_yield.clone(),
+                oracle_yield.clone(),
+            )
+            .unwrap_or_else(|e| panic!("{name}: get_yield_strength: {e}"));
+            compare_unit(
+                "MaterialType.hpp",
+                Oracle::Built,
+                ported_yield,
+                oracle_yield,
+            )
+            .unwrap_or_else(|e| panic!("{name}: get_yield_strength: {e}"));
 
-            let oracle_thermal = oracle::path_thermal_length(name);
+            let oracle_thermal = material_type::path_thermal_length(name);
             let (thermal_length, thermal_found) = get_thermal_length(name);
             let ported_thermal = vec![thermal_length, if thermal_found { 1.0 } else { 0.0 }];
             compare_unit(
@@ -328,8 +373,13 @@ mod tests {
                 oracle_thermal.clone(),
             )
             .unwrap_or_else(|e| panic!("{name}: get_thermal_length: {e}"));
-            compare_unit("MaterialType.hpp", Oracle::Built, ported_thermal, oracle_thermal)
-                .unwrap_or_else(|e| panic!("{name}: get_thermal_length: {e}"));
+            compare_unit(
+                "MaterialType.hpp",
+                Oracle::Built,
+                ported_thermal,
+                oracle_thermal,
+            )
+            .unwrap_or_else(|e| panic!("{name}: get_thermal_length: {e}"));
         }
     }
 }
