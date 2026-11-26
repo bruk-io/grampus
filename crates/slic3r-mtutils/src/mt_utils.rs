@@ -127,20 +127,38 @@ mod tests {
 
     #[test]
     fn cached_object_refreshes_only_when_invalid() {
-        let mut refresh_count = 0;
-        let mut cache = CachedObject::new(0i32, |_obj: &mut i32| {
-            // The setter itself cannot see `refresh_count` without aliasing `cache` while it is
-            // already borrowed mutably by `get`/`invalidate`, so the test counts refreshes by the
-            // value the setter writes instead -- an observable side effect of the same shape the
-            // module's own doc comment describes ("a mutation of whatever external state the
-            // setter reads").
+        // `Rc<Cell<i32>>` (shared with the closure, which `CachedObject` boxes and owns) is a
+        // real, observable count of how many times the setter itself actually ran -- not a
+        // count the test increments by hand regardless of what `CachedObject` does, which an
+        // earlier version of this test did and which would have passed even with a
+        // `get`/`invalidate` that never called the setter at all.
+        let refresh_count = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counter = refresh_count.clone();
+        let mut cache = CachedObject::new(0i32, move |obj: &mut i32| {
+            counter.set(counter.get() + 1);
+            *obj += 10;
         });
-        assert_eq!(*cache.get(), 0);
-        refresh_count += 1; // first get() refreshed once
+        assert_eq!(refresh_count.get(), 0, "unrefreshed until the first get()");
+        assert_eq!(*cache.get(), 10, "first get() refreshes once, from 0 to 10");
+        assert_eq!(refresh_count.get(), 1);
+        assert_eq!(
+            *cache.get(),
+            10,
+            "a second get() with no invalidation must not re-run the setter"
+        );
+        assert_eq!(refresh_count.get(), 1);
         cache.invalidate(|| {});
-        assert_eq!(*cache.get(), 0);
-        refresh_count += 1; // invalidate + get() refreshed a second time
-        assert_eq!(refresh_count, 2);
+        assert_eq!(
+            refresh_count.get(),
+            1,
+            "invalidate() itself does not refresh"
+        );
+        assert_eq!(
+            *cache.get(),
+            20,
+            "the next get() after invalidate() refreshes again, 10 to 20"
+        );
+        assert_eq!(refresh_count.get(), 2);
     }
 
     /// Proof path 2 (R19). **Finding for the regeneration pass, recorded here and in the pull
