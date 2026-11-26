@@ -32,8 +32,9 @@
 //! **Proof path 1**: `Slic3r::filament_mixer_lerp` (`src/libslic3r/FilamentMixer.cpp:58-64`), an
 //! externally linked symbol in `liblibslic3r.a` that forwards its six channel bytes and mixing
 //! ratio straight into `::filament_mixer::lerp` with no transformation of its own -- verified by
-//! reading `FilamentMixer.cpp:58-64` directly. `crates/slic3r-ffi/src/proof.rs`'s
-//! `path1_filament_mixer_lerp` is this task's own proof shim for it.
+//! reading `FilamentMixer.cpp:58-64` directly. `crates/slic3r-ffi/src/proof_units/filament_mixer_model.rs`'s
+//! `path1_filament_mixer_lerp` is this task's own proof shim for it, reached through
+//! `slic3r-proof`'s re-export (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 1).
 
 /// `filament_mixer::detail` (`FilamentMixerModel.hpp:48-750`): the generated coefficient tables
 /// and the polynomial-feature expansion, private to this module exactly as the vendored
@@ -866,45 +867,24 @@ pub fn lerp(r1: u8, g1: u8, b1: u8, r2: u8, g2: u8, b2: u8, t: f32) -> Rgb {
     }
 }
 
-// **Proof path 1 could not be wired as a real proof (a finding for this pull request, not a
-// stand-in invented on this branch).** `crates/slic3r-ffi/src/proof.rs`'s
-// `path1_filament_mixer_lerp` (this task's own shim, appended as task.md directs) links and
-// runs correctly -- called by hand during this task's development, it returned r=47 g=141 b=56
-// for `lerp(0, 33, 133, 252, 211, 0, 0.5)`, exactly the header's own documented example
-// (`FilamentMixerModel.hpp:11-13`, "blue + yellow -> green"; see this task's pull request body
-// for the exact session transcript this was measured from). But calling it from *this* crate's
-// own test needs `slic3r-ffi` as a dev-dependency of `slic3r-filamentmixermodel`, confirmed by
-// actually trying it (`cargo test -p slic3r-filamentmixermodel` with the import added: "error
-// \[E0433\]: cannot find module or crate `slic3r_ffi` in this scope" -- Rust 2018's per-crate
-// dependency edges do not transit through `slic3r-proof`'s own regular dependency on it).
-// `34-foundation-spike` gave every crate only a dev-dependency on `slic3r-proof`
-// (`docs/WORKFLOW.md`'s dep-row rule), and this task's own rules put every crate's `Cargo.toml`
-// other than the fuzz crate's on the must-not-write list -- so adding the one line that would
-// fix this is not this task's to add. The same gap exists for every other leaf crate holding a
-// `template-heavy: yes`, `proof path: 1` row (`slic3r-aabbmesh`, `slic3r-arachne`,
-// `slic3r-geometry-dir`, `slic3r-gcode`, ... checked: none of their committed `Cargo.toml`s
-// depend on `slic3r-ffi` either), so this is not specific to this unit's own design -- it is a
-// gap in `34-foundation-spike`'s crate-skeleton generation that a later task owning that
-//
-// **Second adversarial reviewer's finding, carried into the trailer below:** with the oracle
-// shim unreachable from here, this branch's only oracle-verified data point for `lerp`'s full
-// arithmetic (the polynomial features, the summation, the cast-and-clamp) is the one measured
-// above, plus the module's own table-shape test and the two clamp-boundary cases (which return
-// before the arithmetic runs at all). `POWERS`/`COEF`/`INTERCEPT` are independently re-verified
-// byte-for-byte against the vendored source (this task's pull request body has the method and
-// output), and `compute_poly_features`/`lerp` are a direct line-by-line transcription, but one
-// oracle-matched input is not the breadth a `confidence: high` row elsewhere in this task carries
-// -- the trailer below records `medium` for exactly this reason, not `high`.
-// regeneration should close. This module therefore carries no `// PROOF:` marker;
-// `port/port-status` derives it as `drafted`, not `ported`.
+// **Proof path 1, reached via `slic3r-proof`'s re-export of `slic3r-ffi`'s per-unit proof
+// bridges (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 1).** This task's
+// shim is three new files under `crates/slic3r-ffi`
+// (`cxx/proof_units/filament_mixer_model.{h,cpp}`, `src/proof_units/filament_mixer_model.rs`),
+// not an append to `proof_shims.cpp`/`src/proof.rs` as an earlier draft of this task's text
+// named -- those two files no longer exist on `main`; decision 5 states that
+// `docs/PORTING.md`'s decisions govern over a task's file list, and the pull request body says
+// so. `slic3r-filamentmixermodel`'s existing dev-dependency on `slic3r-proof`
+// (`34-foundation-spike`'s crate skeleton) is the one dependency edge decision 1 requires, so no
+// `Cargo.toml` changes.
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Not a `// PROOF:` marker (see the finding above this module records) -- a plain
-    /// correctness check of the documented usage example (`FilamentMixerModel.hpp:11-13`) and
-    /// of the two clamp branches (`:771-778`) at and past their exact boundary.
+    /// A plain correctness check of the documented usage example (`FilamentMixerModel.hpp:11-13`)
+    /// and of the two clamp branches (`:771-778`) at and past their exact boundary. Not a
+    /// `// PROOF:` marker -- see `filament_mixer_model_lerp_matches_the_oracle` below for that.
     #[test]
     fn filament_mixer_model_lerp_matches_the_documented_example_and_clamps_t() {
         assert_eq!(
@@ -948,10 +928,48 @@ mod tests {
             }
         );
     }
+
+    /// `Slic3r::filament_mixer_lerp` (`FilamentMixer.cpp:58-64`) against this module's [`lerp`],
+    /// over a spread of inputs including both clamp boundaries and the interior arithmetic path.
+    /// Each side is driven independently -- the oracle through `slic3r-proof`'s re-export of
+    /// `slic3r-ffi`'s per-unit proof bridge (`docs/PORTING.md`, "Decisions recorded on
+    /// 2026-11-25", decision 1), the port through this module's own [`lerp`] -- and compared as
+    /// `Vec<u32>` ([`u8`] has no `slic3r_proof::tiers::ProofValue` impl; widening to `u32` is a
+    /// lossless, order-preserving wrapper, not a tolerance).
+    // PROOF: 1
+    #[test]
+    fn filament_mixer_model_lerp_matches_the_oracle() {
+        use slic3r_proof::proof_units::filament_mixer_model::path1_filament_mixer_lerp;
+        use slic3r_proof::{compare_unit, Oracle};
+
+        let cases: &[(u8, u8, u8, u8, u8, u8, f32)] = &[
+            (0, 33, 133, 252, 211, 0, 0.5),
+            (10, 20, 30, 200, 210, 220, 0.0),
+            (10, 20, 30, 200, 210, 220, 1.0),
+            (10, 20, 30, 200, 210, 220, -1.0),
+            (10, 20, 30, 200, 210, 220, 2.0),
+            (255, 0, 0, 0, 255, 0, 0.25),
+            (0, 0, 0, 255, 255, 255, 0.75),
+        ];
+        for &(r1, g1, b1, r2, g2, b2, t) in cases {
+            let oracle: Vec<u32> = path1_filament_mixer_lerp(r1, g1, b1, r2, g2, b2, t)
+                .into_iter()
+                .map(u32::from)
+                .collect();
+            let ported = lerp(r1, g1, b1, r2, g2, b2, t);
+            let ported_vec: Vec<u32> = vec![
+                u32::from(ported.r),
+                u32::from(ported.g),
+                u32::from(ported.b),
+            ];
+            compare_unit("FilamentMixerModel.hpp", Oracle::Built, ported_vec, oracle)
+                .expect("filament_mixer_lerp: [r, g, b] against the oracle");
+        }
+    }
 }
 
 // PORT STATUS
 // source: src/libslic3r/FilamentMixerModel.hpp
-// confidence: medium
+// confidence: high
 // tier: exact
 // oracle: built
