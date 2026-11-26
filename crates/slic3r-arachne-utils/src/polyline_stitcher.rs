@@ -100,9 +100,9 @@ pub trait StitchPath: Clone {
     /// (`:180`): append `other`'s junctions from `start_idx` (inclusive) to its end, in order.
     fn extend_from_front(&mut self, other: &Self, start_idx: usize);
     /// `chain.insert(chain.end(), start_pos, (*closest.polygons)[closest.poly_idx].rend())`
-    /// (`:189`): append `other`'s junctions from `start_idx_from_end` (inclusive, counted from
-    /// the end) back to its front, in reverse order.
-    fn extend_from_back(&mut self, other: &Self, start_idx_from_end: usize);
+    /// (`:189`): append `other`'s junctions in reverse order, from its last junction (skipping
+    /// `skip_last` of them, counted from the end) back to its first.
+    fn extend_from_back(&mut self, other: &Self, skip_last: usize);
 
     /// `static bool canReverse(const PathsPointIndex<Paths> &polyline);` (`:230`) -- no
     /// generic body; see the module doc.
@@ -151,10 +151,12 @@ impl StitchPath for Polygon {
     fn extend_from_front(&mut self, other: &Self, start_idx: usize) {
         self.points.extend_from_slice(&other.points[start_idx..]);
     }
-    fn extend_from_back(&mut self, other: &Self, start_idx_from_end: usize) {
-        let take = other.points.len() - start_idx_from_end;
-        self.points
-            .extend(other.points[..=start_idx_from_end].iter().rev().take(take + 1));
+    fn extend_from_back(&mut self, other: &Self, skip_last: usize) {
+        // `rbegin()` (+1 when `skip_last == 1`) walked forward to `rend()` visits indices
+        // `other.points.len() - 1 - skip_last` down to `0`; the equivalent forward slice is
+        // `other.points[..other.points.len() - skip_last]`, reversed.
+        let end = other.points.len() - skip_last;
+        self.points.extend(other.points[..end].iter().rev());
     }
 
     // PORT SRC: src/libslic3r/Arachne/utils/PolylineStitcher.cpp:28
@@ -326,8 +328,8 @@ pub fn stitch<Path: StitchPath>(
                     let start = if segment_dist < snap_distance { 1 } else { 0 };
                     chain.extend_from_front(closest_line, start);
                 } else {
-                    let start_from_end = if segment_dist < snap_distance { 1 } else { 0 };
-                    chain.extend_from_back(closest_line, start_from_end);
+                    let skip_last = if segment_dist < snap_distance { 1 } else { 0 };
+                    chain.extend_from_back(closest_line, skip_last);
                 }
                 for i in old_len..chain.junction_count() {
                     let a = chain.junction_at(i - 1).as_point();
