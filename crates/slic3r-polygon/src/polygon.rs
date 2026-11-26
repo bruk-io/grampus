@@ -488,8 +488,16 @@ impl Polygon {
                 let diff = self.points[i] - self.points[j - 1];
                 let diff_len = lengths[j] - lengths[j - 1];
                 let r = min_length / diff_len;
+                // `Point(r*diff[0], r*diff[1])` (`Polygon.cpp:401`) calls the rounding
+                // `Point(double, double)` constructor (`r*diff[0]` promotes to `float` by the
+                // usual arithmetic conversions, then widens losslessly to `double` for the
+                // call) -- `.round()`, not a truncating `as i64`, which `Point::new`'s own
+                // two-`i64`-argument form would give.
                 let new_pt = self.points[j - 1]
-                    + Point::new((r * diff.x() as f32) as i64, (r * diff.y() as f32) as i64);
+                    + Point::from_f64_rounded(
+                        (r * diff.x() as f32) as f64,
+                        (r * diff.y() as f32) as f64,
+                    );
                 self.points.insert(j, new_pt);
                 lengths.insert(j, lengths[j - 1] + min_length);
             }
@@ -1403,6 +1411,27 @@ mod tests {
             actual_param, oracle_param,
             "Polygon::parameter_by_length diverged"
         );
+
+        // Review finding: an earlier draft of `densify` truncated the new point's coordinates
+        // (`as i64` on the raw float product) instead of rounding through
+        // `Point(double, double)`'s own constructor the way `Point new_pt = points[j-1] +
+        // Point(r*diff[0], r*diff[1]);` (`Polygon.cpp:401`) does -- undetected until this
+        // comparison was added, because every earlier case here happened not to land near a
+        // half-integer boundary. `min_length = 23.5` against this square's 100-unit edges gives
+        // `r = 0.235`, so the first inserted point's `r * diff.x()` is `23.5` -- truncation
+        // gives `23`, `Point`'s own round-half-away-from-zero gives `24`; measured by reverting
+        // this fix locally and rerunning this test, which then fails with exactly that 23-vs-24
+        // mismatch (see this task's pull request body).
+        let mut densified = p.clone();
+        densified.densify(23.5, None);
+        let oracle_densified = slic3r_proof::proof_units::polygon::path3_densify(&xs, &ys, 23.5);
+        compare_unit(
+            "Polygon.cpp",
+            Oracle::Built,
+            flatten(&densified.points),
+            oracle_densified,
+        )
+        .expect("Polygon::densify must match the oracle exactly");
     }
 }
 

@@ -40,11 +40,14 @@ mod ffi {
         fn path3_remove_sticks(xs: &[i64], ys: &[i64]) -> Vec<i64>;
         /// `Polygon::parameter_by_length() const` (`:371-379`).
         fn path3_parameter_by_length(xs: &[i64], ys: &[i64]) -> Vec<f32>;
+        /// `Polygon::densify(float, std::vector<float>*)` (`:381-407`), the no-`lengths_ptr`
+        /// overload; returning the resulting points flattened.
+        fn path3_densify(xs: &[i64], ys: &[i64], min_length: f32) -> Vec<i64>;
     }
 }
 
 pub use ffi::{
-    path3_area, path3_centroid, path3_contains, path3_is_counter_clockwise,
+    path3_area, path3_centroid, path3_contains, path3_densify, path3_is_counter_clockwise,
     path3_make_circle_num_segments, path3_parameter_by_length, path3_point_in_polygon,
     path3_point_projection, path3_polygon_is_convex, path3_remove_sticks,
 };

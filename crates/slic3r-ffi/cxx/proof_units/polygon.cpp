@@ -37,6 +37,16 @@ Slic3r::Polygon make_polygon(rust::Slice<const int64_t> xs, rust::Slice<const in
     return Slic3r::Polygon(pts);
 }
 
+rust::Vec<int64_t> pack_points(const Slic3r::Points &pts) {
+    rust::Vec<int64_t> out;
+    out.reserve(pts.size() * 2);
+    for (const Slic3r::Point &p : pts) {
+        out.push_back(static_cast<int64_t>(p.x()));
+        out.push_back(static_cast<int64_t>(p.y()));
+    }
+    return out;
+}
+
 } // namespace
 
 int32_t path3_point_in_polygon(int64_t px, int64_t py, rust::Slice<const int64_t> xs,
@@ -118,6 +128,13 @@ rust::Vec<float> path3_parameter_by_length(rust::Slice<const int64_t> xs,
     for (float f : lengths)
         out.push_back(f);
     return out;
+}
+
+rust::Vec<int64_t> path3_densify(rust::Slice<const int64_t> xs, rust::Slice<const int64_t> ys,
+                                  float min_length) {
+    Slic3r::Polygon poly = make_polygon(xs, ys);
+    poly.densify(min_length);
+    return pack_points(poly.points);
 }
 
 } // namespace polygon

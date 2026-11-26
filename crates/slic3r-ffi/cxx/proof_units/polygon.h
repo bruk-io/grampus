@@ -32,6 +32,8 @@ rust::Vec<int64_t> path3_remove_sticks(rust::Slice<const int64_t> xs,
                                         rust::Slice<const int64_t> ys);
 rust::Vec<float> path3_parameter_by_length(rust::Slice<const int64_t> xs,
                                             rust::Slice<const int64_t> ys);
+rust::Vec<int64_t> path3_densify(rust::Slice<const int64_t> xs, rust::Slice<const int64_t> ys,
+                                  float min_length);
 
 } // namespace polygon
 } // namespace proof_units
