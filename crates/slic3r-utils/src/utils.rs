@@ -2254,10 +2254,10 @@ fn string_as_relative_path(rel_path: &str) -> PathBuf {
 /// `Slic3r::makedir(const std::string)` (`utils.cpp:1961-1971`): true when the directory exists
 /// or was created.
 ///
-/// On this port's targets the live branch is the vendored `#else` at `:1968`, whose comment is
+/// On this port's targets the live branch is the vendored `#else` at `:1970`, whose comment is
 /// "I don't know how to make dir on Mac..." and whose body is empty, so the function falls
-/// through to `:1969`'s unconditional `return true;` -- it creates nothing. The `WIN32`
-/// (`:1963-1964`) and `__linux__` (`:1965-1967`) branches are not ported; see the "Deferred
+/// through to `:1972`'s unconditional `return true;` -- it creates nothing. The `WIN32`
+/// (`:1963-1965`) and `__linux__` (`:1966-1969`) branches are not ported; see the "Deferred
 /// declarations" block.
 pub fn makedir(_path: &Path) -> bool {
     true
@@ -2829,9 +2829,9 @@ pub fn is_running_in_flatpak() -> bool {
 // TODO(port): src/libslic3r/utils.cpp:432 (default_data_dir; the whole definition is inside
 //   `#ifdef __linux__`, so the macOS oracle holds no such symbol)
 // TODO(port): src/libslic3r/utils.cpp:1963 (makedir, the WIN32 branch)
-// TODO(port): src/libslic3r/utils.cpp:1965 (makedir, the __linux__ branch)
+// TODO(port): src/libslic3r/utils.cpp:1966 (makedir, the __linux__ branch)
 // TODO(port): src/libslic3r/utils.cpp:820 (rename_file, the WindowsSupport::rename branch)
-// TODO(port): src/libslic3r/utils.cpp:1147 (copy_file, the WIN32 CopyFileW branch)
+// TODO(port): src/libslic3r/utils.cpp:1146 (copy_file, the WIN32 CopyFileW branch)
 // TODO(port): src/libslic3r/utils.cpp:917 (copy_file_linux_read_write and the __linux__
 //   sendfile fast path copy_file_inner takes there)
 
