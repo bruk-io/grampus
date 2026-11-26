@@ -863,11 +863,21 @@ hand. This was found while fixing decision 1, not reported by a task.
 
 **The decision.** `just port-check` runs it, as its second line. That recipe is the right home and
 not a new one: its stated entry condition is "the code checks that need neither the oracle binary
-nor a built libslic3r", and `--self-test` reads the fixture trees under `port/tests/port-status/`
-plus the pinned `vendor/OrcaSlicer/` that a fixture's `source:` lines resolve against — which the
-recipe's first line already reads. It takes about a tenth of a second. The recipe's own header
-comment accounts for every line that has joined it, including this one, and points here.
+nor a built libslic3r", and it takes about a tenth of a second. The recipe's own header comment
+accounts for every line that has joined it, including this one, and points here.
 
-This is a strengthening, not a narrowing: no existing check's rule moved, and a port task that
-passed `just port-check` before passes it now unless `port/port-status` itself has stopped holding
-one of its own rules.
+**Measured, because this line is added to a gate three branches are building against.** A port
+branch's `crates/` and `port/manifest.tsv` differ from `main`'s, so "the self-test reads only its
+own fixtures" has to be a measurement and not a reading of the code. `run_selftest()` was called
+with `Path.read_text`, `Path.read_bytes`, `Path.is_file`, `Path.iterdir`, `Path.glob`,
+`Path.rglob`, `builtins.open` and `subprocess` wrapped to record every path: **348 distinct paths
+touched, and exactly two of them outside `port/tests/port-status/` and the pinned
+`vendor/OrcaSlicer/`** — a `port/manifest.tsv` in each of two scratch trees the self-test itself
+creates under the system temporary directory. It touches no file of the real `crates/` tree and
+not the real `port/manifest.tsv`. (`vendor/OrcaSlicer/` is in the set because a fixture's
+`source:` lines resolve against the pin, which the recipe's first line already reads.)
+
+So this is a strengthening and not a narrowing: no existing check's rule moved, and a port task
+that passed `just port-check` before passes it now unless `port/port-status` itself has stopped
+holding one of its own rules. `git grep -- --self-test` also confirms nothing else in the
+repository — no other recipe, workflow, hook or script — invoked it before this.
