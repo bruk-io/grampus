@@ -1,0 +1,48 @@
+// Proof shim for the `AABBTreeLines.hpp` unit (R19, proof path 2, task
+// `61-foundation-line-slicing`), compiled onto `crates/slic3r-ffi`'s shared `cxx_build::Build`
+// by this crate's `build.rs` -- the one sanctioned route a ported unit reaches the oracle by
+// (`docs/PORTING.md`, "Decisions recorded on 2026-11-25").
+//
+// `AABBTreeLines.hpp`'s own row is `proof path: 2` with no stage-dump field that is this
+// header's own output (its callers are all fan-out modules not yet written), so this proof
+// reaches the oracle through the per-unit bridge instead -- `docs/PORTING.md`'s "Decisions
+// recorded on 2026-11-26", decision 2, the same route `60-foundation-trees-grids`'s
+// `AABBTreeIndirect.hpp` precedent (`aabb_tree_indirect.cpp`) uses. This builds a real
+// `Slic3r::AABBTreeLines::LinesDistancer<Slic3r::Linef>` over the lines the Rust test passes in
+// and calls its real vendored `distance_from_lines_extra<true>` and `outside`.
+#include "aabb_tree_lines.h"
+
+#include "libslic3r/AABBTreeLines.hpp"
+#include "libslic3r/Line.hpp"
+
+namespace slic3r_ffi {
+namespace proof_units {
+namespace aabb_tree_lines {
+
+rust::Vec<double> path2_distance_and_outside(rust::Slice<const double> ax,
+                                              rust::Slice<const double> ay,
+                                              rust::Slice<const double> bx,
+                                              rust::Slice<const double> by, double qx, double qy) {
+    std::vector<Slic3r::Linef> lines;
+    lines.reserve(ax.size());
+    for (size_t i = 0; i < ax.size(); ++i) {
+        lines.emplace_back(Eigen::Vector2d(ax[i], ay[i]), Eigen::Vector2d(bx[i], by[i]));
+    }
+
+    Slic3r::AABBTreeLines::LinesDistancer<Slic3r::Linef> distancer(std::move(lines));
+    const Eigen::Vector2d point(qx, qy);
+    auto [distance, idx, nearest] = distancer.distance_from_lines_extra<true>(point);
+    int outside = distancer.outside(point);
+
+    rust::Vec<double> out;
+    out.push_back(distance);
+    out.push_back(static_cast<double>(idx));
+    out.push_back(nearest.x());
+    out.push_back(nearest.y());
+    out.push_back(static_cast<double>(outside));
+    return out;
+}
+
+} // namespace aabb_tree_lines
+} // namespace proof_units
+} // namespace slic3r_ffi
