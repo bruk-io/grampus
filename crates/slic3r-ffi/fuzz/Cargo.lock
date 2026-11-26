@@ -292,6 +292,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "slic3r-boundingbox"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-point",
+]
+
+[[package]]
 name = "slic3r-exception"
 version = "0.1.0"
 
@@ -309,6 +318,7 @@ version = "0.0.0"
 dependencies = [
  "arbitrary",
  "libfuzzer-sys",
+ "slic3r-boundingbox",
  "slic3r-ffi",
  "slic3r-point",
 ]
