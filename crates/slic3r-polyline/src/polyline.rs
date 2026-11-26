@@ -616,6 +616,13 @@ fn points_to_lines(points: &Points) -> Lines {
 }
 
 /// `inline Lines to_lines(const Polylines &polys)` (`Polyline.hpp:186-200`).
+// PORT NOTE: src/libslic3r/Polyline.hpp:196 -- the vendored body's own second loop walks
+// `poly.points.begin()..poly.points.end()-1` unguarded for a 0- or 1-point member (undefined
+// behaviour: `end()-1` before `begin()` on an empty `points`), where this function instead
+// reuses `to_lines`'s own `len >= 2` guard (the same convention `split_at_index`/
+// `to_thick_polylines` already note for their own unguarded `size() - 1` sites) -- a safe,
+// empty-for-degenerate-input rendering rather than reproducing the vendored UB, since no
+// in-scope caller passes a degenerate member and the two give the same result otherwise.
 pub fn to_lines_polylines(polys: &Polylines) -> Lines {
     let mut n_lines = 0usize;
     for poly in polys {
