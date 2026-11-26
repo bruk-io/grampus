@@ -516,11 +516,49 @@ def tainted_identifiers(body: str, oracle: frozenset[str]) -> frozenset[str]:
     return frozenset(tainted)
 
 
+def let_binding_pattern(pattern: str) -> str:
+    """`pattern` with a `let`'s type annotation cut off: the text before its first `:` at
+    bracket depth 0 that is not part of a `::` path.
+
+    A type annotation binds nothing. Reading it as part of the pattern made every type word a
+    proof wrote in its own annotations an oracle name -- `let oracle: Vec<u32> = path1_x();`
+    made `Vec` and `u32` oracle names -- and the fixed point in `tainted_identifiers` then
+    carried that taint on to the ported side, so a genuinely differential proof whose ported
+    value is spelled with one of those words (`let ported: Vec<u32> = Vec::from(PORTED);`) read
+    as having no ported side at all and its row stayed `drafted`. Measured on PR #56's
+    `crates/slic3r-filamentmixermodel` proof, which derived `ported` only through the loop-
+    binding fallback at the end of `has_differential_comparison` once its annotations were
+    dropped.
+
+    Only a `let` carries an annotation; a `for` pattern is passed through untouched. The depth
+    counter is what keeps a tuple's own `:` (`let Foo { a: x }: Foo`) and an array length
+    (`let oracle: [i64; 3]`) from cutting in the wrong place, and the `::` test is what keeps a
+    path pattern (`let Enum::V(x)`) from being read as an annotation."""
+    depth = 0
+    i = 0
+    while i < len(pattern):
+        c = pattern[i]
+        if c in "([{<":
+            depth += 1
+        elif c in ")]}>":
+            depth -= 1
+        elif depth <= 0 and c == ":":
+            if pattern[i + 1 : i + 2] == ":":
+                i += 2
+                continue
+            return pattern[:i]
+        i += 1
+    return pattern
+
+
 def _find_bindings(masked: str) -> list[tuple[str, str]]:
     """Every `(pattern, right-hand side)` pair in `masked`: a `let <pattern> = <expr>;` and a
     `for <pattern> in <expr>` (which `if let`/`while let` also match, since both write
     `let <pattern> = <expr>`). Scanned with a bracket-depth counter rather than a regex, so a
-    `;` or an `=` inside the pattern's own brackets does not end it early."""
+    `;` or an `=` inside the pattern's own brackets does not end it early.
+
+    A `let`'s pattern is returned without its type annotation (`let_binding_pattern`), since an
+    annotation names types and binds no name."""
     out: list[tuple[str, str]] = []
     for m in re.finditer(r"\b(let|for)\s", masked):
         keyword = m.group(1)
@@ -545,6 +583,8 @@ def _find_bindings(masked: str) -> list[tuple[str, str]]:
         if i >= len(masked) or masked[i] in ";{":
             continue
         pattern = masked[pattern_start:i]
+        if keyword == "let":
+            pattern = let_binding_pattern(pattern)
         rhs_start = i + (1 if keyword == "let" else len(separator))
         j = rhs_start
         depth = 0
@@ -2894,6 +2934,14 @@ def _check_enclosing_and_differential() -> list[str]:
             "drafted",
             "its '// PROOF:' marker sits on a test that compares nothing the oracle produced",
         ),
+        (
+            "proof-differential-annotated-binding",
+            ported,
+            "ported",
+            "its proof compares the oracle's value against the module's own through two "
+            "type-annotated 'let' bindings (docs/PORTING.md, 'Decisions recorded on "
+            "2026-11-26', the type-annotation cut)",
+        ),
     ]
     for tree_name, target, want, why in cases:
         got = status_of(tree_name, target)
@@ -2910,6 +2958,7 @@ def _check_enclosing_and_differential() -> list[str]:
         ("enclosing-unit-chain", ["bad-enclosing-unit", "bad-enclosing-unit"]),
         ("enclosing-unit-other-crate", ["bad-enclosing-unit"]),
         ("proof-not-differential", ["proof-marker-not-differential"]),
+        ("proof-differential-annotated-binding", []),
     ]:
         result, _gate, _docs = full_check(FIXTURES_ROOT / tree_name)
         got_rules = sorted(f.rule for f in result.findings)
@@ -2960,6 +3009,20 @@ def _check_enclosing_and_differential() -> list[str]:
          "a `;` inside the binding's own type does not end the pattern"),
         ('let oracle = path1_flags();\nassert_eq!(oracle.iter().collect::<String>(), ported());',
          True, "a turbofish type argument is not the ported side, but `ported()` is"),
+        # A `let`'s type annotation binds no name, so no type word in it becomes an oracle name
+        # (`let_binding_pattern`). Each of the three accepted shapes below derived `drafted`
+        # before that cut, because the annotation's own type word was tainted and then flowed on
+        # to the ported side; the fourth pins that the cut refuses what it refused before.
+        ('let oracle: Mask = path1_flags();\nlet ported: Mask = Mask::ALL;\n'
+         'assert_eq!(oracle, ported);', True,
+         "a type annotation's own word does not taint the ported side"),
+        ('let oracle: Vec<Mask> = path1_flags();\nlet ported: Vec<Mask> = vec![Mask::ALL];\n'
+         'assert_eq!(oracle, ported);', True,
+         "nor does a type argument inside the annotation's brackets"),
+        ('let (a, b): (u32, u32) = oracle_call();\nassert_eq!(PORTED, a);', True,
+         "the annotation is cut after the tuple pattern, not at the `:` the pattern could hold"),
+        ('let oracle: Mask = path1_flags();\nassert_eq!(oracle, Mask::ALL);', False,
+         "cutting the annotation does not make either end of a path a value this port computed"),
     ]
     for body, want, why in shapes:
         got = has_differential_comparison(body, oracle)
