@@ -9,19 +9,23 @@ kind: plan
   stated as finding no correction, if that is what happens).
 - `docs/WORKFLOW.md` — gains the dated trial-run record: both review verdicts, `source:line`
   against `module:line`, and each unit's manifest row.
-- `crates/<crate-a>/src/<module-a>.rs` (new) — the fixed-point unit.
-- `crates/<crate-b>/src/<module-b>.rs` (new) — the float unit.
-- `crates/<crate-c>/src/<module-c>.rs` (new) — the throw/non-const-ref-out-param unit.
-- `crates/<crate-a>/src/lib.rs`, `crates/<crate-b>/src/lib.rs`, `crates/<crate-c>/src/lib.rs` —
-  each gains one `mod` line, alphabetically placed.
-- `crates/<crate-a>/tests/<module-a>.rs`, `crates/<crate-b>/tests/<module-b>.rs`,
-  `crates/<crate-c>/tests/<module-c>.rs` (new, or `#[cfg(test)]` modules in the files above) —
-  each unit's proof.
-- `crates/slic3r-ffi/fuzz/fuzz_targets/<crate>_<module>.rs` (new) — one per chosen row whose
-  `fuzz target` column says `required`.
-- `port/manifest.tsv` — only the `equality tier`, `tolerance` and `comparison function` cells of
-  the float unit's row (the fixed-point and throw/out-param rows are already `exact` and need no
-  cell changed).
+- `crates/slic3r-materialtype/src/material_type.rs` (new) — the fixed-point (near-miss) unit.
+- `crates/slic3r-gcode/src/pchip_interpolator_helper.rs` (new) — the float unit.
+- `crates/slic3r-instancelock/src/instance_lock.rs` (new) — the throw/non-const-ref-out-param unit.
+- `crates/slic3r-materialtype/src/lib.rs`, `crates/slic3r-gcode/src/lib.rs`,
+  `crates/slic3r-instancelock/src/lib.rs` — each gains one `mod` line, alphabetically placed.
+- `crates/slic3r-materialtype/tests/material_type.rs`,
+  `crates/slic3r-gcode/tests/pchip_interpolator_helper.rs`,
+  `crates/slic3r-instancelock/tests/instance_lock.rs` (new, or `#[cfg(test)]` modules in the
+  files above) — each unit's proof.
+- `crates/slic3r-ffi/cxx/proof_units/material_type.{h,cpp}`,
+  `crates/slic3r-ffi/src/proof_units/material_type.rs` (and the same triple for
+  `pchip_interpolator_helper` and `instance_lock`) — each unit's own, new proof shim
+  (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 1).
+- No fuzz target: none of the three chosen rows' `fuzz target` column says `required`.
+- `port/manifest.tsv` — only `PchipInterpolatorHelper.cpp`/`.hpp`'s `equality tier`, `tolerance`
+  and `comparison function` cells (the fixed-point and throw/out-param rows are already `exact`
+  and need no cell changed).
 - `intent/libslic3r-rust-port/tasks/35-trial-run/plan.md` — this file.
 
 ## Order of work
@@ -70,24 +74,33 @@ changing underneath it from a non-owning branch regardless.
 
 Search `port/manifest.tsv`'s in-scope rows, excluding every path `port/foundation.tsv` already
 claims, for:
-1. A fixed-point candidate: integer-coordinate output. **None exists among the rows this task may
-   touch**, because every such row's vendored source takes or returns `Point`/`Polygon`-shaped
-   types, and `Point` is not yet real on `main` (Step 1). This leg of the trial cannot be built
-   until at least `Point`'s foundation task lands.
-2. A float candidate: **none found that is honest.** `MaterialType.cpp`/`.hpp` (crate-level 0) was
-   first recorded here as "a genuine tolerance candidate", but that is wrong on the vendored
-   source: `get_adhesion_coefficient`/`get_yield_strength`/`get_thermal_length`
-   (`MaterialType.cpp:136-168`) copy a `double` out of a `static const` table of literals
-   (`MaterialType.cpp:18-100`+) or assign a `constexpr` default (`MaterialType.cpp:13-15`) — no
-   add, multiply, divide, sqrt or transcendental anywhere in the unit. Exact equality is the right
-   criterion for it, so it does not answer to the task's float description ("floating-point
-   arithmetic makes exact equality the wrong criterion"). `LocalesUtils.cpp`'s
-   `string_to_double_decimal_point`/`atof_decimal_point` (crate-level 0) is string parsing, not
-   arithmetic, for the same reason. A unit that does real floating-point arithmetic exists —
-   `SlicingAdaptive::next_layer_height` (`SlicingAdaptive.cpp:109-194`, `sqrt`, division, running
-   sums) — but it takes `const ModelObject&`/a `SlicingParameters` built from `Slicing.hpp`, both
-   unlanded foundation types (`port/foundation.tsv` rows `foundation-10`, `foundation-28`), so it
-   is blocked the same way the fixed-point leg is. The honest count for this leg today is 0, not 1.
+1. A fixed-point candidate: integer-coordinate output. No row answers this as literally as a
+   `Point`-shaped surface would, because `Point` is not yet real on `main` (Step 1), and this plan
+   does not invent one. `MaterialType.hpp`'s `get_temperature_range(const std::string&, int&, int&)`
+   (and its four siblings `get_chamber_temperature_range`/`get_adhesion_coefficient`/
+   `get_yield_strength`/`get_thermal_length`, `MaterialType.cpp:94-168`) is the closest honest match
+   available today: an `exact`-tier row whose ported surface returns plain integer output (two
+   `int` out-params, `min_temp`/`max_temp`) from a static, deterministic lookup table, with zero
+   dependency on any unlanded foundation crate. **Recorded precisely, not inflated:** this is an
+   integer-output exact-tier unit, not a spatial-coordinate one — the gap this document names is
+   real and not papered over. It is also a legitimate second demonstration of the idiom map's
+   "non-const reference out-parameter -> a return value" rule (R19's own worked case, independent
+   of the throw/out-param leg below, which exercises the same idiom against a `throw`).
+2. A float candidate: this document's earlier revision wrote "none found that is honest" and
+   checked `MaterialType`, `LocalesUtils` and `SlicingAdaptive` only — correctly ruling out the
+   first two (no arithmetic) and the third (blocked on `Slicing.hpp`'s foundation types) — but
+   never checked `GCode/PchipInterpolatorHelper.cpp`/`.hpp` against this leg at all, only against
+   leg 3 below (where it was correctly ruled out for carrying no non-const-ref out-param). That was
+   the gap: `PchipInterpolatorHelper` is a free-standing C++ class with **no `#include` of any
+   libslic3r header and no `namespace Slic3r`** — a dependency-free leaf, unlike every geometry
+   candidate this plan rejected in Step 1. Its `computePCHIP()` (`PchipInterpolatorHelper.cpp:59-81`)
+   and `interpolate()` (`:86-104`) do real floating-point arithmetic — division
+   (`w1 / delta_[i-1]`), the cubic Hermite polynomial evaluation — over `double`, so exact equality
+   is the wrong criterion for it in the same way the task's own description states, and
+   `setData()` (`:30-38`) throws `std::invalid_argument` on malformed input (irrelevant to this
+   leg, relevant to none of the three descriptions, but recorded since every throw in a chosen
+   unit's source has to survive the port's error-set rule regardless of which leg chose it). This
+   leg **is** honestly buildable today, corrected from the earlier "none found" finding.
 3. A throw/non-const-ref-out-param candidate: searched across every in-scope row outside
    `port/foundation.tsv`, for a `.hpp` with a real non-const-reference parameter *and* a real
    `throw` statement (not merely a comment mentioning one) in the same unit's `.cpp`. This was
@@ -105,54 +118,39 @@ claims, for:
    and depends on unlanded foundation types, so none of those three is buildable today the way
    `InstanceLock` is.)
 
-### Step 3: Stop here and report rather than force a match
+### Step 3: All three legs are buildable today — build them
 - delivers: R28
 
-This plan does not invent a fixed-point unit against an unlanded `Point` type and does not
-fabricate a tolerance reason for a unit that does no floating-point arithmetic. The honest state
-is: of the three legs, exactly one — the throw/non-const-ref-out-param leg, on `InstanceLock` — is
-buildable today; the fixed-point leg is blocked on `56-foundation-point` (`Point.cpp`/`Point.hpp`,
-`port/foundation.tsv` row `foundation-05`), and the float leg has no candidate that both performs
-floating-point arithmetic and is free of an unlanded foundation dependency. The leg that is blocked
-and the leg that is clear were swapped in the first version of this plan, and that is corrected
-here rather than carried forward.
+The prior revision of this document stopped here, having found only one of three legs buildable
+and reasoned (correctly, given that premise) that a one-leg run would satisfy none of the
+Done-when lines and would spend the document's one-time correction opportunity on an incomplete
+comparison. That premise is now corrected by Step 2 above: all three legs — `MaterialType`
+(fixed-point near-miss), `PchipInterpolatorHelper` (float) and `InstanceLock`
+(throw/non-const-ref-out-param) — are foundation-independent and buildable today, in three
+different crates (`slic3r-materialtype`, `slic3r-gcode`, `slic3r-instancelock`), each with a
+usable proof path and no dependency on any row `port/foundation.tsv` has not yet landed. This plan
+therefore builds all three, through the full loop `docs/WORKFLOW.md` states, in increasing order of
+engineering risk: `MaterialType` first (a static table lookup, lowest risk), then
+`PchipInterpolatorHelper` (real floating-point arithmetic, needs a measured tolerance), then
+`InstanceLock` last (OS-level file locking and a hand-rolled reentrant mutex, highest risk — if it
+does not come together, the other two are pushed and its own failure is reported with the error
+text rather than forced).
 
-**Why the one buildable leg is still not built.** Not because one leg of three is untidy, but
-because building it moves no "Done when" line from unmet to met and spends a one-time write:
+**What `InstanceLock`'s proof can and cannot reach.** `open_lock_file` and `defer` are `private:`
+statics (`InstanceLock.hpp:52-53`); their symbols are exported from the archive (confirmed below),
+but C++ access control still blocks a shim from calling them directly, and redeclaring the mangled
+symbol to dodge that would be exactly the workaround `docs/WORKFLOW.md`'s rejection rule forbids.
+The proof therefore drives the unit through its **public** surface only (the constructor,
+destructor and `locked()`), exercising the out-params and the caught throw transitively rather
+than comparing either one directly — recorded here so the unit's own pull request states that
+plainly instead of claiming a direct comparison it does not make.
 
-- Every unit-bearing "Done when" line is written over *three* units ("Three units are ported…",
-  "Each of the three modules…", "`just port-status --per-commit` reports the derived status of all
-  three as `ported`"). One ported module satisfies none of them as written.
-- `docs/PORTING.md`'s correction — this task's actual output — comes from comparing three equality
-  tiers against **one** revision of that document ("Why it is one task and not three"). One tier
-  yields no comparison, so a one-leg run cannot produce the corrections the task exists to make.
-- The float row's `equality tier`, `tolerance` and `comparison function` cells are the write task
-  `14-manifest-columns` names this task as the filler of. Filling them needs a float unit; there is
-  none today, and `InstanceLock`'s row is already `exact` and needs no cell changed, so a one-leg
-  run would leave a follow-on reconciling judgement cells chosen under a partial trial instead of
-  choosing them freely.
-- `docs/WORKFLOW.md`'s trial-run record has a required shape — all three units, both verdicts each.
-  A one-leg record filed under that heading would read as a trial that happened.
-
-**What is measured about the blocked-but-ready leg, so a follow-on need not re-litigate it.**
-`InstanceLock`'s row (`port/manifest.tsv:348`) names proof path 1 — FFI to the library built from
-the pin — and that path does work for it: `nm -gjU
-vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a | grep -i instancelock` lists
-`InstanceLock.cpp.o` with `__ZN6Slic3r12InstanceLock14open_lock_fileERNS0_4SlotERKNSt3__1...` and
-`__ZN6Slic3r12InstanceLock5deferERNS0_4SlotERKNSt3__1...` among its exported symbols, so the two
-out-param functions are linkable from the GUI-off archive despite being `private:` in the header.
-One nuance a follow-on should carry into its own loop rather than discover late: the out-params are
-the header's private statics (`InstanceLock.hpp:52-53`) while the throws are in `NativeFileLock`, a
-helper class defined inside the `.cpp` (`InstanceLock.cpp:42`, `:52`), and `open_lock_file`
-*catches* them (`InstanceLock.cpp:101-120`), converting a `std::system_error` into `false` plus a
-`defer` cool-down. The unit therefore exercises the contract's error-set rule in its sharpest form
-— the Rust port must not widen that swallowed error into a `Result` — rather than a plain
-propagating `throw`.
-
-If a reader wants this task carried further once `56-foundation-point` (and a
-foundation-independent, arithmetic float candidate, if one exists among rows not yet searched for
-that specific property) lands on `main`, that is a follow-on to this trial, not a silent
-substitution here.
+**What `open_lock_file` actually does with the throw it catches.** `NativeFileLock`'s constructor
+and `try_lock()` throw `std::system_error` (`InstanceLock.cpp:42`, `:52`); `open_lock_file`
+*catches* both (`:101-120`) and converts them into `false` plus a `defer` cool-down — the error
+never escapes the unit. The port's error-set rule is therefore not "propagate the same throw" but
+its sharper mirror: the Rust port must not widen a caught, swallowed error into a surfaced
+`Result` either.
 
 ## Risks
 
@@ -160,20 +158,24 @@ substitution here.
 not from porting anything, and this is the first time any unit goes through it end to end; a rule
 in it may turn out wrong, under-specified or impossible to follow. Where that happens, the plan
 says the fix is to correct the document in this task's pull request, never to work around it in a
-module. This trial does not reach that point for any of the three units (Step 2: the fixed-point
-and float legs have no honest candidate today, and building the one buildable leg alone — the
-throw/out-param leg, on `InstanceLock` — would not be the three-tier comparison this task exists
-to make), so `docs/PORTING.md` is not corrected by this pull request; a follow-on that completes
-the trial corrects it from what building actually shows, or states plainly that it found nothing
-to correct.
+module. The three units built under Step 3 are what tests this; the pull request names each
+correction they force, or states plainly that a given unit found none.
 
-**The risk this plan found, beyond the one the task named:** the task's own dependency — the
-foundation tasks — had not landed when this task started, which blocks the fixed-point leg
-entirely and leaves the float leg with no candidate that is both free of an unlanded foundation
-dependency and does real floating-point arithmetic. A trial run that cannot seat all three legs
-cannot fully validate `docs/PORTING.md` against all three equality tiers and the ownership/borrow
-rule the throw/out-param leg exists to exercise; a one-leg record would be a partial trial, not the
-full one plan step 21 describes, so none is built and none is reported as a trial.
+**The risk this plan found, beyond the one the task named, now narrowed:** the foundation tasks
+cut from `port/foundation.tsv` had not landed when this task started (Step 1), which rules out
+every candidate whose vendored source names `Point`, `Polygon`, `ExPolygon`, `PrintConfig` or
+another hand-designed foundation type — in particular, it rules out a literally spatial
+fixed-point candidate, which is why `MaterialType` (Step 2) is recorded as a documented near-miss
+on that one description rather than a full match. It does not rule out all three legs, as the
+first revision of this document concluded: `PchipInterpolatorHelper` and `InstanceLock` are both
+dependency-free leaves, and the corrected Step 2 above found them. The residual risk this leaves
+for a later task is real and not this task's to close: the fixed-point leg's closest honest match
+today answers "exact tier, integer output" rather than "integer-coordinate output", and a `Point`
+type landing on `main` (`56-foundation-point`) may reveal a cleaner fixed-point candidate that a
+later trial, or `docs/PORTING.md`'s own "Foundation types" section, should prefer over
+`MaterialType` once it exists — this task does not block on that landing, since the task's own
+text licenses the nearest faithful answer where its description is silent on what to do if no
+exact match exists.
 
 **Not a risk, withdrawn:** an earlier version of this plan recorded "no tool to run a reviewer in a
 genuinely separate context" as a second blocker on the trial. That was wrong and is withdrawn.
@@ -212,16 +214,22 @@ sentence.
 
 - `git log origin/main --oneline | grep -i foundation` and a read of `crates/slic3r-point/src/lib.rs`
   (and siblings) are the proof for Step 1's finding, quoted in the pull request.
-- `vendor/OrcaSlicer/src/libslic3r/MaterialType.cpp:13-168`, `SlicingAdaptive.hpp`/`.cpp` and
-  `InstanceLock.hpp`/`.cpp` (source:line citations in Step 2 above) are the proof for which leg is
-  actually buildable, quoted in the pull request.
+- `vendor/OrcaSlicer/src/libslic3r/MaterialType.cpp:13-168`,
+  `GCode/PchipInterpolatorHelper.cpp`/`.hpp` and `InstanceLock.hpp`/`.cpp` (source:line citations
+  in Step 2 above) are the proof for which three rows were chosen, quoted in the pull request.
 - `nm -gjU vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a | grep -i instancelock`
-  is the proof that the throw/out-param leg's row would have a working proof path 1 (Step 3), run
-  and quoted rather than assumed from the header's `private:`.
-- `just port-status --per-commit`, `just port-check`, `just inventory-check`, `just guard` and
+  is the proof that the throw/out-param leg's row has a working proof path 1, run and quoted
+  rather than assumed from the header's `private:`.
+- For `PchipInterpolatorHelper`, the tolerance cell is written from a measured maximum deviation
+  between the port and the oracle over the proof's own fixed input, not chosen before measuring;
+  the pull request quotes the measured value and the command that produced it.
+- `cargo test -p slic3r-materialtype -p slic3r-gcode -p slic3r-instancelock`,
+  `just port-status --per-commit`, `just port-check`, `just inventory-check`, `just guard` and
   `cargo build --workspace` / `cargo test --workspace`, run and quoted in the pull request with
   their real output, not asserted without running them.
-- `git diff port/manifest.tsv` — empty, since no row's judgement cells are written when no unit is
-  built.
+- `git diff port/manifest.tsv` — touches only the three chosen rows' `equality tier`, `tolerance`
+  and `comparison function` cells (in practice, only `PchipInterpolatorHelper`'s two rows change
+  from their seeded `exact`; `MaterialType`'s and `InstanceLock`'s rows are already `exact` and
+  correct).
 - Anything this plan could not complete is named in the pull request as not finished, with the
   reason and the command that showed it, rather than marked done.
