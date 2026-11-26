@@ -6467,6 +6467,50 @@ pub fn set_at_dyn(
     ))
 }
 
+/// `ConfigOptionVectorBase::clear` (`:388`), through a `&dyn ConfigOption` -- same dispatch
+/// shape as [`set_at_dyn`]. **Review finding, fixed here**: an earlier version of
+/// `DynamicConfig::read_cli`'s `! existing` branch (`Config.cpp:1874-1876`'s `opt_vector->clear()`)
+/// downcast straight to `ConfigOptionBools` and silently did nothing for every other vector type
+/// (`Floats`, `Ints`, `Strings`, `Percents`, `Points`, ...), so a CLI-supplied value for a
+/// non-bool vector option was appended onto that option's *default* values instead of replacing
+/// them, for every type but `coBools`.
+pub fn clear_dyn(opt: &mut dyn ConfigOption) {
+    use ConfigOptionType::*;
+    macro_rules! try_clear {
+        ($t:ty) => {
+            if let Some(v) = opt.as_any_mut().downcast_mut::<$t>() {
+                <$t as ConfigOptionVectorBase>::clear_values(v);
+                return;
+            }
+        };
+    }
+    match opt.option_type() {
+        Floats => {
+            try_clear!(ConfigOptionFloats);
+            try_clear!(ConfigOptionFloatsNullable);
+        }
+        Ints => {
+            try_clear!(ConfigOptionInts);
+            try_clear!(ConfigOptionIntsNullable);
+        }
+        Strings => try_clear!(ConfigOptionStrings),
+        Percents => {
+            try_clear!(ConfigOptionPercents);
+            try_clear!(ConfigOptionPercentsNullable);
+        }
+        FloatsOrPercents => {
+            try_clear!(ConfigOptionFloatsOrPercents);
+            try_clear!(ConfigOptionFloatsOrPercentsNullable);
+        }
+        Points => try_clear!(ConfigOptionPoints),
+        Bools => {
+            try_clear!(ConfigOptionBools);
+            try_clear!(ConfigOptionBoolsNullable);
+        }
+        _ => {}
+    }
+}
+
 // =================================================================================================
 // `set_deserialize_raw` (`Config.cpp:630-713`) and `load_from_gcode_file`/
 // `load_from_gcode_string_legacy` (`:1250-1520`), as free functions generic over any `ConfigBase +
@@ -7072,11 +7116,11 @@ impl<'a> DynamicConfig<'a> {
             let is_vector = optdef.option_type.is_vector_type();
             if is_vector {
                 if !existing {
+                    // `opt_vector->clear()` (`:1876`): remove the default values before a
+                    // CLI-supplied value is appended. See `clear_dyn`'s own doc for the review
+                    // finding this fixes (it used to downcast to `ConfigOptionBools` only).
                     if let Some(opt) = self.optptr_mut(&opt_key, true).ok().flatten() {
-                        // `opt_vector->clear()` (`:1876`).
-                        if let Some(v) = opt.as_any_mut().downcast_mut::<ConfigOptionBools>() {
-                            v.values.clear();
-                        }
+                        clear_dyn(opt);
                     }
                 }
                 if optdef.option_type == ConfigOptionType::Bools && value.is_empty() {
@@ -7411,6 +7455,30 @@ mod tests {
         );
         assert_eq!(parse_capability_ref(""), None);
         assert_eq!(parse_capability_ref("onlyone"), None);
+    }
+
+    /// Review finding, fixed in [`clear_dyn`]: `read_cli`'s `! existing` branch used to clear a
+    /// vector option's default values only when it was `coBools` -- every other vector type's
+    /// CLI-supplied value was appended onto its *defaults* instead of replacing them. This
+    /// exercises a `coFloats` option, which the bug left unfixed.
+    #[test]
+    fn read_cli_replaces_a_non_bool_vector_options_defaults() {
+        let mut def = ConfigDef::new();
+        def.add("speeds", ConfigOptionType::Floats)
+            .set_default_value(Box::new(ConfigOptionFloats {
+                values: vec![10.0, 20.0],
+            }));
+        let mut cfg = DynamicConfig::with_def(&def);
+        let mut extra = Vec::new();
+        let argv: Vec<String> = vec!["--speeds".to_string(), "99".to_string()];
+        assert!(cfg.read_cli(&argv, &mut extra, &mut None));
+        let opt = cfg
+            .option("speeds")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloats>())
+            .expect("speeds is coFloats");
+        // The bug this test pins would leave this `vec![10.0, 20.0, 99.0]` (appended onto the
+        // unlcared defaults) instead of replacing them.
+        assert_eq!(opt.values, vec![99.0]);
     }
 
     /// `// PROOF: 3` -- this unit's one cell (both of this task's manifest rows carry it; one
