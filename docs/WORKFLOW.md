@@ -217,8 +217,14 @@ loop's steady state.
   `crates/slic3r-materialtype/src/material_type.rs:88` — the `1f64` suffix form normalises to
   the exempt literal `1` under `port/port-status`'s own rule while still typing as `f64`,
   checked against every other whole-number float field in the table, not only this row. No
-  divergence found.
-- **Fixer:** no fix needed; both passes agreed.
+  *behavioural* divergence found — every value both passes checked was correct.
+- **Fixer:** no behavioural fix needed from either pass above. **Not a clean pass, though**: at
+  the point both reviewers signed off, `just port-check` had not yet run, and when it did it
+  found this unit's row derived `drafted`, not `ported` — all 80 `// PORT SRC:` markers in this
+  module were missing the `src/libslic3r/` prefix `resolve_vendored` requires, and the test's
+  `use ... as oracle;` import made its proof read as non-differential to the text scanner. Fixed
+  in the "Fix `// PORT SRC:` markers..." commit; see "What the two review passes did not catch"
+  below for why neither review pass caught it.
 
 ### Unit 2 — float: `GCode/PchipInterpolatorHelper.cpp` / `GCode/PchipInterpolatorHelper.hpp`
 
@@ -277,11 +283,19 @@ loop's steady state.
   &slot` in the vendored source and `&mut SlotState` here, both mutating shared state the caller
   already holds locked, matching the idiom map's "a non-const reference out-parameter -> a
   return value" by returning `bool`/`()` rather than adopting a second `&mut` parameter to mirror
-  the C++ signature. No divergence found. Noted, not a finding: this unit's shim can drive only
-  the public surface (`InstanceLock`'s constructor, destructor, `locked()`) — `open_lock_file`/
-  `defer` are `private:`, so the out-params and the caught throw are exercised transitively, and
-  the record above says so rather than claiming a direct comparison that was not made.
-- **Fixer:** no fix needed; both passes agreed.
+  the C++ signature. No *behavioural* divergence found — every value both passes checked was
+  correct. Noted, not a finding: this unit's shim can drive only the public surface
+  (`InstanceLock`'s constructor, destructor, `locked()`) — `open_lock_file`/`defer` are
+  `private:`, so the out-params and the caught throw are exercised transitively, and the record
+  above says so rather than claiming a direct comparison that was not made.
+- **Fixer:** no behavioural fix needed from either pass above. **Not a clean pass, though**: at
+  the point both reviewers signed off, `just port-check` had not yet run, and when it did it
+  found this unit's row derived `drafted`, not `ported` — the symbolic POSIX flock flags and the
+  octal-notation open mode needed the external marker form instead of a vendored-line citation,
+  `DEFAULT_TIMEOUT`/`COOLDOWN`/the retry sleep's `5` were missing a marker entirely, and the
+  test's `use ... as oracle;` import made its proof read as non-differential to the text scanner.
+  Fixed in the "Fix `// PORT SRC:` markers..." commit; see "What the two review passes did not
+  catch" below for why neither review pass caught it.
 
 ## What the two review passes did not catch
 

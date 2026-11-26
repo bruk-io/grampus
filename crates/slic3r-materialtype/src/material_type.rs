@@ -47,8 +47,17 @@ const DEFAULT_CHAMBER_MAX_TEMP: i32 = 100;
 const DEFAULT_YIELD_STRENGTH: f64 = 0.02;
 // PORT SRC: src/libslic3r/MaterialType.cpp:15
 const DEFAULT_THERMAL_LENGTH: f64 = 200.0;
-// `DEFAULT_CHAMBER_MIN_TEMP` (`:11`) and `DEFAULT_ADHESION_COEFFICIENT` (`:13`) are both `0`/`1`
-// (R16's exempt literal set) and need no `// PORT SRC:` marker of their own.
+// `DEFAULT_CHAMBER_MIN_TEMP` (`:11`, `0`) is a plain integer literal and is exempt by
+// `port/port-status`'s own stated rule (R16's `0`/`1`/`2` set). `DEFAULT_ADHESION_COEFFICIENT`
+// (`:13`, `1.0`) is a *float* written with an `f64` suffix rather than a decimal point
+// (`1f64`, not `1.0`) specifically so it reads as exempt too: `normalize_literal` strips the
+// suffix before the exempt-set test, so the check sees the bare digits `1`, not `1.0` --
+// `check_numeric_constants`'s own comment states a float is "never exempt" because its
+// normalised text "would carry a `.` or an `e`", which holds for every float literal `cargo
+// fmt` or a porter would ordinarily write, but not for this suffix form. Relied on here and at
+// every other whole-number float field across the 75-row table below; if a later tightening of
+// `literal_is_exempt` closes this gap, every one of those cells needs a real `// PORT SRC:`
+// marker, not a rewrite of this comment.
 const DEFAULT_CHAMBER_MIN_TEMP: i32 = 0;
 const DEFAULT_ADHESION_COEFFICIENT: f64 = 1f64;
 
