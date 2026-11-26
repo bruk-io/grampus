@@ -199,9 +199,14 @@ its `rust type` cell verbatim. A porter never chooses a pointer's Rust type inde
 file, because `port/ownership.tsv` is R30's committed classification and this document only points
 at it.
 
-The column is filled in two different ways, and the two cases are not interchangeable, because
-only one of them has a Rust type to take yet:
+The column is filled in three different ways, and the cases are not interchangeable, because not
+all of them have a Rust type to take:
 
+- **A row whose `class` cell names a class other than `unknown`** — `borrowed`,
+  `back-reference`, `owned`, `ffi` or `shared`: the step-12 classification task for that row's
+  batch filled both the class and the `rust type` cell. Take the cell verbatim. No check requires
+  it to be filled (`validate_rows` constrains `rust type` only on an `unknown` row), so if one is
+  ever empty, treat it as the blank-class case below rather than inventing a type.
 - **A row whose `class` cell is `unknown`:** the row names a conservative Rust type, and
   `just ownership-check` fails an `unknown` row that carries no conservative Rust type — so this
   cell is guaranteed present. Take it.
@@ -214,9 +219,14 @@ only one of them has a Rust type to take yet:
   batch (port/ownership-batches.tsv)` marker, and move on; the step-12 classification task cut for
   that row's batch fills the cell in, later, on `main`.
 
-As this document is written, every row of `port/ownership.tsv` has a blank `class` cell (there are
-no `unknown` rows yet), so the `// TODO(port):` case is, today, every row. That is expected: it is
-the state the window before fan-out is in, not an error in the ownership manifest.
+When this document was written, every row of `port/ownership.tsv` had a blank `class` cell and
+there were no `unknown` rows, so the `// TODO(port):` case was then every row. **That is no longer
+true, and the sentence that said so was stale** (`## Decisions recorded on 2026-11-26`, decision
+6). Measured on the committed file: 143 `borrowed`, 31 `back-reference`, 20 `owned`, 7 `unknown`,
+6 `ffi`, 1 `shared` and **no blank-class row**, and all 208 rows carry a filled `rust type` cell —
+so the `// TODO(port):` case is, today, no row at all, and the first bullet above is the one a
+porter reaches for. The blank-class bullet is kept because nothing stops a future row of the
+vendored tree arriving unclassified.
 
 **Foundation types.** `Point`, the Eigen vector aliases at `src/libslic3r/Point.hpp:52-69`
 (`Vec2crd`, `Vec3crd`, `Vec2i32`, `Vec2i64`, `Vec3i32`, `Vec3i64`, `Vec4i32`, `Vec2f`, `Vec3f`,
@@ -723,7 +733,9 @@ as a divergence.
 
 The three port tasks merged as pull requests #54, #56 and #57 each carried forward a finding they
 were not allowed to fix: every file that would have to change was on their own must-not-write
-list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1.
+list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1;
+decision 6 closes one `57-foundation-utils` (#60) routed here for the same reason, its own
+must-not-write list.
 Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
 2026-11-26; the owner was away and had handed
 over this intent's decisions. Like the section above, this is a record: where a decision changes
@@ -881,3 +893,55 @@ So this is a strengthening and not a narrowing: no existing check's rule moved, 
 that passed `just port-check` before passes it now unless `port/port-status` itself has stopped
 holding one of its own rules. `git grep -- --self-test` also confirms nothing else in the
 repository — no other recipe, workflow, hook or script — invoked it before this.
+
+### 6. `FilePtr::f`'s Rust type, and what the ownership column's cases are today
+
+**The gap.** `57-foundation-utils`' Done-when line 6 asks its module to take
+`port/ownership.tsv`'s `rust type` cell verbatim (the rule "Raw-pointer fields" above states).
+That row — `Utils.hpp 544 FilePtr f FILE * owned Utils.hpp:536, Utils.hpp:540` — read
+`std::fs::File`, a type that cannot hold the state the vendored field is actually in. Measured at
+the pin, not assumed:
+
+- `FILE* f = nullptr;` (`src/libslic3r/Utils.hpp:544`) — the field is null before first use.
+- `close()` (`:538-543`) sets it back to `nullptr` while the object lives on, and the destructor
+  calls `close()`.
+- Every in-scope construction site builds a `FilePtr` straight from a `fopen` that may have
+  failed: `GCodeReader.cpp:152`, `GCode/GCodeProcessor.cpp:1171`, `:1177`, `:2049` and `:2054`.
+  (The only other uses in the vendored tree are two in `src/slic3r/GUI/GCodeViewer.cpp`, which R10
+  puts out of scope, and one commented out.)
+
+So a module that took the cell verbatim could not represent a closed or a failed-open `FilePtr`,
+and a module that wrote `Option<std::fs::File>` diverged from the cell. #60's reviewer rejected
+the unit over exactly that, and the task's Done-when line 10 forbids it from writing
+`port/ownership.tsv`, anything under `port/` or anything under `docs/` — so it could not close the
+finding itself.
+
+**The decision, first half.** The cell now reads `Option<std::fs::File>`. The `Option` is the
+field's nullability, which is load-bearing in the original; the inner type is the committed
+classification's own choice and is not touched. `rust type` is one of `port/ownership`'s
+`CARRIED_COLUMNS` (`port/ownership:690`), carried forward verbatim from the committed file, and
+`validate_rows` constrains it only on an `unknown`-class row — so the cell edit alone is the whole
+change and `just ownership-check` passes with it (measured: 208 rows, exit 0).
+
+**Why a cell is edited here when decision 2 refused to edit one.** The two cases are opposites,
+and the reason decision 2 gives is the test:
+
+- Decision 2's cells are *not wrong* — they name a seeded mechanism, and decision 4 of 2026-11-25
+  already governs which oracle route a proof may take. This cell *is* wrong: it names a Rust type
+  that cannot represent a state the vendored field reaches.
+- Decision 2's edit would have *broken* the in-flight branch holding the row, measured
+  (`56-foundation-point`'s units). This edit *unblocks* the only in-flight branch holding this row:
+  #60 has already written `Option<std::fs::File>`, so after this amendment the branch and the cell
+  agree.
+
+**The decision, second half — the ownership column's cases.** "Raw-pointer fields" above
+enumerated two cases, an `unknown`-class row and a blank-class row, and closed with "every row of
+`port/ownership.tsv` has a blank `class` cell (there are no `unknown` rows yet), so the
+`// TODO(port):` case is, today, every row". That is stale, and it left the rows a porter actually
+meets with no case of their own. Measured on the committed file: 143 `borrowed`, 31
+`back-reference`, 20 `owned`, 7 `unknown`, 6 `ffi`, 1 `shared`, **no blank-class row**, and all 208
+rows carrying a filled `rust type` cell. The section now carries a first bullet for a row whose
+class is filled and is not `unknown` — take the cell verbatim, and fall back to the blank-class
+rule rather than inventing a type if one is ever empty — and says what the measured state is
+instead of asserting the old one. The blank-class bullet is kept: nothing stops a future row
+arriving unclassified.
