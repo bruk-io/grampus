@@ -214,9 +214,11 @@ only one of them has a Rust type to take yet:
   batch (port/ownership-batches.tsv)` marker, and move on; the step-12 classification task cut for
   that row's batch fills the cell in, later, on `main`.
 
-As this document is written, every row of `port/ownership.tsv` has a blank `class` cell (there are
-no `unknown` rows yet), so the `// TODO(port):` case is, today, every row. That is expected: it is
-the state the window before fan-out is in, not an error in the ownership manifest.
+When this document was first written every row of `port/ownership.tsv` had a blank `class` cell.
+The classification tasks have since filled all 208: a blank class is now a failure of
+`just ownership-check`, and only the `unknown` rows still take the `// TODO(port):` marker. For every
+other class, the row's `rust type` cell is the field's type, written as the cell reads; see
+`## Decisions recorded on 2026-11-26`, decision 6, for a nullable field.
 
 **Foundation types.** `Point`, the Eigen vector aliases at `src/libslic3r/Point.hpp:52-69`
 (`Vec2crd`, `Vec3crd`, `Vec2i32`, `Vec2i64`, `Vec3i32`, `Vec3i64`, `Vec4i32`, `Vec2f`, `Vec3f`,
@@ -881,3 +883,19 @@ So this is a strengthening and not a narrowing: no existing check's rule moved, 
 that passed `just port-check` before passes it now unless `port/port-status` itself has stopped
 holding one of its own rules. `git grep -- --self-test` also confirms nothing else in the
 repository — no other recipe, workflow, hook or script — invoked it before this.
+
+### 6. An `owned` field that the C++ can null is an `Option`
+
+**The gap.** #60 (`57-foundation-utils`) found that `port/ownership.tsv`'s row for `FilePtr::f`
+(`Utils.hpp:544`, `FILE *`, class `owned`) gave the Rust type as `std::fs::File`. The vendored
+field is nullable and the port depends on it: it is initialised to `nullptr`, `close()` at
+`Utils.hpp:538-543` nulls it while the object lives on, and the in-scope construction sites pass it
+the result of an `fopen` that may have failed. A reviewer rejected the unit for being unable to
+represent that state, and the task could not write the manifest.
+
+**The decision.** The cell now reads `Option<std::fs::File>`. As a rule for the rows not yet
+ported: where an `owned` row's C++ field can hold null during the object's life, the `rust type`
+cell wraps the owned type in `Option`. A port task that finds such a row without the `Option`
+reports it and stops on that field, as #60 did; the cell is corrected on `main` by a pull request
+like this one, not inside the task. Made by Claude acting for Bruk Habtu under the delegation for
+this intent, on 2026-11-26.
