@@ -1483,6 +1483,25 @@ mod tests {
         assert_eq!(tp.points, vec![Point::new(0, 0), Point::new(10, 0)]);
     }
 
+    /// `ThickPolyline::append_before` through `via_polyline` on a single-point polyline --
+    /// exercises `Polyline::append_before`'s `size() == 1` branch (`push` then `reverse`,
+    /// rather than the general `reverse`/`append`/`reverse` path) by delegation, confirming
+    /// `via_polyline`'s whole-vector move-and-write-back leaves that branch seeing the same
+    /// length it would see called directly on a `Polyline`.
+    #[test]
+    fn thick_polyline_append_before_on_one_point_matches_polyline() {
+        let mut pl = Polyline::from_points(vec![Point::new(10, 0)]);
+        pl.append_before(Point::new(0, 0));
+        let mut tp = ThickPolyline {
+            points: vec![Point::new(10, 0)],
+            width: Vec::new(),
+            endpoints: (false, false),
+        };
+        tp.append_before(Point::new(0, 0));
+        assert_eq!(tp.points, pl.points);
+        assert_eq!(tp.points, vec![Point::new(0, 0), Point::new(10, 0)]);
+    }
+
     /// Proof path 1 (R19): `Polyline::clip_end` (`Polyline.cpp:61-101`) is defined in the `.cpp`
     /// and externally linked, proven against the library `just oracle-build` compiles from the
     /// pin, through `crates/slic3r-ffi/cxx/proof_units/polyline.{h,cpp}`'s own shims.
