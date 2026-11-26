@@ -23,7 +23,29 @@
 //! (non-polymorphic) relationship, so [`ThickPolyline`] below is its own struct and its own
 //! `impl MultiPoint for ThickPolyline`, matching `Polyline`'s shape rather than wrapping it; this
 //! duplicates roughly a dozen lines (its own `points`/`points_mut`/`last_point`/`lines`) rather
-//! than inventing a composition/delegation idiom this document does not sanction. `Polyline3`
+//! than inventing a composition/delegation idiom this document does not sanction. **`ThickPolyline`
+//! also reaches every one of `Polyline`'s inherited non-virtual public methods that this unit
+//! itself ports** -- `append`/`append_before`/`append_points`/`append_points_range`/
+//! `append_polyline`/`append_polyline_moved`, `leftmost_point`, `clip_end`/`clip_start`/
+//! `extend_end`/`extend_start`, `equally_spaced_points`/`equally_spaced_lines`, `simplify`,
+//! `split_at_index`/`split_at_length`, `is_closed` and `Index`/`IndexMut` -- through a private
+//! `via_polyline` helper that moves `self.points` into a temporary [`Polyline`], calls the
+//! already-ported method on it, and writes the result back. This is faithful by construction,
+//! not merely convenient: in C++, `this->reverse()` (or any other non-virtual call) made from
+//! inside `Polyline::clip_end`'s own body resolves at compile time to `Polyline::reverse`, never
+//! `ThickPolyline::reverse`, regardless of `this`'s actual dynamic type, because non-virtual
+//! dispatch binds on the *static* type the method body is compiled against -- exactly what
+//! constructing a `Polyline` and calling its own methods on it reproduces. None of these methods
+//! touches `width`/`endpoints` in the vendored body either (`Polyline`'s own fields are its whole
+//! state), so those two fields are deliberately left unresized by every one of them: that is the
+//! vendored behaviour reached through non-virtual dispatch, not an oversight here. Found missing
+//! by review with a named in-scope caller (`src/libslic3r/Fill/FillConcentric.cpp:183`,
+//! `thick_polylines_out[i].clip_end(this->loop_clipping)`, crate `slic3r-fill`, not yet started)
+//! and fixed in the same pull request; see that review's own verdict in the pull request body.
+//! `Polyline::split_at`/`is_straight` stay deferred for `ThickPolyline` too, for the identical
+//! cross-crate gap named above for `Polyline` itself -- no second TODO repeats it.
+//! `simplify_by_fitting_arc`/`reset_to_linear_move` are the same arc-bookkeeping-only omission as
+//! `Polyline`'s own. `Polyline3`
 //! (`Polyline.hpp:297-357`) is the unrelated 3D sibling, over
 //! `crates/slic3r-multipoint`'s [`MultiPoint3`](slic3r_multipoint::multi_point::MultiPoint3) --
 //! the same non-polymorphic-inherited-field shape `MultiPoint`/`MultiPoint3` themselves have, per
@@ -299,9 +321,10 @@ impl Polyline {
     /// bookkeeping and the latter is write-only even in the vendored body (set, never read).
     pub fn clip_end(&mut self, mut distance: f64) {
         // `0f64`: the vendored `while (distance > 0)` (`Polyline.cpp:65`) spells its own literal
-        // as the bare integer `0`; `0f64` normalises to that same exempt `"0"` text
-        // (`docs/PORTING.md` decision 8's `f64`-suffix technique), so this stays exempt rather
-        // than taking a marker.
+        // as the bare integer `0`, so `0f64`'s normalised text (`docs/PORTING.md` decision 8)
+        // matches that line's own text -- the suffix is chosen for the textual match decision 8
+        // requires, not to reach the exempt `0`/`1`/`2` set un-marked (the set membership is a
+        // side effect of the value, not the reason for this spelling).
         while distance > 0f64 {
             let last = self.last_point();
             let last_f = Vec2d::new(last.x() as f64, last.y() as f64);
@@ -346,11 +369,18 @@ impl Polyline {
         let dy = d.y() as f64;
         let norm_sq = dx * dx + dy * dy;
         // PORT SRC: external: Eigen's own `squaredNorm() == 0` guard inside
-        // `MatrixBase::normalized()` -- not a value transcribed from a vendored literal at
+        // `MatrixBase::normalized()`, at
+        // `vendor/OrcaSlicer/deps/build/arm64/dep_Eigen-prefix/src/dep_Eigen/Eigen/src/Core/
+        // Dot.h:96-102` (`RealScalar z = n.squaredNorm(); if (z > RealScalar(0)) return n /
+        // numext::sqrt(z); else return n;`) -- not a value transcribed from a vendored literal at
         // `Polyline.cpp:115` (that call site carries no numeric literal of its own), but the
         // library-defined threshold this doc comment cites; see
-        // `crates/slic3r-polygon/src/polygon.rs`'s own identical guard and marker.
-        let (vx, vy) = if norm_sq == 0f64 {
+        // `crates/slic3r-polygon/src/polygon.rs`'s own identical guard and marker. Spelled `0.0`
+        // rather than `0f64` so this literal is *not* in `port/port-status`'s exempt `0`/`1`/`2`
+        // set, which is what makes `check_numeric_constants` read this marker at all -- an
+        // earlier `0f64` spelling here left the marker mechanically inert (`port/port-status`
+        // never reads past an all-exempt line to find a covering marker), found by review.
+        let (vx, vy) = if norm_sq == 0.0 {
             (dx, dy)
         } else {
             let norm = norm_sq.sqrt();
@@ -377,10 +407,8 @@ impl Polyline {
         let mut out = Points::new();
         out.push(self.first_point());
         // `0f64`: the vendored `double len = 0;` (`Polyline.cpp:133`) spells its own literal as
-        // the bare integer `0`; `0f64` normalises to that same exempt `"0"` text
-        // (`docs/PORTING.md` decision 8's `f64`-suffix technique), so this stays exempt rather
-        // than taking a marker -- the same technique `crates/slic3r-multipoint/src/
-        // multi_point.rs`'s own `find_point_eps` comment explains.
+        // the bare integer `0`, so `0f64`'s normalised text matches that line's own text, the
+        // same textual-match reasoning `clip_end` above states in full.
         let mut len = 0f64;
         let mut i = 1usize;
         while i < self.points.len() {
@@ -617,12 +645,15 @@ fn points_to_lines(points: &Points) -> Lines {
 
 /// `inline Lines to_lines(const Polylines &polys)` (`Polyline.hpp:186-200`).
 // PORT NOTE: src/libslic3r/Polyline.hpp:196 -- the vendored body's own second loop walks
-// `poly.points.begin()..poly.points.end()-1` unguarded for a 0- or 1-point member (undefined
-// behaviour: `end()-1` before `begin()` on an empty `points`), where this function instead
-// reuses `to_lines`'s own `len >= 2` guard (the same convention `split_at_index`/
-// `to_thick_polylines` already note for their own unguarded `size() - 1` sites) -- a safe,
-// empty-for-degenerate-input rendering rather than reproducing the vendored UB, since no
-// in-scope caller passes a degenerate member and the two give the same result otherwise.
+// `poly.points.begin()..poly.points.end()-1`, which is undefined behaviour only for an empty
+// (0-point) member (`end()-1` before `begin()`); for a 1-point member `begin() == end()-1`, so
+// the loop body never runs and the two already agree there without any guard. This function
+// instead reuses `to_lines`'s own `len >= 2` guard for the empty case specifically (this
+// module's one place that guards vendored UB rather than reproducing it, unlike
+// `split_at_index`'s wraparound and `to_thick_polylines`'s `size() - 1`, both of which keep the
+// vendored unguarded shape) -- a safe, empty-for-degenerate-input rendering rather than
+// reproducing the vendored UB, since no in-scope caller passes an empty member and the two give
+// the same result for every other input.
 pub fn to_lines_polylines(polys: &Polylines) -> Lines {
     let mut n_lines = 0usize;
     for poly in polys {
@@ -881,6 +912,123 @@ impl ThickPolyline {
             let front = self.points[0];
             self.points.push(front);
         }
+    }
+
+    /// Moves `self.points` into a temporary [`Polyline`], runs `f` on it, and writes the result
+    /// back -- see the module doc for why this reproduces non-virtual dispatch exactly rather
+    /// than merely approximating it.
+    fn via_polyline<R>(&mut self, f: impl FnOnce(&mut Polyline) -> R) -> R {
+        let mut pl = Polyline::from_points(std::mem::take(&mut self.points));
+        let r = f(&mut pl);
+        self.points = pl.points;
+        r
+    }
+
+    /// Inherited from `Polyline::append(const Point&)` (`Polyline.hpp:65-71`): hides
+    /// `MultiPoint::append` the same way `Polyline::append` does. **The fix for a real
+    /// divergence found by review**: without this inherent method, an unqualified
+    /// `thick_polyline.append(point)` resolved to the non-dedup `MultiPoint::append` trait
+    /// default, where C++ resolves `tp.append(point)` (`tp: ThickPolyline`) to this dedup-ing
+    /// method, since `append` is not `virtual` and the lookup is static, not dynamic.
+    pub fn append(&mut self, point: Point) {
+        self.via_polyline(|pl| pl.append(point));
+    }
+
+    /// Inherited from `Polyline::append_before` (`Polyline.hpp:73-86`).
+    pub fn append_before(&mut self, point: Point) {
+        self.via_polyline(|pl| pl.append_before(point));
+    }
+
+    /// Inherited from `Polyline::append(const Points&)` (`Polyline.hpp:88-94`).
+    pub fn append_points(&mut self, src: &[Point]) {
+        self.via_polyline(|pl| pl.append_points(src));
+    }
+
+    /// Inherited from `Polyline::append(begin, end)` (`Polyline.hpp:95-102`).
+    pub fn append_points_range(&mut self, src: &[Point]) {
+        self.via_polyline(|pl| pl.append_points_range(src));
+    }
+
+    /// Inherited from `Polyline::append(const Polyline&)` (`Polyline.cpp:369-390`).
+    pub fn append_polyline(&mut self, src: &Polyline) {
+        self.via_polyline(|pl| pl.append_polyline(src));
+    }
+
+    /// Inherited from `Polyline::append(Polyline&&)` (`Polyline.cpp:392-415`).
+    pub fn append_polyline_moved(&mut self, src: Polyline) {
+        self.via_polyline(|pl| pl.append_polyline_moved(src));
+    }
+
+    /// Inherited from `Polyline::leftmost_point` (`Polyline.cpp:21-29`).
+    pub fn leftmost_point(&self) -> Point {
+        Polyline::from_points(self.points.clone()).leftmost_point()
+    }
+
+    /// Inherited from `Polyline::clip_end` (`Polyline.cpp:61-101`). Named in-scope caller:
+    /// `src/libslic3r/Fill/FillConcentric.cpp:183` --
+    /// `thick_polylines_out[i].clip_end(this->loop_clipping);` (crate `slic3r-fill`,
+    /// `not-started` at the pin) -- the gap review found this method missing over.
+    pub fn clip_end(&mut self, distance: f64) {
+        self.via_polyline(|pl| pl.clip_end(distance));
+    }
+
+    /// Inherited from `Polyline::clip_start` (`Polyline.cpp:104-110`).
+    pub fn clip_start(&mut self, distance: f64) {
+        self.via_polyline(|pl| pl.clip_start(distance));
+    }
+
+    /// Inherited from `Polyline::extend_end` (`Polyline.cpp:112-118`).
+    pub fn extend_end(&mut self, distance: f64) {
+        self.via_polyline(|pl| pl.extend_end(distance));
+    }
+
+    /// Inherited from `Polyline::extend_start` (`Polyline.cpp:120-125`).
+    pub fn extend_start(&mut self, distance: f64) {
+        self.via_polyline(|pl| pl.extend_start(distance));
+    }
+
+    /// Inherited from `Polyline::equally_spaced_points` (`Polyline.cpp:127-153`).
+    pub fn equally_spaced_points(&self, distance: f64) -> Points {
+        Polyline::from_points(self.points.clone()).equally_spaced_points(distance)
+    }
+
+    /// Inherited from `Polyline::equally_spaced_lines` (`Polyline.cpp:167-206`).
+    pub fn equally_spaced_lines(&self, distance: f64) -> Polylines {
+        Polyline::from_points(self.points.clone()).equally_spaced_lines(distance)
+    }
+
+    /// Inherited from `Polyline::simplify` (`Polyline.cpp:155-159`).
+    pub fn simplify(&mut self, tolerance: f64) {
+        self.via_polyline(|pl| pl.simplify(tolerance));
+    }
+
+    /// Inherited from `Polyline::split_at_index` (`Polyline.cpp:277-307`).
+    pub fn split_at_index(&self, index: usize, p1: &mut Polyline, p2: &mut Polyline) -> bool {
+        Polyline::from_points(self.points.clone()).split_at_index(index, p1, p2)
+    }
+
+    /// Inherited from `Polyline::split_at_length` (`Polyline.cpp:309-355`).
+    pub fn split_at_length(&self, length: f64, p1: &mut Polyline, p2: &mut Polyline) -> bool {
+        Polyline::from_points(self.points.clone()).split_at_length(length, p1, p2)
+    }
+
+    /// Inherited from `Polyline::is_closed` (`Polyline.hpp:132`).
+    pub fn is_closed(&self) -> bool {
+        self.points[0] == *self.points.last().unwrap()
+    }
+}
+
+impl std::ops::Index<usize> for ThickPolyline {
+    type Output = Point;
+    /// Inherited from `Polyline::operator[](Points::size_type) const` (`Polyline.hpp:112`).
+    fn index(&self, idx: usize) -> &Point {
+        &self.points[idx]
+    }
+}
+impl std::ops::IndexMut<usize> for ThickPolyline {
+    /// Inherited from `Polyline::operator[](Points::size_type)` (`Polyline.hpp:111`).
+    fn index_mut(&mut self, idx: usize) -> &mut Point {
+        &mut self.points[idx]
     }
 }
 
@@ -1301,6 +1449,38 @@ mod tests {
         let out = to_thick_polylines(pls, 42.0);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].width, vec![42.0, 42.0, 42.0, 42.0]);
+    }
+
+    /// `ThickPolyline::clip_end` -- the inherited `Polyline::clip_end` method found missing by
+    /// review (`src/libslic3r/Fill/FillConcentric.cpp:183` calls it on a `ThickPolyline`) --
+    /// reaches `points` exactly like `Polyline::clip_end` above and leaves `width`/`endpoints`
+    /// untouched, matching the vendored non-virtual call (`this->reverse()`/other calls inside
+    /// `Polyline::clip_end`'s own body resolve to `Polyline`'s methods even when `this` is a
+    /// `ThickPolyline`, never touching the subclass's extra fields).
+    #[test]
+    fn thick_polyline_clip_end_matches_polyline_and_leaves_width_alone() {
+        let mut tp = ThickPolyline {
+            points: vec![Point::new(0, 0), Point::new(1_000_000, 0)],
+            width: vec![1.0, 2.0],
+            endpoints: (true, false),
+        };
+        tp.clip_end(400_000.0);
+        assert_eq!(tp.points, vec![Point::new(0, 0), Point::new(600_000, 0)]);
+        assert_eq!(tp.width, vec![1.0, 2.0]);
+        assert_eq!(tp.endpoints, (true, false));
+    }
+
+    /// `ThickPolyline::append` -- the real divergence review found: without this inherent
+    /// method, an unqualified `tp.append(point)` resolved to the non-dedup
+    /// `MultiPoint::append` trait default, where C++ resolves it to the dedup-ing
+    /// `Polyline::append` (`Polyline.hpp:65-71`).
+    #[test]
+    fn thick_polyline_append_dedups_the_last_point() {
+        let mut tp = ThickPolyline::new();
+        tp.append(Point::new(0, 0));
+        tp.append(Point::new(0, 0));
+        tp.append(Point::new(10, 0));
+        assert_eq!(tp.points, vec![Point::new(0, 0), Point::new(10, 0)]);
     }
 
     /// Proof path 1 (R19): `Polyline::clip_end` (`Polyline.cpp:61-101`) is defined in the `.cpp`
