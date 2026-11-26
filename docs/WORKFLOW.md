@@ -422,11 +422,15 @@ three units in this pass, recorded as each reviewer actually gave it:**
   **module itself** carried, including the `BOOST_LOG_TRIVIAL` count, against the file as
   committed (see `instance_lock.rs`'s own doc comments for those corrected citations).
   `cargo test -p slic3r-instancelock` and `./port/port-status` (0 findings) confirmed clean
-  after the fix. **This record's own Reviewer 1/Reviewer 2 entries above** (the `module:line`
-  halves of their citations, which described `instance_lock.rs` as it stood before the fix) **are
-  corrected in commit `2d6071a`**, the documentation commit that added this second-pass section
-  — re-derived against the file as committed in `166c759` — rather than left wrong beside a
-  note that they were.
+  after the fix. **This record's own first review pass's wrong `module:line` citations, at the
+  top of this unit** (the constructor at `:254-312`, `:306-307`, the destructor at `:320-334`,
+  `NativeFileLock`'s constructor/`try_lock` at `:89-126`, and `open_lock_file`/`defer` at
+  `:207-232`) **are corrected in commit `2d6071a`**, the documentation commit that added this
+  second-pass section, re-derived against `instance_lock.rs` as committed in `166c759` — rather
+  than left wrong beside a note that they were. The second-pass Reviewer 1/Reviewer 2 entries
+  immediately above this bullet are deliberately **not** touched by either commit: their
+  `module:line` halves (`:56`, `:59`, `:160`, `:330`, `:277`) describe the file as it stood
+  *before* the fix, which is what "as it then stood" marks them as, on purpose.
 - **LOCK_EX and the `0o644` open mode, two related findings also raised on this pass (majors, not
   blockers): fixed and recorded, respectively.** `LOCK_EX`'s value (`2`) carries no `// PORT SRC:`
   marker even though the module's own doc comment claimed all three flock flags had one — `2` is
