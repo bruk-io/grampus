@@ -1297,6 +1297,13 @@ pub fn is_img_file(path: &str) -> bool {
 /// not. Distinct from [`has_extension_ci`], which compares a dot-free extension and is correct
 /// for its own two callers ([`is_ini_file`]/[`is_idx_file`], which pass a dot-free
 /// `extension_type` on both sides of the comparison).
+///
+/// Measured against the real built oracle for `extension_type` values a caller could
+/// plausibly pass (`".stl"`, `"stl"`); **not** measured for an extensionless path with
+/// `extension_type == ""`, where the vendored `strcasecmp("", "")` returns true and this
+/// returns `false` (`path.extension()` is `None` either way `extension_type` is empty) -- no
+/// in-scope caller passes an empty `extension_type`, so this gap does not reach compared
+/// output, but it is named here rather than asserted away.
 fn has_extension_dot_inclusive_ci(path: &Path, extension_type: &str) -> bool {
     match path.extension() {
         Some(e) => format!(".{}", e.to_string_lossy()).eq_ignore_ascii_case(extension_type),
