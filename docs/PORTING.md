@@ -199,24 +199,33 @@ its `rust type` cell verbatim. A porter never chooses a pointer's Rust type inde
 file, because `port/ownership.tsv` is R30's committed classification and this document only points
 at it.
 
-The column is filled in two different ways, and the two cases are not interchangeable, because
-only one of them has a Rust type to take yet:
+Every row has a cell to take, and `just ownership-check` is what guarantees it:
 
-- **A row whose `class` cell is `unknown`:** the row names a conservative Rust type, and
-  `just ownership-check` fails an `unknown` row that carries no conservative Rust type — so this
-  cell is guaranteed present. Take it.
-- **A row whose `class` cell is still blank:** `16-ownership-spike` deliberately leaves no `class`
-  cell filled, and no check requires a blank-class row's `rust type` cell to be filled, so that
-  cell is guaranteed *empty* for the whole window the fan-out drafts are written in (the window
-  step 12's classification tasks, cut from `port/ownership-batches.tsv`, are still open). **No
-  module may invent a Rust type for a blank-class row.** Instead, leave the field with a
-  `// TODO(port): <header path>:<line> — Rust type pending the classification task for this row's
-  batch (port/ownership-batches.tsv)` marker, and move on; the step-12 classification task cut for
-  that row's batch fills the cell in, later, on `main`.
+- **Every row's `class` cell is one of `owned`, `shared`, `borrowed`, `back-reference`, `ffi` or
+  `unknown`.** A blank class is not among them (`port/ownership`'s `VALID_CLASSES`, `:95`) and
+  `validate_rows` (`:747-749`) fails any row whose class is not, saying so in as many words — "a
+  blank class is no longer accepted". When this document was first written every row's class was
+  blank and the classification tasks cut from `port/ownership-batches.tsv` were still open; they
+  have since filled all 208, so a blank-class row can no longer exist on `main` at all.
+- **An `unknown`-class row names a conservative Rust type**, and `validate_rows` (`:752-755`)
+  fails an `unknown` row carrying no Rust type and no evidence — so that cell is guaranteed
+  present. Take it. `unknown` does not mean "no type to take": it means the type is the
+  conservative one.
+- **Every other class's `rust type` cell is the field's type, taken as the cell reads it.** See
+  `## Decisions recorded on 2026-11-26`, decision 6, for a nullable `owned` field. Measured on the
+  committed file: 143 `borrowed`, 31 `back-reference`, 20 `owned`, 7 `unknown`, 6 `ffi`, 1
+  `shared`, no blank-class row — and all 208 rows carry a filled `rust type` cell.
 
-As this document is written, every row of `port/ownership.tsv` has a blank `class` cell (there are
-no `unknown` rows yet), so the `// TODO(port):` case is, today, every row. That is expected: it is
-the state the window before fan-out is in, not an error in the ownership manifest.
+**The one case with no type to take, and the only one left.** `validate_rows` requires a `rust
+type` cell only on an `unknown` row, so a row of some *other* class with an empty cell would pass
+every check. No row is in that state today (measured above), and if a porter ever meets one it is
+a finding to report, not a type to invent: leave the field with a
+`// TODO(port): <header path>:<line> — Rust type pending the classification task for this row's
+batch (port/ownership-batches.tsv)` marker, say so in the pull request body, and move on; the cell
+is corrected on `main` by an amendment pull request, as decision 6's was. **No module invents a
+Rust type for a row whose cell is empty**, and no module writes a type that differs from a cell
+that is filled — #60 reported the mismatch that produced decision 6 rather than silently picking
+one side, which is the behaviour this rule wants.
 
 **Foundation types.** `Point`, the Eigen vector aliases at `src/libslic3r/Point.hpp:52-69`
 (`Vec2crd`, `Vec3crd`, `Vec2i32`, `Vec2i64`, `Vec3i32`, `Vec3i64`, `Vec4i32`, `Vec2f`, `Vec3f`,
@@ -723,11 +732,14 @@ as a divergence.
 
 The three port tasks merged as pull requests #54, #56 and #57 each carried forward a finding they
 were not allowed to fix: every file that would have to change was on their own must-not-write
-list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1.
+list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1;
+decision 6 closes one `57-foundation-utils` (#60) carried forward for the same reason; and
+decision 7 reconciles the section decision 6 corrected, whose older text contradicted it; and
+decision 8 is task `35-trial-run`'s own trial-run finding, recorded here by that task.
 Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
-2026-11-26; the owner was away and had handed
-over this intent's decisions. Like the section above, this is a record: where a decision changes
-a rule above, the rule's own text says so and points here.
+2026-11-26; the owner was away and had handed over this intent's decisions. Like the section
+above, this is a record: where a decision changes a rule above, the rule's own text says so and
+points here.
 
 ### 1. A `let`'s type annotation is not part of its binding
 
@@ -881,3 +893,96 @@ So this is a strengthening and not a narrowing: no existing check's rule moved, 
 that passed `just port-check` before passes it now unless `port/port-status` itself has stopped
 holding one of its own rules. `git grep -- --self-test` also confirms nothing else in the
 repository — no other recipe, workflow, hook or script — invoked it before this.
+
+### 6. An `owned` field that the C++ can null is an `Option`
+
+**The gap.** #60 (`57-foundation-utils`) found that `port/ownership.tsv`'s row for `FilePtr::f`
+(`Utils.hpp:544`, `FILE *`, class `owned`) gave the Rust type as `std::fs::File`. The vendored
+field is nullable and the port depends on it: it is initialised to `nullptr`, `close()` at
+`Utils.hpp:538-543` nulls it while the object lives on, and the in-scope construction sites pass it
+the result of an `fopen` that may have failed. A reviewer rejected the unit for being unable to
+represent that state, and the task could not write the manifest.
+
+**The decision.** The cell now reads `Option<std::fs::File>`. As a rule for the rows not yet
+ported: where an `owned` row's C++ field can hold null during the object's life, the `rust type`
+cell wraps the owned type in `Option`. A port task that finds such a row without the `Option`
+reports it and stops on that field, as #60 did; the cell is corrected on `main` by a pull request
+like this one, not inside the task. Made by Claude acting for Bruk Habtu under the delegation for
+this intent, on 2026-11-26.
+
+### 7. What the ownership column's cases are, now that every row has a class
+
+**The gap.** Decision 6 corrected the stale sentence that closed "Raw-pointer fields" above, but
+the two bullets over it were written for the pre-classification window and were left in place, so
+the section then said three things that cannot all be true: that a blank class is "guaranteed" and
+is the expected state "for the whole window the fan-out drafts are written in"; that a blank class
+"is now a failure of `just ownership-check`"; and that "only the `unknown` rows still take the
+`// TODO(port):` marker", when the `unknown` bullet directly above says an `unknown` row's cell is
+guaranteed present and is to be taken.
+
+**What the code says, which settles all three.** `port/ownership`'s `VALID_CLASSES` (`:95`) does
+not contain the empty string, and `validate_rows` (`:747-749`) fails any row whose class is not in
+it — with the literal detail "a blank class is no longer accepted". So a blank-class row cannot
+exist on `main`: decision 6's sentence is right, and the blank-class bullet described a state the
+checks now forbid. And `validate_rows` (`:752-755`) fails an `unknown` row with no evidence or no
+Rust type, so an `unknown` row always has a cell to take: the "only the `unknown` rows still take
+the `// TODO(port):` marker" clause had it backwards.
+
+**The decision.** The section is rewritten around what is true: every row carries a class from
+that set, every row's `rust type` cell is taken verbatim, and `unknown` means the type is the
+conservative one rather than that there is no type. The `// TODO(port):` route is kept with its
+one real trigger — `validate_rows` requires a `rust type` cell only on an `unknown` row, so a row
+of another class with an empty cell would pass every check — and is stated as a finding to report
+rather than a type to invent. Measured on the committed file: 143 `borrowed`, 31 `back-reference`,
+20 `owned`, 7 `unknown`, 6 `ffi`, 1 `shared`, no blank-class row, and all 208 rows carrying a
+filled `rust type` cell, so that route has no row today.
+
+**Recorded against myself.** A closed pull request of mine (#63) proposed the same correction and
+asserted the opposite of the first paragraph above — that "nothing stops a future row of the
+vendored tree arriving unclassified" and that a porter should fall back to the blank-class route.
+That was false, from a reading of `validate_rows` that grepped only its `rust type` lines and
+missed the `VALID_CLASSES` gate. #62's author got it right; this decision follows the code, not
+that pull request. Made by Claude acting for Bruk Habtu under the delegation for this intent, on
+2026-11-26.
+
+### 8. A transcribed literal must be spelled so its own text, not only its value, matches the cited line
+
+**The gap.** Task `35-trial-run` found a transcribed numeric constant that carries a real
+`// PORT SRC: <vendored path>:<line>` marker and still gets no mechanical benefit from it, because
+`port/port-status`'s `check_numeric_constants` matches a cited line by the literal's *normalised
+text*, not its numeric value: `_vendored_line_holds` is a text search for the normalised digits,
+not a numeric-equality check. Two concrete ways a porter can get this wrong while believing a
+marker is honest and sufficient:
+
+- Writing a whole-number float with a type suffix instead of a decimal point (`1f64` rather than
+  `1.0`) when the vendored line spells it `1.0`. `normalize_literal` strips the suffix, so the
+  check reads the bare digits `1` — which lands in R16's exempt `0`/`1`/`2` set and needs no marker
+  at all, silently. The constant is correctly transcribed and the marker, if written, would even
+  be correctly placed; the literal's *spelling* is what defeats the check, not its value.
+- Writing an octal literal in Rust's `0o` syntax (`0o644`) to transcribe a C octal literal spelled
+  without the `o` (`0644`). The two denote the same value, but `0o644`'s normalised text is not a
+  substring of a line that writes `0644`, so a marker citing that exact line fails
+  `_vendored_line_holds` and the porter is left with no vendored-line marker that can pass — the
+  external form is the only one `port-status` currently accepts, even though the constant's origin
+  is not outside the vendored tree (decision 2 of 2026-11-25's criterion), only differently
+  spelled.
+
+**The decision.** A transcribed numeric constant's Rust spelling must be chosen, among the
+spellings that type-check and have the correct value, so its normalised text (after
+`normalize_literal` strips digit separators and a type suffix) occurs verbatim on the cited
+vendored line — never relying on landing in the `0`/`1`/`2` exempt set as a way to skip writing a
+marker for a value that *is* transcribed from a vendored line. The 75-row `MaterialType` table
+(`crates/slic3r-materialtype/src/material_type.rs`) is the sanctioned instance of the suffix
+technique: every whole-number float field there is written with an explicit `f64` suffix (`100f64`,
+not `100.0`) specifically because the *vendored* line spells the value as a bare integer, so the
+suffix form is what makes the normalised text match — every one of those cells also carries its
+own `// PORT SRC:` marker, so the suffix is chosen for a textual match, not to reach the exempt
+set un-marked.
+
+Where no Rust spelling of a value can be made to match the cited line's text (the octal case
+above, until `port-status` gains a numeric-equality fallback), the external marker form is used as
+a stated workaround — not under decision 2 of 2026-11-25's "origin outside the vendored tree"
+criterion, which does not apply — and the module's own comment says so plainly, naming the vendored line the
+constant actually comes from and the reviewer's job of checking that disclosure rather than taking
+the external form's usual meaning on faith. This document's idiom map (the `#define` numeric
+constant row) and decision 2 of 2026-11-25 are read together with this rule, not in place of it.
