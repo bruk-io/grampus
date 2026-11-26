@@ -292,8 +292,152 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "slic3r-aabbtreeindirect"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-arachne-utils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-clipperzutils",
+ "slic3r-extrusionentity",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-variablewidth",
+]
+
+[[package]]
+name = "slic3r-arcfitter"
+version = "0.1.0"
+dependencies = [
+ "slic3r-circle",
+ "slic3r-libslic3r",
+ "slic3r-multipoint",
+ "slic3r-point",
+]
+
+[[package]]
+name = "slic3r-boundingbox"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-point",
+]
+
+[[package]]
+name = "slic3r-circle"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+]
+
+[[package]]
+name = "slic3r-clipperutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-aabbtreeindirect",
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-shortestpath",
+ "slic3r-surface",
+]
+
+[[package]]
+name = "slic3r-clipperzutils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+]
+
+[[package]]
+name = "slic3r-clonable-ptr"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-commondefs"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-config"
+version = "0.1.0"
+dependencies = [
+ "slic3r-clonable-ptr",
+ "slic3r-exception",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-point",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-enum-bitmask"
+version = "0.1.0"
+
+[[package]]
 name = "slic3r-exception"
 version = "0.1.0"
+
+[[package]]
+name = "slic3r-expolygon"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+]
+
+[[package]]
+name = "slic3r-extrusionentity"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arcfitter",
+ "slic3r-extrusionentitycollection",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-extrusionentitycollection"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+]
 
 [[package]]
 name = "slic3r-ffi"
@@ -309,13 +453,56 @@ version = "0.0.0"
 dependencies = [
  "arbitrary",
  "libfuzzer-sys",
+ "slic3r-arachne-utils",
  "slic3r-ffi",
  "slic3r-point",
 ]
 
 [[package]]
+name = "slic3r-filamentmixer"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-filamentmixermodel",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-localesutils",
+]
+
+[[package]]
+name = "slic3r-filamentmixermodel"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-flow"
+version = "0.1.0"
+dependencies = [
+ "slic3r-config",
+ "slic3r-exception",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-printconfig",
+]
+
+[[package]]
+name = "slic3r-format"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-i18n"
+version = "0.1.0"
+
+[[package]]
 name = "slic3r-int128"
 version = "0.1.0"
+
+[[package]]
+name = "slic3r-kdtreeindirect"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+ "slic3r-utils",
+]
 
 [[package]]
 name = "slic3r-libslic3r"
@@ -325,7 +512,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "slic3r-line"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-point",
+]
+
+[[package]]
 name = "slic3r-localesutils"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-materialtype"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-multipoint"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+]
+
+[[package]]
+name = "slic3r-mutablepriorityqueue"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-platform"
 version = "0.1.0"
 
 [[package]]
@@ -339,10 +557,109 @@ dependencies = [
 ]
 
 [[package]]
+name = "slic3r-polygon"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+]
+
+[[package]]
+name = "slic3r-polyline"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arcfitter",
+ "slic3r-boundingbox",
+ "slic3r-circle",
+ "slic3r-exception",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+]
+
+[[package]]
+name = "slic3r-printconfig"
+version = "0.1.0"
+dependencies = [
+ "slic3r-commondefs",
+ "slic3r-config",
+ "slic3r-enum-bitmask",
+ "slic3r-filamentmixer",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-localesutils",
+ "slic3r-materialtype",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfigconstants",
+]
+
+[[package]]
+name = "slic3r-printconfigconstants"
+version = "0.1.0"
+
+[[package]]
 name = "slic3r-semver"
 version = "0.1.0"
 dependencies = [
  "slic3r-exception",
+]
+
+[[package]]
+name = "slic3r-shortestpath"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-extrusionentitycollection",
+ "slic3r-kdtreeindirect",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-mutablepriorityqueue",
+ "slic3r-point",
+ "slic3r-polyline",
+]
+
+[[package]]
+name = "slic3r-surface"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+]
+
+[[package]]
+name = "slic3r-utils"
+version = "0.1.0"
+dependencies = [
+ "slic3r-exception",
+ "slic3r-format",
+ "slic3r-i18n",
+ "slic3r-libslic3r",
+ "slic3r-platform",
+ "slic3r-semver",
+]
+
+[[package]]
+name = "slic3r-variablewidth"
+version = "0.1.0"
+dependencies = [
+ "slic3r-extrusionentity",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-point",
+ "slic3r-polyline",
 ]
 
 [[package]]
