@@ -778,7 +778,15 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
         let o = other
             .as_any()
             .downcast_ref::<Self>()
-            .expect("type() check above guarantees the downcast");
+            .ok_or_else(|| {
+                ConfigError::Configuration(
+                    "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                     (or vice versa) is not representable by this downcast; both share one \
+                     ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                     one type regardless of NULLABLE (see the module doc's known limitation)."
+                        .to_string(),
+                )
+            })?;
         self.values = o.values.clone();
         Ok(())
     }
@@ -791,7 +799,15 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
         let o = rhs
             .as_any()
             .downcast_ref::<Self>()
-            .expect("type() check above guarantees the downcast");
+            .ok_or_else(|| {
+                ConfigError::Configuration(
+                    "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                     (or vice versa) is not representable by this downcast; both share one \
+                     ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                     one type regardless of NULLABLE (see the module doc's known limitation)."
+                        .to_string(),
+                )
+            })?;
         Ok(Self::vectors_equal(&self.values, &o.values))
     }
     fn nullable(&self) -> bool {
@@ -831,7 +847,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionFloatsTempl<NU
                 let other = opt
                     .as_any()
                     .downcast_ref::<Self>()
-                    .expect("type() check above guarantees the downcast");
+                    .ok_or_else(|| {
+                        ConfigError::Configuration(
+                            "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                             (or vice versa) is not representable by this downcast; both share one \
+                             ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                             one type regardless of NULLABLE (see the module doc's known limitation)."
+                                .to_string(),
+                        )
+                    })?;
                 if other.values.is_empty() {
                     return Err(ConfigError::Configuration(
                         "ConfigOptionVector::set(): Assigning from an empty vector".to_string(),
@@ -884,7 +908,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionFloatsTempl<NU
             let other = rhs
                 .as_any()
                 .downcast_ref::<Self>()
-                .expect("type() check above guarantees the downcast");
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                         (or vice versa) is not representable by this downcast; both share one \
+                         ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                         one type regardless of NULLABLE (see the module doc's known limitation)."
+                            .to_string(),
+                    )
+                })?;
             if other.values.is_empty() {
                 return Err(ConfigError::Configuration(
                     "ConfigOptionVector::append(): append an empty vector".to_string(),
@@ -913,7 +945,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionFloatsTempl<NU
             let other = rhs
                 .as_any()
                 .downcast_ref::<Self>()
-                .expect("type() check above guarantees the downcast");
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                         (or vice versa) is not representable by this downcast; both share one \
+                         ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                         one type regardless of NULLABLE (see the module doc's known limitation)."
+                            .to_string(),
+                    )
+                })?;
             if other.values.len() < start + len {
                 return Err(ConfigError::Configuration(
                     "ConfigOptionVector::set_with(): Assigning from an vector with invalid size"
@@ -941,7 +981,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionFloatsTempl<NU
             let other = rhs
                 .as_any()
                 .downcast_ref::<Self>()
-                .expect("type() check above guarantees the downcast");
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                         (or vice versa) is not representable by this downcast; both share one \
+                         ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                         one type regardless of NULLABLE (see the module doc's known limitation)."
+                            .to_string(),
+                    )
+                })?;
             self.values = other.values.clone();
             if other.values.len() != restore_index.len() * stride as usize {
                 return Err(ConfigError::Configuration(
@@ -1226,7 +1274,15 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
         let o = other
             .as_any()
             .downcast_ref::<Self>()
-            .expect("type() check above guarantees the downcast");
+            .ok_or_else(|| {
+                ConfigError::Configuration(
+                    "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                     (or vice versa) is not representable by this downcast; both share one \
+                     ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                     one type regardless of NULLABLE (see the module doc's known limitation)."
+                        .to_string(),
+                )
+            })?;
         self.values = o.values.clone();
         Ok(())
     }
@@ -1239,7 +1295,15 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
         let o = rhs
             .as_any()
             .downcast_ref::<Self>()
-            .expect("type() check above guarantees the downcast");
+            .ok_or_else(|| {
+                ConfigError::Configuration(
+                    "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                     (or vice versa) is not representable by this downcast; both share one \
+                     ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                     one type regardless of NULLABLE (see the module doc's known limitation)."
+                        .to_string(),
+                )
+            })?;
         Ok(self.values == o.values)
     }
     fn nullable(&self) -> bool {
@@ -1282,7 +1346,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionIntsTempl<NULL
                 let other = opt
                     .as_any()
                     .downcast_ref::<Self>()
-                    .expect("type() check above guarantees the downcast");
+                    .ok_or_else(|| {
+                        ConfigError::Configuration(
+                            "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                             (or vice versa) is not representable by this downcast; both share one \
+                             ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                             one type regardless of NULLABLE (see the module doc's known limitation)."
+                                .to_string(),
+                        )
+                    })?;
                 if other.values.is_empty() {
                     return Err(ConfigError::Configuration(
                         "ConfigOptionVector::set(): Assigning from an empty vector".to_string(),
@@ -1308,7 +1380,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionIntsTempl<NULL
             let other = rhs
                 .as_any()
                 .downcast_ref::<Self>()
-                .expect("type() check above guarantees the downcast");
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                         (or vice versa) is not representable by this downcast; both share one \
+                         ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                         one type regardless of NULLABLE (see the module doc's known limitation)."
+                            .to_string(),
+                    )
+                })?;
             self.values[i] = other.get_at(j);
             Ok(())
         } else if rhs.option_type() == self.scalar_type() {
@@ -1328,7 +1408,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionIntsTempl<NULL
             let other = rhs
                 .as_any()
                 .downcast_ref::<Self>()
-                .expect("type() check above guarantees the downcast");
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                         (or vice versa) is not representable by this downcast; both share one \
+                         ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                         one type regardless of NULLABLE (see the module doc's known limitation)."
+                            .to_string(),
+                    )
+                })?;
             self.values.extend_from_slice(&other.values);
             Ok(())
         } else if rhs.option_type() == self.scalar_type() {
@@ -1352,7 +1440,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionIntsTempl<NULL
             let other = rhs
                 .as_any()
                 .downcast_ref::<Self>()
-                .expect("type() check above guarantees the downcast");
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                         (or vice versa) is not representable by this downcast; both share one \
+                         ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                         one type regardless of NULLABLE (see the module doc's known limitation)."
+                            .to_string(),
+                    )
+                })?;
             for i in 0..len {
                 self.values[i] = other.get_at(start + i);
             }
@@ -1374,7 +1470,15 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionIntsTempl<NULL
             let other = rhs
                 .as_any()
                 .downcast_ref::<Self>()
-                .expect("type() check above guarantees the downcast");
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                         (or vice versa) is not representable by this downcast; both share one \
+                         ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                         one type regardless of NULLABLE (see the module doc's known limitation)."
+                            .to_string(),
+                    )
+                })?;
             self.values = other.values.clone();
             for (i, &r) in restore_index.iter().enumerate() {
                 if r != -1 {
@@ -1553,7 +1657,15 @@ impl ConfigOption for ConfigOptionString {
         let o = other
             .as_any()
             .downcast_ref::<Self>()
-            .expect("type() check above guarantees the downcast");
+            .ok_or_else(|| {
+                ConfigError::Configuration(
+                    "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                     (or vice versa) is not representable by this downcast; both share one \
+                     ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                     one type regardless of NULLABLE (see the module doc's known limitation)."
+                        .to_string(),
+                )
+            })?;
         self.value = o.value.clone();
         Ok(())
     }
@@ -1566,7 +1678,15 @@ impl ConfigOption for ConfigOptionString {
         let o = rhs
             .as_any()
             .downcast_ref::<Self>()
-            .expect("type() check above guarantees the downcast");
+            .ok_or_else(|| {
+                ConfigError::Configuration(
+                    "Assigning/comparing a NULLABLE instantiation against its non-NULLABLE sibling \
+                     (or vice versa) is not representable by this downcast; both share one \
+                     ConfigOptionType tag, unlike the vendored ConfigOptionVector<T> base, which is \
+                     one type regardless of NULLABLE (see the module doc's known limitation)."
+                        .to_string(),
+                )
+            })?;
         Ok(self.value == o.value)
     }
     fn hash_value(&self) -> u64 {
@@ -1896,12 +2016,14 @@ impl ConfigOptionVectorBase for ConfigOptionStrings {
     }
 }
 
-/// `ConfigOptionPercent` (`:1237-1278`).
-pub type ConfigOptionPercent = ConfigOptionSingle<f64>;
-// A distinct wrapper is needed because `ConfigOptionFloat` and `ConfigOptionPercent` are both
-// `ConfigOptionSingle<f64>` and must still be two different Rust types (different `ConfigOption`
-// impls) -- see [`ConfigOptionPercentValue`] immediately below, which the rest of this module
-// uses for `coPercent` instead of the bare alias above.
+/// `ConfigOptionPercent` (`:1237-1278`): a struct of its own, not a `ConfigOptionSingle<f64>`
+/// type alias. **Review finding, fixed here**: an earlier version of this module spelled it
+/// `pub type ConfigOptionPercent = ConfigOptionSingle<f64>;`, which is the exact same Rust type
+/// as `ConfigOptionFloat` (also `ConfigOptionSingle<f64>`) -- `ConfigOptionPercent::option_type()`
+/// would have resolved to `ConfigOptionFloat`'s `impl ConfigOption` and returned `Float`, not
+/// `Percent`. Named `ConfigOptionPercentValue` here (not `ConfigOptionPercent`) only to read
+/// distinctly from the type map's own `coPercent` row in prose elsewhere in this file; it is the
+/// one and only Rust type this module exports for `coPercent`.
 #[derive(Debug, Clone, Default)]
 pub struct ConfigOptionPercentValue {
     pub value: f64,
@@ -4271,6 +4393,18 @@ impl<T: ConfigOptionEnumValue + Default + fmt::Debug> ConfigOption for ConfigOpt
     }
 }
 
+/// The sentinel `ConfigOptionEnumGeneric`/`ConfigOptionEnumsGenericTempl`/`ConfigOptionDef`
+/// use in place of a null `keys_map`/`enum_keys_map` pointer -- `port/ownership.tsv`'s cell for
+/// each of those three rows is `&'a BTreeMap<String, i32>` with **no** `Option<>` wrapper, so
+/// `None` is not available without inventing a type the row does not give (`docs/PORTING.md`:
+/// "no module invents a Rust type for a row whose cell is filled"). The vendored pointer *can*
+/// be null (`ConfigOptionEnumGeneric(const t_config_enum_values* keys_map = nullptr)`,
+/// `Config.hpp:2149`), so a real empty table standing in for "no map" is the borrowed-row
+/// counterpart of decision 6 of "Decisions recorded on 2026-11-26" (which is stated for an
+/// `owned` row): every read site below treats "empty" as "no map", matching every behaviour the
+/// vendored null check (`if (this->keys_map == nullptr)`) gates.
+static EMPTY_ENUM_VALUES: TConfigEnumValues = BTreeMap::new();
+
 /// `ConfigOptionEnumGeneric` (`:2146-2202`). `keys_map`: `port/ownership.tsv`, `Config.hpp:2152`,
 /// class `borrowed`, verbatim: `&'a BTreeMap<String, i32>`, instantiated here with `'a =
 /// 'static`.
@@ -4288,13 +4422,21 @@ impl<T: ConfigOptionEnumValue + Default + fmt::Debug> ConfigOption for ConfigOpt
 #[derive(Debug, Clone, Copy)]
 pub struct ConfigOptionEnumGeneric {
     pub value: i32,
-    pub keys_map: Option<&'static TConfigEnumValues>,
+    pub keys_map: &'static TConfigEnumValues,
+}
+impl Default for ConfigOptionEnumGeneric {
+    fn default() -> Self {
+        ConfigOptionEnumGeneric {
+            value: 0,
+            keys_map: &EMPTY_ENUM_VALUES,
+        }
+    }
 }
 impl ConfigOptionEnumGeneric {
-    pub fn new(keys_map: Option<&'static TConfigEnumValues>) -> Self {
+    pub fn new(keys_map: &'static TConfigEnumValues) -> Self {
         ConfigOptionEnumGeneric { value: 0, keys_map }
     }
-    pub fn with_value(keys_map: Option<&'static TConfigEnumValues>, value: i32) -> Self {
+    pub fn with_value(keys_map: &'static TConfigEnumValues, value: i32) -> Self {
         ConfigOptionEnumGeneric { value, keys_map }
     }
 }
@@ -4304,10 +4446,7 @@ impl ConfigOption for ConfigOptionEnumGeneric {
     }
     /// `serialize()` (`:2181-2187`): the name whose value equals `self.value`, or empty.
     fn serialize(&self) -> String {
-        let Some(map) = self.keys_map else {
-            return String::new();
-        };
-        for (k, v) in map {
+        for (k, v) in self.keys_map {
             if *v == self.value {
                 return k.clone();
             }
@@ -4315,10 +4454,7 @@ impl ConfigOption for ConfigOptionEnumGeneric {
         String::new()
     }
     fn deserialize(&mut self, s: &str, _append: bool) -> bool {
-        let Some(map) = self.keys_map else {
-            return false;
-        };
-        match map.get(s) {
+        match self.keys_map.get(s) {
             Some(v) => {
                 self.value = *v;
                 true
@@ -4338,7 +4474,7 @@ impl ConfigOption for ConfigOptionEnumGeneric {
             ));
         }
         self.value = other.get_int()?;
-        if self.keys_map.is_none() {
+        if self.keys_map.is_empty() {
             if let Some(o) = other.as_any().downcast_ref::<ConfigOptionEnumGeneric>() {
                 self.keys_map = o.keys_map;
             }
@@ -4376,12 +4512,20 @@ impl ConfigOption for ConfigOptionEnumGeneric {
 #[derive(Debug, Clone)]
 pub struct ConfigOptionEnumsGenericTempl<const NULLABLE: bool> {
     pub values: Vec<i32>,
-    pub keys_map: Option<&'static TConfigEnumValues>,
+    pub keys_map: &'static TConfigEnumValues,
 }
 pub type ConfigOptionEnumsGeneric = ConfigOptionEnumsGenericTempl<false>;
 pub type ConfigOptionEnumsGenericNullable = ConfigOptionEnumsGenericTempl<true>;
+impl<const NULLABLE: bool> Default for ConfigOptionEnumsGenericTempl<NULLABLE> {
+    fn default() -> Self {
+        ConfigOptionEnumsGenericTempl {
+            values: Vec::new(),
+            keys_map: &EMPTY_ENUM_VALUES,
+        }
+    }
+}
 impl<const NULLABLE: bool> ConfigOptionEnumsGenericTempl<NULLABLE> {
-    pub fn new(keys_map: Option<&'static TConfigEnumValues>) -> Self {
+    pub fn new(keys_map: &'static TConfigEnumValues) -> Self {
         ConfigOptionEnumsGenericTempl {
             values: Vec::new(),
             keys_map,
@@ -4405,11 +4549,9 @@ impl<const NULLABLE: bool> ConfigOptionEnumsGenericTempl<NULLABLE> {
             }
             return String::new();
         }
-        if let Some(map) = self.keys_map {
-            for (k, mv) in map {
-                if *mv == v {
-                    return k.clone();
-                }
+        for (k, mv) in self.keys_map {
+            if *mv == v {
+                return k.clone();
             }
         }
         String::new()
@@ -4430,9 +4572,6 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
         if !append {
             self.values.clear();
         }
-        let Some(map) = self.keys_map else {
-            return false;
-        };
         for item in s.split(',') {
             let item = item.trim();
             if item == "nil" {
@@ -4441,7 +4580,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
                 }
                 self.values.push(Self::nil_value());
             } else {
-                match map.get(item) {
+                match self.keys_map.get(item) {
                     Some(v) => self.values.push(*v),
                     None => return false,
                 }
@@ -4459,7 +4598,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
             )
         })?;
         self.values = o.values.clone();
-        if self.keys_map.is_none() {
+        if self.keys_map.is_empty() {
             self.keys_map = o.keys_map;
         }
         Ok(())
@@ -5112,8 +5251,10 @@ pub const NOCLI: &str = "~~~noCLI";
 
 /// `ConfigOptionDef` (`:2315-2637`). The archive methods (`load_option_from_archive`,
 /// `save_option_to_archive`, `:2359-2544`) are the cereal/Undo-Redo boundary -- see the module
-/// doc -- and are not ported.
-#[derive(Debug, Default)]
+/// doc -- and are not ported. `enum_keys_map`: `port/ownership.tsv`, `Config.hpp:2619`, class
+/// `borrowed`, verbatim: `&'a BTreeMap<String, i32>` -- see [`EMPTY_ENUM_VALUES`]'s own doc for
+/// why this is a bare `&'static` reference, never `Option<_>` and never an owned `BTreeMap`.
+#[derive(Debug)]
 pub struct ConfigOptionDef {
     pub opt_key: String,
     pub option_type: ConfigOptionType,
@@ -5145,8 +5286,49 @@ pub struct ConfigOptionDef {
     pub shortcut: Vec<String>,
     pub enum_values: Vec<String>,
     pub enum_labels: Vec<String>,
-    pub enum_keys_map: Option<BTreeMap<String, i32>>,
+    pub enum_keys_map: &'static TConfigEnumValues,
     pub serialization_key_ordinal: usize,
+}
+
+impl Default for ConfigOptionDef {
+    fn default() -> Self {
+        ConfigOptionDef {
+            opt_key: String::new(),
+            option_type: ConfigOptionType::None,
+            nullable: false,
+            default_value: None,
+            gui_type: GuiType::default(),
+            gui_flags: String::new(),
+            plugin_type: String::new(),
+            label: String::new(),
+            full_label: String::new(),
+            printer_technology: PrinterTechnology::default(),
+            category: String::new(),
+            tooltip: String::new(),
+            sidetext: String::new(),
+            cli: String::new(),
+            cli_params: String::new(),
+            ratio_over: String::new(),
+            multiline: false,
+            full_width: false,
+            is_code: false,
+            readonly: false,
+            // PORT SRC: src/libslic3r/Config.hpp:2595
+            height: -1,
+            // PORT SRC: src/libslic3r/Config.hpp:2597
+            width: -1,
+            min: f32::MIN,
+            max: f32::MAX,
+            max_literal: 1_f64,
+            mode: ConfigOptionMode::default(),
+            aliases: Vec::new(),
+            shortcut: Vec::new(),
+            enum_values: Vec::new(),
+            enum_labels: Vec::new(),
+            enum_keys_map: &EMPTY_ENUM_VALUES,
+            serialization_key_ordinal: 0,
+        }
+    }
 }
 
 impl Default for ConfigOptionType {
@@ -5191,7 +5373,7 @@ impl Clone for ConfigOptionDef {
             shortcut: self.shortcut.clone(),
             enum_values: self.enum_values.clone(),
             enum_labels: self.enum_labels.clone(),
-            enum_keys_map: self.enum_keys_map.clone(),
+            enum_keys_map: self.enum_keys_map,
             serialization_key_ordinal: self.serialization_key_ordinal,
         }
     }
@@ -5322,12 +5504,25 @@ impl ConfigOptionDef {
 pub type TOptiondefMap = BTreeMap<String, ConfigOptionDef>;
 
 /// `ConfigDef` (`:2655-2683`).
+///
+/// **Reported, not silently routed around: `by_serialization_key_ordinal` is not carried as a
+/// stored field here, and this is a real divergence from `port/ownership.tsv`'s cell, not a
+/// style choice.** That row's cell is `BTreeMap<usize, &'a ConfigOptionDef>`, verbatim
+/// (`Config.hpp:2659`, class `borrowed`) -- a map of references into `self.options`, stored on
+/// the very struct that owns `self.options` and can still mutate it. That is a self-referential
+/// struct, which safe Rust has no representation for (no lifetime `'a` can simultaneously name
+/// "borrowed from `self.options`" and let `self.options` keep being `&mut`-accessed, the way
+/// `ConfigDef::add` already needs to while this map is being built). No module invents a Rust
+/// type for a row whose cell is filled (`docs/PORTING.md`), so this type is not invented as a
+/// stored field either: [`by_serialization_key_ordinal`](ConfigDef::by_serialization_key_ordinal)
+/// below is a *method*, computed on demand by scanning `self.options` for the matching
+/// `serialization_key_ordinal`, which gives every external caller the same lookup the vendored
+/// field gives without storing a type this crate cannot express safely. This task's
+/// corresponding `Done when` line ("each of the six raw-pointer fields ... carries the `rust
+/// type` cell ... verbatim") is **not met** for this one row; see the pull request body.
 #[derive(Debug, Default)]
 pub struct ConfigDef {
     pub options: TOptiondefMap,
-    /// `port/ownership.tsv`, `Config.hpp:2659`, class `borrowed`, verbatim:
-    /// `BTreeMap<usize, &'a ConfigOptionDef>`.
-    pub by_serialization_key_ordinal: BTreeMap<usize, usize>,
     next_serialization_key_ordinal: usize,
 }
 
@@ -5367,8 +5562,14 @@ impl ConfigDef {
         def.option_type = option_type;
         def.serialization_key_ordinal = ordinal;
         self.options.insert(opt_key.to_string(), def);
-        self.by_serialization_key_ordinal.insert(ordinal, 0);
         self.options.get_mut(opt_key).expect("just inserted")
+    }
+    /// `ConfigDef::by_serialization_key_ordinal` (`:2659`) -- see the struct's own doc comment
+    /// for why this is a method, not a stored field, and the `Done when` line it leaves unmet.
+    pub fn by_serialization_key_ordinal(&self, ordinal: usize) -> Option<&ConfigOptionDef> {
+        self.options
+            .values()
+            .find(|d| d.serialization_key_ordinal == ordinal)
     }
     /// `add_nullable()` (`Config.cpp:374-379`).
     pub fn add_nullable(
@@ -6585,15 +6786,33 @@ fn set_deserialize_raw_impl<'a, C: ConfigBase + ?Sized>(
             DeserializationSubstitution::DefaultsToFalse
         };
         let opt = config.option_throw_mut(&opt_key, true)?;
+        // `optdef.nullable` and the Rust instantiation actually stored for this key should
+        // always agree (both come from the same `ConfigOptionDef`), but neither this crate's
+        // own storage nor the oracle's `dynamic_cast` guarantees it structurally -- a stored
+        // option one caller's own bug swaps for the wrong NULLABLE instantiation is exactly the
+        // module doc's "known, named limitation", so this is a real `Err`, not a `panic!` the
+        // oracle's own `static_cast` (which never fails this way) has no counterpart for.
         let result = if nullable {
             opt.as_any_mut()
                 .downcast_mut::<ConfigOptionBoolsNullable>()
-                .expect("nullable bools")
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "set_deserialize_raw: optdef.nullable is true but the stored option is \
+                         not ConfigOptionBoolsNullable"
+                            .to_string(),
+                    )
+                })?
                 .deserialize_with_substitutions(value, append, default_value)
         } else {
             opt.as_any_mut()
                 .downcast_mut::<ConfigOptionBools>()
-                .expect("non-nullable bools")
+                .ok_or_else(|| {
+                    ConfigError::Configuration(
+                        "set_deserialize_raw: optdef.nullable is false but the stored option is \
+                         not ConfigOptionBools"
+                            .to_string(),
+                    )
+                })?
                 .deserialize_with_substitutions(value, append, default_value)
         };
         success = result != DeserializationResult::Failed;
