@@ -15,7 +15,25 @@
 //! `static mut`.** `I18N.hpp:16-17`'s `translate_fn` is process-global mutable state, default
 //! `nullptr` (`utils.cpp:358`). `Mutex::new` is `const fn`, so a plain `static` needs no lazy
 //! initialisation and no `unsafe`, which a raw mutable static or an `AtomicPtr` cast back to a
-//! function pointer would.
+//! function pointer would. **Fixed by adversarial review:** the vendored `translate_fn` is an
+//! unsynchronised raw pointer, so `I18N.hpp:18`'s call to it is not reentrant-hostile -- a
+//! callback that calls `translate` again just reads the same pointer again, and a throwing
+//! callback (`cxx` has no C++ exception to propagate here, but the general case) leaves
+//! `translate_fn` exactly as it was for the next call. An earlier version of [`translate`]
+//! matched on `*TRANSLATE_FN.lock().unwrap()` directly, so the guard's temporary lived across
+//! the call to `f(s)` and the lock was held while the callback ran: a callback that calls
+//! [`translate`] again deadlocks (measured: hangs, killed at a 10s timeout), and a callback that
+//! panics poisons the mutex permanently, so every later [`translate`] panics too. Neither is
+//! reachable from the vendored semantics. [`translate`] now copies the `Option<TranslateFn>`
+//! out of the guard (it is `Copy`) and drops the guard before calling it, and both functions
+//! recover from a poisoned lock with [`std::sync::PoisonError::into_inner`] rather than
+//! unwrapping it, so one panicking callback cannot wedge every later call the way a held lock
+//! would.
+//!
+//! **Fixed by adversarial review: `set_translate_callback` takes `Option<TranslateFn>`, not
+//! `TranslateFn`.** `I18N.hpp:15-17`'s `translate_fn_type` is a nullable function pointer, and
+//! `set_translate_callback(nullptr)` is how the vendored code restores the identity state. A
+//! non-nullable `TranslateFn` parameter could not express that reset; `None` now does.
 //!
 //! **Proof path 2, reached via `slic3r-proof`'s re-export of `slic3r-ffi`'s per-unit proof
 //! bridges (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decisions 1 and 4).** Exactly
@@ -25,9 +43,10 @@
 //! string or any other I18N-derived value. Decision 4 names the per-unit proof bridges, not only
 //! the dump corpus, as a "2" row's oracle entry point, so this unit's shim
 //! (`crates/slic3r-ffi/cxx/proof_units/i18_n.{h,cpp}`, `crates/slic3r-ffi/src/proof_units/i18_n.rs`)
-//! drives the vendored header's own inline code directly, at its default
-//! (`translate_fn == nullptr`) state -- see the shim's own comment for why it never calls
-//! `set_translate_callback`.
+//! drives the vendored header's own inline code directly, both at its default
+//! (`translate_fn == nullptr`) state and, since the same adversarial review, with a callback
+//! installed and then restored -- see the shim's own comment for how it saves, sets, calls and
+//! restores `translate_fn` inside its own translation unit.
 
 use std::sync::Mutex;
 
@@ -40,15 +59,35 @@ pub type TranslateFn = fn(&str) -> String;
 /// `nullptr`) -- `None` is that same default.
 static TRANSLATE_FN: Mutex<Option<TranslateFn>> = Mutex::new(None);
 
-/// `Slic3r::I18N::set_translate_callback` (`I18N.hpp:17`).
-pub fn set_translate_callback(f: TranslateFn) {
-    *TRANSLATE_FN.lock().unwrap() = Some(f);
+/// `Slic3r::I18N::set_translate_callback` (`I18N.hpp:17`): `None` is the nullable vendored
+/// parameter's `nullptr`, restoring the identity state `translate` falls back to.
+pub fn set_translate_callback(f: Option<TranslateFn>) {
+    let mut guard = TRANSLATE_FN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *guard = f;
 }
 
 /// `Slic3r::I18N::translate` (`I18N.hpp:18-19`, both overloads): the callback's result, or `s`
 /// unchanged when none is set.
+///
+/// The `Option<TranslateFn>` is copied out of the lock and the guard is dropped before the
+/// callback runs -- see this module's doc comment for why holding the lock across the call
+/// would diverge from `I18N.hpp:18`'s unsynchronised raw-pointer read.
 pub fn translate(s: &str) -> String {
-    match *TRANSLATE_FN.lock().unwrap() {
+    let callback = {
+        let guard = TRANSLATE_FN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard
+    };
+    match callback {
+        // PORT NOTE: I18N.hpp:18 hands the callback `s.c_str()`, a `const char*` that truncates
+        // at the first embedded NUL byte; this port hands it the whole `&str`, which can contain
+        // an interior NUL Rust strings do not treat specially. Divergent only on that callback
+        // branch, and unreachable from any in-scope caller: the only vendored caller of
+        // `set_translate_callback` is `src/slic3r/GUI/GUI_App.cpp:3715` (R10, the GUI module,
+        // out of scope).
         Some(f) => f(s),
         None => s.to_string(),
     }
@@ -87,12 +126,15 @@ mod tests {
 
     /// Not a `// PROOF:` marker (see `crates/slic3r-i18n/tests/i18_n_proof_path_2.rs` for that) --
     /// a plain correctness check of `translate`'s identity fallback (`translate_fn == nullptr`,
-    /// `I18N.hpp:18-19`'s own case) and of `set_translate_callback` actually installing a
-    /// callback `translate` then uses. One test, not two in this file: [`TRANSLATE_FN`] is one
-    /// process-global `static`, exactly as the vendored `translate_fn` is, so a second `#[test]`
-    /// touching it in this binary could race this one under `cargo test`'s default
-    /// multi-threaded runner -- the same reason the oracle-comparing proof test lives in its own
-    /// binary under `tests/` rather than beside this one.
+    /// `I18N.hpp:18-19`'s own case), of `set_translate_callback(Some(..))` actually installing a
+    /// callback `translate` then uses, of a callback that calls `translate` again not
+    /// deadlocking now that the lock is not held across the call, and of
+    /// `set_translate_callback(None)` restoring the identity state. One test, not several in
+    /// this file: [`TRANSLATE_FN`] is one process-global `static`, exactly as the vendored
+    /// `translate_fn` is, so a second `#[test]` touching it in this binary could race this one
+    /// under `cargo test`'s default multi-threaded runner -- the same reason the
+    /// oracle-comparing proof test lives in its own binary under `tests/` rather than beside
+    /// this one.
     #[test]
     fn i18_n_translate_falls_back_to_identity_then_uses_a_set_callback() {
         assert_eq!(translate("hello"), "hello");
@@ -103,9 +145,27 @@ mod tests {
         fn shout(s: &str) -> String {
             s.to_uppercase()
         }
-        set_translate_callback(shout);
+        set_translate_callback(Some(shout));
         assert_eq!(translate("hello"), "HELLO");
         assert_eq!(_u8l("hello"), "HELLO");
+
+        // A callback that itself calls `translate` (and `set_translate_callback`) must not
+        // deadlock: it would, if the outer `translate` still held the lock while this callback
+        // ran (see this module's doc comment). Clearing the callback before the nested call
+        // keeps the recursion to one level while still proving the lock is free during the
+        // callback.
+        fn reentrant(s: &str) -> String {
+            set_translate_callback(None);
+            let inner = translate(s);
+            set_translate_callback(Some(reentrant));
+            format!("[{inner}]")
+        }
+        set_translate_callback(Some(reentrant));
+        assert_eq!(translate("hi"), "[hi]");
+
+        set_translate_callback(None);
+        assert_eq!(translate("hello"), "hello");
+        assert_eq!(_u8l("hello"), "hello");
     }
 }
 

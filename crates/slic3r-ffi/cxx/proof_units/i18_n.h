@@ -12,6 +12,7 @@ namespace proof_units {
 namespace i18_n {
 
 rust::String path2_translate(rust::Str s);
+rust::String path2_translate_with_callback(rust::Str s);
 
 } // namespace i18_n
 } // namespace proof_units
