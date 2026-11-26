@@ -920,6 +920,11 @@ pub fn append_points(dst: &mut Points, src: &Points3) {
     dst.extend(src.iter().map(Point3::to_point));
 }
 
+// TODO(port): src/libslic3r/Point.cpp:270-271 -- `to_polyline(const Points&)`/
+// `to_polyline(const Points3&)` (declared src/libslic3r/Point.hpp:99-100), the two siblings of
+// `to_points`/`to_points3` in the same vendored block, need `Polyline`/`Polyline3` from a fan-out
+// crate this task does not own (see the module doc).
+
 /// `Points to_points(const Points3 &points3)` (`Point.cpp:273-278`): drops each point's `z`,
 /// through [`Point3::to_point`].
 pub fn to_points(points3: &Points3) -> Points {
