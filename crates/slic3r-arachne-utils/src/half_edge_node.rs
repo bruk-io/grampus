@@ -13,12 +13,24 @@
 //! field (`HalfEdgeNode.hpp:25`) already resolves to a plain `usize` index, with no `edge_t`
 //! type needed at all to spell it. So after taking that cell verbatim, this struct needs only
 //! one generic parameter, `NodeData`, for the field the vendored template actually stores a
-//! caller-chosen type in. **Finding, named in this task's pull request**: dropping
-//! `edge_data_t`/`derived_edge_t`/`derived_node_t` from the Rust signature is a judgement call
-//! about a template with no in-scope instantiation yet (`HalfEdge`, `HalfEdgeGraph.hpp`,
-//! `SkeletalTrapezoidationGraph.hpp` and `SkeletalTrapezoidation.hpp` -- `port/ownership.tsv`'s
-//! own evidence column for this field -- are each a fan-out module, not this task's to write),
-//! so there is no concrete caller yet to monomorphise against and check this choice against.
+//! caller-chosen type in. **Finding, named in this task's pull request, corrected on review**:
+//! a concrete, in-scope CRTP instantiation does exist and the collapse is checked against it
+//! here, not asserted with no caller. `Arachne/SkeletalTrapezoidationGraph.hpp:59`: `class
+//! STHalfEdgeNode : public HalfEdgeNode<SkeletalTrapezoidationJoint, SkeletalTrapezoidationEdge,
+//! STHalfEdgeNode, STHalfEdge>` fixes all four parameters (`port/manifest.tsv` marks this row
+//! `in` scope, target `crates/slic3r-arachne/src/skeletal_trapezoidation_graph.rs`, a fan-out
+//! module this task does not write). Against that instantiation: `node_data_t ->
+//! SkeletalTrapezoidationJoint` is exactly this struct's `NodeData`; `derived_node_t ->
+//! STHalfEdgeNode` and `derived_edge_t -> STHalfEdge` are the CRTP self-types, used in the
+//! vendored class body only to spell `node_t`/`edge_t`, which this port needs only for
+//! `incident_edge`'s type -- already resolved to `usize` by `port/ownership.tsv`'s cell above,
+//! with no `edge_t` type required to write it; `edge_data_t -> SkeletalTrapezoidationEdge` is
+//! unused in the class body at all, instantiation or not. So the collapse holds against the one
+//! instantiation that exists, not because none does. Separately, `HalfEdge.hpp` and
+//! `HalfEdgeGraph.hpp` are not fan-out: `port/manifest.tsv` marks both `template-heavy: yes`,
+//! i.e. hand-designed foundation rows -- task `74-foundation-arachne-half-edge`'s, not written
+//! by a fan-out pass. Only `SkeletalTrapezoidationGraph.hpp` and `SkeletalTrapezoidation.hpp`
+//! (`template-heavy: no`) are fan-out modules this task correctly does not write.
 //!
 //! **`operator==` is identity, not a field comparison, and has no `PartialEq` counterpart
 //! here.** `bool operator==(const node_t& other) { return this == &other; }` (`:31-34`)
@@ -101,12 +113,20 @@ mod tests {
     }
 
     /// Proof path 1 (R19, manifest row `Arachne/utils/HalfEdgeNode.hpp`): the shim instantiates
-    /// the vendored template over a concrete, FFI-plain node/edge data pair and reads back the
-    /// `p` field and the default `incident_edge`'s nullness through the pointer-identity
-    /// comparison `is_same_node` stands in for -- see `cxx/proof_units/half_edge_node.cpp` for
-    /// what is actually instantiated and why the proof is necessarily thin (a template with no
-    /// in-scope fan-out caller yet has no behaviour beyond its own constructor and field
-    /// layout). One cell across this unit's single manifest row, so one `// PROOF: 1` marker.
+    /// the vendored template over a concrete, FFI-plain node/edge data pair (`TestNode =
+    /// HalfEdgeNode<int64_t, int64_t, int64_t, int64_t>`) and reads back the `p` field and the
+    /// default `incident_edge`'s nullness -- **named as a divergence, not a proof of this
+    /// class's one real behaviour**: `operator==`/`is_same_node`'s pointer identity
+    /// (`HalfEdgeNode.hpp:31-34`) is not exercised through this shim at all (it is unreachable
+    /// with `node_t = int64_t`, an unrelated scalar, and is proven Rust-against-Rust only, by
+    /// `is_same_node_is_identity_not_value` above), and `oracle_has_edge` below is an assertion
+    /// against a constant the shim's own default member initialiser makes unconditionally true
+    /// -- nothing this port computes can make it fail. See `cxx/proof_units/half_edge_node.cpp`
+    /// for what is actually instantiated and why the proof is necessarily thin: a template with
+    /// no in-scope instantiation this task writes (the one that exists,
+    /// `SkeletalTrapezoidationGraph.hpp:59`'s CRTP shape, belongs to a fan-out module -- see the
+    /// module doc) has no behaviour beyond its own constructor and field layout to check here.
+    /// One cell across this unit's single manifest row, so one `// PROOF: 1` marker.
     // PROOF: 1
     #[test]
     fn half_edge_node_matches_the_oracle() {
@@ -120,7 +140,7 @@ mod tests {
             "HalfEdgeNode's stored point must match the oracle exactly"
         );
 
-        // `edge_t* incident_edge = nullptr;` (`:22`): the oracle's default-constructed node
+        // `edge_t* incident_edge = nullptr;` (`:25`): the oracle's default-constructed node
         // reports no incident edge, mirrored here by this port's own placeholder `0` carrying no
         // claim of meaning -- see the module doc. Proven as "the oracle also starts with none",
         // not as "0 means none" on this port's side.

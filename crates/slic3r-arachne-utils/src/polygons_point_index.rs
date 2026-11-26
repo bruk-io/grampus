@@ -22,14 +22,14 @@
 //! **No default-constructed, "uninitialised" state is ported, and this is a deliberate gap, not
 //! an oversight.** `port/ownership.tsv`'s `borrowed` row for `PathsPointIndex::polygons`
 //! (`:32`) gives the field's Rust type as `&'a Paths` verbatim -- a live reference, never
-//! null -- so `PathsPointIndex()` (`:38-44`, the zero-argument constructor whose own comment
-//! admits "you can't ever make this initialisation useful") and `initialized()` (`:71`, `return
+//! null -- so `PathsPointIndex()` (`:45`, preceded by its own doc comment at `:38-44` admitting
+//! "you can't ever make this initialisation useful") and `initialized()` (`:71`, `return
 //! polygons;`, i.e. "is this the non-null state") have no faithful counterpart here: writing
 //! `initialized()` to always return `true` would be a method whose body contradicts what its
 //! name and its source say, which is exactly the "green result that is not real" this project's
 //! honesty rules name, so neither is ported. **Finding, named in this task's pull request.**
 //! The one in-scope call site that needs the zero-then-maybe-filled shape,
-//! `PolylineStitcher.hpp:118,163` (`PathsPointIndex<Paths> closest; ... if
+//! `PolylineStitcher.hpp:102,163` (`PathsPointIndex<Paths> closest; ... if
 //! (!closest.initialized()) ...`), is this task's own `polyline_stitcher.rs`, which represents
 //! it as `Option<PathsPointIndex<'a, Paths>>` instead -- see that module. The other,
 //! `PolygonsSegmentIndex()` (`PolygonsSegmentIndex.hpp:23`), is this task's own
@@ -94,7 +94,7 @@ impl PointPath for Polygon {
     }
 }
 
-/// `template<typename Paths> class PathsPointIndex` (`:25-123`) -- see the module doc for the
+/// `template<typename Paths> class PathsPointIndex` (`:25-131`) -- see the module doc for the
 /// constructor and the methods this port does not carry over.
 ///
 /// `Clone`/`Copy` are implemented by hand below, not derived: `#[derive(Clone, Copy)]` on a
@@ -112,11 +112,11 @@ pub struct PathsPointIndex<'a, Paths> {
     /// arithmetic sensitive to a 32-bit width), matching the index type the indexing operator
     /// below already requires.
     pub poly_idx: usize,
-    /// `unsigned int point_idx;` (`:37`), same reasoning as `poly_idx` above.
+    /// `unsigned int point_idx;` (`:36`), same reasoning as `poly_idx` above.
     pub point_idx: usize,
 }
 
-/// `PathsPointIndex(const PathsPointIndex &original) = default;` (`:47`) -- a field-wise copy,
+/// `PathsPointIndex(const PathsPointIndex &original) = default;` (`:58`) -- a field-wise copy,
 /// unconditional in every field regardless of `Paths`; see the struct doc for why this is
 /// hand-written rather than `#[derive(Clone)]`.
 impl<'a, Paths> Clone for PathsPointIndex<'a, Paths> {
@@ -132,7 +132,7 @@ impl<'a, Paths> Copy for PathsPointIndex<'a, Paths> {}
 
 impl<'a, Paths> PathsPointIndex<'a, Paths> {
     /// `PathsPointIndex(const Paths *polygons, unsigned int poly_idx, unsigned int point_idx)`
-    /// (`:51`). The zero-argument constructor (`:38-44`) is not ported -- see the module doc.
+    /// (`:53`). The zero-argument constructor (`:45`) is not ported -- see the module doc.
     pub fn new(polygons: &'a Paths, poly_idx: usize, point_idx: usize) -> Self {
         PathsPointIndex {
             polygons,
@@ -165,6 +165,12 @@ where
     pub fn advance(&mut self) {
         // PORT SRC: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:106
         let len = self.polygons[self.poly_idx].point_count();
+        // PORT NOTE: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:106 -- `point_idx =
+        // (point_idx + 1) % (*polygons)[poly_idx].size();` is C++ undefined behaviour when the
+        // polygon is empty (`% 0`); this port panics on `len == 0` instead of invoking UB. No
+        // in-scope caller advances an empty path's index (`PolylineStitcher.hpp`'s own callers
+        // always insert at least one point before indexing), so this divergence is unreachable
+        // in practice, same as the vendored UB it stands in for.
         self.point_idx = (self.point_idx + 1) % len;
     }
 
@@ -173,9 +179,16 @@ where
     pub fn retreat(&mut self) {
         let len = self.polygons[self.poly_idx].point_count();
         if self.point_idx == 0 {
-            // PORT SRC: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:113
+            // PORT NOTE: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:113 -- the
+            // read-size-then-reset step of the vendored two-step wrap; carries no numeric
+            // literal of its own, so this is a correspondence note, not a transcribed constant.
             self.point_idx = len;
         }
+        // PORT NOTE: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:114 -- `point_idx--;`
+        // on an unsigned int wraps to `UINT_MAX` in C++ (defined behaviour there); this port's
+        // `usize` subtraction panics on underflow in a debug build instead of wrapping. Reached
+        // only when `len == 0` (the `if` above leaves `point_idx` at `0`), the same empty-path
+        // case `advance`'s note above names as unreached by any in-scope caller.
         self.point_idx -= 1;
     }
 
@@ -216,7 +229,9 @@ impl<'a> PathsPointIndex<'a, Polygons> {
 /// module doc for why this is hand-written rather than derived.
 impl<'a, Paths> PartialEq for PathsPointIndex<'a, Paths> {
     fn eq(&self, other: &Self) -> bool {
-        // PORT SRC: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:86
+        // PORT NOTE: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:86 -- the vendored
+        // pointer comparison this method reproduces; carries no numeric literal of its own, so
+        // this is a correspondence note, not a transcribed constant.
         std::ptr::eq(self.polygons, other.polygons)
             && self.poly_idx == other.poly_idx
             && self.point_idx == other.point_idx

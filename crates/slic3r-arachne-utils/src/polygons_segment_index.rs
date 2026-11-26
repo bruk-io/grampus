@@ -14,6 +14,15 @@
 //! a C++ caller would reach a public base member through the derived object, just spelled with
 //! an explicit field instead of an implicit upcast.
 //!
+//! **Consequence, named here rather than left for the fan-out to discover as a compile error:
+//! composition drops the IS-A substitutability the vendored `public` inheritance gives for
+//! free.** A C++ `PolygonsSegmentIndex&`/`*` converts implicitly to `PolygonsPointIndex&`/`*`;
+//! `PolygonsSegmentIndex<'a>` and `PathsPointIndex<'a, Polygons>` are unrelated Rust types with
+//! no coercion between them, so a caller that needs to pass one where the other is expected
+//! must spell `seg.base` explicitly rather than relying on an upcast that does not exist here.
+//! Future consumers of `72-foundation-arachne-grids`' `SparseLineGrid`-shaped locators are the
+//! ones most likely to hit this.
+//!
 //! **No default constructor, for the same reason `polygons_point_index.rs` gives.**
 //! `PolygonsSegmentIndex() : PolygonsPointIndex(){}` (`:23`) delegates straight to the base's own
 //! zero-argument constructor, which that module does not port (`port/ownership.tsv`'s

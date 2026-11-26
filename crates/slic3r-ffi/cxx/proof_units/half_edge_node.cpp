@@ -3,15 +3,20 @@
 // `cxx_build::Build` -- the one sanctioned route a ported unit reaches the oracle by
 // (`docs/PORTING.md`, "Decisions recorded on 2026-11-25").
 //
-// `HalfEdgeNode<node_data_t, edge_data_t, derived_node_t, derived_edge_t>` (`:17-32`) is a
-// four-parameter template with no in-scope instantiation yet (`HalfEdge`, `HalfEdgeGraph.hpp`
-// and the two `SkeletalTrapezoidation*` files that use it are each a fan-out module, not this
-// task's). `TestNode` below instantiates it over a plain `int64_t` for every parameter --
-// `node_data_t` is read back below, `edge_data_t`/`derived_node_t`/`derived_edge_t` are each
-// unused inside the class body except as `edge_t`/`node_t`'s own aliases (see
-// `half_edge_node.rs`'s own module doc), so any FFI-plain type satisfies them. This proof is
-// therefore necessarily thin -- it exercises the constructor and the field layout the vendored
-// class actually has, not a caller's use of it, because this unit has no in-scope caller yet.
+// `HalfEdgeNode<node_data_t, edge_data_t, derived_node_t, derived_edge_t>` (`:17-35`) has one
+// concrete in-scope instantiation, `SkeletalTrapezoidationGraph.hpp:59`'s `STHalfEdgeNode :
+// public HalfEdgeNode<SkeletalTrapezoidationJoint, SkeletalTrapezoidationEdge, STHalfEdgeNode,
+// STHalfEdge>` -- but that type belongs to a fan-out module this task does not write (see
+// `half_edge_node.rs`'s own module doc), so `TestNode` below instead instantiates the template
+// over a plain `int64_t` for every parameter. `edge_data_t`/`derived_node_t`/`derived_edge_t`
+// are each unused inside the class body except as `edge_t`/`node_t`'s own aliases, so any
+// FFI-plain type satisfies them; `node_data_t` is passed to the constructor but never read back
+// by this shim (`path1_node_point` and `path1_node_has_incident_edge` below read `p` and
+// `incident_edge`, never `data`). This proof is therefore necessarily thin -- it exercises the
+// constructor and the field layout the vendored class actually has, and cannot exercise
+// `operator==`'s pointer identity at all (`node_t = int64_t` here, so `this == &other` would
+// compare against an unrelated scalar type and is never instantiated), not a caller's use of
+// the class, because the instantiation that exists is a fan-out module's, not this task's.
 #include "half_edge_node.h"
 
 #include "Arachne/utils/HalfEdgeNode.hpp"
