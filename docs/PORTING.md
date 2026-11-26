@@ -2,8 +2,10 @@
 
 `just port-status` reads the twelve headings below — the six `##` sections and the six `###`
 rules under `## Rules` — to check that this document says what it must (R29); renaming one
-breaks that check. This document is committed before any unit is ported.
-Every unit of Phase A and Phase B — `port/manifest.tsv`'s 409 in-scope files — is held to
+breaks that check. `## Decisions recorded on 2026-11-25` is a later addition and is not one of
+the twelve; adding a heading does not break the check, renaming one of the twelve does.
+This document is committed before any unit is ported.
+Every unit of Phase A and Phase B — `port/manifest.tsv`'s 408 in-scope files — is held to
 it, and a porter is given their task, this repository and nothing else: this document is written
 so a porter never has to guess and never has to ask. `docs/WORKFLOW.md` is the process this
 document's rules are used inside; it states the phases, the review loop and the conflict
@@ -20,12 +22,12 @@ awk -F'\t' 'NR==1{for(i=1;i<=NF;i++)c[$i]=i} NR>1 {print $c["target crate"]}' po
   | sort | uniq -c
 ```
 
-(an empty-string line in that output counts the 198 out-of-scope rows, which carry no crate —
+(an empty-string line in that output counts the 199 out-of-scope rows, which carry no crate —
 expected, not an error) against the `crate` rows of `port/cut.tsv`
 (`awk -F'\t' '$1=="crate"{print $2, $3, $4, $5}' port/cut.tsv`, which prints the table's four
 columns — crate, level, subsystems, in-scope files — in order).
-As this document is written, the two agree exactly: the same 126 crate names, and the same
-in-scope file count per crate, summing to the 409 in-scope rows `port/manifest.tsv` carries. Plan
+As this document is written, the two agree exactly: the same 125 crate names, and the same
+in-scope file count per crate, summing to the 408 in-scope rows `port/manifest.tsv` carries. Plan
 step 20's prose estimate of "roughly 43 crates" is stale against the committed cut; `port/cut.tsv`
 is the authority, not the plan's prose.
 
@@ -55,7 +57,6 @@ cut's edges or any file's per-file scope decision — those are `port/cut.tsv`'s
 | `slic3r-int128` | 0 | Int128 | 1 |
 | `slic3r-lifecycleevents` | 0 | LifecycleEvents | 1 |
 | `slic3r-localesutils` | 0 | LocalesUtils | 2 |
-| `slic3r-macutils` | 0 | MacUtils | 1 |
 | `slic3r-materialtype` | 0 | MaterialType | 2 |
 | `slic3r-mutablepriorityqueue` | 0 | MutablePriorityQueue | 1 |
 | `slic3r-objectid` | 0 | ObjectID | 2 |
@@ -263,12 +264,12 @@ differently changes every call site.
 | Construct | Rendering |
 |---|---|
 | A method on a class | A method on the corresponding Rust type (an inherent method, or a trait method where the crate map's module defines a trait for it). |
-| A free function in an anonymous namespace, or a `static` free function | A private (non-`pub`) free function in the module. It is **not** made `pub` to ease testing: proof path 3 (R19) — a test translation unit inside the FFI crate that `#include`s the vendored `.cpp` — is how such a function is proven equal, not visibility. |
+| A free function in an anonymous namespace, or a `static` free function | A private (non-`pub`) free function in the module. It is **not** made `pub` to ease testing: proof path 3 (R19) — a test translation unit inside the FFI crate that `#include`s the vendored `.cpp` — is how such a function is proven equal, not visibility. `## Decisions recorded on 2026-11-25`, decision 1, states the three files that translation unit and its bridge are, and that they are the only route. |
 | A non-const reference out-parameter | A return value, or a tuple of return values, from the Rust function — never a `&mut` parameter adopted just to mirror the C++ signature. |
 | A destructor | `Drop`, implemented only where the destructor does more than drop its fields (an RAII release, a log, a cache invalidation); a destructor that only frees owned sub-objects needs no explicit `Drop` impl, because Rust already drops them. |
 | Virtual dispatch over a class hierarchy (e.g. `ExtrusionEntity`) | A Rust trait with one implementing type per concrete C++ subclass, dispatched through `&dyn Trait` or an enum, whichever the foundation design for that hierarchy (`slic3r-extrusionentity`, hand-designed by plan step 20) chooses; a port task does not introduce a second dispatch mechanism for the same hierarchy. |
 | A template | A generic function or type with the same bound, monomorphised the same way the C++ template's instantiations are used in in-scope code; a template is not force-collapsed to one concrete type unless the manifest row's unit only ever instantiates one. |
-| A `#define` numeric constant | A `const` item, carrying a `// PORT SRC: <vendored path>:<line>` marker beside it naming the macro's definition. |
+| A `#define` numeric constant | A `const` item, carrying a `// PORT SRC: <vendored path>:<line>` marker beside it naming the macro's definition. Where the value's origin is outside the vendored tree — a C standard clause, or a linked library — the marker takes the `// PORT SRC: external: <what defines it>` form instead; see `## Decisions recorded on 2026-11-25`, decision 2, which also states what "beside" means. |
 | `std::sort` | `slice::sort_unstable` (no ordering guarantee between equal elements, matching `std::sort`'s own lack of a stability guarantee). |
 | `std::stable_sort` | `slice::sort` (stable, matching `std::stable_sort`). |
 | `tbb::parallel_for`, `tbb::parallel_reduce` | See `### Linked libraries` below: TBB itself is not reimplemented. R18 states this without qualification: the port sums in a fixed order and is serial, and the module carries a `// PERF(port):` marker and nothing else — that marker is the only place a deferred optimization may live (R15). This is the unconditional default at every such site; parallelising a reduction requires a committed audit that establishes the site's order-independence, and no such audit exists today — `port/reports/order-containers.md` and `port/reports/order-comparators.md` audit container shapes and comparators, not parallel sites, so neither grants that licence — so no port task may parallelise a reduction yet. |
@@ -282,7 +283,10 @@ What a porter stops at rather than ports:
 - **Out-of-scope code reached from an in-scope file.** The manifest row's reason (`port/manifest.tsv`,
   "in scope or out with a reason" column) is the authority for why; the porter adds a
   `// PORT NOTE:` marker at the boundary (the call or reference into the out-of-scope code) rather
-  than following it in.
+  than following it in. A **declaration-only header whose every definition is in a file the
+  manifest marks out of scope** is one of these: `port/inventory` deducts it, with a reason naming
+  that file, so it has no row to port at all — see `## Decisions recorded on 2026-11-25`,
+  decision 3.
 - **The libraries R17 binds**: Clipper2, admesh, libnest2d, qhull, Boost.Polygon's Voronoi builder,
   and NLopt only where the manifest marks an in-scope caller. They are called through
   `crates/slic3r-ffi` (see `### Linked libraries` below), not reimplemented.
@@ -508,7 +512,202 @@ published crate matches it), admesh, libnest2d, qhull, Boost.Polygon's Voronoi b
 against the Boost superbuild under `vendor/OrcaSlicer/deps/Boost/`, since it has no vendored
 source of its own), and NLopt only where `port/manifest.tsv` marks an in-scope caller — read the
 manifest, not this document, for whether one exists today. They are called through
-`crates/slic3r-ffi`, exactly as they are at the pin; `just port-check`'s substitute check (added
+`crates/slic3r-ffi`, exactly as they are at the pin — and so is every unit's own proof shim, by
+the one route `## Decisions recorded on 2026-11-25`, decision 1, fixes; `just port-check`'s substitute check (added
 by `24-port-check-ci`) fails a crate manifest that depends on a named substitute for one of them.
 Replacing any of them with a Rust implementation is out of scope for this intent (C4's decision
 leaves that to a later one).
+
+## Decisions recorded on 2026-11-25
+
+The first five port attempts (pull requests #53 to #57) each hit the same handful of gaps and
+each invented a different way around them. These five decisions close those gaps. Every one was
+made by Claude acting for Bruk Habtu, under the delegation for this intent, on 2026-11-25; the
+owner was away and had handed over this intent's decisions. This section is a record, not a
+summary of a rule stated elsewhere: where a decision changes a rule above, the rule's own text
+says so and points here.
+
+### 1. One route from a ported crate to the oracle
+
+**The gap.** Port crates are generated with only a dev-dependency on `slic3r-proof`, and a port
+task may add no dependency and may not write `Cargo.lock`. A unit whose manifest row declares
+proof path 1 or 3 therefore had no sanctioned way to reach the built library at all, and the
+first three attempts each invented one: a per-crate `build.rs` with its own C++ shim (#54, and
+#53 as merged), a Cargo dependency on `slic3r-ffi` (#57, later reverted), and appends to the
+shared `crates/slic3r-ffi/cxx/proof_shims.cpp`, `proof_shims.h` and `src/proof.rs` (#53 and
+#56). The appends also do not work: `cxx` compiles its generated translation unit against the
+bridge's own `include!`ed header, so a declaration appended to a *shared* header is not visible
+to it (#54 measured the undefined-symbol error), and a bridge in `slic3r-ffi` is unreachable
+from a crate that may not depend on it (#56 measured the `E0433`).
+
+**The decision.** Every port crate reaches the oracle through `slic3r-proof`, which re-exports
+the FFI crate's per-unit proof bridges (`slic3r_proof::proof_units`). No port crate gets its own
+`build.rs`, its own C++ shim, or a new Cargo dependency. A port task adds its shim by **adding
+new files only**, touching no file another port task also edits, because hundreds of port
+branches are built side by side and every shared append point is a merge conflict.
+
+**What a port task creates — three new files, plus its own test file:**
+
+| file | what it holds |
+|---|---|
+| `crates/slic3r-ffi/cxx/proof_units/<unit>.h` | the shim's C++ declarations, inside `namespace slic3r_ffi::proof_units::<unit>`; `#include`s its own `cxx`-generated header, `"slic3r-ffi/src/proof_units/<unit>.rs.h"` |
+| `crates/slic3r-ffi/cxx/proof_units/<unit>.cpp` | the definitions: for proof path 1, `#include`s the vendored header and calls the externally linked symbol; for proof path 3, `#include`s the vendored `.cpp` whole and forwards to its internal-linkage helper |
+| `crates/slic3r-ffi/src/proof_units/<unit>.rs` | one `#[cxx::bridge(namespace = "slic3r_ffi::proof_units::<unit>")]`, `include!`ing `"cxx/proof_units/<unit>.h"`, and the `pub use` of its own names |
+| the unit's own proof | `crates/<crate>/tests/<something>.rs`, or a `#[cfg(test)]` module in the unit's module file; calls `slic3r_proof::proof_units::<unit>::<fn>` |
+
+`<unit>` is the unit's `port/manifest.tsv` `target module` file stem (`object_id` for
+`crates/slic3r-objectid/src/object_id.rs`), so the shim's name is derivable from the manifest row
+and two units can never pick the same file name.
+
+**What a shim may carry across the bridge:** a plain integer or a plain floating-point value, a
+`rust::Vec` of those, and a `cxx` bridge `struct` whose every field is one of those — never a
+libslic3r type. The third is not an exception grudgingly allowed: the one proof-path-3 unit in
+the tree is built that way (`crates/slic3r-ffi/src/proof_units/clipper_z_utils.rs`'s
+`ProofZPoint`, three `i64` fields standing for one `ClipperZUtils::ZPoint`), and the first
+version of this rule, written as "plain integers and plain floating-point values" alone, forbade
+the shape of its own worked example. A coordinate travels as a 64-bit integer and never through
+an `f64` (`coord_t` is `int64_t` at the pin, `src/libslic3r/libslic3r.h:45-48`).
+
+`crates/slic3r-ffi/build.rs` globs both directories: every `src/proof_units/*.rs` goes to
+`cxx_build::bridges`, every `cxx/proof_units/*.cpp` onto the one shared `cxx_build::Build` that
+carries `-ffp-contract=off` and the whole include set, each shim's vendored
+`cargo:rerun-if-changed` set is read from its own `#include "..."` lines, and the `#[path]`-ed
+`pub mod` list is generated into `OUT_DIR` for `src/proof_units.rs` to `include!`. There is no
+shared list, no shared C++ file and no shared `pub use` block to append to. A bridge with no
+matching `.h` and `.cpp` is a named build failure, not a silent skip.
+
+`cargo fmt` cannot follow an `include!` and so never reaches the bridge files; `just port-check`
+runs `rustfmt --check` over them directly instead, so they are not a gap in its coverage.
+
+The shims that existed before this decision — the harness's own two and the four pull request #53
+added — are migrated into this layout, so there is exactly one pattern in the tree. Of the
+migrated functions, `object_id`'s `path1_wipe_tower_object_id` and `clipper_z_utils`'s
+`path3_to_paths64` had live callers; `print_config_constants`' and `technologies`' did not, and
+now do.
+
+### 2. A constant whose origin is outside the vendored tree
+
+**The gap.** R16 requires every numeric literal other than `0`, `1` and `2` to carry a
+`// PORT SRC: <vendored path>:<line>` marker naming a line that contains the literal. Pull
+request #57 has a correct literal that cannot comply: the `4` in C's `%g`
+fixed-versus-scientific threshold comes from the C standard library's specification, not from any
+OrcaSlicer line, and citing an unrelated vendored `-4` would satisfy the scanner with a false
+statement.
+
+**The decision.** One sanctioned second form, and the exempt literal set is **not** widened:
+
+```
+// PORT SRC: external: <what defines it, specifically>
+```
+
+for example `// PORT SRC: external: ISO/IEC 9899:2018 7.21.6.1 p8 -- %g renders in scientific
+notation when the converted value's exponent is less than -4`, or a named linked library and
+version with its file and line under the superbuild. `port/port-status` accepts it without a
+vendored-line lookup, requires the text after `external:` to be non-empty, and **counts and
+prints every external marker separately, with its text**, so a reviewer can audit each one.
+`docs/WORKFLOW.md` makes checking every external marker against the source it cites a reviewer's
+job.
+
+Three things it deliberately does not do, each of which the form's first implementation did and
+a reviewer measured:
+
+- It does not exempt the file, the module or any other line. A literal with no marker of either
+  form still fails.
+- It does not cover **more than one literal on its own line**. There is no cited line to match a
+  literal against, so one marker on a line carrying two or three would legitimise all of them —
+  a per-line exemption in all but name. Such a line is its own finding; the externally defined
+  constant goes on a line of its own.
+- It does not suppress a vendored marker sitting in the same comment block. A
+  `// PORT SRC: <path>:<line>` naming a line that does not exist at the pin is still R16's own
+  placeholder-constant failure, with or without an external marker beside it.
+
+"Beside" means the same for both forms: on the literal's own line, or in the contiguous run of
+`//` comment lines ending on the line directly above it. **A blank line between the marker and
+the literal breaks the run**, which is the other half of #57's red gate and is now stated in
+`port/port-status --help`.
+
+### 3. A declaration-only header whose definitions are all out of scope
+
+**The gap.** `port/manifest.tsv` marked `MacUtils.hpp` in scope with proof path 1, but it is a
+ten-line declaration-only header whose only definitions are in `MacUtils.mm`, which the same
+manifest deducts. The unit had no in-scope body to port and no in-scope symbol to prove against,
+so it could never be ported or proven (#54).
+
+**The decision.** A declaration-only header whose every definition is in a file the manifest
+marks out of scope is itself out of scope, with a reason naming that file. It is a rule in
+`port/inventory`'s scope computation, not a hand edit of the manifest, and it is conservative in
+the direction of keeping a row in scope: a header declaring a class, struct, enum, typedef,
+`using`, template, variable, a `#define` with a replacement list, or carrying any function body
+is not declaration-only; every declared name must have a definition somewhere in the tracked
+tree; one in-scope definer leaves the header in scope; and the search runs over every tracked
+file but the header itself, headers included. At the pin it deducts exactly one row,
+`MacUtils.hpp`, and `port/inventory` fails with a named error if it ever deducts a different set,
+so the rule cannot widen without someone judging the new row against the vendored source.
+
+A caller that reaches such a header adds a `// PORT NOTE:` marker at the boundary, exactly as
+`## Don't-translate list` already requires for out-of-scope code reached from an in-scope file.
+
+### 4. A unit with nothing executable to prove, and what counts as a proof
+
+**The gap.** Some units are declarations, constants or type definitions with no behaviour the
+oracle can be asked about; #53 and #54 both had some, and one proof compared a module's output
+against literals the test itself had transcribed, which is not a proof against the oracle. R19's
+answer — "Where even that is not possible the row says so and the helper is proven through its
+enclosing file's exported surface" — was neither concrete nor checkable.
+
+**The decision, first half.** A manifest row may declare that its unit has no independently
+provable behaviour, in its existing `proof path` column:
+
+```
+enclosing: <the enclosing unit's own `path` cell>
+```
+
+The named unit is the in-scope unit whose proof exercises this one. Such a row carries no
+`// PROOF:` marker of its own, and `port/port-status` derives it as `ported` only when its module
+exists, a `mod` line reaches it, it holds no `todo!()`/`unimplemented!()`, and the named row is
+itself `ported`. A cell naming no manifest row, an out-of-scope row, itself, or a row whose own
+proof path is another `enclosing:` cell, or a row in a different `target crate`, is a finding and
+derives `drafted` — a chain is refused outright, which is also what makes a cycle impossible, and
+the same-crate requirement is the widest check a text rule can make of R19's "its **enclosing
+file's** exported surface" (the manifest has no "this file includes that one" column), so it is a
+floor and not the whole of that wording: a reviewer still reads whether the named unit's proof
+really exercises this one. The cell is set by the regeneration or amendment pull request that
+writes `port/manifest.tsv`, never by a port task.
+
+**The decision, second half.** A `// PROOF:` marker counts only over a test that compares a value
+the **oracle** produced against a value this port computed.
+
+The oracle's own entry points are the per-unit proof bridges `slic3r-proof` re-exports and the
+committed stage dumps (decision 1's route), plus an `extern "C"` declaration. A name holds an
+oracle value when it is bound — by a `let`, a tuple pattern or a `for` pattern — off an
+expression that reaches one of those, whether by an imported name or by a fully-qualified
+`proof_units::`/`dumps::` path. A comparison counts when it names an oracle value and a value of
+this port's own, **in two different arguments**, or in one argument that itself makes a call (so
+`assert!(agrees(ported, oracle))` counts and `assert_eq!(oracle[index], 5)`, where the loop
+variable merely shares an argument with the oracle value, does not). The port's side must be a
+plain value identifier: a macro name (`vec!`, `format!`), either end of a path
+(`String::from`, `Oracle::Built`), a field or method name, a turbofish's type argument and the
+literal and type words are none of them values this port computed. A marker over a test that
+reaches no oracle, or that compares an oracle value only against a literal, is a
+`proof-marker-not-differential` finding and its row stays `drafted`.
+
+**Its stated limit.** A hand-transcribed named constant in the test's own scope is not
+mechanically distinguishable from the ported module's own `pub const`: comparing an oracle value
+against such a constant still counts, and remains a reviewer's judgement. What the rule does
+catch is a test that reaches no oracle at all, and one that compares an oracle value only against
+a literal — the two shapes the first port attempts actually produced. Every accept and reject the
+rule is held to is listed in `port/port-status --self-test` and in
+`crates/oracle-compare/src/stages.rs`'s own tests, in the same order in both, so a reader can see
+exactly where the line falls.
+
+Both halves are mirrored in `crates/oracle-compare/src/stages.rs`, which carries the Rust copy of
+this derivation that `just compare-stages` reads, so the two authorities cannot disagree about
+whether a stage is fully ported.
+
+### 5. Where a task's file list and this document disagree
+
+Foundation task bodies enumerate exactly which files `git diff main` may touch, and task files on
+`main` are not edited after acceptance; decisions 1 to 4 move where shims and markers go.
+`docs/WORKFLOW.md`'s "Decisions that govern over a task's file list" states the rule: this
+document governs, the builder says so in the pull request body, and a reviewer does not count it
+as a divergence.

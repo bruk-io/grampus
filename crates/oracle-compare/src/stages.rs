@@ -31,6 +31,15 @@
 //! Python logic in Rust rather than shelling out to it, because it must run from `cargo test -p
 //! oracle-compare` with no Python and no built libslic3r.
 //!
+//! Two parts of that arm come from docs/PORTING.md's "Decisions recorded on 2026-11-25" and are
+//! mirrored here too, under the same names the Python carries: a `// PROOF:` marker counts only
+//! over a test that compares a value the ORACLE produced against a value this port computed
+//! (`has_differential_comparison`), and a row whose `proof path` cell reads
+//! `enclosing: <path>` carries no marker of its own and is `ported` exactly when the in-scope
+//! row it names is (`enclosing_unit_of`, `enclosing_row`). `stages.rs`'s own tests hold the Rust
+//! implementation to the same five body shapes `port/port-status --self-test` holds the Python
+//! one to, so the two cannot drift apart silently.
+//!
 //! **The two seamless stages fall back to the exported G-code's L0-L4 levels**
 //! (`is_fallback_stage`, `FALLBACK_STAGES`): `psGCodeExport` and `psConflictCheck` have no R5
 //! seam, so this command never has a per-seam dump for them and instead compares the port's and
@@ -728,12 +737,15 @@ fn extract_cfg_test_text(text: &str) -> String {
 
 /// Mirrors `find_proof_match`: a `#[test]`-attributed function whose name contains
 /// `module_snake`, carrying beside it (a run of `//` lines right above its `#[test]`, through
-/// the function's own `fn` line) the literal line `// PROOF: <proof_path_cell>`.
+/// the function's own `fn` line) the literal line `// PROOF: <proof_path_cell>`, **and** whose
+/// body compares a value the oracle produced against a value this port computed
+/// (`has_differential_comparison`; docs/PORTING.md, "Decisions recorded on 2026-11-25").
 fn find_proof_match(text: &str, module_snake: &str, proof_path_cell: &str) -> bool {
     let wanted = proof_path_cell.trim();
     if wanted.is_empty() {
         return false;
     }
+    let oracle = oracle_names(text);
     let lines: Vec<&str> = text.lines().collect();
     for i in 0..lines.len() {
         if !is_test_attr_line(lines[i]) {
@@ -772,13 +784,658 @@ fn find_proof_match(text: &str, module_snake: &str, proof_path_cell: &str) -> bo
         let window_end = (j + 1).min(lines.len().saturating_sub(1));
         for li in window_start..=window_end {
             if let Some(path) = parse_proof_line(lines[li]) {
-                if path == wanted {
+                if path == wanted && has_differential_comparison(&function_body(&lines, j), &oracle)
+                {
                     return true;
                 }
             }
         }
     }
     false
+}
+
+// --- The differential-comparison rule and the `enclosing:` proof-path form -----------------
+//
+// Mirrors `port/port-status`'s `oracle_names`, `function_body`, `split_call_arguments`,
+// `tainted_identifiers`, `has_differential_comparison`, `enclosing_unit_of` and
+// `enclosing_row_error` (docs/PORTING.md, "Decisions recorded on 2026-11-25"). Reimplemented in
+// Rust for the same reason the rest of this module is: `cargo test -p oracle-compare` must run
+// with no Python and no built libslic3r. Hand-rolled scanners rather than a regex crate, in the
+// same style as `mask_strings` and `extract_cfg_test_text` above, so this module adds no
+// dependency.
+
+/// The oracle entry points a proof may call: the per-unit proof bridges `slic3r-proof`
+/// re-exports and the committed stage dumps, taken from the file's own `use` paths, plus every
+/// name declared in an `extern "C"` block. Mirrors `port/port-status`'s `oracle_names`.
+fn oracle_names(text: &str) -> HashSet<String> {
+    const ORACLE_PATH_SEGMENTS: [&str; 2] = ["proof_units", "dumps"];
+    // Deliberately NOT seeded with the two bare words: see `port/port-status`'s `oracle_names`
+    // for why (a local named `dumps` would otherwise taint its binding). A file that reaches an
+    // oracle names it in a `use` path, which the loop below collects.
+    let mut found: HashSet<String> = HashSet::new();
+    // A `use` statement is accumulated across lines until its `;`, never read one line at a
+    // time: `cargo fmt` breaks an import over 100 characters into a multi-line braced form, and
+    // a line-at-a-time read of that sees only `use slic3r_proof::proof_units::object_id::{` and
+    // so collects none of the imported names. Measured against
+    // `crates/slic3r-objectid/tests/object_id_proof_path_1.rs`, where the first version of this
+    // function found no oracle name at all while `port/port-status`'s regex (`[^;]+`, which
+    // spans newlines) found both -- the exact Python/Rust divergence this mirror exists to
+    // prevent.
+    let mut statements: Vec<String> = Vec::new();
+    let mut current: Option<String> = None;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if current.is_none() && !trimmed.starts_with("use ") {
+            continue;
+        }
+        let acc = current.get_or_insert_with(String::new);
+        acc.push(' ');
+        acc.push_str(trimmed);
+        if trimmed.contains(';') {
+            let done = current.take().unwrap_or_default();
+            statements.push(done);
+        }
+    }
+    for statement in &statements {
+        let rest = statement.trim_start().trim_start_matches("use ");
+        let Some(path) = rest.split(';').next() else {
+            continue;
+        };
+        if !ORACLE_PATH_SEGMENTS.iter().any(|seg| path.contains(seg)) {
+            continue;
+        }
+        for segment in path
+            .replace('{', " ")
+            .replace('}', " ")
+            .replace(',', " ")
+            .split("::")
+            .flat_map(|s| s.split_whitespace())
+        {
+            let segment = segment.trim();
+            if !segment.is_empty() && is_ident(segment) {
+                found.insert(segment.to_string());
+            }
+        }
+    }
+    // `extern "C" { ... }`: the names declared inside one, found by brace matching from the
+    // block's own opening brace so an ordinary `fn` elsewhere in the file is not collected.
+    let bytes: Vec<char> = text.chars().collect();
+    let mut search_from = 0usize;
+    while let Some(rel) = text[search_from..].find("extern") {
+        let abs = search_from + rel;
+        search_from = abs + "extern".len();
+        let after: String = text[abs..].chars().take(16).collect();
+        if !after.replace(' ', "").starts_with("extern\"C\"{") {
+            continue;
+        }
+        let Some(open_rel) = text[abs..].find('{') else {
+            continue;
+        };
+        let open = text[..abs + open_rel].chars().count();
+        let mut depth = 0i64;
+        let mut end = bytes.len();
+        for (offset, c) in bytes[open..].iter().enumerate() {
+            if *c == '{' {
+                depth += 1;
+            } else if *c == '}' {
+                depth -= 1;
+                if depth == 0 {
+                    end = open + offset;
+                    break;
+                }
+            }
+        }
+        let block: String = bytes[open..=end.min(bytes.len() - 1)].iter().collect();
+        for name in declared_fn_names(&block) {
+            found.insert(name);
+        }
+    }
+    found
+}
+
+fn is_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Every `fn NAME(` name in `text` -- used only over an `extern "C"` block's own body.
+fn declared_fn_names(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i + 2 < chars.len() {
+        if chars[i] == 'f'
+            && chars[i + 1] == 'n'
+            && (i == 0 || !(chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_'))
+            && chars[i + 2].is_whitespace()
+        {
+            let mut j = i + 2;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            let start = j;
+            while j < chars.len() && (chars[j].is_ascii_alphanumeric() || chars[j] == '_') {
+                j += 1;
+            }
+            if j > start {
+                let mut k = j;
+                while k < chars.len() && chars[k].is_whitespace() {
+                    k += 1;
+                }
+                if k < chars.len() && chars[k] == '(' {
+                    out.push(chars[start..j].iter().collect::<String>());
+                }
+            }
+            i = j;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The text of the function whose signature starts at `lines[fn_line_idx]`, to its matching
+/// closing brace, counted on the code-only, string-masked view. Mirrors `port/port-status`'s
+/// `function_body`.
+fn function_body(lines: &[&str], fn_line_idx: usize) -> String {
+    let mut depth = 0i64;
+    let mut seen_open = false;
+    let mut out: Vec<&str> = Vec::new();
+    for line in &lines[fn_line_idx..] {
+        out.push(line);
+        let masked_line = strip_block_comments(line);
+        let chars: Vec<char> = masked_line.chars().collect();
+        let code: String = split_code_comment(&chars).into_iter().collect();
+        let masked = mask_strings(&code);
+        let opens = masked.matches('{').count() as i64;
+        let closes = masked.matches('}').count() as i64;
+        if opens > 0 {
+            seen_open = true;
+        }
+        depth += opens - closes;
+        if seen_open && depth <= 0 {
+            break;
+        }
+    }
+    out.join("\n")
+}
+
+/// `mask_strings` fills a literal with the letter 'x', which the identifier scan below would
+/// read as a value. Mirrors `port/port-status`'s `blank_masked_literals`: empty exactly what
+/// `mask_strings` produces, never a lifetime, which it does not mask.
+fn blank_masked_literals(masked: &str) -> String {
+    let chars: Vec<char> = masked.chars().collect();
+    let mut out = String::new();
+    let mut i = 0usize;
+    'scan: while i < chars.len() {
+        if chars[i] == '"' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j] == 'x' {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '"' {
+                out.push_str("\"\"");
+                i = j + 1;
+                continue 'scan;
+            }
+        }
+        if chars[i] == '\'' {
+            // Exactly what `mask_strings` produces for a char literal: one or two 'x's between
+            // single quotes (two for an escape such as `'\n'`). Labelled `continue` on a match,
+            // never a bare `break` out of the inner loop: an earlier revision broke only the
+            // `for` and fell through to `out.push(chars[i]); i += 1;`, which pushed the character
+            // *after* the literal and advanced past it. Traced rather than assumed: that
+            // fall-through happens to produce the same output for every input that is valid
+            // Rust, because the character after a char literal is never itself the start of
+            // another literal -- so this is a control-flow correction for clarity, not a
+            // behaviour change, and the char-literal case in this module's own tests pins the
+            // behaviour either way.
+            for width in [1usize, 2] {
+                let close = i + 1 + width;
+                if close < chars.len()
+                    && chars[i + 1..close].iter().all(|c| *c == 'x')
+                    && chars[close] == '\''
+                {
+                    out.push_str("''");
+                    i = close + 1;
+                    continue 'scan;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// The plain *value* identifiers in `text`: `own_identifiers`, minus a path segment (either end
+/// of a `::`), a macro name (followed by `!`) and a turbofish's type argument (which is removed
+/// first, since its `<` hides the `::` that would otherwise disqualify it). Mirrors
+/// `port/port-status`'s `VALUE_IDENT_RE` and `value_identifiers`.
+///
+/// This is the view the PORTED side of a comparison is read with, and it is narrower than the
+/// oracle side's on purpose: an oracle may legitimately be reached through a path, but
+/// `vec![1, 0, 1]`, `String::from("x")`, `format!("x")` and `Vec::from([..])` are not values
+/// this port computed, and reading them as such made `assert_eq!(oracle, vec![1, 0, 1])` -- an
+/// oracle value against a literal -- count as differential. Measured.
+fn value_identifiers(text: &str) -> Vec<String> {
+    let without_turbofish = strip_turbofish(text);
+    let chars: Vec<char> = without_turbofish.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i].is_ascii_alphabetic() || chars[i] == '_' {
+            let prev = if i == 0 { None } else { Some(chars[i - 1]) };
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            // The whole token, never a prefix of it: a shorter match would stop being followed
+            // by the `!` or `::` that disqualifies it (the same backtracking hole the Python
+            // regex closes with a trailing `\b`).
+            let preceded_by_path_or_field = matches!(prev, Some(p) if p == '.' || p == ':');
+            let mut j = i;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            let followed_by_macro = chars.get(j) == Some(&'!');
+            let followed_by_path = chars.get(j) == Some(&':') && chars.get(j + 1) == Some(&':');
+            if !preceded_by_path_or_field && !followed_by_macro && !followed_by_path {
+                out.push(chars[start..i].iter().collect::<String>());
+            }
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// `text` with every `::<...>` turbofish removed. Mirrors `port/port-status`'s `TURBOFISH_RE`.
+fn strip_turbofish(text: &str) -> String {
+    let mut out = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i] == ':' && chars.get(i + 1) == Some(&':') && chars.get(i + 2) == Some(&'<') {
+            if let Some(close) = chars[i + 3..].iter().position(|c| *c == '>' || *c == '<') {
+                if chars[i + 3 + close] == '>' {
+                    i = i + 3 + close + 1;
+                    continue;
+                }
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Every identifier in `text` not preceded by `.` or a word character -- so a field or method
+/// name reached through a `.` never reads as naming a value of its own. Mirrors
+/// `port/port-status`'s `IDENT_RE`. This is the view the ORACLE side is read with.
+fn own_identifiers(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i].is_ascii_alphabetic() || chars[i] == '_' {
+            let prev = if i == 0 { None } else { Some(chars[i - 1]) };
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let own = !matches!(prev, Some(p) if p == '.' || p.is_ascii_alphanumeric() || p == '_');
+            if own {
+                out.push(chars[start..i].iter().collect::<String>());
+            }
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Kept byte-for-byte in step with `port/port-status`'s own `LITERAL_WORD_TOKENS`: the two
+/// implementations of this rule must accept and reject the same bodies, and an entry in one list
+/// and not the other is a divergence no fixture would catch. `String` was missing here once, and
+/// `assert_eq!(oracle.iter().collect::<String>(), "101")` measured differently in the two.
+const LITERAL_WORD_TOKENS: [&str; 25] = [
+    "true", "false", "as", "None", "Some", "Ok", "Err", "i8", "i16", "i32", "i64", "i128", "isize",
+    "u8", "u16", "u32", "u64", "u128", "usize", "f32", "f64", "bool", "char", "str", "String",
+];
+
+/// The code-only, string-blanked view of a function body that both scans below read. Mirrors
+/// the identical pair of calls `port/port-status` makes.
+fn comparison_view(body: &str) -> String {
+    let code_only = code_only_text(body);
+    blank_masked_literals(&mask_strings(&code_only))
+}
+
+/// A fully-qualified call into an oracle, for a proof that writes the path at the call site
+/// instead of importing it. Required to be the `::` path form, never the bare word, so a local
+/// named `dumps` does not taint its own binding. Mirrors `port/port-status`'s
+/// `ORACLE_PATH_CALL_RE`.
+fn names_oracle_path(text: &str) -> bool {
+    text.contains("proof_units::") || text.contains("dumps::")
+}
+
+/// Every `(pattern, right-hand side)` pair in `view`: a `let <pattern> = <expr>;` and a
+/// `for <pattern> in <expr>` (which `if let`/`while let` also match, since both write
+/// `let <pattern> = <expr>`). Scanned with a bracket-depth counter, so a `;` or an `=` inside
+/// the pattern's own brackets does not end it early. Mirrors `port/port-status`'s
+/// `_find_bindings`.
+fn find_bindings(view: &str) -> Vec<(String, String)> {
+    let chars: Vec<char> = view.chars().collect();
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let is_word_start =
+            i == 0 || !(chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_');
+        let keyword = if is_word_start
+            && chars.len() > i + 3
+            && chars[i..i + 3] == ['l', 'e', 't']
+            && chars[i + 3].is_whitespace()
+        {
+            Some("let")
+        } else if is_word_start
+            && chars.len() > i + 3
+            && chars[i..i + 3] == ['f', 'o', 'r']
+            && chars[i + 3].is_whitespace()
+        {
+            Some("for")
+        } else {
+            None
+        };
+        let Some(keyword) = keyword else {
+            i += 1;
+            continue;
+        };
+        let mut j = i + 4;
+        let pattern_start = j;
+        let mut depth = 0i64;
+        let mut stopped_at_separator = false;
+        while j < chars.len() {
+            match chars[j] {
+                '(' | '[' | '{' | '<' => depth += 1,
+                ')' | ']' | '}' | '>' => depth -= 1,
+                _ => {}
+            }
+            if depth <= 0 {
+                if keyword == "let" && chars[j] == '=' && chars.get(j + 1) != Some(&'=') {
+                    stopped_at_separator = true;
+                    break;
+                }
+                if keyword == "for"
+                    && chars[j] == 'i'
+                    && chars.get(j + 1) == Some(&'n')
+                    && chars.get(j + 2).is_some_and(|c| c.is_whitespace())
+                    && chars
+                        .get(j.wrapping_sub(1))
+                        .is_some_and(|c| c.is_whitespace())
+                {
+                    stopped_at_separator = true;
+                    break;
+                }
+                if chars[j] == ';' || chars[j] == '{' {
+                    break;
+                }
+            }
+            j += 1;
+        }
+        if !stopped_at_separator {
+            i += 4;
+            continue;
+        }
+        let pattern: String = chars[pattern_start..j].iter().collect();
+        let rhs_start = if keyword == "let" { j + 1 } else { j + 3 };
+        let mut k = rhs_start.min(chars.len());
+        depth = 0;
+        while k < chars.len() {
+            match chars[k] {
+                '(' | '[' | '{' if keyword == "let" => depth += 1,
+                ')' | ']' | '}' if keyword == "let" => depth -= 1,
+                '(' | '[' => depth += 1,
+                ')' | ']' => depth -= 1,
+                _ => {}
+            }
+            if depth <= 0 && (chars[k] == ';' || (keyword == "for" && chars[k] == '{')) {
+                break;
+            }
+            k += 1;
+        }
+        let rhs: String = chars[rhs_start.min(chars.len())..k.min(chars.len())]
+            .iter()
+            .collect();
+        out.push((pattern, rhs));
+        i = k.max(i + 4);
+    }
+    out
+}
+
+/// Every identifier holding a value the oracle produced: a name bound by a `let` or a `for`
+/// whose right-hand side names an oracle entry point, plus the oracle names themselves. Mirrors
+/// `port/port-status`'s `tainted_identifiers`, one level deep and iterated to the same small
+/// fixed point.
+fn tainted_identifiers(view: &str, oracle: &HashSet<String>) -> HashSet<String> {
+    let mut tainted: HashSet<String> = oracle.clone();
+    let bindings = find_bindings(view);
+    for _ in 0..4 {
+        let before = tainted.len();
+        for (pattern, rhs) in &bindings {
+            let reaches_oracle =
+                names_oracle_path(rhs) || own_identifiers(rhs).iter().any(|n| tainted.contains(n));
+            if !reaches_oracle {
+                continue;
+            }
+            for name in own_identifiers(pattern) {
+                tainted.insert(name);
+            }
+        }
+        if tainted.len() == before {
+            break;
+        }
+    }
+    tainted.remove("mut");
+    tainted.remove("in");
+    tainted
+}
+
+/// The comparison calls a proof may make, mirroring `port/port-status`'s `COMPARISON_CALL_RE`.
+const COMPARISON_CALLS: [&str; 8] = [
+    "compare_unit_at",
+    "compare_unit",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert_eq",
+    "debug_assert_ne",
+    "debug_assert",
+    "assert",
+];
+
+/// The comma-separated top-level arguments of the call whose `(` is at `open`. Mirrors
+/// `port/port-status`'s `split_call_arguments`.
+fn split_call_arguments(chars: &[char], open: usize) -> Vec<String> {
+    let mut depth = 0i64;
+    let mut args: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut i = open;
+    while i < chars.len() {
+        let c = chars[i];
+        if matches!(c, '(' | '[' | '{') {
+            depth += 1;
+            if depth == 1 {
+                i += 1;
+                continue;
+            }
+        } else if matches!(c, ')' | ']' | '}') {
+            depth -= 1;
+            if depth == 0 {
+                args.push(current);
+                return args;
+            }
+        }
+        if depth == 1 && c == ',' {
+            args.push(std::mem::take(&mut current));
+            i += 1;
+            continue;
+        }
+        current.push(c);
+        i += 1;
+    }
+    args.push(current);
+    args
+}
+
+/// True if `body` compares a value the oracle produced against a value this port computed.
+/// Mirrors `port/port-status`'s `has_differential_comparison`, including its stated limit: a
+/// hand-transcribed named constant in the test's own scope is not distinguishable from the
+/// ported module's own `pub const`, and still counts here.
+pub fn has_differential_comparison(body: &str, oracle: &HashSet<String>) -> bool {
+    let view = comparison_view(body);
+    let tainted = tainted_identifiers(&view, oracle);
+    let chars: Vec<char> = view.chars().collect();
+    let mut has_comparison = false;
+    let mut i = 0usize;
+    while i < chars.len() {
+        let mut matched: Option<usize> = None;
+        for name in COMPARISON_CALLS {
+            let name_chars: Vec<char> = name.chars().collect();
+            if i + name_chars.len() > chars.len() {
+                continue;
+            }
+            if chars[i..i + name_chars.len()] != name_chars[..] {
+                continue;
+            }
+            if i > 0 && (chars[i - 1].is_ascii_alphanumeric() || chars[i - 1] == '_') {
+                continue;
+            }
+            let mut j = i + name_chars.len();
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '!' {
+                j += 1;
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+            }
+            if j < chars.len() && chars[j] == '(' {
+                matched = Some(j);
+            }
+            break;
+        }
+        let Some(open) = matched else {
+            i += 1;
+            continue;
+        };
+        has_comparison = true;
+        let args = split_call_arguments(&chars, open);
+        let oracle_args: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, arg)| own_identifiers(arg).iter().any(|n| tainted.contains(n)))
+            .map(|(index, _)| index)
+            .collect();
+        let ported_args: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, arg)| {
+                value_identifiers(arg)
+                    .iter()
+                    .any(|n| !tainted.contains(n) && !LITERAL_WORD_TOKENS.contains(&n.as_str()))
+            })
+            .map(|(index, _)| index)
+            .collect();
+        for a in &oracle_args {
+            for b in &ported_args {
+                if a != b {
+                    return true;
+                }
+                // Same argument: it counts only if that argument itself makes a call, which is
+                // what distinguishes `assert!(agrees(ported, oracle))` from
+                // `assert_eq!(oracle[index], 5)`.
+                if argument_makes_a_call(&args[*a]) {
+                    return true;
+                }
+            }
+        }
+        i = open + 1;
+    }
+    if !has_comparison {
+        return false;
+    }
+    // The element-wise shape, where the pairing happens in the loop header rather than in the
+    // comparison: `for (got, want) in oracle.iter().zip(PORTED) { assert_eq!(got, want); }`.
+    // Both loop variables are oracle-tainted, so the comparison above sees no ported side -- but
+    // the `for`'s own right-hand side names both an oracle value and a value this port computed,
+    // which is the comparison, one level up.
+    find_bindings(&view).iter().any(|(_pattern, rhs)| {
+        own_identifiers(rhs).iter().any(|n| tainted.contains(n))
+            && value_identifiers(rhs)
+                .iter()
+                .any(|n| !tainted.contains(n) && !LITERAL_WORD_TOKENS.contains(&n.as_str()))
+    })
+}
+
+/// An identifier (or a path's last segment) followed by `(` in one comparison argument. Mirrors
+/// `port/port-status`'s `CALL_IN_ARGUMENT_RE`; see `has_differential_comparison` for the one
+/// case it decides.
+fn argument_makes_a_call(arg: &str) -> bool {
+    let chars: Vec<char> = arg.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if chars[i].is_ascii_alphabetic() || chars[i] == '_' {
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let mut j = i;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if chars.get(j) == Some(&'(') {
+                return true;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// The `port/manifest.tsv` `path` cell this row names as its enclosing unit, if its `proof path`
+/// cell takes the `enclosing: <path>` form. Mirrors `port/port-status`'s `enclosing_unit_of`.
+pub fn enclosing_unit_of(row: &ManifestRow) -> Option<String> {
+    let cell = row.proof_path.trim();
+    let rest = cell.strip_prefix("enclosing:")?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
+    }
+}
+
+/// True if this row's `enclosing: <path>` cell can be honoured: it names another in-scope row
+/// whose own proof path is not itself an `enclosing:` cell. Mirrors `port/port-status`'s
+/// `enclosing_row_error` (a chain is refused, so a cycle is impossible).
+fn enclosing_row<'a>(row: &ManifestRow, all_rows: &'a [ManifestRow]) -> Option<&'a ManifestRow> {
+    let named = enclosing_unit_of(row)?;
+    if named == row.path.trim() {
+        return None;
+    }
+    let target = all_rows.iter().find(|r| r.path.trim() == named)?;
+    if !target.in_scope || enclosing_unit_of(target).is_some() {
+        return None;
+    }
+    // Same `target crate`: R19's fallback is "proven through its *enclosing file's* exported
+    // surface", and a unit in another crate is not that. See `port/port-status`'s
+    // `enclosing_row_error` for why this is a floor rather than the whole of that wording.
+    let own_crate = row.target_crate.trim();
+    let target_crate = target.target_crate.trim();
+    if !own_crate.is_empty() && !target_crate.is_empty() && own_crate != target_crate {
+        return None;
+    }
+    Some(target)
 }
 
 fn walk_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -841,7 +1498,18 @@ pub fn proof_present(row: &ManifestRow, target_path: &Path, tree: &Path) -> bool
 /// its proof is present. Everything else (`drafted`, `not-started`) collapses to `false` here —
 /// this command only ever needs the `ported` predicate (task.md: "the stage is fully ported
 /// when every one of those rows has a derived status of `ported`"), never the three-way status.
-pub fn row_is_ported(row: &ManifestRow, tree: &Path, mod_reachable: &HashSet<PathBuf>) -> bool {
+///
+/// `all_rows` is the whole manifest, which the `enclosing: <path>` proof-path form needs: such a
+/// row carries no `// PROOF:` marker of its own and is `ported` exactly when the in-scope row it
+/// names is (R19's own fallback; docs/PORTING.md, "Decisions recorded on 2026-11-25"). A cell
+/// that cannot be honoured — naming no row, an out-of-scope row, itself, or a row whose own
+/// proof path is another `enclosing:` cell — is `false`, never `true`.
+pub fn row_is_ported(
+    row: &ManifestRow,
+    all_rows: &[ManifestRow],
+    tree: &Path,
+    mod_reachable: &HashSet<PathBuf>,
+) -> bool {
     let target_module_cell = row.target_module.trim();
     if target_module_cell.is_empty() {
         return false;
@@ -860,6 +1528,12 @@ pub fn row_is_ported(row: &ManifestRow, tree: &Path, mod_reachable: &HashSet<Pat
     if !mod_reachable.contains(&target_path) {
         return false;
     }
+    if enclosing_unit_of(row).is_some() {
+        return match enclosing_row(row, all_rows) {
+            Some(enclosing) => row_is_ported(enclosing, all_rows, tree, mod_reachable),
+            None => false,
+        };
+    }
     proof_present(row, &target_path, tree)
 }
 
@@ -870,10 +1544,14 @@ pub fn row_is_ported(row: &ManifestRow, tree: &Path, mod_reachable: &HashSet<Pat
 /// not a stage this run has actually proven anything about.
 pub fn stage_fully_ported(
     rows: &[&ManifestRow],
+    all_rows: &[ManifestRow],
     tree: &Path,
     mod_reachable: &HashSet<PathBuf>,
 ) -> bool {
-    !rows.is_empty() && rows.iter().all(|r| row_is_ported(r, tree, mod_reachable))
+    !rows.is_empty()
+        && rows
+            .iter()
+            .all(|r| row_is_ported(r, all_rows, tree, mod_reachable))
 }
 
 // --- Tier (tolerance) ---------------------------------------------------------------------
@@ -1342,7 +2020,7 @@ pub fn compare_stage_outputs(
 
     for stage in stages {
         let stage_rows = rows_for_stage(&rows, &stage);
-        let fully_ported = stage_fully_ported(&stage_rows, tree, &mod_reachable);
+        let fully_ported = stage_fully_ported(&stage_rows, &rows, tree, &mod_reachable);
         if !fully_ported {
             lines.push(StageLine {
                 stage,
@@ -1735,6 +2413,7 @@ mod tests {
         let rows: Vec<&ManifestRow> = Vec::new();
         assert!(!stage_fully_ported(
             &rows,
+            &[],
             Path::new("/nonexistent"),
             &HashSet::new()
         ));
@@ -1934,7 +2613,7 @@ mod tests {
         r.target_module = "crates/fixture-crate/src/mod_chain/leaf.rs".to_string();
         r.proof_path = "proof/mod_chain_leaf".to_string();
         assert!(
-            row_is_ported(&r, &tree, &mod_reachable),
+            row_is_ported(&r, std::slice::from_ref(&r), &tree, &mod_reachable),
             "a module reached only through lib.rs -> mod_chain/mod.rs -> leaf.rs must derive \
              ported"
         );
@@ -1949,9 +2628,248 @@ mod tests {
         r.target_module = "crates/fixture-crate/src/tested_externally.rs".to_string();
         r.proof_path = "proof/tested_externally".to_string();
         assert!(
-            row_is_ported(&r, &tree, &mod_reachable),
+            row_is_ported(&r, std::slice::from_ref(&r), &tree, &mod_reachable),
             "a proof living under crates/fixture-crate/tests/ (not an inline #[cfg(test)] module) \
              must still be found"
+        );
+    }
+
+    // --- The differential-comparison rule and the `enclosing:` form (docs/PORTING.md,
+    // "Decisions recorded on 2026-11-25"), held to the same cases `port/port-status`'s own
+    // self-test holds its Python implementation to, so the two cannot drift -------------------
+
+    #[test]
+    fn has_differential_comparison_separates_an_oracle_comparison_from_a_transcribed_one() {
+        // The same list `port/port-status --self-test` holds its Python implementation to, in
+        // the same order. A case added to one must be added to the other: these two
+        // implementations of one rule are what keep `just compare-stages` and
+        // `just port-status` from disagreeing about whether a stage is fully ported.
+        let oracle: HashSet<String> = ["dumps", "proof_units", "path1_flags", "oracle_call"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cases: [(&str, bool, &str); 16] = [
+            (
+                "let expected: u32 = 0b111;\nassert_eq!(actual, expected);",
+                false,
+                "no oracle value is read at all",
+            ),
+            (
+                "let dump = dumps::read(\"x\");\nassert_eq!(dump.seam, \"psWipeTower\");",
+                false,
+                "the oracle value is compared only against a literal",
+            ),
+            (
+                "let oracle = path1_flags();\nassert_eq!(oracle.len(), PORTED_FLAGS.len());",
+                true,
+                "an oracle value against a value the module computed",
+            ),
+            (
+                "let (a, b) = oracle_call();\nassert_eq!(PORTED, a);\nassert_eq!(OTHER, b);",
+                true,
+                "a tuple binding off one oracle call",
+            ),
+            (
+                "let oracle = path1_flags();\nassert!(agrees(ported, oracle));",
+                true,
+                "both sides inside one argument that makes a call",
+            ),
+            (
+                "let oracle = dumps::sep();\nassert_eq!(oracle, '\\n');",
+                false,
+                "a char literal is blanked, so it does not read as a value",
+            ),
+            (
+                "let oracle = path1_flags();\nassert_eq!(oracle, vec![1, 0, 1]);",
+                false,
+                "a macro name is not a value this port computed",
+            ),
+            (
+                "let dump = dumps::read(\"x\");\n\
+                 assert_eq!(dump.seam, String::from(\"psWipeTower\"));",
+                false,
+                "neither end of a path is a value this port computed",
+            ),
+            (
+                "let dump = dumps::read(\"x\");\nassert_eq!(dump.seam, format!(\"psWipeTower\"));",
+                false,
+                "a macro name is not a value, however it is spelled",
+            ),
+            (
+                "let oracle = path1_flags();\nassert_eq!(oracle, Vec::from([1, 0, 1]));",
+                false,
+                "an associated function on a type is not a value either",
+            ),
+            (
+                "let oracle = path1_flags();\nassert_eq!(oracle, [1, 0, 1].to_vec());",
+                false,
+                "a method name reached through a dot is not a value",
+            ),
+            (
+                "let oracle = path1_flags();\nassert_eq!(oracle[index], 5);",
+                false,
+                "a loop variable in the same argument as the oracle value is not a second value",
+            ),
+            (
+                "let oracle = path1_flags();\n\
+                 for (got, want) in oracle.iter().zip(PORTED_FLAGS) { assert_eq!(got, want); }",
+                true,
+                "a `for` pattern off a tainted iterator carries the taint",
+            ),
+            (
+                "let oracle = slic3r_proof::proof_units::u::f();\nassert_eq!(ported(), oracle);",
+                true,
+                "a fully-qualified oracle path needs no `use` statement",
+            ),
+            (
+                "let oracle: [i64; 3] = path1_flags();\nassert_eq!(oracle, PORTED);",
+                true,
+                "a `;` inside the binding's own type does not end the pattern",
+            ),
+            (
+                "let oracle = path1_flags();\n\
+                 assert_eq!(oracle.iter().collect::<String>(), ported());",
+                true,
+                "a turbofish type argument is not the ported side, but `ported()` is",
+            ),
+        ];
+        for (body, want, why) in cases {
+            assert_eq!(
+                has_differential_comparison(body, &oracle),
+                want,
+                "{why}: {body:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn row_is_ported_agrees_with_port_status_on_every_ported_row_of_the_real_manifest() {
+        // The guarantee this whole mirror exists for, pinned against the real tree rather than a
+        // fixture: every row `port/port-status`'s `derive_row_status` derives as `ported` must
+        // be `ported` here too. A reviewer found the two disagreeing about exactly these rows
+        // (this module read a multi-line braced `use` one line at a time and so found no oracle
+        // name), and no fixture caught it because the fixtures pass a pre-built oracle set in.
+        //
+        // Read from the committed manifest's own `status` cell, which `port/inventory` writes
+        // from the text-visible half of the same rule, so this test does not need to be edited
+        // as the port advances: it holds whatever the manifest currently says is ported.
+        let tree = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let manifest = tree.join("port/manifest.tsv");
+        let rows = load_manifest_rows(&manifest).expect("the committed manifest reads");
+        let mod_reachable = mod_reachable_files(&tree);
+        let text = fs::read_to_string(&manifest).expect("the committed manifest reads");
+        let header: Vec<&str> = text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .split('\t')
+            .collect();
+        let status_col = header
+            .iter()
+            .position(|h| *h == "status")
+            .expect("the manifest has a status column");
+        let path_col = header
+            .iter()
+            .position(|h| *h == "path")
+            .expect("the manifest has a path column");
+        let ported_paths: Vec<String> = text
+            .lines()
+            .skip(1)
+            .filter_map(|line| {
+                let cells: Vec<&str> = line.split('\t').collect();
+                match (cells.get(path_col), cells.get(status_col)) {
+                    (Some(path), Some(&"ported")) => Some((*path).to_string()),
+                    _ => None,
+                }
+            })
+            .collect();
+        assert!(
+            !ported_paths.is_empty(),
+            "the committed manifest names no ported row, so this test would pass vacuously"
+        );
+        for path in &ported_paths {
+            let row = rows
+                .iter()
+                .find(|r| r.path.trim() == path.as_str())
+                .unwrap_or_else(|| panic!("no manifest row for {path}"));
+            assert!(
+                row_is_ported(row, &rows, &tree, &mod_reachable),
+                "port/manifest.tsv says {path} is ported but this module's row_is_ported says \
+                 it is not -- the two implementations of the derivation have diverged"
+            );
+        }
+    }
+
+    #[test]
+    fn oracle_names_reads_a_multi_line_braced_use_the_way_the_python_does() {
+        // The divergence a reviewer found: `cargo fmt` breaks a long import into this shape, and
+        // a line-at-a-time read of it collects none of the imported names, so this mirror
+        // silently disagreed with `port/port-status` about every proof written that way.
+        let found = oracle_names(
+            "use slic3r_proof::proof_units::object_id::{\n\
+             \x20   path1_wipe_tower_instance_id, path1_wipe_tower_object_id,\n\
+             };\n",
+        );
+        for wanted in [
+            "path1_wipe_tower_object_id",
+            "path1_wipe_tower_instance_id",
+            "object_id",
+        ] {
+            assert!(
+                found.contains(wanted),
+                "oracle_names missed {wanted:?} in a multi-line braced `use`; got {found:?}"
+            );
+        }
+        // And the bare words are not oracle names: a local merely called `dumps` taints nothing.
+        assert!(
+            oracle_names("let dumps = vec![1, 2];\nassert_eq!(dumps.len(), ported());").is_empty()
+        );
+    }
+
+    #[test]
+    fn row_is_ported_derives_an_enclosing_row_from_the_unit_it_names() {
+        let tree = fixture_tree_dir();
+        let mod_reachable = mod_reachable_files(&tree);
+
+        let mut enclosing = row("myExternalProofStage", true);
+        enclosing.path = "Ported/Enclosing.cpp".to_string();
+        enclosing.target_crate = "fixture-crate".to_string();
+        enclosing.target_module = "crates/fixture-crate/src/tested_externally.rs".to_string();
+        enclosing.proof_path = "proof/tested_externally".to_string();
+
+        let mut helper = row("myExternalProofStage", true);
+        helper.path = "Ported/Helper.hpp".to_string();
+        helper.target_crate = "fixture-crate".to_string();
+        helper.target_module = "crates/fixture-crate/src/enclosing_helper.rs".to_string();
+        helper.proof_path = "enclosing: Ported/Enclosing.cpp".to_string();
+
+        let rows = vec![enclosing.clone(), helper.clone()];
+        assert!(
+            row_is_ported(&helper, &rows, &tree, &mod_reachable),
+            "a row naming an enclosing unit whose own row is ported must derive ported, with no \
+             `// PROOF:` marker of its own"
+        );
+
+        // The enclosing row loses its own proof: the helper must follow it down.
+        let mut rows_unproven = rows.clone();
+        rows_unproven[0].proof_path = String::new();
+        assert!(
+            !row_is_ported(&rows_unproven[1], &rows_unproven, &tree, &mod_reachable),
+            "a row whose enclosing unit is not ported must not derive ported"
+        );
+
+        // A cell naming no row at all, and a chain, are both refused.
+        let mut dangling = helper.clone();
+        dangling.proof_path = "enclosing: NoSuchFile.hpp".to_string();
+        assert!(!row_is_ported(&dangling, &rows, &tree, &mod_reachable));
+
+        let mut chained_enclosing = enclosing.clone();
+        chained_enclosing.proof_path = "enclosing: Ported/Helper.hpp".to_string();
+        let chained = vec![chained_enclosing, helper.clone()];
+        assert!(
+            !row_is_ported(&chained[1], &chained, &tree, &mod_reachable),
+            "a chain of `enclosing:` cells is refused outright, which is also what makes a cycle \
+             impossible"
         );
     }
 
@@ -1967,6 +2885,11 @@ mod tests {
         r.target_crate = "fixture-crate".to_string();
         r.target_module = "crates/fixture-crate/src/tested_externally.rs".to_string();
         r.proof_path = String::new();
-        assert!(!row_is_ported(&r, &tree, &mod_reachable));
+        assert!(!row_is_ported(
+            &r,
+            std::slice::from_ref(&r),
+            &tree,
+            &mod_reachable
+        ));
     }
 }

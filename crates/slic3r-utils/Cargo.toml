@@ -9,7 +9,6 @@ slic3r-exception = { path = "../slic3r-exception" }
 slic3r-format = { path = "../slic3r-format" }
 slic3r-i18n = { path = "../slic3r-i18n" }
 slic3r-libslic3r = { path = "../slic3r-libslic3r" }
-slic3r-macutils = { path = "../slic3r-macutils" }
 slic3r-platform = { path = "../slic3r-platform" }
 slic3r-semver = { path = "../slic3r-semver" }
 

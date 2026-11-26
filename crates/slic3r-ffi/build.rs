@@ -1,8 +1,9 @@
 //! Compiles the vendored Clipper2 and admesh sources, the vendored (unmodified)
 //! `libnest2d.cpp`, this crate's own `cxx` glue (including the Boost.Polygon Voronoi unit), and
-//! the per-unit proof harness's two shims (task 31-proof-harness, plan step 18, R19:
-//! `cxx/proof_shims.cpp` and `cxx/include_vendored.cpp`) onto one shared `cxx_build::Build`, so
-//! every unit inherits the same flags (`-ffp-contract=off` above all). qhull is bound against the
+//! every per-unit proof shim under `cxx/proof_units/` (plan step 18, R19) onto one shared
+//! `cxx_build::Build`, so every unit inherits the same flags (`-ffp-contract=off` above all).
+//! The proof units are globbed, never listed -- see `discover_proof_units` and
+//! `src/proof_units.rs`. qhull is bound against the
 //! superbuild's installed copy instead of a vendored source -- `libqhullcpp.a`/
 //! `libqhullstatic_r.a` reach the link through the derived link line below; see the
 //! determination in `src/lib.rs`'s crate-doc table.
@@ -141,8 +142,9 @@ const LIBNEST2D_VENDORED_SOURCE: &str = "vendor/OrcaSlicer/deps_src/libnest2d/sr
 /// through `target_link_libraries(libslic3r PUBLIC ... libnest2d ...)`).
 ///
 /// That justification covers the TUs that, in the oracle build, actually depend on `libnest2d`:
-/// `libslic3r`'s own sources -- which includes task 31-proof-harness's
-/// `cxx/include_vendored.cpp`, since the vendored `.cpp` it includes *is* a `libslic3r` source
+/// `libslic3r`'s own sources -- which includes the proof-path-3 unit
+/// `cxx/proof_units/clipper_z_utils.cpp`, since the vendored `.cpp` it includes *is* a
+/// `libslic3r` source
 /// and the oracle compiles that file with exactly these four defines, so giving them to that TU
 /// moves it towards the oracle's command line rather than away from it.
 ///
@@ -186,6 +188,162 @@ fn is_disallowed_include(path: &Path) -> bool {
             .iter()
             .any(|prefix| path.starts_with(prefix)),
     }
+}
+
+/// One per-unit proof bridge (R19, plan step 18): the unit's name (its `port/manifest.tsv`
+/// `target module` file stem, which is also its Rust module name), the bridge `.rs` under
+/// `src/proof_units/` and the shim `.cpp` under `cxx/proof_units/`.
+struct ProofUnit {
+    name: String,
+    bridge_rs: PathBuf,
+    shim_cpp: PathBuf,
+    shim_h: PathBuf,
+}
+
+/// Every per-unit proof bridge present in the tree, found by globbing `src/proof_units/*.rs`
+/// rather than from a list any file names -- the point of the layout (`docs/PORTING.md`,
+/// "Decisions recorded on 2026-11-25"): a port task adds its unit by creating three new files,
+/// so hundreds of port branches built side by side never append to a shared list, a shared C++
+/// file or a shared `pub use` block.
+///
+/// Sorted by unit name, so the generated module list, the `cxx_build::bridges` argument and the
+/// compiled-source order are all deterministic and two builds of the same tree are identical.
+/// A bridge `.rs` with no matching `cxx/proof_units/<unit>.h` and `<unit>.cpp` is a named panic,
+/// not a silent skip: the bridge would otherwise compile to a generated translation unit calling
+/// a C++ function nothing defines, which is the undefined-symbol wall a hand-edited shared
+/// header already produced once (see PR #54's own measurement of it).
+fn discover_proof_units(crate_dir: &Path) -> Vec<ProofUnit> {
+    let bridge_dir = crate_dir.join("src/proof_units");
+    let shim_dir = crate_dir.join("cxx/proof_units");
+    // Both directories, not only their current contents: cargo re-runs this script when a
+    // directory's listing changes, which is what makes a newly added unit build without any
+    // other file being touched.
+    println!("cargo:rerun-if-changed={}", bridge_dir.display());
+    println!("cargo:rerun-if-changed={}", shim_dir.display());
+
+    let mut names: Vec<String> = Vec::new();
+    let entries = match fs::read_dir(&bridge_dir) {
+        Ok(entries) => entries,
+        Err(e) => panic!(
+            "slic3r-ffi build.rs: cannot read the per-unit proof bridge directory {:?}: {e}",
+            bridge_dir
+        ),
+    };
+    for entry in entries {
+        let path = entry
+            .unwrap_or_else(|e| panic!("slic3r-ffi build.rs: reading {:?}: {e}", bridge_dir))
+            .path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_else(|| panic!("slic3r-ffi build.rs: non-utf-8 bridge file name {:?}", path))
+            .to_string();
+        // The unit name is a Rust module name and a C++ namespace component, so it is held to
+        // the intersection of both: lower-case ASCII, digits and underscores, starting with a
+        // letter. A name that is not (`Object-ID.rs`, `mod.rs`) would otherwise fail much later,
+        // inside the generated module list or the generated C++, with a confusing error.
+        let valid = name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !valid {
+            panic!(
+                "slic3r-ffi build.rs: {:?} is not a valid proof-unit name -- a file under \
+                 src/proof_units/ must be named <unit>.rs, where <unit> is the unit's \
+                 port/manifest.tsv 'target module' file stem (lower-case ASCII, digits and \
+                 underscores, starting with a letter)",
+                path
+            );
+        }
+        names.push(name);
+    }
+    // The shim directory is globbed too, so an orphan there is a named failure rather than a
+    // file that is silently never compiled: a port task that writes its two C++ files and
+    // forgets the bridge would otherwise get an unresolved-name error from its own test, with
+    // nothing pointing at the missing file. The bridge-without-shim direction is checked below.
+    let mut shim_names: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir(&shim_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("cpp") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                shim_names.push(stem.to_string());
+            }
+        }
+    }
+    for stem in &shim_names {
+        if !names.contains(stem) {
+            panic!(
+                "slic3r-ffi build.rs: {:?} has no bridge at {:?}. A proof unit is exactly three \
+                 files: cxx/proof_units/<unit>.h, cxx/proof_units/<unit>.cpp and \
+                 src/proof_units/<unit>.rs -- without the bridge the shim is never compiled and \
+                 nothing can call it.",
+                shim_dir.join(format!("{stem}.cpp")),
+                bridge_dir.join(format!("{stem}.rs"))
+            );
+        }
+    }
+    names.sort();
+
+    names
+        .into_iter()
+        .map(|name| {
+            let unit = ProofUnit {
+                bridge_rs: bridge_dir.join(format!("{name}.rs")),
+                shim_cpp: shim_dir.join(format!("{name}.cpp")),
+                shim_h: shim_dir.join(format!("{name}.h")),
+                name,
+            };
+            for required in [&unit.shim_cpp, &unit.shim_h] {
+                if !required.is_file() {
+                    panic!(
+                        "slic3r-ffi build.rs: the proof unit '{}' has a bridge at {:?} but no \
+                         {:?}. A proof unit is exactly three files: \
+                         cxx/proof_units/<unit>.h, cxx/proof_units/<unit>.cpp and \
+                         src/proof_units/<unit>.rs.",
+                        unit.name, unit.bridge_rs, required
+                    );
+                }
+            }
+            unit
+        })
+        .collect()
+}
+
+/// A vendored `src/libslic3r/` file a shim translation unit `#include`s, so `cargo` rebuilds the
+/// shim when the pinned source it reads changes. Read out of the shim's own `#include "..."`
+/// lines rather than from a list this script keeps: a proof-path-3 shim `#include`s the vendored
+/// `.cpp` whole, and a proof-path-1 shim `#include`s the vendored header its symbols are
+/// declared in, so the dependency is always written in the shim itself.
+fn vendored_includes_of(shim_cpp: &Path, libslic3r_src_dir: &Path) -> Vec<PathBuf> {
+    let Ok(text) = fs::read_to_string(shim_cpp) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_start();
+        let Some(rest) = line.strip_prefix("#include") else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = rest.find('"') else {
+            continue;
+        };
+        let included = &rest[..end];
+        let candidate = libslic3r_src_dir.join(included);
+        if candidate.is_file() {
+            out.push(candidate);
+        }
+    }
+    out
 }
 
 /// Finds every line in `content` containing `needle` and, for each, collects the following
@@ -361,11 +519,9 @@ fn main() {
         "cxx/voronoi_shim.h",
         "cxx/voronoi_glue.cc",
         "src/voronoi.rs",
-        // task 31-proof-harness's two proof translation units and their bridge.
-        "cxx/proof_shims.h",
-        "cxx/proof_shims.cpp",
-        "cxx/include_vendored.cpp",
-        "src/proof.rs",
+        // The per-unit proof bridges' own module file. Every unit under the two directories it
+        // lists is found by `discover_proof_units` below, not named here.
+        "src/proof_units.rs",
     ] {
         println!("cargo:rerun-if-changed={}", crate_dir.join(glue).display());
     }
@@ -574,14 +730,55 @@ fn main() {
         }
     }
 
-    let mut build = cxx_build::bridges([
-        "src/clipper2.rs",
-        "src/admesh.rs",
-        "src/qhull.rs",
-        "src/libnest2d.rs",
-        "src/voronoi.rs",
-        "src/proof.rs",
-    ]);
+    // The per-unit proof bridges, globbed rather than listed (see `discover_proof_units`). The
+    // `#[path]`-ed `pub mod` line for each one is generated into OUT_DIR and `include!`d by
+    // `src/proof_units.rs`, so the Rust module list is derived from the same glob the C++ side
+    // is and the two can never disagree about which units exist.
+    let proof_units = discover_proof_units(&crate_dir);
+    let mut mods_rs = String::from(
+        "// Generated by crates/slic3r-ffi/build.rs from the files present in \
+         src/proof_units/.\n// Do not edit, and do not commit: `src/proof_units.rs` \
+         `include!`s this from OUT_DIR.\n",
+    );
+    for unit in &proof_units {
+        for watched in [&unit.bridge_rs, &unit.shim_cpp, &unit.shim_h] {
+            println!("cargo:rerun-if-changed={}", watched.display());
+        }
+        for vendored in vendored_includes_of(&unit.shim_cpp, &libslic3r_src_dir) {
+            println!("cargo:rerun-if-changed={}", vendored.display());
+        }
+        mods_rs.push_str(&format!(
+            "#[path = {:?}]\npub mod {};\n",
+            unit.bridge_rs.to_str().expect("utf-8 workspace path"),
+            unit.name
+        ));
+    }
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("cargo always sets OUT_DIR"));
+    fs::write(out_dir.join("proof_units_mods.rs"), &mods_rs)
+        .expect("writing the generated proof-unit module list into OUT_DIR");
+    println!(
+        "slic3r-ffi build.rs: {} per-unit proof bridge(s): {}",
+        proof_units.len(),
+        proof_units
+            .iter()
+            .map(|u| u.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    let mut bridge_paths: Vec<PathBuf> = vec![
+        PathBuf::from("src/clipper2.rs"),
+        PathBuf::from("src/admesh.rs"),
+        PathBuf::from("src/qhull.rs"),
+        PathBuf::from("src/libnest2d.rs"),
+        PathBuf::from("src/voronoi.rs"),
+    ];
+    bridge_paths.extend(
+        proof_units
+            .iter()
+            .map(|u| PathBuf::from(format!("src/proof_units/{}.rs", u.name))),
+    );
+    let mut build = cxx_build::bridges(&bridge_paths);
     // `-ffp-contract=off`: not a preference. The library this crate links and the one
     // `oracle/build-libslic3r` builds are the normative oracle for every per-unit and per-stage
     // proof only when both carry this flag (`just port-check`'s drift check fails the build
@@ -607,9 +804,10 @@ fn main() {
         .file(crate_dir.join("cxx/admesh_glue.cc"))
         .file(crate_dir.join("cxx/qhull_glue.cc"))
         .file(crate_dir.join("cxx/libnest2d_glue.cc"))
-        .file(crate_dir.join("cxx/voronoi_glue.cc"))
-        .file(crate_dir.join("cxx/proof_shims.cpp"))
-        .file(crate_dir.join("cxx/include_vendored.cpp"));
+        .file(crate_dir.join("cxx/voronoi_glue.cc"));
+    for unit in &proof_units {
+        build.file(&unit.shim_cpp);
+    }
     for src in CLIPPER2_VENDORED_SOURCES
         .iter()
         .chain(ADMESH_VENDORED_SOURCES)
@@ -617,17 +815,12 @@ fn main() {
     {
         build.file(workspace_root.join(src));
     }
-    // The vendored libslic3r files task 31-proof-harness's two proof units reach: proof path 3
-    // `#include`s `ClipperZUtils.cpp` outright, so a change to either file (or to the headers the
-    // shims call through) must rebuild this crate.
-    for rerun in [
-        libslic3r_src_dir.join("ObjectID.hpp"),
-        libslic3r_src_dir.join("ObjectID.cpp"),
-        libslic3r_src_dir.join("ClipperZUtils.hpp"),
-        libslic3r_src_dir.join("ClipperZUtils.cpp"),
-    ] {
-        println!("cargo:rerun-if-changed={}", rerun.display());
-    }
+    // The vendored libslic3r files the proof units reach are not listed here: each unit's
+    // `#include "..."` lines are read by `vendored_includes_of` above and turned into
+    // `cargo:rerun-if-changed` there, so a proof-path-3 unit that `#include`s a vendored `.cpp`
+    // whole, and a proof-path-1 unit that `#include`s the header its symbols are declared in,
+    // both rebuild when that pinned source changes without this file naming either one.
+    //
     // One archive for every source on the shared `Build`: this crate's own Clipper2/admesh/
     // libnest2d compilations, its four bridge glue units and the proof harness's two shims all
     // need the same flags, so they are one `cc::Build` and one output archive rather than several

@@ -1,0 +1,19 @@
+#pragma once
+
+// Declarations only (see cxx/clipper2_shim.h's comment for why this crate always splits the
+// cxx-generated header from the hand-written declarations file). `cxx_build::bridges` generates
+// this header's counterpart at <crate-name>/src/proof_units/libslic3r.rs.h on the include path
+// it sets up, and `cxx/proof_units/libslic3r.cpp` is the one translation unit that defines the
+// function below.
+#include "slic3r-ffi/src/proof_units/libslic3r.rs.h"
+
+namespace slic3r_ffi {
+namespace proof_units {
+namespace libslic3r {
+
+double path1_scaling_factor();
+double path2_unscale_double(int64_t scaled);
+
+} // namespace libslic3r
+} // namespace proof_units
+} // namespace slic3r_ffi

@@ -1,9 +1,9 @@
 task	unit count	line sum	unit paths
 foundation-01	4	932	CommonDefs.hpp, Exception.hpp, FilamentMixerModel.hpp, I18N.hpp
-foundation-02	4	1017	Int128.hpp, LifecycleEvents.hpp, MacUtils.hpp, MutablePriorityQueue.hpp
-foundation-03	4	474	ObjectID.cpp, ObjectID.hpp, PrintConfigConstants.hpp, Technologies.hpp, clonable_ptr.hpp
-foundation-04	4	718	enum_bitmask.hpp, format.hpp, libslic3r.cpp, libslic3r.h, Execution/Execution.hpp
-foundation-05	4	1517	Execution/ExecutionSeq.hpp, Execution/ExecutionTBB.hpp, MTUtils.hpp, Point.cpp, Point.hpp
+foundation-02	4	1250	Int128.hpp, LifecycleEvents.hpp, MutablePriorityQueue.hpp, ObjectID.cpp, ObjectID.hpp
+foundation-03	4	322	PrintConfigConstants.hpp, Technologies.hpp, clonable_ptr.hpp, enum_bitmask.hpp
+foundation-04	4	714	format.hpp, libslic3r.cpp, libslic3r.h, Execution/Execution.hpp, Execution/ExecutionSeq.hpp
+foundation-05	3	1430	Execution/ExecutionTBB.hpp, MTUtils.hpp, Point.cpp, Point.hpp
 foundation-06	1	3264	Utils.hpp, utils.cpp
 foundation-07	2	684	BoundingBox.cpp, BoundingBox.hpp, BrimEarsPoint.hpp
 foundation-08	1	5358	Config.cpp, Config.hpp

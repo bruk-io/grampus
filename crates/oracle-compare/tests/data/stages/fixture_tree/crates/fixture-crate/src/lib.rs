@@ -17,3 +17,7 @@ pub mod mod_chain;
 // inside this file, the other half of `proof_present`'s own two search locations that
 // `ported_seam.rs` alone never exercises.
 pub mod tested_externally;
+
+// Reached, holds no `todo!()`/`unimplemented!()`, and carries no proof of its own: the
+// `enclosing: <path>` form's own fixture (see `enclosing_helper.rs`).
+pub mod enclosing_helper;
