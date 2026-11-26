@@ -14,8 +14,8 @@
 
 #[cxx::bridge(namespace = "slic3r_ffi::proof_units::print_config")]
 mod ffi {
-    /// One `ConfigOptionDef::enum_keys_map` entry (`Config.hpp:2356` / `t_config_enum_values`,
-    /// `std::map<std::string, int>`).
+    /// One `ConfigOptionDef::enum_keys_map` entry (`Config.hpp:2619` for the field, `Config.hpp:2072`
+    /// for the `t_config_enum_values` typedef it points at, `std::map<std::string, int>`).
     struct OracleEnumKeyValue {
         name: String,
         value: i32,
