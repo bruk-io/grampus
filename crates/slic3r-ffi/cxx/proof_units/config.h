@@ -39,6 +39,21 @@ rust::String path3_serialize_float(double value);
 ProofDeserializeFloatResult path3_deserialize_float(rust::Str value);
 ProofDeserializeIntResult path3_deserialize_int(rust::Str value);
 
+// `std::istringstream >> double` on its own, seeded with a sentinel the caller can recognise.
+// `ConfigOptionFloat::deserialize` (`Config.hpp:844-854`) extracts into a *local* `double` and
+// assigns the option only when `!iss.fail()`, so `path3_deserialize_float` above cannot observe
+// what a failing extraction assigned -- and the underflow (`ERANGE`) cases are exactly the ones
+// that fail *with* a value. This exposes the extraction itself, which is what the port's
+// `cpp_istream_extract_f64` claims to reproduce, in the same translation unit and locale as the
+// vendored code above.
+ProofIstreamExtractDoubleResult path3_istream_extract_double(rust::Str value);
+
+// `ConfigOptionPoint::deserialize`/`ConfigOptionPoint3::deserialize` (`Config.hpp:1557-1567`
+// and `:1686-1696`), whose `sscanf(" %lf , %lf %c", ...)` is `strtod` and not the `istream`
+// extraction above -- a different acceptance grammar, measured rather than assumed.
+ProofDeserializePointResult path3_deserialize_point(rust::Str value);
+ProofDeserializePoint3Result path3_deserialize_point3(rust::Str value);
+
 } // namespace config
 } // namespace proof_units
 } // namespace slic3r_ffi

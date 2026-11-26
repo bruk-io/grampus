@@ -20,6 +20,21 @@ mod ffi {
         ok: bool,
         value: i32,
     }
+    struct ProofIstreamExtractDoubleResult {
+        fail: bool,
+        value: f64,
+    }
+    struct ProofDeserializePointResult {
+        ok: bool,
+        x: f64,
+        y: f64,
+    }
+    struct ProofDeserializePoint3Result {
+        ok: bool,
+        x: f64,
+        y: f64,
+        z: f64,
+    }
 
     unsafe extern "C++" {
         include!("slic3r-ffi/cxx/proof_units/config.h");
@@ -47,14 +62,27 @@ mod ffi {
         fn path3_serialize_float(value: f64) -> String;
         fn path3_deserialize_float(value: &str) -> ProofDeserializeFloatResult;
         fn path3_deserialize_int(value: &str) -> ProofDeserializeIntResult;
+
+        // `std::istringstream >> double` by itself. `ConfigOptionFloat::deserialize` extracts
+        // into a local and assigns the option only on success, so it cannot observe what a
+        // *failing* extraction assigned -- and underflow (`ERANGE`) is exactly a failure that
+        // carries a value. See `cxx/proof_units/config.h` for the full reason.
+        fn path3_istream_extract_double(value: &str) -> ProofIstreamExtractDoubleResult;
+
+        // `ConfigOptionPoint::deserialize`/`ConfigOptionPoint3::deserialize`, whose `sscanf`
+        // `%lf` conversion is `strtod` -- a wider grammar than the `istream` extraction above.
+        fn path3_deserialize_point(value: &str) -> ProofDeserializePointResult;
+        fn path3_deserialize_point3(value: &str) -> ProofDeserializePoint3Result;
     }
 }
 
 pub use ffi::{
-    path3_deserialize_float, path3_deserialize_int, path3_escape_ampersand,
-    path3_escape_string_cstyle, path3_escape_strings_cstyle, path3_is_end_of_gcode_line,
-    path3_is_end_of_line, path3_is_end_of_word, path3_is_whitespace,
+    path3_deserialize_float, path3_deserialize_int, path3_deserialize_point,
+    path3_deserialize_point3, path3_escape_ampersand, path3_escape_string_cstyle,
+    path3_escape_strings_cstyle, path3_is_end_of_gcode_line, path3_is_end_of_line,
+    path3_is_end_of_word, path3_is_whitespace, path3_istream_extract_double,
     path3_normalize_cli_bool_value, path3_serialize_float, path3_unescape_string_cstyle,
     path3_unescape_strings_cstyle, ProofDeserializeFloatResult, ProofDeserializeIntResult,
+    ProofDeserializePoint3Result, ProofDeserializePointResult, ProofIstreamExtractDoubleResult,
     ProofUnescapeResult, ProofUnescapeStringsResult,
 };

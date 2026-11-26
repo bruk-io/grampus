@@ -102,6 +102,28 @@ ProofDeserializeIntResult path3_deserialize_int(rust::Str value) {
     return ProofDeserializeIntResult{ok, opt.value};
 }
 
+ProofIstreamExtractDoubleResult path3_istream_extract_double(rust::Str value) {
+    std::string cpp_value(value);
+    std::istringstream iss(cpp_value);
+    double extracted = -999.0;
+    iss >> extracted;
+    return ProofIstreamExtractDoubleResult{iss.fail(), extracted};
+}
+
+ProofDeserializePointResult path3_deserialize_point(rust::Str value) {
+    std::string cpp_value(value);
+    Slic3r::ConfigOptionPoint opt(Slic3r::Vec2d(-999.0, -999.0));
+    bool ok = opt.deserialize(cpp_value);
+    return ProofDeserializePointResult{ok, opt.value.x(), opt.value.y()};
+}
+
+ProofDeserializePoint3Result path3_deserialize_point3(rust::Str value) {
+    std::string cpp_value(value);
+    Slic3r::ConfigOptionPoint3 opt(Slic3r::Vec3d(-999.0, -999.0, -999.0));
+    bool ok = opt.deserialize(cpp_value);
+    return ProofDeserializePoint3Result{ok, opt.value.x(), opt.value.y(), opt.value.z()};
+}
+
 } // namespace config
 } // namespace proof_units
 } // namespace slic3r_ffi

@@ -260,10 +260,52 @@ fn cpp_hex_digit_value(b: u8) -> Option<u32> {
     }
 }
 
+// PORT SRC: external: IEEE 754-2008 binary64 -- the smallest positive subnormal is 2**-1074.
+const F64_MIN_SUBNORMAL_EXPONENT: i64 = -1074;
+// PORT SRC: external: IEEE 754-2008 binary64 -- the smallest positive normal value is 2**-1022.
+const F64_MIN_NORMAL_EXPONENT: i64 = -1022;
+// PORT SRC: external: IEEE 754-2008 binary64 -- the largest finite value's leading bit is 2**1023.
+const F64_MAX_FINITE_EXPONENT: i64 = 1023;
+// PORT SRC: external: IEEE 754-2008 binary64 -- the stored exponent is biased by 1023.
+const F64_EXPONENT_BIAS: i64 = 1023;
+// PORT SRC: external: IEEE 754-2008 binary64 -- the significand is 53 bits wide, implicit bit
+// included.
+const F64_SIGNIFICAND_BITS: i64 = 53;
+// PORT SRC: external: IEEE 754-2008 binary64 -- the stored significand occupies the low 52 bits.
+const F64_STORED_SIGNIFICAND_BITS: u32 = 52;
+// PORT SRC: external: IEEE 754-2008 binary64 -- the biased exponent field is 11 bits wide.
+const F64_EXPONENT_FIELD_MASK: u64 = 0x7ff;
+// PORT SRC: external: IEEE 754-2008 binary64 -- a quiet NaN sets every exponent bit and the
+// significand's leading bit.
+const F64_QUIET_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
+// PORT SRC: external: IEEE 754-2008 binary64 -- a NaN payload occupies the significand bits
+// below the quiet bit.
+const F64_NAN_PAYLOAD_MASK: u64 = 0x0007_ffff_ffff_ffff;
+// PORT SRC: external: IEEE 754-2008 binary64 -- the sign is the most significant bit, bit 63.
+const F64_SIGN_BIT_INDEX: u32 = 63;
+// PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- a hexadecimal-floating-point mantissa's
+// digits are base 16.
+const HEX_MANTISSA_BASE: u128 = 16;
+// PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- each hexadecimal digit after the point
+// scales the mantissa by a further 2**-4, i.e. four binary places per digit.
+const HEX_DIGIT_BITS: i64 = 4;
+// PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- a hex-float binary exponent after 'p'/'P' is
+// itself written in ordinary base-10 decimal digits.
+const DECIMAL_BASE: i64 = 10;
+
 /// `strtod`'s hex-float grammar (`[sign] "0x" hexdigits ["." hexdigits] [("p"|"P") [sign]
 /// digits]`), required to consume the whole of `buf` or the overall extraction fails -- see
 /// [`cpp_istream_extract_f64`].
-fn cpp_parse_hex_float(buf: &str) -> Option<f64> {
+///
+/// Returns the value and whether the literal is **exactly** representable as an `f64`, which is
+/// what the hex path's `ERANGE` (failbit) condition turns on: measured on this machine's own
+/// libc, `strtod` reports `ERANGE` for a hex literal whose result is subnormal or zero only when
+/// rounding to it lost something -- `"0x1p-1070"`, `"0x1p-1074"`, `"0x3p-1074"`, `"0x8p-1077"`
+/// and `"0x1.8p-1030"` all succeed with a subnormal result, while `"0x1.8p-1074"`,
+/// `"0x1.0000000000001p-1030"`, `"0x1p-1075"` and `"0x1p-20000"` all fail. That is a different
+/// rule from the decimal path's (see [`cpp_istream_extract_f64`]), so the two are decided
+/// separately.
+fn cpp_parse_hex_float(buf: &str) -> Option<(f64, bool)> {
     let bytes = buf.as_bytes();
     let mut i = 0usize;
     let mut negative = false;
@@ -278,32 +320,32 @@ fn cpp_parse_hex_float(buf: &str) -> Option<f64> {
         return None;
     }
     i += 2;
-    let mut mantissa: f64 = Default::default();
+    // The mantissa is accumulated as the exact integer its hexadecimal digits spell, so that the
+    // literal as a whole is rounded to an `f64` exactly once (see [`cpp_round_scaled_integer`]).
+    // Once that integer is full -- more than 32 hexadecimal digits -- a further digit only
+    // contributes a sticky low bit and a factor of 16 to the scale, which is round-to-odd and
+    // keeps that single final rounding correct.
+    let mut mantissa: u128 = 0;
+    let mut dropped_digits: i64 = 0;
     let mut any_digit = false;
     while i < bytes.len() {
         match cpp_hex_digit_value(bytes[i]) {
             Some(d) => {
-                // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- a hexadecimal-floating-point
-                // mantissa's digits are base 16.
-                mantissa = mantissa * 16.0 + d as f64;
+                cpp_push_hex_mantissa_digit(&mut mantissa, &mut dropped_digits, d);
                 i += 1;
                 any_digit = true;
             }
             None => break,
         }
     }
-    let mut frac_scale: i32 = 0;
+    let mut frac_scale: i64 = 0;
     if i < bytes.len() && bytes[i] == b'.' {
         i += 1;
         while i < bytes.len() {
             match cpp_hex_digit_value(bytes[i]) {
                 Some(d) => {
-                    // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- same base-16 mantissa
-                    // digit as the integer-part loop above.
-                    mantissa = mantissa * 16.0 + d as f64;
-                    // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- each hexadecimal digit
-                    // after the point scales the mantissa by a further 2**-4 (4 bits per digit).
-                    frac_scale -= 4;
+                    cpp_push_hex_mantissa_digit(&mut mantissa, &mut dropped_digits, d);
+                    frac_scale = frac_scale.saturating_sub(HEX_DIGIT_BITS);
                     i += 1;
                     any_digit = true;
                 }
@@ -314,7 +356,7 @@ fn cpp_parse_hex_float(buf: &str) -> Option<f64> {
     if !any_digit {
         return None;
     }
-    let mut exp: i32 = 0;
+    let mut exp: i64 = 0;
     // PORT SRC: external: ASCII (ISO/IEC 646) -- same case-folding bit as the 'x'/'X' check
     // above, here for 'p'/'P'.
     if i < bytes.len() && (bytes[i] | 0x20) == b'p' {
@@ -327,21 +369,135 @@ fn cpp_parse_hex_float(buf: &str) -> Option<f64> {
         let start = i;
         let mut e: i64 = 0;
         while i < bytes.len() && bytes[i].is_ascii_digit() {
-            // PORT SRC: external: ISO/IEC 9899:2018 6.4.4.2 -- the hex-float binary exponent
-            // after 'p'/'P' is itself written in ordinary base-10 decimal digits.
-            e = e * 10 + (bytes[i] - b'0') as i64;
+            // Saturating, so that a long run of exponent digits cannot wrap the accumulator: a
+            // generated case measured against the oracle, `"0x2p-10753241074"`, did exactly that
+            // and turned an underflow to zero into an infinity. Saturation itself is harmless,
+            // because every exponent anywhere near this magnitude gives an infinite or a zero
+            // result and only its sign still matters.
+            e = e
+                .saturating_mul(DECIMAL_BASE)
+                .saturating_add(i64::from(bytes[i] - b'0'));
             i += 1;
         }
         if i == start {
             return None;
         }
-        exp = if exp_neg { -(e as i32) } else { e as i32 };
+        exp = if exp_neg { -e } else { e };
     }
     if i != bytes.len() {
         return None;
     }
-    let value = mantissa * 2f64.powi(frac_scale + exp);
-    Some(if negative { -value } else { value })
+    let scale = frac_scale
+        .saturating_add(exp)
+        .saturating_add(dropped_digits.saturating_mul(HEX_DIGIT_BITS));
+    let value = cpp_round_scaled_integer(mantissa, scale);
+    let exact = cpp_hex_float_is_exact(mantissa, scale);
+    Some((if negative { -value } else { value }, exact))
+}
+
+/// Appends one hexadecimal mantissa digit to the exact integer `mantissa`, or -- once that
+/// integer is full -- counts the digit as a factor of 16 in `dropped_digits` and folds it into
+/// `mantissa`'s low bit instead. That is round-to-odd: it keeps exactly the information the one
+/// final rounding in [`cpp_round_scaled_integer`] needs to land where a single correctly rounded
+/// conversion of the whole literal would.
+fn cpp_push_hex_mantissa_digit(mantissa: &mut u128, dropped_digits: &mut i64, digit: u32) {
+    let room_for_one_more = (u128::MAX - (HEX_MANTISSA_BASE - 1)) / HEX_MANTISSA_BASE;
+    if *dropped_digits > 0 || *mantissa > room_for_one_more {
+        *dropped_digits = dropped_digits.saturating_add(1);
+        if digit != 0 {
+            *mantissa |= 1;
+        }
+    } else {
+        *mantissa = *mantissa * HEX_MANTISSA_BASE + u128::from(digit);
+    }
+}
+
+/// `mantissa * 2**scale`, with `mantissa` an exact integer, rounded to an `f64` exactly once
+/// (round half to even, as `strtod` and every other IEEE 754 conversion do).
+///
+/// **Review finding, fixed here, twice over.** The hexadecimal path used to compute its value as
+/// `mantissa * 2f64.powi(scale)` over an `f64` mantissa accumulated digit by digit, which was
+/// wrong in two independent ways, both measured through the `path3_istream_extract_double`
+/// bridge rather than argued:
+///
+/// * `f64::powi` computes a negative exponent as the reciprocal of the positive one, so any
+///   exponent below about -1024 made `2f64.powi` overflow to infinity and the reciprocal
+///   collapse to zero, losing every subnormal result: `"0x1p-1070"` is
+///   `7.9050503334599447e-323` in the oracle and was `0` here.
+/// * Accumulating the mantissa in an `f64` rounds at every digit, so a literal with more than 13
+///   hexadecimal digits was rounded repeatedly instead of once: `"0x30830832410741022"` is
+///   `55930347963232300000` in the oracle and was `55930347963232290000` here, one ULP out.
+///
+/// A normal result is now one correctly rounded integer-to-`f64` conversion followed by an exact
+/// scaling by a power of two, which cannot round again; a subnormal result is rounded in integer
+/// arithmetic instead, because scaling into the subnormal range after an `f64` conversion would
+/// round a second time and double rounding is not what the oracle does.
+fn cpp_round_scaled_integer(mantissa: u128, scale: i64) -> f64 {
+    if mantissa == 0 {
+        // PORT SRC: external: IEEE 754-2008 binary64 -- zero times any power of two is zero.
+        return 0.0;
+    }
+    let highest_set_bit = i64::from(u128::BITS - 1 - mantissa.leading_zeros());
+    if scale + highest_set_bit > F64_MAX_FINITE_EXPONENT {
+        return f64::INFINITY;
+    }
+    if scale + highest_set_bit < F64_MIN_SUBNORMAL_EXPONENT - 1 {
+        // PORT SRC: external: IEEE 754-2008 binary64 -- a magnitude below half the smallest
+        // positive subnormal rounds to zero.
+        return 0.0;
+    }
+    if scale + highest_set_bit >= F64_MIN_NORMAL_EXPONENT {
+        // A normal result: the conversion rounds once, and the two scalings are exact because
+        // each intermediate stays in the normal range (halving a negative scale can only move an
+        // intermediate *up*, towards the mantissa's own magnitude).
+        let half_scale = scale / 2;
+        return mantissa as f64
+            * cpp_exact_power_of_two(half_scale)
+            * cpp_exact_power_of_two(scale - half_scale);
+    }
+    // A subnormal result is a multiple of 2**-1074, so it is rounded here as an integer.
+    let dropped_bits = F64_MIN_SUBNORMAL_EXPONENT - scale;
+    let quotient = if dropped_bits <= 0 {
+        mantissa << (-dropped_bits) as u32
+    } else {
+        let dropped_bits = dropped_bits as u32;
+        let remainder = mantissa & ((1u128 << dropped_bits) - 1);
+        let half = 1u128 << (dropped_bits - 1);
+        let mut quotient = mantissa >> dropped_bits;
+        if remainder > half || (remainder == half && quotient & 1 == 1) {
+            quotient += 1;
+        }
+        quotient
+    };
+    // `quotient` is at most one more than a 52-bit integer here, so both the conversion and the
+    // multiplication by the smallest subnormal are exact.
+    quotient as f64 * f64::from_bits(1)
+}
+
+/// `2**exponent` as an exact `f64`, built from the bit pattern rather than from `f64::powi`,
+/// whose negative-exponent reciprocal is the trap [`cpp_round_scaled_integer`] documents. The
+/// exponent must be one a normal `f64` can hold, which every caller here guarantees.
+fn cpp_exact_power_of_two(exponent: i64) -> f64 {
+    debug_assert!(exponent >= F64_MIN_NORMAL_EXPONENT && exponent <= F64_MAX_FINITE_EXPONENT);
+    f64::from_bits(((exponent + F64_EXPONENT_BIAS) as u64) << F64_STORED_SIGNIFICAND_BITS)
+}
+
+/// Whether `mantissa * 2**scale` -- a hexadecimal float literal's exact value, with `mantissa`
+/// the integer its hexadecimal digits spell (round-to-odd past 32 digits, which can only make an
+/// already inexact literal read as inexact) -- is itself an `f64`, i.e. whether converting it
+/// loses nothing. A value is representable exactly when its lowest set bit is no lower than the
+/// smallest subnormal's, its highest set bit no higher than the largest finite value's, and the
+/// two within one significand of each other; the last is checked rather than assumed, because a
+/// 128-bit mantissa inside the other two bounds can still span more than a significand.
+fn cpp_hex_float_is_exact(mantissa: u128, scale: i64) -> bool {
+    if mantissa == 0 {
+        return true;
+    }
+    let lowest_set_bit = i64::from(mantissa.trailing_zeros());
+    let highest_set_bit = i64::from(u128::BITS - 1 - mantissa.leading_zeros());
+    scale + lowest_set_bit >= F64_MIN_SUBNORMAL_EXPONENT
+        && scale + highest_set_bit <= F64_MAX_FINITE_EXPONENT
+        && highest_set_bit - lowest_set_bit < F64_SIGNIFICAND_BITS
 }
 
 /// The character-collection loop of libc++'s `__num_get<char>::__stage2_float_loop`
@@ -411,28 +567,269 @@ fn cpp_collect_float_atoms(s: &str) -> String {
     buffer
 }
 
+/// `strtod`'s own matching rule -- the longest prefix of `s` that is a number -- as `sscanf`'s
+/// `%lf` conversion uses it (`ConfigOptionPoint::deserialize`, `Config.hpp:1562-1563`, and
+/// `ConfigOptionPoint3::deserialize`, `:1691-1692`). Returns the value and how many bytes it
+/// consumed, or `None` when no prefix is a number at all (a matching failure, which makes
+/// `sscanf` return fewer conversions than the format asks for).
+///
+/// This is deliberately **not** [`cpp_istream_extract_f64`]: an `istream` extraction collects a
+/// restricted atom set first and then requires the whole of it to parse, which rejects `"inf"`
+/// and `"nan"`, while `strtod` accepts both. The two acceptance grammars differ and the two
+/// call sites are proven separately (`path3_deserialize_float` against
+/// `path3_deserialize_point`).
+fn cpp_strtod_prefix(s: &str) -> Option<(f64, usize)> {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
+        i += 1;
+    }
+    let after_sign = i;
+    let lower_at = |k: usize| -> u8 {
+        if k < bytes.len() {
+            // PORT SRC: external: ASCII (ISO/IEC 646) -- the one bit that differs between an
+            // uppercase and a lowercase Latin letter's code point, as `cpp_parse_hex_float`
+            // already uses for its own 'x'/'X' and 'p'/'P' checks.
+            bytes[k] | 0x20
+        } else {
+            0
+        }
+    };
+
+    // "inf" / "infinity", and "nan" with an optional parenthesised n-char sequence: both are
+    // `strtod` subject sequences (ISO/IEC 9899:2018 7.22.1.3), and neither is an `istream` one.
+    if lower_at(i) == b'i' && lower_at(i + 1) == b'n' && lower_at(i + 2) == b'f' {
+        let short_form = b"inf";
+        let long_form = b"infinity";
+        let mut end = i + short_form.len();
+        if (i..i + long_form.len()).all(|k| lower_at(k) == long_form[k - i]) {
+            end = i + long_form.len();
+        }
+        let negative = bytes[0] == b'-';
+        return Some((
+            if negative {
+                f64::NEG_INFINITY
+            } else {
+                f64::INFINITY
+            },
+            end,
+        ));
+    }
+    if lower_at(i) == b'n' && lower_at(i + 1) == b'a' && lower_at(i + 2) == b'n' {
+        let mut end = i + b"nan".len();
+        let mut payload = 0u64;
+        if end < bytes.len() && bytes[end] == b'(' {
+            let mut k = end + 1;
+            while k < bytes.len() && (bytes[k].is_ascii_alphanumeric() || bytes[k] == b'_') {
+                k += 1;
+            }
+            if k < bytes.len() && bytes[k] == b')' {
+                // `strtod`'s `nan(n-char-sequence)` reads the sequence "in an
+                // implementation-defined manner" (ISO/IEC 9899:2018 7.22.1.3); measured on this
+                // machine's own libc, it is `strtoull` with base 0 and the result goes straight
+                // into the significand's low bits -- `"nan(1)"` is `7ff8000000000001`,
+                // `"nan(0x5)"` is `7ff8000000000005`.
+                payload = cpp_strtoull_base0_prefix(&s[end + 1..k]);
+                end = k + 1;
+            }
+        }
+        let mut bits = F64_QUIET_NAN_BITS | (payload & F64_NAN_PAYLOAD_MASK);
+        if bytes[0] == b'-' {
+            bits |= 1u64 << F64_SIGN_BIT_INDEX;
+        }
+        return Some((f64::from_bits(bits), end));
+    }
+
+    // Hexadecimal, but only when at least one hex digit follows the "0x": `strtod` on `"0x"`
+    // matches the single "0" and leaves the "x", which this reproduces by falling through.
+    let after_prefix = i + b"0x".len();
+    let hex = lower_at(i) == b'0'
+        && lower_at(i + 1) == b'x'
+        && (cpp_hex_digit_value(*bytes.get(after_prefix).unwrap_or(&0)).is_some()
+            || (bytes.get(after_prefix) == Some(&b'.')
+                && cpp_hex_digit_value(*bytes.get(after_prefix + 1).unwrap_or(&0)).is_some()));
+    let mut digits = 0usize;
+    if hex {
+        i += 2;
+        while i < bytes.len() && cpp_hex_digit_value(bytes[i]).is_some() {
+            i += 1;
+            digits += 1;
+        }
+        if i < bytes.len() && bytes[i] == b'.' {
+            i += 1;
+            while i < bytes.len() && cpp_hex_digit_value(bytes[i]).is_some() {
+                i += 1;
+                digits += 1;
+            }
+        }
+        if digits == 0 {
+            return None;
+        }
+        if lower_at(i) == b'p' {
+            let mut k = i + 1;
+            if k < bytes.len() && (bytes[k] == b'+' || bytes[k] == b'-') {
+                k += 1;
+            }
+            let exp_start = k;
+            while k < bytes.len() && bytes[k].is_ascii_digit() {
+                k += 1;
+            }
+            // An exponent marker with no digits after it is not part of the subject sequence.
+            if k > exp_start {
+                i = k;
+            }
+        }
+    } else {
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+            digits += 1;
+        }
+        if i < bytes.len() && bytes[i] == b'.' {
+            i += 1;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+                digits += 1;
+            }
+        }
+        if digits == 0 {
+            return None;
+        }
+        if lower_at(i) == b'e' {
+            let mut k = i + 1;
+            if k < bytes.len() && (bytes[k] == b'+' || bytes[k] == b'-') {
+                k += 1;
+            }
+            let exp_start = k;
+            while k < bytes.len() && bytes[k].is_ascii_digit() {
+                k += 1;
+            }
+            if k > exp_start {
+                i = k;
+            }
+        }
+    }
+    debug_assert!(i > after_sign);
+    let matched = &s[..i];
+    let value = if hex {
+        cpp_parse_hex_float(matched).map(|(v, _)| v)?
+    } else {
+        matched.parse::<f64>().ok()?
+    };
+    Some((value, i))
+}
+
+/// `strtoull(s, nullptr, 0)` over the longest numeric prefix of `s`: a `0x`/`0X` prefix selects
+/// base 16, a leading `0` base 8, anything else base 10, and parsing stops at the first
+/// character that is not a digit of that base (ISO/IEC 9899:2018 7.22.1.4). Used only for a
+/// `nan(n-char-sequence)` payload, which is the one place this port needs it.
+fn cpp_strtoull_base0_prefix(s: &str) -> u64 {
+    // PORT SRC: external: ISO/IEC 9899:2018 7.22.1.4 -- with a base of 0, a "0x"/"0X" prefix
+    // selects base 16.
+    const HEX_BASE: u32 = 16;
+    // PORT SRC: external: ISO/IEC 9899:2018 7.22.1.4 -- a leading "0" selects base 8.
+    const OCTAL_BASE: u32 = 8;
+    // PORT SRC: external: ISO/IEC 9899:2018 7.22.1.4 -- anything else is base 10.
+    const DECIMAL_DIGIT_BASE: u32 = 10;
+    let bytes = s.as_bytes();
+    // PORT SRC: external: ASCII (ISO/IEC 646) -- the same case-folding bit this module already
+    // uses for 'x'/'X' and 'p'/'P', here for the "0x"/"0X" base prefix.
+    let (base, start) = if bytes.len() >= 2 && bytes[0] == b'0' && (bytes[1] | 0x20) == b'x' {
+        (HEX_BASE, 2usize)
+    } else if !bytes.is_empty() && bytes[0] == b'0' {
+        (OCTAL_BASE, 1)
+    } else {
+        (DECIMAL_DIGIT_BASE, 0)
+    };
+    let mut value = 0u64;
+    for &b in &bytes[start..] {
+        match (b as char).to_digit(base) {
+            Some(d) => value = value.saturating_mul(base as u64).saturating_add(d as u64),
+            None => break,
+        }
+    }
+    value
+}
+
+/// `sscanf(str, " %lf <sep> %lf %c", &a, &b, &dummy) == 2` (`ConfigOptionPoint::deserialize`,
+/// `Config.hpp:1562-1563`) for `n` numbers rather than two, which is the only shape
+/// `Config.hpp` uses this for (`n` is 2 for `ConfigOptionPoint`, 3 for `ConfigOptionPoint3`).
+/// `Some(values)` means the format converted exactly `n` numbers and the trailing `" %c"`
+/// matched nothing; `None` means it converted fewer, or that `%c` matched and made the
+/// conversion count `n + 1`. The leading `" "` of each directive skips whitespace, which is why
+/// whitespace is skipped before every field, before the separator and before the final `%c`.
+fn cpp_sscanf_separated_f64<const N: usize>(s: &str, sep: u8) -> Option<[f64; N]> {
+    // Every slot is written by the loop below before this function can return `Some`, so the
+    // value this is seeded with is never read; `NAN` rather than a zero makes that obvious and
+    // keeps a placeholder constant out of the module.
+    let mut out = [f64::NAN; N];
+    let mut rest = s;
+    for (index, slot) in out.iter_mut().enumerate() {
+        rest = rest.trim_start_matches(CPP_ISTREAM_WHITESPACE);
+        if index > 0 {
+            rest = rest.strip_prefix(sep as char)?;
+            rest = rest.trim_start_matches(CPP_ISTREAM_WHITESPACE);
+        }
+        let (value, consumed) = cpp_strtod_prefix(rest)?;
+        *slot = value;
+        rest = &rest[consumed..];
+    }
+    // The format's trailing `" %c"`: whitespace is skipped, and any character left over matches
+    // it -- which makes `sscanf` return `N + 1`, not `N`, and so fails the vendored test.
+    if !rest.trim_start_matches(CPP_ISTREAM_WHITESPACE).is_empty() {
+        return None;
+    }
+    Some(out)
+}
+
+/// Whether a collected decimal buffer's significand -- everything before the exponent marker --
+/// holds a non-zero digit. That is what tells a genuine underflow (`"1e-400"`, failbit, value
+/// `0`) apart from a literal zero with a tiny exponent (`"0e-400"`, no failbit), which
+/// [`cpp_istream_extract_f64`] needs and the parsed value alone cannot say.
+fn cpp_decimal_significand_is_nonzero(buffer: &str) -> bool {
+    let significand = buffer.split(['e', 'E']).next().unwrap_or("");
+    significand.bytes().any(|b| b.is_ascii_digit() && b != b'0')
+}
+
 /// Reproduces `std::istringstream >> double` (`Config.hpp:845-855` and every other `iss >>
 /// value` float extraction in this unit): `None` means the stream's sentry never entered
 /// extraction at all -- there was only whitespace, or nothing -- so `iss.fail()` is true but the
 /// destination `double` is left **completely untouched** (not forced to any particular value);
-/// `Some((fail, value))` is what extraction actually assigned -- forced to `0.0` when nothing
-/// parseable was collected, or the overflowing `+-inf` `strtod` itself returns on `ERANGE`
-/// (`iss.fail()` is still true in that case too) -- paired with `iss.fail()`.
+/// `Some((fail, value))` is what extraction actually assigned, paired with `iss.fail()`: the
+/// parsed value; `0.0` when nothing parseable was collected; the overflowing `+-inf` `strtod`
+/// returns on `ERANGE`; or, on the `ERANGE` *underflow* described below, the correctly rounded
+/// subnormal or signed zero. The last three all leave `iss.fail()` true with a value assigned.
 ///
 /// Verified, not trusted from the algorithm's description alone: fuzzed against this machine's
-/// own `clang++`/libc++ over 80,000+ generated strings (random atom-alphabet soup plus the
-/// adversarial cases the findings measured -- `"0x10"`, `"1abc"`, `"inf"`, `"5%"`, `"0.0.1"`,
-/// hex floats with a `p` exponent, repeated signs, repeated decimal points and exponent markers,
-/// overflow), byte-for-byte identical on every one -- see the pull request body for the probe
-/// script.
+/// own `clang++`/libc++ over 80,000+ generated strings when it was first written (random
+/// atom-alphabet soup plus the adversarial cases the findings measured -- `"0x10"`, `"1abc"`,
+/// `"inf"`, `"5%"`, `"0.0.1"`, hex floats with a `p` exponent, repeated signs, repeated decimal
+/// points and exponent markers, overflow), and again over 6,000,000 generated strings (six
+/// seeds of 1,000,000, an atom alphabet weighted towards tiny exponents and long hexadecimal
+/// mantissas) after the underflow arms and the exact-integer hexadecimal mantissa below were
+/// added, through the `path3_istream_extract_double` bridge this unit's shim carries.
+/// Byte-for-byte identical on every one; the two cases that sweep found while they were still
+/// divergent are in `config_matches_the_oracle`'s committed list.
 ///
-/// **Known, named gap**: `strtod` sets `ERANGE` (failbit) on *underflow* too (a value too small
-/// to represent, rounded to `0.0`), which this function does not detect -- it only recognises
-/// *overflow* (`v.is_infinite()`, below). Measured: `"1e-400"` fails in the oracle (value forced
-/// to `0.0`) and succeeds here (value `0.0`, no failure) -- the end value happens to agree, but
-/// `fail` does not. Telling a genuine underflow apart from a legitimately tiny parsed value would
-/// need `strtod`'s own `errno`, which this hand-written parser has no equivalent of; named here
-/// and in the pull request body rather than silently left uncovered by the differential proof.
+/// **Underflow is `ERANGE` too, and the two paths decide it by different rules** -- measured on
+/// this machine's own `clang++`/libc++, not inferred (an earlier version of this function
+/// detected overflow only, and justified the omission with a claim about `errno` that these
+/// measurements contradict; the cases below are now in `config_matches_the_oracle`'s own
+/// differential list):
+///
+/// * **Decimal**: failbit whenever the *rounded result* is subnormal, exactly representable or
+///   not -- `"4.9e-324"` (value `4.94065645841246540e-324`), `"1e-320"`, `"2e-308"`,
+///   `"1e-309"`, `"2.2250738585072009e-308"` and even the 757-digit exact decimal expansion of
+///   2**-1074 all fail with the value kept; and failbit when a non-zero significand rounds all
+///   the way to zero -- `"1e-400"` (value `0`), `"-1e-400"` (value `-0`). A zero significand is
+///   not an underflow: `"0e-400"` and `"0.0e-400"` both succeed. A result that rounds *up* out
+///   of the subnormal range is not one either: `"2.2250738585072012e-308"` succeeds at
+///   `f64::MIN_POSITIVE`.
+/// * **Hexadecimal**: failbit only when a subnormal-or-zero result lost something in the
+///   rounding -- `"0x1.8p-1074"`, `"0x1.0000000000001p-1030"`, `"0x1p-1075"`,
+///   `"0x10000000000000000p-1180"` and `"0x1p-20000"` fail, while `"0x1p-1070"`, `"0x1p-1074"`,
+///   `"0x3p-1074"`, `"0x2p-1074"`, `"0x8p-1077"`, `"0x1.8p-1030"` and `"0x0p-20000"` succeed
+///   with a subnormal (or zero) value. [`cpp_parse_hex_float`] decides representability from the
+///   literal's own integer mantissa and binary scale, which is why it returns that flag.
 fn cpp_istream_extract_f64(s: &str) -> Option<(bool, f64)> {
     let trimmed = s.trim_start_matches(CPP_ISTREAM_WHITESPACE);
     if trimmed.is_empty() {
@@ -453,14 +850,27 @@ fn cpp_istream_extract_f64(s: &str) -> Option<(bool, f64)> {
     let parsed = if is_hex {
         cpp_parse_hex_float(&buffer)
     } else {
-        buffer.parse::<f64>().ok()
+        // The decimal path needs no representability flag: failbit there turns on the result's
+        // magnitude alone (see this function's doc comment), so the flag is never read.
+        buffer.parse::<f64>().ok().map(|v| (v, true))
     };
     match parsed {
         // Overflow: `strtod` sets `ERANGE` and returns `+-HUGE_VAL`, which
         // `__num_get_float` (`libcxx/include/__locale_dir/num.h`) turns into failbit *with* that
         // infinite value kept, not forced to 0.
-        Some(v) if v.is_infinite() => Some((true, v)),
-        Some(v) => Some((false, v)),
+        Some((v, _)) if v.is_infinite() => Some((true, v)),
+        // Underflow: the same `ERANGE`, with the value `strtod` itself returned kept rather than
+        // forced to 0 -- the correctly rounded subnormal, or a signed zero. The two paths'
+        // conditions are the measured ones this function's doc comment states.
+        Some((v, exactly_representable)) if v.abs() < f64::MIN_POSITIVE => {
+            let erange = if is_hex {
+                !exactly_representable
+            } else {
+                v.is_subnormal() || cpp_decimal_significand_is_nonzero(&buffer)
+            };
+            Some((erange, v))
+        }
+        Some((v, _)) => Some((false, v)),
         // PORT SRC: external: libcxx/include/__locale_dir/num.h, __num_get_float's
         // "if (__p2 != __a_end) { __err = ios_base::failbit; return 0; }" -- the collected
         // buffer did not parse as a complete number.
@@ -1288,7 +1698,8 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
     // PORT NOTE: src/libslic3r/Config.hpp:938-955 -- `std::getline(is, item_str, ',')`, not
     // `str::split` (see `cpp_getline_split`), and `iss >> value` with **no** `iss.fail()` check:
     // the vendored body pushes whatever `value` ends up holding even on a failed extraction
-    // (forced to 0, or the overflowing `+-inf` `strtod` returns on `ERANGE`), unlike the scalar
+    // (forced to 0, the overflowing `+-inf` `strtod` returns on an `ERANGE` overflow, or the
+    // subnormal it returns on an `ERANGE` underflow), unlike the scalar
     // `ConfigOptionFloat::deserialize` above. The one case the vendored `double value;` leaves
     // genuinely uninitialised -- an all-whitespace/empty item, where `iss`'s sentry never enters
     // extraction at all -- is undefined behaviour at the pin; this substitutes `0.0`, the value a
@@ -3719,15 +4130,24 @@ impl ConfigOption for ConfigOptionPoint {
             float_to_string_decimal_point(self.value.y(), None)
         )
     }
-    /// `sscanf(str.data(), " %lf , %lf %c", ...)` or `" %lf x %lf %c"` (`:1562-1563`): two
-    /// `f64`s separated by `,` or `x`, with nothing but whitespace after.
+    /// `sscanf(str.data(), " %lf , %lf %c", ...) != 2 && sscanf(str.data(), " %lf x %lf %c",
+    /// ...) != 2` (`:1557-1567`): the comma format is tried first and the `x` format only if it
+    /// converted something other than exactly two numbers.
+    ///
+    /// **Review finding, fixed here**: this used to split on the separator and
+    /// `str::trim().parse::<f64>()` each half. `%lf` is `strtod`, which matches the longest
+    /// numeric *prefix* and accepts a hexadecimal literal; measured through
+    /// `path3_deserialize_point`, that made the port reject `"0x10,0x20"` (oracle: `(16, 32)`),
+    /// `"0x1p4,1"` (oracle: `(16, 1)`) and `"0x10x0x20"` (oracle: `(16, 32)`, the `x` format
+    /// over two hex prefixes) where the oracle accepts them. [`cpp_sscanf_separated_f64`] is
+    /// the format itself, and every case is now in `config_matches_the_oracle` -- which also
+    /// swept 1,000,000 generated strings per seed over six seeds through
+    /// `path3_deserialize_point` and `path3_deserialize_point3` while this was being written,
+    /// byte-for-byte identical on every one.
     fn deserialize(&mut self, s: &str, _append: bool) -> bool {
-        let sep = if s.contains(',') { ',' } else { 'x' };
-        let mut parts = s.splitn(2, sep);
-        let (Some(x_str), Some(y_str)) = (parts.next(), parts.next()) else {
-            return false;
-        };
-        let (Ok(x), Ok(y)) = (x_str.trim().parse::<f64>(), y_str.trim().parse::<f64>()) else {
+        let Some([x, y]) = cpp_sscanf_separated_f64::<2>(s, b',')
+            .or_else(|| cpp_sscanf_separated_f64::<2>(s, b'x'))
+        else {
             return false;
         };
         self.value = Vec2d::new(x, y);
@@ -4129,18 +4549,17 @@ impl ConfigOption for ConfigOptionPoint3 {
             float_to_string_decimal_point(self.value.z(), None)
         )
     }
+    /// `sscanf(str.data(), " %lf , %lf , %lf %c", ...) != 3 && sscanf(str.data(),
+    /// " %lf x %lf x %lf %c", ...) != 3` (`:1686-1696`) -- the same `strtod` semantics as
+    /// [`ConfigOptionPoint::deserialize`], over three fields instead of two, and fixed in the
+    /// same review pass for the same reason.
     fn deserialize(&mut self, s: &str, _append: bool) -> bool {
-        let sep = if s.contains(',') { ',' } else { 'x' };
-        let parts: Vec<&str> = s.split(sep).collect();
-        // PORT SRC: src/libslic3r/Config.hpp:1691
-        if parts.len() != 3 {
-            return false;
-        }
-        let (Ok(x), Ok(y), Ok(z)) = (
-            parts[0].trim().parse::<f64>(),
-            parts[1].trim().parse::<f64>(),
-            parts[2].trim().parse::<f64>(),
-        ) else {
+        // PORT SRC: src/libslic3r/Config.hpp:1691 -- the three `%lf` conversions this format
+        // asks for, and the `!= 3` that tests how many it made.
+        const FIELDS: usize = 3;
+        let Some([x, y, z]) = cpp_sscanf_separated_f64::<FIELDS>(s, b',')
+            .or_else(|| cpp_sscanf_separated_f64::<FIELDS>(s, b'x'))
+        else {
             return false;
         };
         self.value = Vec3d::new(x, y, z);
@@ -6585,36 +7004,31 @@ static NEXT_SERIALIZATION_KEY_ORDINAL: std::sync::atomic::AtomicUsize =
 
 /// `ConfigDef` (`:2655-2683`).
 ///
-/// **Reported, not silently routed around: `by_serialization_key_ordinal` is not carried as a
-/// stored field here, and this is a real divergence from `port/ownership.tsv`'s cell, not a
-/// style choice.** That row's cell is `BTreeMap<usize, &'a ConfigOptionDef>`, verbatim
-/// (`Config.hpp:2659`, class `borrowed`) -- a map of references into `self.options`, stored on
-/// the very struct that owns `self.options` and can still mutate it. That is a self-referential
-/// struct, which safe Rust has no representation for (no lifetime `'a` can simultaneously name
-/// "borrowed from `self.options`" and let `self.options` keep being `&mut`-accessed, the way
-/// `ConfigDef::add` already needs to while this map is being built). **Review finding, fixed
-/// here**: an earlier version of this module routed around the gap with a *method* that scanned
-/// `self.options` for the matching `serialization_key_ordinal` instead -- `docs/PORTING.md`'s
-/// "Raw-pointer fields"/"Decisions recorded on 2026-11-26" decision 6 is "no module invents a
-/// Rust type for a row whose cell is filled", and a method that gives every caller the field's
-/// lookup *is* inventing a differing representation for it, which `docs/WORKFLOW.md`'s rejection
-/// rule does not accept just because it is disclosed. There is no field here at all: this task's
-/// `Done when` line ("each of the six raw-pointer fields ... carries the `rust type` cell ...
-/// verbatim") is **not met** for this one row, named in the pull request body rather than routed
-/// around on this branch -- the cell is corrected by an amendment to `port/ownership.tsv` on
-/// `main` (decision 6's own route), or the field is left exactly where it would be with a
-/// `// TODO(port): src/libslic3r/Config.hpp:2659` marker, which is what follows.
-// TODO(port): src/libslic3r/Config.hpp:2659 -- `by_serialization_key_ordinal`,
-// `BTreeMap<usize, &'a ConfigOptionDef>` per port/ownership.tsv, is a map of references into this
-// same struct's own `options` field: self-referential, which safe Rust cannot express as a
-// stored field without `unsafe` or reference counting this unit's own design did not choose.
-// Not carried; see this struct's own doc comment and the pull request body.
+/// **`by_serialization_key_ordinal` carries `port/ownership.tsv`'s cell verbatim**:
+/// `BTreeMap<usize, &'a ConfigOptionDef>` (`Config.hpp:2659`, class `borrowed`), which is what
+/// puts the `'a` on this struct. Two earlier versions of this module got this wrong in two
+/// different ways, both of them review findings: one replaced the field with a *method* that
+/// scanned `self.options` for a matching `serialization_key_ordinal` (inventing a different
+/// representation for a filled cell, which `docs/PORTING.md`'s "Raw-pointer fields" rule
+/// forbids), and the next dropped the field altogether and declared the `Done when` line unmet.
+/// Neither was necessary: the cell is declarable exactly as written, and the live in-scope
+/// consumer is a *cross-instance* one, which `'a` expresses directly --
+/// `PrintConfig.hpp:2537`'s `PrintAndCLIConfigDef` fills this map with pointers into the options
+/// of four *other*, longer-lived `ConfigDef`s and `:2788` reads it back.
+///
+/// What is **not** reproduced is one line of `ConfigDef::add` (`Config.cpp:370`), which stores a
+/// pointer into the entry of `self.options` that the same call just mutated: that one assignment
+/// is self-referential and safe Rust has no representation for it. It carries a
+/// `// TODO(port):` marker at its own site in `add` below, and is named in the pull request
+/// body. The field itself is `pub`, so the cross-instance fill `PrintConfig.hpp:2537` performs is
+/// available to the fan-out task that reaches it without this struct changing.
 #[derive(Debug, Default)]
-pub struct ConfigDef {
+pub struct ConfigDef<'a> {
     pub options: TOptiondefMap,
+    pub by_serialization_key_ordinal: BTreeMap<usize, &'a ConfigOptionDef>,
 }
 
-impl ConfigDef {
+impl<'a> ConfigDef<'a> {
     pub fn new() -> Self {
         ConfigDef::default()
     }
@@ -6643,9 +7057,23 @@ impl ConfigDef {
     /// field a previous `add` of the same key had set -- live at the pin, not theoretical:
     /// `PrintConfig.cpp` re-`add`s `retract_lift_above` and `scale` under the same key more than
     /// once.
+    ///
+    /// The vendored body's fourth statement,
+    /// `this->by_serialization_key_ordinal[opt->serialization_key_ordinal] = opt`
+    /// (`Config.cpp:370`), is **not** reproduced, and that is this unit's one unported line --
+    /// see the `// TODO(port):` marker in the body and this struct's own doc comment. It stores
+    /// a pointer into the `self.options` entry this same call is holding `&mut`, which is a
+    /// self-referential borrow; the field itself is declared with
+    /// `port/ownership.tsv`'s cell verbatim and is `pub`, so the cross-instance fill
+    /// `PrintConfig.hpp:2537` performs is unaffected.
     pub fn add(&mut self, opt_key: &str, option_type: ConfigOptionType) -> &mut ConfigOptionDef {
         let ordinal =
             NEXT_SERIALIZATION_KEY_ORDINAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        // TODO(port): src/libslic3r/Config.cpp:370 --
+        // `this->by_serialization_key_ordinal[opt->serialization_key_ordinal] = opt;` borrows the
+        // `self.options` entry mutated on the next line and stores that borrow in `self`, which
+        // safe Rust cannot express; the field is declared above with its `port/ownership.tsv`
+        // type verbatim and is left unfilled by this method.
         let def = self.options.entry(opt_key.to_string()).or_default();
         def.opt_key = opt_key.to_string();
         def.option_type = option_type;
@@ -6873,7 +7301,7 @@ fn has_resolve_capability_fn() -> bool {
 /// see the module doc's scope-gap finding.
 pub trait ConfigBase: ConfigOptionResolver {
     /// `virtual const ConfigDef* def() const = 0` (`:2742`).
-    fn def(&self) -> Option<&ConfigDef>;
+    fn def(&self) -> Option<&ConfigDef<'_>>;
     /// `virtual ConfigOption* optptr(const t_config_option_key&, bool create = false) = 0`
     /// (`:2745`).
     fn optptr_mut(
@@ -8287,7 +8715,7 @@ pub fn parse_capability_ref(value: &str) -> Option<PluginCapabilityRef> {
 #[derive(Debug, Default)]
 pub struct DynamicConfig<'a> {
     options: BTreeMap<String, Box<dyn ConfigOption>>,
-    def: Option<&'a ConfigDef>,
+    def: Option<&'a ConfigDef<'a>>,
 }
 
 impl<'a> Clone for DynamicConfig<'a> {
@@ -8329,7 +8757,7 @@ impl<'a> DynamicConfig<'a> {
             def: None,
         }
     }
-    pub fn with_def(def: &'a ConfigDef) -> Self {
+    pub fn with_def(def: &'a ConfigDef<'a>) -> Self {
         DynamicConfig {
             options: BTreeMap::new(),
             def: Some(def),
@@ -8612,7 +9040,7 @@ impl<'a> ConfigOptionResolver for DynamicConfig<'a> {
 }
 
 impl<'a> ConfigBase for DynamicConfig<'a> {
-    fn def(&self) -> Option<&ConfigDef> {
+    fn def(&self) -> Option<&ConfigDef<'_>> {
         self.def
     }
     /// `ConfigOption* DynamicConfig::optptr(const t_config_option_key&, bool create)`
@@ -8848,6 +9276,50 @@ mod tests {
         assert!(!std::ptr::eq(opt.keys_map, &EMPTY_ENUM_VALUES));
     }
 
+    /// Review finding (the `Done when` line on the six `port/ownership.tsv` rows): verifies
+    /// `ConfigDef::by_serialization_key_ordinal`, declared with that file's cell verbatim
+    /// (`BTreeMap<usize, &'a ConfigOptionDef>`), is actually fillable and readable in the one
+    /// shape the pin uses it in -- `PrintConfig.hpp:2537`'s `PrintAndCLIConfigDef`, which builds
+    /// one ordinal map out of the options of *other*, longer-lived `ConfigDef`s and reads it back
+    /// at `:2788`. That cross-instance shape is what the `'a` names; only `ConfigDef::add`'s own
+    /// same-instance assignment (`Config.cpp:370`) is unrepresentable, and it carries its own
+    /// `// TODO(port):` marker there.
+    #[test]
+    fn config_def_by_serialization_key_ordinal_is_fillable_across_instances() {
+        let mut source_a = ConfigDef::new();
+        source_a.add("alpha", ConfigOptionType::Float);
+        let mut source_b = ConfigDef::new();
+        source_b.add("beta", ConfigOptionType::Int);
+
+        let mut merged = ConfigDef::new();
+        for source in [&source_a, &source_b] {
+            for (key, def) in &source.options {
+                merged.options.insert(key.clone(), def.clone());
+                merged
+                    .by_serialization_key_ordinal
+                    .insert(def.serialization_key_ordinal, def);
+            }
+        }
+
+        let alpha_ordinal = source_a.get("alpha").unwrap().serialization_key_ordinal;
+        let beta_ordinal = source_b.get("beta").unwrap().serialization_key_ordinal;
+        assert_ne!(alpha_ordinal, beta_ordinal);
+        assert_eq!(
+            merged
+                .by_serialization_key_ordinal
+                .get(&alpha_ordinal)
+                .map(|d| d.opt_key.as_str()),
+            Some("alpha")
+        );
+        assert_eq!(
+            merged
+                .by_serialization_key_ordinal
+                .get(&beta_ordinal)
+                .map(|d| d.option_type),
+            Some(ConfigOptionType::Int)
+        );
+    }
+
     #[test]
     fn plugin_capability_ref_parses_and_rejects() {
         assert_eq!(
@@ -9068,7 +9540,8 @@ mod tests {
         // from this same translation unit (the reviewers' own measurement), so there is no
         // linkage obstacle to proving them directly through `Slic3r::ConfigOptionFloat`/`::Int`.
         use slic3r_proof::proof_units::config::{
-            path3_deserialize_float, path3_deserialize_int, path3_serialize_float,
+            path3_deserialize_float, path3_deserialize_int, path3_deserialize_point,
+            path3_deserialize_point3, path3_istream_extract_double, path3_serialize_float,
         };
 
         let float_serialize_cases: &[f64] = &[
@@ -9091,14 +9564,95 @@ mod tests {
             assert_eq!(oracle, ported, "ConfigOptionFloat::serialize({v:?})");
         }
 
-        // "1e-400" (underflow, not overflow) is deliberately not in this list: `strtod` sets
-        // `ERANGE` on underflow too, which `cpp_istream_extract_f64` does not reproduce (it
-        // only detects overflow, by checking whether the parsed value is infinite) -- a known,
-        // narrow gap named in the pull request body rather than silently left uncovered here.
+        // The underflow (`ERANGE`) cases are in this list rather than excluded from it. An
+        // earlier pass left them out with a comment claiming the gap could not be closed
+        // without `strtod`'s own `errno`; measuring the oracle showed otherwise (see
+        // `cpp_istream_extract_f64`'s doc comment for the two rules and every value below).
+        // `EXACT_MIN_SUBNORMAL_DECIMAL` is the exact decimal expansion of 2**-1074, the case
+        // that settles whether the decimal path's rule is about the result's magnitude or about
+        // what the rounding lost: the oracle fails it, so it is magnitude.
+        const EXACT_MIN_SUBNORMAL_DECIMAL: &str = concat!(
+            "4.940656458412465441765687928682213723650598026143247644255856825006755",
+            "0727020875186529983636163599237979656469544571773092665671035593979639877",
+            "4796010781878126300713190311404527845817167848982103688718636056998730723",
+            "05000638063535580581311512468232036786371644e-324",
+        );
         let float_deserialize_cases: &[&str] = &[
-            "1abc", "0x10", "1.5e2mm", "12%", "inf", "nan", "INF", "NAN", "5%", "100 mm", "0.0.1",
-            "1_000", "0x1p4", "+5", "-5", "  5", "5.", ".5", "5e", "1e", "1.", "1e5", "0x1.8p3",
-            "abc", "", "   ", "0", "1e400", "-1e400",
+            "1abc",
+            "0x10",
+            "1.5e2mm",
+            "12%",
+            "inf",
+            "nan",
+            "INF",
+            "NAN",
+            "5%",
+            "100 mm",
+            "0.0.1",
+            "1_000",
+            "0x1p4",
+            "+5",
+            "-5",
+            "  5",
+            "5.",
+            ".5",
+            "5e",
+            "1e",
+            "1.",
+            "1e5",
+            "0x1.8p3",
+            "abc",
+            "",
+            "   ",
+            "0",
+            "1e400",
+            "-1e400",
+            // Decimal underflow: a subnormal result, whatever the rounding lost.
+            "4.9e-324",
+            "1e-320",
+            "2e-308",
+            "1e-309",
+            "1e-310",
+            "-4.9e-324",
+            "1e-323",
+            "2.2250738585072009e-308",
+            "2.225073858507201e-308",
+            EXACT_MIN_SUBNORMAL_DECIMAL,
+            // Decimal underflow all the way to a signed zero, and the two non-underflows next
+            // to it: a zero significand, and a result that rounds up out of the subnormal range.
+            "1e-400",
+            "-1e-400",
+            "0e-400",
+            "0.0e-400",
+            "2.2250738585072012e-308",
+            "2.2250738585072014e-308",
+            "-0.0",
+            // Hexadecimal: failbit only where the rounding to a subnormal-or-zero result lost
+            // something, which is a different rule from the decimal path's.
+            "0x1p-1070",
+            "0x1p-1074",
+            "0x3p-1074",
+            "0x2p-1074",
+            "0x8p-1077",
+            "0x1.8p-1030",
+            "0x0p-20000",
+            "0x1p-1022",
+            "0x1.fffffffffffffp-1023",
+            "0x1.8p-1074",
+            "0x1.0000000000001p-1030",
+            "0x1p-1075",
+            "0x1p-20000",
+            "0x10000000000000000p-1180",
+            "0x1p1024",
+            "0x1.00000000000008p0",
+            "1e-320abc",
+            // Two cases a generated-string sweep against `path3_istream_extract_double` found,
+            // each of which was a divergence when it was found: an exponent whose digits
+            // overflowed the accumulator (oracle `0`, port `inf`), and a 17-digit mantissa that
+            // the old `f64` digit-by-digit accumulation rounded more than once (oracle
+            // `55930347963232300000`, port `55930347963232290000`).
+            "0x2p-10753241074",
+            "0x30830832410741022",
         ];
         for s in float_deserialize_cases {
             let oracle = path3_deserialize_float(s);
@@ -9117,14 +9671,146 @@ mod tests {
                         !oracle.ok, fail,
                         "ConfigOptionFloat::deserialize({s:?}) fail"
                     );
-                    if !fail {
+                    if fail {
+                        // `ConfigOptionFloat::deserialize` (`Config.hpp:844-854`) extracts into
+                        // a *local* `double` and assigns the option only when `!iss.fail()`, so
+                        // a failing case leaves the -999.0 this test seeded -- and the ported
+                        // `deserialize` does the same (`Some((false, v))` is its only assigning
+                        // arm). The value a failing *extraction* produced is compared below,
+                        // through `path3_istream_extract_double`, which is the only way to
+                        // observe it at all.
                         assert_eq!(
-                            oracle.value, v,
-                            "ConfigOptionFloat::deserialize({s:?}) value"
+                            oracle.value, -999.0,
+                            "ConfigOptionFloat::deserialize({s:?}) left its value alone"
+                        );
+                    } else {
+                        assert_eq!(
+                            oracle.value.to_bits(),
+                            v.to_bits(),
+                            "ConfigOptionFloat::deserialize({s:?}) value ({} vs {})",
+                            oracle.value,
+                            v
                         );
                     }
                 }
             }
+        }
+
+        // The extraction itself, which is what `cpp_istream_extract_f64` claims to reproduce:
+        // the same case list, compared bit for bit *including* the failing cases, since
+        // underflow (`ERANGE`) is a failure that still assigns a value and the option-level
+        // oracle above cannot see it.
+        for s in float_deserialize_cases {
+            let extracted = path3_istream_extract_double(s);
+            match cpp_istream_extract_f64(s) {
+                // The sentry never entered extraction, so the oracle's `double` is untouched --
+                // still the -999.0 the shim seeded it with.
+                None => assert!(
+                    extracted.fail && extracted.value == -999.0,
+                    "istringstream >> double ({s:?}): expected an untouched value, got {}",
+                    extracted.value
+                ),
+                Some((fail, v)) => {
+                    assert_eq!(extracted.fail, fail, "istringstream >> double ({s:?}) fail");
+                    assert_eq!(
+                        extracted.value.to_bits(),
+                        v.to_bits(),
+                        "istringstream >> double ({s:?}) value ({} vs {})",
+                        extracted.value,
+                        v
+                    );
+                }
+            }
+        }
+
+        // `ConfigOptionPoint::deserialize`'s `sscanf(" %lf , %lf %c", ...)`, whose `%lf` is
+        // `strtod` and not the `istream` extraction above: the hexadecimal cases are the ones a
+        // review finding measured as diverging before `cpp_sscanf_separated_f64` replaced the
+        // split-and-`parse` version, and the rest pin the shapes that already agreed.
+        let point_cases: &[&str] = &[
+            "1,2",
+            "1x2",
+            " 1 , 2 ",
+            "1,2 ",
+            "10,20 ",
+            "1,2,3",
+            "1x2,3",
+            "1abc,2",
+            "inf,nan",
+            "nan(1),2",
+            "-inf,-2",
+            "infinity,1",
+            "5%",
+            "",
+            "   ",
+            "1,",
+            ",2",
+            "1,2x",
+            "1 2,3",
+            "0x10,0x20",
+            "0x1p4,1",
+            "0x10x0x20",
+            "0x,1",
+            "0x1.8p3,2",
+            "1e,2",
+            "1e5,2",
+            "1.,.2",
+            "4.9e-324,1",
+            "1e400,2",
+            "+1,-2",
+            "1,2,",
+            "1.5.5,2",
+            "1,2 3",
+        ];
+        for s in point_cases {
+            let oracle = path3_deserialize_point(s);
+            let mut ported = ConfigOptionPoint::new(Vec2d::new(-999.0, -999.0));
+            let ok = ported.deserialize(s, false);
+            assert_eq!(oracle.ok, ok, "ConfigOptionPoint::deserialize({s:?})");
+            assert_eq!(
+                (oracle.x.to_bits(), oracle.y.to_bits()),
+                (ported.value.x().to_bits(), ported.value.y().to_bits()),
+                "ConfigOptionPoint::deserialize({s:?}) value ({}, {}) vs ({}, {})",
+                oracle.x,
+                oracle.y,
+                ported.value.x(),
+                ported.value.y()
+            );
+        }
+
+        // The same for `ConfigOptionPoint3::deserialize` (`Config.hpp:1686-1696`), three fields.
+        let point3_cases: &[&str] = &[
+            "1,2,3",
+            "1x2x3",
+            " 1 , 2 , 3 ",
+            "1,2,3 ",
+            "1,2",
+            "1,2,3,4",
+            "0x10,0x20,0x30",
+            "0x1p4,1,2",
+            "0x10x0x20x0x30",
+            "inf,nan,1",
+            "1,2,3x",
+            "",
+            "1,,3",
+            "1e5,2,3",
+            "4.9e-324,1,2",
+            "-1,-2,-3",
+        ];
+        for s in point3_cases {
+            let oracle = path3_deserialize_point3(s);
+            let mut ported = ConfigOptionPoint3::new(Vec3d::new(-999.0, -999.0, -999.0));
+            let ok = ported.deserialize(s, false);
+            assert_eq!(oracle.ok, ok, "ConfigOptionPoint3::deserialize({s:?})");
+            assert_eq!(
+                (oracle.x.to_bits(), oracle.y.to_bits(), oracle.z.to_bits()),
+                (
+                    ported.value.x().to_bits(),
+                    ported.value.y().to_bits(),
+                    ported.value.z().to_bits()
+                ),
+                "ConfigOptionPoint3::deserialize({s:?}) value"
+            );
         }
 
         let int_deserialize_cases: &[&str] = &[
