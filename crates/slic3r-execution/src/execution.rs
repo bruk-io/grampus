@@ -28,18 +28,21 @@
 //! this row's `proof path` cell (`2`) and `pipeline stage` cell (`posContouring`) are
 //! mechanically seeded, like `enum_bitmask.hpp`'s (see that module's own doc comment for the
 //! full note). A generic dispatch layer with no concrete policy to run writes no output any
-//! committed stage dump could carry, so the proof below exercises the dispatch itself against a
-//! minimal, real (not mocked-away) test policy, with every expected value hand-derived from this
-//! header's own documented semantics -- the same technique
-//! `crates/slic3r-proof/tests/harness_paths.rs` sanctions for a unit with nothing yet to compare
-//! against a stage dump.
+//! committed stage dump could carry.
 //!
-//! **Same finding, named against the trailer below (review finding)**: the `PORT STATUS`
-//! trailer's `oracle: built` reads as a claim that the test below was checked against the
-//! library `just oracle-build` compiles -- it was not; `ORACLE_VALUES = {release, built}`
-//! (`port/port-status`) has no third value for "no oracle path reaches this unit", so `built` is
-//! the least false of the two, not an honest description of this row's own proof. Carried here
-//! rather than invented as a new trailer value on this branch.
+//! **Not a dump read, but a real proof against the built oracle, not a hand-derived literal.**
+//! `docs/PORTING.md`'s "Decisions recorded on 2026-11-25", decision 1, generalised the per-unit
+//! shim mechanism beyond proof paths 1 and 3 -- `crates/slic3r-ffi/cxx/proof_units/
+//! object_id.cpp`'s `path2_header_observations` already proves a `proof path: 2` row this same
+//! way. This module's test does the same: `crates/slic3r-ffi/cxx/proof_units/execution.cpp`
+//! specialises `Slic3r::IsExecutionPolicy_` and `Slic3r::execution::Traits` for a minimal, real,
+//! serial proof-local policy (the dispatch template under test is generic in `EP`, not in which
+//! concrete policy parameterises it -- a real one, `ExecutionSeq.hpp`/`ExecutionTBB.hpp`, is a
+//! sibling foundation task's own unit) and calls the vendored `Slic3r::execution::reduce` free
+//! function through it, and the test below compares the port's own [`reduce`] dispatch against
+//! that oracle value through `compare_unit`. The `PORT STATUS` trailer's `oracle: built` is
+//! therefore an accurate description of this row's proof, not the least-false placeholder an
+//! earlier version of this module doc recorded.
 
 /// `template<class EP, class En = void> struct Traits {};` (`:27`), specialised per concrete
 /// policy (`ExecutionSeq.hpp`, `ExecutionTBB.hpp`): "each execution policy should declare two

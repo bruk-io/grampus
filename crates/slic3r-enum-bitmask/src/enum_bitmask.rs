@@ -11,20 +11,23 @@
 //! (`CutUtils.hpp`'s `ModelObjectCutAttribute`, `PresetBundle.hpp`'s `LoadConfigBundleAttribute`,
 //! `GCode.cpp`/`PrintConfig.cpp`'s `ThumbnailError`) shows none of its instantiations write a
 //! value any committed stage dump carries, so there is no dump field a path-2 test could read as
-//! this module's own output. The test below instead holds [`EnumBitmask`] to exact equality
-//! against a value hand-derived from one of those real, in-scope call sites
-//! (`CutUtils.hpp:18-20`'s `ModelObjectCutAttribute`) -- the same technique
-//! `crates/slic3r-proof/tests/harness_paths.rs` and `crates/slic3r-proof/tests/dumps_proof.rs`
-//! already use for a unit with no port yet ("`expected` ... is the value this task worked out
-//! from reading the vendored C++ directly"), applied here because the manifest's path-2
-//! mechanism genuinely does not reach this unit's output.
+//! this module's own output.
 //!
-//! **Same finding, named against the trailer below (review finding)**: the `PORT STATUS`
-//! trailer's `oracle: built` reads as a claim that the test below was checked against the
-//! library `just oracle-build` compiles -- it was not; `ORACLE_VALUES = {release, built}`
-//! (`port/port-status`) has no third value for "no oracle path reaches this unit", so `built` is
-//! the least false of the two, not an honest description of this row's own proof. Carried here
-//! rather than invented as a new trailer value on this branch.
+//! **Not a dump read, but a real proof against the built oracle, not a hand-derived literal.**
+//! `docs/PORTING.md`'s "Decisions recorded on 2026-11-25", decision 1, generalised the per-unit
+//! shim mechanism beyond proof paths 1 and 3 -- `crates/slic3r-ffi/cxx/proof_units/
+//! object_id.cpp`'s `path2_header_observations` already proves a `proof path: 2` row this same
+//! way, driving the vendored header's own inline code directly rather than reading a dump. This
+//! module's test does the same: `crates/slic3r-ffi/cxx/proof_units/enum_bitmask.cpp` instantiates
+//! the real vendored `Slic3r::enum_bitmask<T>` template with a proof-local three-value enum (the
+//! template under test is generic in its enum parameter, not in which real one parameterises it
+//! -- `CutUtils.hpp:18`'s `ModelObjectCutAttribute` pulls in `Model.hpp` and is not needed) and
+//! reconstructs the combined mask through the template's own public `has()`, and the test below
+//! compares [`EnumBitmask`]'s own combined mask against that oracle value through
+//! `compare_unit`. The `PORT STATUS` trailer's `oracle: built` is therefore an accurate
+//! description of this row's proof, not the least-false placeholder an earlier version of this
+//! module doc recorded (`just oracle-build`'s library genuinely is on the call path, through
+//! this crate's own `cxx` bridge).
 
 use std::marker::PhantomData;
 
