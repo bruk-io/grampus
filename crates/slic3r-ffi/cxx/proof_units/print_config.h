@@ -21,6 +21,11 @@ rust::Vec<rust::String> oracle_option_keys();
 // key at all.
 OracleOptionInfo oracle_option_info(rust::Str key);
 
+// `Slic3r::PrintConfigDef::handle_legacy(opt_key, value)` (`PrintConfig.hpp:848`), a public
+// static member function with external linkage. It rewrites both arguments in place, so this
+// shim copies them in and hands both back.
+OracleLegacyResult oracle_handle_legacy(rust::Str opt_key, rust::Str value);
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

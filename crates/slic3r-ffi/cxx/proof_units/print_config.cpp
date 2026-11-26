@@ -94,6 +94,16 @@ OracleOptionInfo oracle_option_info(rust::Str key) {
     return info;
 }
 
+OracleLegacyResult oracle_handle_legacy(rust::Str opt_key, rust::Str value) {
+    std::string k(opt_key);
+    std::string v(value);
+    Slic3r::PrintConfigDef::handle_legacy(k, v);
+    OracleLegacyResult out;
+    out.opt_key = rust::String(k);
+    out.value = rust::String(v);
+    return out;
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

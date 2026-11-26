@@ -35,6 +35,14 @@ mod ffi {
         enum_keys_map: Vec<OracleEnumKeyValue>,
     }
 
+    /// Both arguments of `PrintConfigDef::handle_legacy` after it has rewritten them in place
+    /// (`PrintConfig.cpp:9748-10041`). An empty `opt_key` is the vendored function's own "this
+    /// key is no longer valid in this version of Slic3r" answer, not an error.
+    struct OracleLegacyResult {
+        opt_key: String,
+        value: String,
+    }
+
     // SAFETY: this is cxx's own unsafe-extern declaration block, not a hand-written unsafe
     // expression (see src/clipper2.rs's identical note) -- it carries no body, and the only
     // unsafety is in the bindings `cxx` generates from it.
@@ -50,7 +58,15 @@ mod ffi {
         /// One key's behaviourally load-bearing metadata, straight off
         /// `Slic3r::print_config_def.get(key)`.
         fn oracle_option_info(key: &str) -> OracleOptionInfo;
+
+        /// `PrintConfigDef::handle_legacy`, with both of its in-place-rewritten arguments
+        /// handed back. Used by this unit's proof to hold the ported `handle_legacy` to exact
+        /// equality over every key the registry knows plus the obsolete and renamed ones.
+        fn oracle_handle_legacy(opt_key: &str, value: &str) -> OracleLegacyResult;
     }
 }
 
-pub use ffi::{oracle_option_info, oracle_option_keys, OracleEnumKeyValue, OracleOptionInfo};
+pub use ffi::{
+    oracle_handle_legacy, oracle_option_info, oracle_option_keys, OracleEnumKeyValue,
+    OracleLegacyResult, OracleOptionInfo,
+};
