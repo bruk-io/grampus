@@ -469,7 +469,7 @@ three units in this pass, recorded as each reviewer actually gave it:**
   marker spelling both passes the checker and cites only a value genuinely outside the vendored
   tree. Kept the external form, with the comment rewritten in commit `166c759` to say plainly
   that this is a `port-status` gap being worked around rather than a case decision 2 covers —
-  recorded here, and in `docs/PORTING.md`'s new decision 6 (see "Corrections to docs/PORTING.md"
+  recorded here, and in `docs/PORTING.md`'s new decision 8 (see "Corrections to docs/PORTING.md"
   below), rather than silently kept as before.
 
 ## What the two review passes did not catch
@@ -498,7 +498,7 @@ the first sequential pass** — the first pass's own note that "every rule this 
 exercised ... held exactly as stated" is withdrawn to that extent; it was true of the rules the
 first pass actually checked, not of this one.
 
-**`docs/PORTING.md` decision 6 (new): a transcribed literal must be spelled so its own text, not
+**`docs/PORTING.md` decision 8 (new): a transcribed literal must be spelled so its own text, not
 only its value, matches the cited line.** `port/port-status`'s `check_numeric_constants` matches
 a cited vendored line by the literal's *normalised text*, not its numeric value. This trial's
 second review pass found two concrete, measured instances of a transcribed constant getting no
@@ -509,7 +509,7 @@ line; and the `0o644` open-mode constant (`slic3r-instancelock`) cannot cite its
 line at all, because Rust's `0o644` is not a textual substring of C's `0644`, so the constant is
 carried under the external-marker form though its origin is not actually outside the vendored
 tree. Both are fixed in `crates/slic3r-materialtype/src/material_type.rs` and
-`crates/slic3r-instancelock/src/instance_lock.rs` (commit `166c759`); decision 6
+`crates/slic3r-instancelock/src/instance_lock.rs` (commit `166c759`); decision 8
 (`docs/PORTING.md`, "Decisions recorded on 2026-11-26", commit `0a3a903`) states the rule, both
 failure shapes, and what to do when no Rust spelling can be made to match (the external form,
 used as a stated workaround rather than under decision 2's "origin outside the vendored tree"
@@ -520,7 +520,7 @@ Every other rule this trial exercised — the idiom map's "non-const reference o
 return value" (units 1 and 3), the error-set rule (units 2 and 3), the `std::sort`/
 `slice::sort_unstable` idiom entry (unit 2, where the adversarial-review finding above was about
 this task's own draft misreading that entry, not about the entry itself) — held exactly as
-stated, including under the second review pass. What this trial also found, besides decision 6,
+stated, including under the second review pass. What this trial also found, besides decision 8,
 is two mismatches between a row's seeded `proof path` cell and the mechanism that cell names
 (`MaterialType`'s rows name proof path 3, the include-the-vendored-`.cpp` mechanism, but
 `MaterialType`'s methods are externally linked, not internal-linkage, so including the `.cpp`

@@ -204,6 +204,6 @@ Support/TreeSupport.hpp	440	TreeSupport	m_object_config	const PrintObjectConfig 
 Support/TreeSupportCommon.hpp	787	InterfacePlacer	top_contacts	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3578, Support/TreeSupport3D.cpp:3606	&'a mut Vec<*mut SupportGeneratorLayer>
 Support/TreeSupportCommon.hpp	788	InterfacePlacer	top_interfaces	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3580, Support/TreeSupport3D.cpp:3606	&'a mut Vec<*mut SupportGeneratorLayer>
 Support/TreeSupportCommon.hpp	789	InterfacePlacer	top_base_interfaces	SupportGeneratorLayersPtr &	borrowed	Support/TreeSupport3D.cpp:3581, Support/TreeSupport3D.cpp:3606	&'a mut Vec<*mut SupportGeneratorLayer>
-Utils.hpp	544	FilePtr	f	FILE *	owned	Utils.hpp:536, Utils.hpp:540	std::fs::File
+Utils.hpp	544	FilePtr	f	FILE *	owned	Utils.hpp:536, Utils.hpp:540	Option<std::fs::File>
 calib.hpp	289	CalibPressureAdvanceLine	mp_gcodegen	GCode *	borrowed	calib.cpp:476	&'a mut GCode
 clonable_ptr.hpp	141	clonable_ptr	px	T *	owned	clonable_ptr.hpp:47, clonable_ptr.hpp:130	Box<T>
