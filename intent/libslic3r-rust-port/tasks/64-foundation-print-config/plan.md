@@ -162,9 +162,23 @@ Each step names the slice a reviewer can accept or reject on its own, even thoug
   option is transcribed, so every later step's progress is a number this test prints, not a claim.
 - delivers: none (step 20 is groundwork).
 
-### Step 2: the ~40 enums and their helper functions (`PrintConfig.hpp:52-839`)
-- Finite and fully bounded; ported in full, including `is_separable_infill_pattern` and its
-  siblings, which are real logic, not plain value lists.
+### Step 2: the ~63 enums and their helper functions
+- Larger than first scoped from `PrintConfig.hpp:52-839` alone (~40 enums): `PrintConfig.cpp`'s
+  `CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS` invocations name 65 types, two of which
+  (`NozzleType`, `SLAMaterialSpeed`) are declared outside this unit's `.hpp` and need a
+  `// TODO(port):` at their first use rather than a guess at their home file. Finite and fully
+  bounded either way; ported in full, including `is_separable_infill_pattern` and its siblings,
+  which are real logic, not plain value lists.
+- **`ConfigOptionEnumValue`'s `from_i32` is an open design question, not a mechanical one.**
+  `grep -rl "ConfigOptionEnumValue" crates/` (outside `slic3r-config/src/config.rs`, which
+  declares the trait) finds no implementer anywhere in the workspace -- this step is the first to
+  implement it for a concrete type. The vendored `ConfigOptionEnum<T>::set_int`/`get_int`
+  round-trip through a bare `static_cast<T>(int)`, a reinterpretation C++ allows even for an
+  out-of-range value; Rust's nearest equivalent, `std::mem::transmute` from the repr type, is
+  undefined behaviour the instant the value does not match a declared discriminant, so it is not
+  a faithful-and-safe translation of the same operation. Decided: a `match` covering every variant
+  with a named fallback (the enum's own zero/default variant) and one `// PORT NOTE:` recording
+  the divergence, applied the same way across all enums rather than re-decided per type.
 - delivers: none.
 
 ### Step 3: `StaticCache<T>`/`StaticPrintConfig` and the `PrintConfigDef`/`StaticPrintConfig::StaticCache` raw-pointer mechanism (`:1041-1211`)
