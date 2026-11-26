@@ -65,7 +65,7 @@ where
     /// `SparsePointGrid<ElemT, Locator> : public SparseGrid<ElemT>` (`:26`) is **public**
     /// inheritance, so `SparseGrid<ElemT>::getNearby` (`SparseGrid.hpp:68`) *is* part of
     /// `SparsePointGrid`'s own public surface, even though this class declares no query method
-    /// of its own (only `insert`) -- `Arachne/WallToolPaths.cpp:877` calls
+    /// of its own (only `insert`) -- `Arachne/WallToolPaths.cpp:878` calls
     /// `grid.getNearby(loc_here, searching_radius)` on one directly. A thin pass-through, not a
     /// method this type declares of its own; this unit's own proof test (below) and fuzz target
     /// drive the insert/query round-trip through it.
