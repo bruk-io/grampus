@@ -53,6 +53,12 @@ rust::Vec<int64_t> path2_index(int64_t min_x, int64_t min_y, int64_t max_x, int6
                                 int32_t idx);
 bool path2_eq(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y, int64_t omin_x,
               int64_t omin_y, int64_t omax_x, int64_t omax_y);
+bool path2_eq_defined(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y, bool defined,
+                       int64_t omin_x, int64_t omin_y, int64_t omax_x, int64_t omax_y,
+                       bool odefined);
+bool path2_from_min_max_defined(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y);
+rust::Vec<int64_t> path2_scaled_bbf(double min_x, double min_y, double max_x, double max_y);
+rust::Vec<double> path2_unscaled_bb(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y);
 
 } // namespace bounding_box
 } // namespace proof_units

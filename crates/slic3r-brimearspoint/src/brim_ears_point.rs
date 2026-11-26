@@ -77,10 +77,10 @@ impl BrimPoint {
 
     /// `bool operator==(const BrimPoint &sp) const` (`:53-57`): `pos == sp.pos` (exact,
     /// componentwise) and `abs(head_front_radius - sp.head_front_radius) < float(EPSILON)`.
-    /// `EPSILON` is `slic3r_libslic3r::libslic3r::EPSILON` (`f64`, `libslic3r.h:111` at the pin,
+    /// `EPSILON` is `slic3r_libslic3r::libslic3r::EPSILON` (`f64`, `libslic3r.h:57` at the pin,
     /// already the port's one spelling), cast to `f32` here exactly as the vendored
     /// `float(EPSILON)` does.
-    // PORT SRC: src/libslic3r/libslic3r.h:111
+    // PORT SRC: src/libslic3r/libslic3r.h:57
     pub fn vendored_eq(&self, sp: &BrimPoint) -> bool {
         let rdiff = (self.head_front_radius - sp.head_front_radius).abs();
         self.pos == sp.pos && rdiff < (EPSILON as f32)

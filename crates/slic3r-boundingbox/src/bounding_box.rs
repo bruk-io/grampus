@@ -4,28 +4,62 @@
 //! hand-designed alongside it in this same task because the two are one unit.
 //!
 //! **Four concrete structs, not one generic type parameterized over the vendored
-//! `BoundingBoxBase<PointType, APointsType>`/`BoundingBox3Base<PointType>` templates.** The
-//! idiom map's template row collapses a template to the concrete instantiations in-scope code
-//! actually uses, and the vendored header's own `extern template` block
-//! (`BoundingBox.hpp:177-209`) names exactly four: `BoundingBoxBase<Point, Points>`
+//! `BoundingBoxBase<PointType, APointsType>`/`BoundingBox3Base<PointType>` templates -- a
+//! deliberate departure from the idiom map's template row, not an application of it.**
+//! `docs/PORTING.md`'s own wording: "A generic function or type with the same bound,
+//! monomorphised the same way the C++ template's instantiations are used in in-scope code; a
+//! template is not force-collapsed to one concrete type unless the manifest row's unit only
+//! ever instantiates one." This unit instantiates four with an in-scope caller (a fifth,
+//! `Vec3f`, with none yet -- see below), so that row's own condition for collapsing to a single
+//! concrete type does not hold here, and a true Rust generic monomorphised per instantiation is
+//! what it asks for instead. Four hand-copied structs are written anyway (see the next
+//! paragraph for why), which is exactly the kind of workaround `docs/WORKFLOW.md`'s "rejection
+//! rule" asks to be named rather than hidden behind a rule reading that does not hold up, so it
+//! is named here plainly rather than dressed up as the idiom map's instruction. The vendored
+//! header's own `extern template` block (`BoundingBox.hpp:177-209`) names exactly four:
+//! `BoundingBoxBase<Point, Points>`
 //! (`BoundingBox`), `BoundingBoxBase<Vec2d>` (`BoundingBoxf`), `BoundingBox3Base<Vec3d>`
 //! (`BoundingBoxf3`), and (through `BoundingBox3`'s own, non-template constructors)
-//! `BoundingBox3Base<Vec3crd>`. The remaining two listed there, `BoundingBoxBase<Vec2f>` and
-//! `BoundingBox3Base<Vec3f>`, have no caller outside `src/slic3r/GUI/` at the pin (measured:
-//! every non-GUI, non-test reference to `BoundingBoxf`-with-`float` is through the `Vec2d`/
-//! `Vec3d` instantiations above), and R10 puts the whole GUI out of scope -- so this task ports
-//! the four with an in-scope caller and leaves the other two unported, the same treatment
-//! `crates/slic3r-point/src/point.rs` gives its own `Vec4<T>` ("no in-scope caller... carries no
-//! arithmetic impls yet").
+//! `BoundingBox3Base<Vec3crd>`. `BoundingBoxBase<Vec2f>` is correctly left unported: measured
+//! with `grep -rn "BoundingBox(Base)?<Vec2f>" vendor/OrcaSlicer/src/libslic3r`, its only hits
+//! outside `BoundingBox.cpp`/`.hpp`'s own explicit-instantiation lines are under
+//! `src/slic3r/GUI/`, and R10 puts the whole GUI out of scope.
+//!
+//! **`BoundingBox3Base<Vec3f>` is a disclosed deferral, not an absent caller.** An earlier draft
+//! of this doc claimed it too had "no caller outside `src/slic3r/GUI/`"; that was false --
+//! `grep -rn "BoundingBox3Base<Vec3f>" vendor/OrcaSlicer/src/libslic3r` finds it constructed and
+//! used at `src/libslic3r/Fill/FillAdaptive.cpp:2030` (`slic3r-fill`, manifest `in`) and three
+//! times in `src/libslic3r/BuildVolume.cpp:404,460,554` (`slic3r-buildvolume`, manifest `in`),
+//! none of them GUI or test code. It is left unported here anyway: no in-scope Rust module
+//! exists yet to call it from (`slic3r-fill`/`slic3r-buildvolume` are both `not-started` at the
+//! pin), and a fifth near-duplicate struct for a type with no Rust caller today would be surface
+//! this task invents rather than ports. The real justification is "no current caller", not "no
+//! caller" -- `slic3r-fill`'s or `slic3r-buildvolume`'s own future task must port this
+//! instantiation (as a fifth struct, or by extending `BoundingBox3`/`BoundingBoxf3` if the two
+//! turn out close enough once a real caller forces the choice) and is named here so the gap is
+//! not silently inherited.
+//!
+//! R10 puts the whole GUI out of scope -- so this task ports the four with a current in-scope
+//! caller and leaves the fifth, `BoundingBox3Base<Vec3f>`, for the task that first needs it, the
+//! same treatment `crates/slic3r-point/src/point.rs` gives its own `Vec4<T>` ("no in-scope
+//! caller... carries no arithmetic impls yet"). See the `// TODO(port):` marker below the last
+//! `impl` block for the exact vendored lines this leaves unported.
 //!
 //! A true Rust generic over all four would need `slic3r_point::point`'s `Point`/`Vec2`/`Vec3` to
 //! expose a shared arithmetic surface -- component-wise min/max, a scalar multiply, a cast to
 //! `f64`, a vector norm -- that module does not export today (task `56-foundation-point` gave
 //! `Point`/`Vec2<T>`/`Vec3<T>` only `Add`/`Sub`/`Neg` and named accessors, per its own module
 //! doc's scope line). This task's own rule ("Write only your own modules") forbids editing that
-//! sibling's file to add it, so each of the four structs below is written out directly against
-//! the public surface `point.rs` already exports, duplicating the handful of lines the four
-//! share rather than inventing a second, parallel arithmetic trait for a sibling module's types.
+//! sibling's file to add such a surface to `point.rs` itself -- but a trait declared and
+//! implemented *here*, in this crate, for the sibling's existing public types, would write no
+//! sibling file and is not what that rule forbids; this doc does not claim otherwise. The actual
+//! reason each of the four structs below is written out directly, duplicating the handful of
+//! lines the four share, rather than through such a module-local trait: a shared trait over
+//! `Point`/`Vec2<T>`/`Vec3<T>` would still need to name a concrete `T` per struct at the call
+//! site to get concrete, differently-typed fields (`i64` vs `f64` coordinates), so it would not
+//! remove the four structs -- only the handful of duplicated arithmetic lines inside their
+//! methods -- for a four-struct, ~250-line module. That trade was not taken; it is a
+//! simplification left for a later pass, not a rule this task is forbidden from taking.
 //!
 //! **Deferred for the same reason -- needs a type from a crate this task does not own, or a
 //! dependency edge the cut graph forbids, and this task's own rule forbids inventing one:**
@@ -97,6 +131,16 @@ impl BoundingBox {
 
     /// `BoundingBoxBase(const PointType &p1, const PointType &p2, const PointType &p3)`
     /// (`:27-28`): starts at `p1` (undefined), then merges `p2` and `p3` in order.
+    ///
+    /// **Not reachable through the vendored `BoundingBox`.** `class BoundingBox :
+    /// public BoundingBoxBase<Point, Points>` declares its own three constructors
+    /// (`BoundingBox.hpp:224-226`) with no `using BoundingBoxBase::BoundingBoxBase;`, so the
+    /// base's three-point constructor is hidden, not inherited, at the real pin -- unlike
+    /// `BoundingBoxf3`, whose `using BoundingBox3Base::BoundingBox3Base;` (`:267`) does inherit
+    /// it (see the `// TODO(port):` marker on [`BoundingBoxf3`] naming that gap). This method is
+    /// ported anyway, against the base constructor directly, as a small utility with no
+    /// vendored call site through `BoundingBox` itself -- named here so a reviewer does not read
+    /// it as a 1:1 port of a reachable constructor.
     pub fn from_three_points(p1: Point, p2: Point, p3: Point) -> Self {
         let mut out = BoundingBox {
             min: p1,
@@ -170,14 +214,19 @@ impl BoundingBox {
         }
     }
 
-    /// `void scale(double factor)` (`:64-69`): `this->min *= factor; this->max *= factor;` on an
-    /// `Eigen::Matrix<int64_t, 2, 1>`. Eigen's mixed-scalar `operator*=` multiplies each
-    /// component by `factor` at `double` precision and converts the *product* back to `int64_t`
-    /// (truncating toward zero, like a C-style cast) -- **not** the other way round (truncating
-    /// `factor` to an integer first, which this module's first draft assumed and which the
-    /// oracle disproved: `scale(0.5)` on `min = (-10, -20)` gives `(-5, -10)`, not `(0, 0)`).
-    /// Confirmed against the oracle by this module's own `// PROOF: 2` test
-    /// (`bounding_box_header_only_methods_match_the_oracle`, the `scale` assertion).
+    /// `void scale(double factor)` (`:64-69`): `this->min *= factor; this->max *= factor;` where
+    /// `min`/`max` are `Point`, not a bare Eigen vector. `Point` declares its own
+    /// `operator*=(const double&)` (`Point.hpp:228`:
+    /// `this->x() = coord_t(this->x() * rhs); this->y() = coord_t(this->y() * rhs);`), which
+    /// hides Eigen's own mixed-scalar `operator*=` by ordinary C++ member lookup -- so this
+    /// multiplies each component by `factor` at `double` precision and converts the *product*
+    /// back to `int64_t` (truncating toward zero, like a C-style cast) -- **not** the other way
+    /// round (truncating `factor` to an integer first, which this module's first draft assumed,
+    /// reasoning from Eigen's own `operator*=(const Scalar&)` rather than from `Point`'s
+    /// override, and which the oracle disproved: `scale(0.5)` on `min = (-10, -20)` gives
+    /// `(-5, -10)`, not `(0, 0)`). Confirmed against the oracle by this module's own
+    /// `// PROOF: 2` test (`bounding_box_header_only_methods_match_the_oracle`, the `scale`
+    /// assertion).
     pub fn scale(&mut self, factor: f64) {
         self.min = Point::new(
             (self.min.x() as f64 * factor) as i64,
@@ -782,10 +831,14 @@ impl BoundingBox3 {
     }
 
     /// `coordf_t max_size() const { PointType s = size(); return std::max(s.x(), std::max(s.y(),
-    /// s.z())); }` (`:244-249`).
-    pub fn max_size(&self) -> i64 {
+    /// s.z())); }` (`:244-249`): the vendored return type is `coordf_t`/`double` even at this
+    /// `Vec3crd` instantiation (the method is defined once on `BoundingBox3Base<PointType>`),
+    /// so the max is computed in `i64` -- matching C++'s own integer `std::max` on `coord_t`
+    /// components -- and converted to `f64` only at the return, exactly where the vendored
+    /// implicit `int64_t` -> `double` return conversion happens.
+    pub fn max_size(&self) -> f64 {
         let s = self.size();
-        s.x().max(s.y()).max(s.z())
+        s.x().max(s.y()).max(s.z()) as f64
     }
 
     /// `bool contains(const PointType &point) const` (`:161-163`): the 2D `contains` plus a `z`
@@ -818,6 +871,10 @@ impl BoundingBox3 {
     // TODO(port): src/libslic3r/BoundingBox.hpp:148 -- `Polygon polygon(bool is_scaled) const`
     // needs `Polygon` (`slic3r-polygon`); see this module's own doc for the dependency-direction
     // reason.
+    // TODO(port): src/libslic3r/BoundingBox.hpp:157 -- the inherited `inflated(coordf_t) const`;
+    // no in-scope caller constructs a `BoundingBox3` (`Vec3crd`) and calls it (every live
+    // `.inflated(` caller in the vendored tree is on a `BoundingBoxf3`/`Vec3d` box, see
+    // [`BoundingBoxf3::inflated`]).
 }
 
 // -------------------------------------------------------------------------------------------
@@ -978,16 +1035,101 @@ impl BoundingBoxf3 {
         )
     }
 
-    /// See [`BoundingBox3::max_size`]'s doc.
+    /// See [`BoundingBox3::max_size`]'s doc; `std::max(a, b)` returns `a` when `b` is `NaN`,
+    /// while Rust's `f64::max` returns the non-`NaN` operand -- a divergence only at `NaN`
+    /// input, which no in-scope caller passes.
+    // FIDELITY(port): src/libslic3r/BoundingBox.cpp:244-249 -- `std::max`'s NaN tie-break
+    // (returns its first argument) differs from `f64::max` (returns the non-NaN operand); no
+    // in-scope caller passes a NaN coordinate.
     pub fn max_size(&self) -> f64 {
         let s = self.size();
         s.x().max(s.y()).max(s.z())
+    }
+
+    /// `bool contains(const PointType &point) const` (`BoundingBox.hpp:161-163`): the 2D
+    /// `BoundingBoxBase::contains(point)` (`:51-54`) plus a `z` range check -- same inclusive
+    /// `>=`/`<=` semantics as [`BoundingBox3::contains`]. Inherited, unported until now: callers
+    /// at `src/libslic3r/BuildVolume.cpp:548-549` (`build_volume.contains(paths_bbox.min)`, on
+    /// the `BoundingBoxf3` constructed at `:542`).
+    // PORT SRC: src/libslic3r/BoundingBox.hpp:161
+    pub fn contains(&self, point: &slic3r_point::point::Vec3d) -> bool {
+        point.x() >= self.min.x()
+            && point.x() <= self.max.x()
+            && point.y() >= self.min.y()
+            && point.y() <= self.max.y()
+            && point.z() >= self.min.z()
+            && point.z() <= self.max.z()
+    }
+
+    /// `bool contains(const BoundingBox3Base& other) const` (`:165-167`). Inherited, unported
+    /// until now: callers at `src/libslic3r/BuildVolume.cpp:438` (`build_volume.contains(
+    /// volume_bbox)`), `:507` (`extruder_bbox.contains(volume_bbox)`), `:548-549`
+    /// (`build_volume.contains(paths_bbox)`).
+    // PORT SRC: src/libslic3r/BoundingBox.hpp:165
+    pub fn contains_bb(&self, other: &BoundingBoxf3) -> bool {
+        self.contains(&other.min) && self.contains(&other.max)
+    }
+
+    /// `bool intersects(const BoundingBox3Base& other) const` (`:170-173`): intersects *without*
+    /// boundaries (strict `<`/`>`, unlike [`BoundingBoxf3::contains_bb`]'s inclusive logic).
+    /// Inherited, unported until now: caller at `src/libslic3r/BuildVolume.cpp:439`
+    /// (`build_volume.intersects(volume_bbox)`).
+    // PORT SRC: src/libslic3r/BoundingBox.hpp:170
+    pub fn intersects(&self, other: &BoundingBoxf3) -> bool {
+        self.min.x() < other.max.x()
+            && self.max.x() > other.min.x()
+            && self.min.y() < other.max.y()
+            && self.max.y() > other.min.y()
+            && self.min.z() < other.max.z()
+            && self.max.z() > other.min.z()
+    }
+
+    /// `void translate(coordf_t x, coordf_t y, coordf_t z)` (`BoundingBox.hpp:154`): asserts
+    /// `defined`; `PointType v(x, y, z)` constructs a bare `Vec3d`, whose per-component
+    /// `double` constructor needs no rounding or truncation at this instantiation (unlike
+    /// [`BoundingBox3::translate`]'s `Vec3crd` case). Distinct from
+    /// [`BoundingBoxf3::translate_vec`] (`BoundingBox.hpp:155`, the exact-`Vec3d`-argument
+    /// overload) only in its three-scalar signature; both have the same effect at this
+    /// instantiation. Inherited, unported until now: callers at `src/libslic3r/Model.cpp:1945`
+    /// and `:1947` (`m_bounding_box_approx.translate(x, y, z)` /
+    /// `m_bounding_box_exact.translate(x, y, z)`, both `BoundingBoxf3` fields,
+    /// `Model.hpp:669,671`).
+    // PORT SRC: src/libslic3r/BoundingBox.hpp:154
+    pub fn translate(&mut self, x: f64, y: f64, z: f64) {
+        debug_assert!(self.defined);
+        let v = slic3r_point::point::Vec3d::new(x, y, z);
+        self.min = self.min + v;
+        self.max = self.max + v;
+    }
+
+    /// `BoundingBox3Base<PointType> inflated(coordf_t delta) const throw()` (`:157`):
+    /// `{ BoundingBox3Base out(*this); out.offset(delta); return out; }`. The vendored return
+    /// type is the *base*, `BoundingBox3Base<Vec3d>`; in this module's four-concrete-struct
+    /// collapse `BoundingBoxf3` **is** that instantiation, so returning `BoundingBoxf3` is the
+    /// faithful translation, not a divergence. Inherited, unported until now: callers at
+    /// `src/libslic3r/BuildVolume.cpp:399,432,457,506,542`, every one on `bounding_volume()`/
+    /// `extruder_volume.bboxf`, typed `BoundingBoxf3` (`BuildVolume.hpp:82,41`).
+    // PORT NOTE: returns BoundingBoxf3, not a separate base type -- see the doc comment above.
+    // PORT SRC: src/libslic3r/BoundingBox.hpp:157
+    pub fn inflated(&self, delta: f64) -> BoundingBoxf3 {
+        let mut out = *self;
+        out.offset(delta);
+        out
     }
 
     // TODO(port): src/libslic3r/BoundingBox.cpp:261-290 -- `BoundingBoxf3::transformed(const
     // Transform3d&)` needs the deferred `Transform3d` type
     // (`crates/slic3r-point/src/point.rs:197`'s own `// TODO(port):`); no in-scope caller this
     // task's own units reach forces it yet.
+    // TODO(port): src/libslic3r/BoundingBox.cpp:72 -- `BoundingBoxBase<Vec3d>::scale(double)`,
+    // explicitly instantiated (`BoundingBox.hpp:179`) but with no in-scope caller found (every
+    // live `.scale(` call on a 3D box in the vendored tree is commented out); ported only once a
+    // caller forces the choice of truncate-vs-round semantics at this `f64`-coordinate
+    // instantiation.
+    // TODO(port): src/libslic3r/BoundingBox.hpp:125-126,267 -- the inherited three-point
+    // constructor (`BoundingBox3Base(const PointType&, const PointType&, const PointType&)`,
+    // reachable on `BoundingBoxf3` through its `using BoundingBox3Base::BoundingBox3Base;`);
+    // no in-scope caller constructs a `BoundingBoxf3` from three points.
 }
 
 // -------------------------------------------------------------------------------------------
@@ -1256,7 +1398,9 @@ mod tests {
         .expect("BoundingBoxBase::merge(bb) must match the oracle exactly");
 
         // scale(factor), driven directly (not through `scaled`) to pin down the `f64 -> i64`
-        // truncation-before-multiply semantics this module's own doc discusses.
+        // multiply-then-truncate semantics this module's own doc discusses (`Point::operator*=`
+        // multiplies at `double` precision, then truncates the product -- not the other way
+        // round).
         for &factor in &[1.0_f64, 2.0, 0.5, 3.75, -1.25, 100.9] {
             let mut actual = bb;
             actual.scale(factor);
@@ -1403,25 +1547,82 @@ mod tests {
             );
         }
 
-        // operator== (ignores `defined`)
+        // operator== (ignores `defined`) -- `path2_eq_defined` takes `defined`/`odefined`
+        // independently (unlike the no-longer-sufficient `path2_eq`, which always passed `true`
+        // for both and so could never exercise a differing `defined` reaching the oracle) so
+        // this assertion can actually fail if the port stopped ignoring `defined`.
         let same_min_max_different_defined = BoundingBox {
             min: bb.min,
             max: bb.max,
             defined: !bb.defined,
         };
         let actual_eq = bb.vendored_eq(&same_min_max_different_defined);
-        let oracle_eq = bounding_box::path2_eq(
+        let oracle_eq = bounding_box::path2_eq_defined(
             min.x(),
             min.y(),
             max.x(),
             max.y(),
+            bb.defined,
             min.x(),
             min.y(),
             max.x(),
             max.y(),
+            !bb.defined,
         );
         assert_eq!(actual_eq, oracle_eq);
         assert!(actual_eq, "operator== must ignore `defined`");
+
+        // `BoundingBox(const Point&, const Point&)`'s own `defined` derivation, driven through
+        // the real constructor rather than `make_bbox`'s direct field assignment.
+        for &(mx, my, nx, ny) in &[(-10_i64, -20, 30, 40), (0, 0, 0, 0), (5, 5, 5, 6)] {
+            let actual = BoundingBox::from_min_max(Point::new(mx, my), Point::new(nx, ny));
+            let oracle_defined = bounding_box::path2_from_min_max_defined(mx, my, nx, ny);
+            assert_eq!(
+                actual.defined, oracle_defined,
+                "BoundingBox(const Point&, const Point&) defined derivation for ({mx},{my})..\
+                 ({nx},{ny})"
+            );
+        }
+    }
+
+    /// `inline BoundingBox scaled(const BoundingBoxf &bb)` and `unscaled<double>(const
+    /// BoundingBox &bb)` (`BoundingBox.hpp:284,292-293`): the free functions re-derive `defined`
+    /// through the two-point constructor rather than carrying the input's `defined` through (see
+    /// [`scaled`]'s doc comment); no shim existed for either before this test.
+    // PROOF: 2
+    #[test]
+    fn bounding_box_free_scaled_unscaled_match_the_oracle() {
+        let bbf = BoundingBoxf::from_min_max(Vec2::new(-1.5, -2.5), Vec2::new(3.5, 4.5));
+        let actual = scaled(&bbf);
+        let oracle_out =
+            bounding_box::path2_scaled_bbf(bbf.min.x(), bbf.min.y(), bbf.max.x(), bbf.max.y());
+        assert_eq!(
+            (
+                actual.min.x(),
+                actual.min.y(),
+                actual.max.x(),
+                actual.max.y(),
+                actual.defined as i64
+            ),
+            (
+                oracle_out[0],
+                oracle_out[1],
+                oracle_out[2],
+                oracle_out[3],
+                oracle_out[4]
+            ),
+            "scaled(&BoundingBoxf) must match the oracle exactly"
+        );
+
+        let bb = BoundingBox::from_min_max(Point::new(-10, -20), Point::new(30, 40));
+        let actual = unscaled(&bb);
+        let oracle_out =
+            bounding_box::path2_unscaled_bb(bb.min.x(), bb.min.y(), bb.max.x(), bb.max.y());
+        assert_eq!(actual.min.x(), oracle_out[0]);
+        assert_eq!(actual.min.y(), oracle_out[1]);
+        assert_eq!(actual.max.x(), oracle_out[2]);
+        assert_eq!(actual.max.y(), oracle_out[3]);
+        assert_eq!(actual.defined as i64 as f64, oracle_out[4]);
     }
 
     #[test]
@@ -1437,6 +1638,53 @@ mod tests {
     fn bounding_box3_from_vec3_slice_rejects_empty_input() {
         let err = BoundingBox3::from_vec3_slice(&[]).unwrap_err();
         assert!(matches!(err, Exception::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn bounding_boxf3_inherited_members_sanity() {
+        // No dedicated oracle proof for these (see the module doc and "Not finished" in the
+        // pull request body); plain self-consistency checks against the formulas
+        // `BoundingBox3`'s own `Vec3crd` methods already implement identically.
+        let bb = BoundingBoxf3::from_min_max(
+            slic3r_point::point::Vec3d::new(-10.0, -20.0, -5.0),
+            slic3r_point::point::Vec3d::new(30.0, 40.0, 15.0),
+        );
+        assert!(bb.contains(&slic3r_point::point::Vec3d::new(0.0, 0.0, 0.0)));
+        assert!(!bb.contains(&slic3r_point::point::Vec3d::new(31.0, 0.0, 0.0)));
+
+        let inside = BoundingBoxf3::from_min_max(
+            slic3r_point::point::Vec3d::new(-1.0, -1.0, -1.0),
+            slic3r_point::point::Vec3d::new(1.0, 1.0, 1.0),
+        );
+        let outside = BoundingBoxf3::from_min_max(
+            slic3r_point::point::Vec3d::new(100.0, 100.0, 100.0),
+            slic3r_point::point::Vec3d::new(200.0, 200.0, 200.0),
+        );
+        assert!(bb.contains_bb(&inside));
+        assert!(!bb.contains_bb(&outside));
+        assert!(bb.intersects(&inside));
+        assert!(!bb.intersects(&outside));
+
+        let mut translated = bb;
+        translated.translate(1.0, 2.0, 3.0);
+        assert_eq!(
+            translated.min,
+            slic3r_point::point::Vec3d::new(-9.0, -18.0, -2.0)
+        );
+        assert_eq!(
+            translated.max,
+            slic3r_point::point::Vec3d::new(31.0, 42.0, 18.0)
+        );
+
+        let inflated = bb.inflated(2.0);
+        assert_eq!(
+            inflated.min,
+            slic3r_point::point::Vec3d::new(-12.0, -22.0, -7.0)
+        );
+        assert_eq!(
+            inflated.max,
+            slic3r_point::point::Vec3d::new(32.0, 42.0, 17.0)
+        );
     }
 
     #[test]

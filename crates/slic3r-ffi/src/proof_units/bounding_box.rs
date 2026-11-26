@@ -82,9 +82,9 @@ mod ffi {
             odefined: bool,
         ) -> Vec<i64>;
         /// `BoundingBoxBase::scale(double factor)` (`:64-69`), `this->min *= factor; this->max *=
-        /// factor;` on an `Eigen::Matrix<int64_t, 2, 1>` -- returns `[min.x, min.y, max.x,
-        /// max.y]` after the in-place mutation, `defined` untouched by the method so not
-        /// returned.
+        /// factor;` through `Point::operator*=(const double&)` (`Point.hpp:228`), which hides
+        /// Eigen's own mixed-scalar `operator*=` -- returns `[min.x, min.y, max.x, max.y]` after
+        /// the in-place mutation, `defined` untouched by the method so not returned.
         fn path2_scale(min_x: i64, min_y: i64, max_x: i64, max_y: i64, factor: f64) -> Vec<i64>;
         /// `BoundingBoxBase::size() const` (`:177-181`), `[size.x, size.y]`.
         fn path2_size(min_x: i64, min_y: i64, max_x: i64, max_y: i64) -> Vec<i64>;
@@ -162,12 +162,38 @@ mod ffi {
             omax_x: i64,
             omax_y: i64,
         ) -> bool;
+        /// `BoundingBoxBase::operator==` again, but with `defined`/`odefined` taken
+        /// independently (unlike [`path2_eq`], which always passes `true` for both) so a
+        /// differing `defined` actually reaches the oracle.
+        fn path2_eq_defined(
+            min_x: i64,
+            min_y: i64,
+            max_x: i64,
+            max_y: i64,
+            defined: bool,
+            omin_x: i64,
+            omin_y: i64,
+            omax_x: i64,
+            omax_y: i64,
+            odefined: bool,
+        ) -> bool;
+        /// `BoundingBox(const Point&, const Point&)` (`BoundingBox.hpp:225`), through the base's
+        /// `BoundingBoxBase(const PointType&, const PointType&)` (`:25-26`): drives `defined`
+        /// through the real constructor rather than `make_bbox`'s direct field assignment.
+        fn path2_from_min_max_defined(min_x: i64, min_y: i64, max_x: i64, max_y: i64) -> bool;
+        /// `inline BoundingBox scaled(const BoundingBoxf &bb)` (`BoundingBox.hpp:284`), returning
+        /// `[min.x, min.y, max.x, max.y, defined (0/1)]`.
+        fn path2_scaled_bbf(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Vec<i64>;
+        /// `unscaled<double>(const BoundingBox &bb)` (`BoundingBox.hpp:292-293`) at its default
+        /// `T`, returning `[min.x, min.y, max.x, max.y, defined (0.0/1.0)]`.
+        fn path2_unscaled_bb(min_x: i64, min_y: i64, max_x: i64, max_y: i64) -> Vec<f64>;
     }
 }
 
 pub use ffi::{
     path1_align_to_grid, path1_rotated, path1_rotated_about, path1_scaled, path2_area,
-    path2_center, path2_contains_bbox, path2_contains_point, path2_eq, path2_index, path2_merge_bb,
-    path2_merge_point, path2_merge_points, path2_offset, path2_overlap, path2_radius, path2_scale,
-    path2_size, path2_translate_point, path2_translate_xy,
+    path2_center, path2_contains_bbox, path2_contains_point, path2_eq, path2_eq_defined,
+    path2_from_min_max_defined, path2_index, path2_merge_bb, path2_merge_point, path2_merge_points,
+    path2_offset, path2_overlap, path2_radius, path2_scale, path2_scaled_bbf, path2_size,
+    path2_translate_point, path2_translate_xy, path2_unscaled_bb,
 };

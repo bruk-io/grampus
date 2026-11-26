@@ -19,11 +19,20 @@
 //! task's own fuzzing: `Point::from_f64_rounded` saturating an astronomical `offset`/`translate`
 //! delta to `i64::MAX` and then overflowing `self.min - v`, and (before that) an unconstrained
 //! `f64` delta reaching the same saturate-then-overflow path through a different arm. Neither is
-//! a divergence from the oracle -- the oracle's own `int64_t` arithmetic wraps the same way
-//! C++ signed overflow always has on this target, silently; only Rust's debug/fuzz build panics
-//! on it -- so bounding every input to a magnitude no real scaled coordinate ever reaches (a
-//! print bed many orders of magnitude larger than any real printer, at `SCALING_FACTOR`) avoids
-//! exercising that difference in build-configuration behaviour rather than the ported logic.
+//! a divergence from the oracle: signed-integer overflow in C++ is undefined behaviour, not
+//! defined wrapping, so the oracle's own `int64_t` arithmetic has no single defined answer at
+//! this magnitude either, and comparing against it there would prove nothing either way. Only
+//! Rust's debug/fuzz build *panics* on the overflow rather than silently producing some value --
+//! so bounding every input to a magnitude no real scaled coordinate ever reaches (a print bed
+//! many orders of magnitude larger than any real printer, at `SCALING_FACTOR`) avoids exercising
+//! that difference in build-configuration behaviour rather than the ported logic.
+//!
+//! **This bounds the `i32` seed itself, not just the derived delta** -- `bounded_coord` is the
+//! identity on its `i32` input, so every generated coordinate stays within `i32::MIN..=i32::MAX`
+//! even though the ported type is `i64`; the fuzzer never reaches a coordinate above/below
+//! +/-2^31. Widening that range is left to a later task: every arm above already asserts exact
+//! equality against the oracle at every coordinate this target does generate today, and
+//! widening the domain is new fuzzing work, not a fix to what this target already covers.
 //!
 //! `just fuzz slic3r-boundingbox_bounding_box` runs it.
 

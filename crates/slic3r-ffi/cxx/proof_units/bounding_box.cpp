@@ -231,6 +231,58 @@ bool path2_eq(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y, int64_
     return bb == other;
 }
 
+// Unlike `path2_eq` above (both boxes always `defined = true`, so the oracle never sees a
+// differing `defined` and the "operator== ignores defined" claim could not fail), this leg
+// takes `defined`/`odefined` independently so a differing value actually reaches the oracle.
+bool path2_eq_defined(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y, bool defined,
+                       int64_t omin_x, int64_t omin_y, int64_t omax_x, int64_t omax_y,
+                       bool odefined) {
+    Slic3r::BoundingBox bb = make_bbox(min_x, min_y, max_x, max_y, defined);
+    Slic3r::BoundingBox other = make_bbox(omin_x, omin_y, omax_x, omax_y, odefined);
+    return bb == other;
+}
+
+// Drives `defined` through the real `BoundingBox(const Point&, const Point&)` constructor --
+// via its base `BoundingBoxBase(const PointType&, const PointType&)` (`BoundingBox.hpp:25-26`)
+// -- rather than `make_bbox`'s direct field assignment, so the constructor's own `defined`
+// derivation rule is itself compared against the oracle (every other shim in this file
+// deliberately bypasses the constructor; see this file's own module doc for why).
+bool path2_from_min_max_defined(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y) {
+    Slic3r::BoundingBox bb(Slic3r::Point(min_x, min_y), Slic3r::Point(max_x, max_y));
+    return bb.defined;
+}
+
+// `inline BoundingBox scaled(const BoundingBoxf &bb)` (`BoundingBox.hpp:284`), the free
+// function this module's `scaled` ports -- constructed directly (never through
+// `BoundingBoxf`'s own two-point constructor) so `defined` on the way in is irrelevant to the
+// call, the same convention `make_bbox` uses above.
+rust::Vec<int64_t> path2_scaled_bbf(double min_x, double min_y, double max_x, double max_y) {
+    Slic3r::BoundingBoxf bb;
+    bb.min = Slic3r::Vec2d(min_x, min_y);
+    bb.max = Slic3r::Vec2d(max_x, max_y);
+    bb.defined = true;
+    Slic3r::BoundingBox out = Slic3r::scaled(bb);
+    return pack(out);
+}
+
+// `template<class T = double> BoundingBoxBase<Vec<2, T>> unscaled(const BoundingBox &bb)`
+// (`BoundingBox.hpp:292-293`) at its default `T = double`, the free function this module's
+// `unscaled` ports.
+rust::Vec<double> path2_unscaled_bb(int64_t min_x, int64_t min_y, int64_t max_x, int64_t max_y) {
+    Slic3r::BoundingBox bb = make_bbox(min_x, min_y, max_x, max_y, true);
+    // `unscaled<double>` is templated on `BoundingBoxBase<Vec<2, double>>`, not the nominal
+    // derived `Slic3r::BoundingBoxf` -- same fields, but no implicit conversion between the two
+    // distinct C++ types, so `out`'s type is left to `auto` rather than named as `BoundingBoxf`.
+    auto out = Slic3r::unscaled(bb);
+    rust::Vec<double> result;
+    result.push_back(out.min.x());
+    result.push_back(out.min.y());
+    result.push_back(out.max.x());
+    result.push_back(out.max.y());
+    result.push_back(out.defined ? 1.0 : 0.0);
+    return result;
+}
+
 } // namespace bounding_box
 } // namespace proof_units
 } // namespace slic3r_ffi
