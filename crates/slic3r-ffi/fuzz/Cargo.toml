@@ -49,3 +49,17 @@ path = "fuzz_targets/slic3r-point_point.rs"
 test = false
 doc = false
 bench = false
+
+# `slic3r-boundingbox`, added by task `58-foundation-bounding-box`: `BoundingBox.cpp`/
+# `BoundingBox.hpp`'s row is `fuzz target: required`. `docs/WORKFLOW.md`'s "A `required` fuzz
+# target" rule names this file as the one crate manifest a foundation task may touch; appended
+# here, at the end, so two branches conflict textually rather than reordering silently.
+[dependencies.slic3r-boundingbox]
+path = "../../slic3r-boundingbox"
+
+[[bin]]
+name = "slic3r-boundingbox_bounding_box"
+path = "fuzz_targets/slic3r-boundingbox_bounding_box.rs"
+test = false
+doc = false
+bench = false
