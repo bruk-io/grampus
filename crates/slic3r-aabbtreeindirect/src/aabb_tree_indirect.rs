@@ -1507,8 +1507,9 @@ mod tests {
     /// `docs/PORTING.md`'s "Decisions recorded on 2026-11-26", decision 2 -- it is proven
     /// through its own per-unit bridge instead. `crates/slic3r-ffi/cxx/proof_units/
     /// aabb_tree_indirect.cpp` builds the real vendored `Slic3r::AABBTreeIndirect::Tree<3,
-    /// double>` over the same two-triangle mesh and calls the real vendored
-    /// `intersect_ray_first_hit` and `squared_distance_to_indexed_triangle_set`.
+    /// double>` over the same mesh this test builds its own tree from -- the five-triangle
+    /// `unit_triangle_mesh_wide` fixture, not the two-triangle one -- and calls the real
+    /// vendored `intersect_ray_first_hit` and `squared_distance_to_indexed_triangle_set`.
     // PROOF: 2
     #[test]
     fn aabb_tree_indirect_matches_the_oracle() {
