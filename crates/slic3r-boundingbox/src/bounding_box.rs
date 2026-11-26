@@ -882,6 +882,13 @@ impl BoundingBox3 {
     // no in-scope caller constructs a `BoundingBox3` (`Vec3crd`) and calls it (every live
     // `.inflated(` caller in the vendored tree is on a `BoundingBoxf3`/`Vec3d` box, see
     // [`BoundingBoxf3::inflated`]).
+    // TODO(port): src/libslic3r/BoundingBox.hpp:38,45,58-61,62-81,82-83,84-88 -- further members
+    // `BoundingBox3Base<PointType>` inherits unchanged from `BoundingBoxBase<PointType,
+    // PointsType>` (`BoundingBox.hpp:116`, `class BoundingBox3Base : public
+    // BoundingBoxBase<PointType, std::vector<PointType>>`): `reset`, `area`, `overlap`,
+    // `operator[]`, `operator==`/`!=`, `operator<<`. No in-scope caller found for any of them at
+    // either 3D instantiation (`Vec3crd` here or `Vec3d` on `BoundingBoxf3`); left unported
+    // rather than guessed at.
 }
 
 // -------------------------------------------------------------------------------------------
@@ -1137,6 +1144,10 @@ impl BoundingBoxf3 {
     // constructor (`BoundingBox3Base(const PointType&, const PointType&, const PointType&)`,
     // reachable on `BoundingBoxf3` through its `using BoundingBox3Base::BoundingBox3Base;`);
     // no in-scope caller constructs a `BoundingBoxf3` from three points.
+    // TODO(port): src/libslic3r/BoundingBox.hpp:38,45,58-61,62-81,82-83,84-88 -- same further
+    // inherited-from-`BoundingBoxBase` members named on [`BoundingBox3`]'s own identical marker
+    // above (`reset`, `area`, `overlap`, `operator[]`, `operator==`/`!=`, `operator<<`); no
+    // in-scope caller found at this `Vec3d` instantiation either.
 }
 
 // -------------------------------------------------------------------------------------------
