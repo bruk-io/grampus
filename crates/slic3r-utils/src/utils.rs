@@ -1568,7 +1568,7 @@ pub fn extended_path(path: &Path) -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Utils.hpp time formatters (Utils.hpp:572-780)
+// The Utils.hpp time formatters (Utils.hpp:576-779)
 //
 // Nine `inline` formatters built on C `sprintf`/`sscanf`. Eight are ported below; the ninth,
 // `get_bbl_monitor_end_time_dhm` (`Utils.hpp:744-757`), is not -- see the "Deferred
@@ -1616,7 +1616,7 @@ pub fn get_time_dhms(time_in_secs: f32) -> String {
     } else if t > 1_f32 {
         format!("{}s", t as i32)
     } else {
-        // `::sprintf(buffer, "%fs", time_in_secs)` (`:644`): `%f` on a `float` promoted to
+        // `::sprintf(buffer, "%fs", time_in_secs)` (`:643`): `%f` on a `float` promoted to
         // `double`, i.e. six decimals of the widened value.
         format!("{}s", format_c_percent_f(t as f64))
     }
@@ -1754,7 +1754,7 @@ pub fn get_bbl_monitor_time_dhm(time_in_secs: f32) -> String {
     }
 }
 
-/// `Slic3r::get_bbl_remain_time_dhms(float)` (`Utils.hpp:759-780`): `DDdHHhMMmSSs`, with `%ds`
+/// `Slic3r::get_bbl_remain_time_dhms(float)` (`Utils.hpp:759-779`): `DDdHHhMMmSSs`, with `%ds`
 /// as its last branch and no `minutes >= 0` guard.
 pub fn get_bbl_remain_time_dhms(time_in_secs: f32) -> String {
     let mut t = time_in_secs;
@@ -1797,7 +1797,7 @@ fn format_c_percent_f(v: f64) -> String {
 /// and `src/libslic3r/GCode/GCodeProcessor.cpp:1415`.
 ///
 /// The vendored body reads its input with four `::sscanf` format strings, one per shape, chosen
-/// by the first of `'d'`/`'h'`/`'m'`/`'s'` that `time` contains (`:581-589`). [`CScan`] below
+/// by the first of `'d'`/`'h'`/`'m'`/`'s'` that `time` contains (`:586-592`). [`CScan`] below
 /// reproduces `sscanf`'s own behaviour for the two conversions used -- `%d` and `%f` -- and for
 /// the literal and whitespace directives between them, including the part that matters here:
 /// **a directive that fails to match stops the scan and leaves every later variable at its
@@ -1818,7 +1818,7 @@ pub fn short_time(time: &str) -> String {
     let mut f_seconds: f32 = 0.0;
 
     if time.contains('d') {
-        // `::sscanf(time.c_str(), "%dd %dh %dm %ds", …)` (`:582`).
+        // `::sscanf(time.c_str(), "%dd %dh %dm %ds", …)` (`:587`).
         let mut scan = CScan::new(time);
         scan.scan_int_into(&mut days);
         scan.literal(b'd');
@@ -1831,7 +1831,7 @@ pub fn short_time(time: &str) -> String {
         scan.whitespace();
         scan.scan_int_into(&mut seconds);
     } else if time.contains('h') {
-        // `::sscanf(time.c_str(), "%dh %dm %ds", …)` (`:584`).
+        // `::sscanf(time.c_str(), "%dh %dm %ds", …)` (`:589`).
         let mut scan = CScan::new(time);
         scan.scan_int_into(&mut hours);
         scan.literal(b'h');
@@ -1841,20 +1841,20 @@ pub fn short_time(time: &str) -> String {
         scan.whitespace();
         scan.scan_int_into(&mut seconds);
     } else if time.contains('m') {
-        // `::sscanf(time.c_str(), "%dm %ds", …)` (`:586`).
+        // `::sscanf(time.c_str(), "%dm %ds", …)` (`:591`).
         let mut scan = CScan::new(time);
         scan.scan_int_into(&mut minutes);
         scan.literal(b'm');
         scan.whitespace();
         scan.scan_int_into(&mut seconds);
     } else if time.contains('s') {
-        // `::sscanf(time.c_str(), "%fs", &f_seconds); seconds = int(f_seconds);` (`:589-590`).
+        // `::sscanf(time.c_str(), "%fs", &f_seconds); seconds = int(f_seconds);` (`:593-594`).
         let mut scan = CScan::new(time);
         scan.scan_float_into(&mut f_seconds);
         seconds = f_seconds as i32;
     }
 
-    // Round to full minutes (`:592-600`). `++minutes`/`++hours`/`++days` are plain `int`
+    // Round to full minutes (`:596-605`). `++minutes`/`++hours`/`++days` are plain `int`
     // increments on values that cannot be near `INT_MAX` after the comparisons above.
     // PORT SRC: src/libslic3r/Utils.hpp:597
     if days + hours > 0 && seconds >= 30 {
@@ -2069,17 +2069,17 @@ impl<'a> CScan<'a> {
 /// `rel_path` is relative, carries no `".."` component and no embedded NUL, and joined to
 /// `root` still resolves inside it.
 ///
-/// The textual half (`:1294-1305`) is byte work on the string as given: both `'/'` and `'\\'`
-/// count as separators on every platform (`:1293`), a leading separator or a `c:`-shaped second
-/// character is rejected, and the component scan compares each component against `".."` with
-/// `rel_path.compare(start, end - start, "..")`, which is a length-aware compare, not a prefix
-/// test.
+/// The textual half (`:1294-1307`) is byte work on the string as given: both `'/'` and `'\\'`
+/// count as separators on every platform (`:1294`'s lambda), a leading separator or a
+/// `c:`-shaped second character is rejected (`:1295`), and the component scan (`:1300-1307`)
+/// compares each component against `".."` with `rel_path.compare(start, end - start, "..")`
+/// (`:1304`), which is a length-aware compare, not a prefix test.
 ///
-/// The resolving half (`:1306-1319`) is `boost::filesystem::weakly_canonical` on `root` and on
-/// `root / rel_path`, a trailing-separator strip on the canonical root, and a prefix match that
-/// additionally requires the next byte of the full path to be the preferred separator -- so
-/// `/root/abc` is not inside `/root/ab`. [`weakly_canonical`] below is this port's rendering of
-/// that call.
+/// The resolving half (`:1308-1319`) is `boost::filesystem::weakly_canonical` on `root`
+/// (`:1310`) and on `root / rel_path` (`:1314`), a trailing-separator strip on the canonical
+/// root (`:1312-1313`), and a prefix match (`:1315-1316`) that additionally requires the next
+/// byte of the full path to be the preferred separator -- so `/root/abc` is not inside
+/// `/root/ab`. [`weakly_canonical`] below is this port's rendering of that call.
 pub fn is_path_within_root(rel_path: &str, root: &Path) -> bool {
     let is_separator = |c: u8| c == b'/' || c == b'\\';
     let bytes = rel_path.as_bytes();
@@ -2103,14 +2103,14 @@ pub fn is_path_within_root(rel_path: &str, root: &Path) -> bool {
         start = end + 1;
     }
     // "Resolve against the canonical root so a symlink inside it cannot lead back out."
-    // (`:1307`). `weakly_canonical` reports failure as `None` where the vendored call throws
+    // (`:1308`). `weakly_canonical` reports failure as `None` where the vendored call throws
     // `filesystem_error` into `:1317`'s `catch`, which returns `false` -- the same answer.
     let Some(root_canonical) = weakly_canonical(root) else {
         return false;
     };
     let mut root_bytes = root_canonical.as_os_str().as_encoded_bytes().to_vec();
     // "A trailing separator on root would otherwise fail the prefix match below for every
-    // path." (`:1311`)
+    // path." (`:1311`, over `:1312-1313`)
     while root_bytes.last() == Some(&b'/') {
         root_bytes.pop();
     }
@@ -2119,7 +2119,7 @@ pub fn is_path_within_root(rel_path: &str, root: &Path) -> bool {
         return false;
     };
     let full_bytes = full.as_os_str().as_encoded_bytes();
-    // `full_str.compare(0, root_str.size(), root_str) == 0` (`:1314`) compares at most
+    // `full_str.compare(0, root_str.size(), root_str) == 0` (`:1315`) compares at most
     // `root_str.size()` bytes of `full_str`, so a `full_str` shorter than `root_str` can never
     // compare equal.
     full_bytes.len() >= root_bytes.len()
@@ -2305,7 +2305,7 @@ fn c_remove(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// `write_whole_file` (`utils.cpp:841-860`), a file-scope `static`, so a private function here
+/// `write_whole_file` (`utils.cpp:841-856`), a file-scope `static`, so a private function here
 /// (the idiom map's row for a `static` free function).
 ///
 /// `binary` picks `"wb"` over `"w"` for `fopen`; the two modes are identical on every target
@@ -2321,14 +2321,14 @@ fn write_whole_file(path: &Path, chunks: &[&str], _binary: bool) -> std::io::Res
         file.write_all(chunk.as_bytes())?;
     }
     file.flush()?;
-    // `std::fclose`'s own failure (`:857`) is the drop below in Rust, which cannot report one;
+    // `std::fclose`'s own failure (`:852`) is the drop below in Rust, which cannot report one;
     // `flush` above is where a deferred write error surfaces in both.
     Ok(())
 }
 
 /// The one mutex `write_in_place` (`utils.cpp:862-867`) holds for every in-place write: "The
 /// in-place fallback truncates the target, so two threads of this process on the same file must
-/// not both be in it. One mutex for all such writes" (`:861-864`).
+/// not both be in it. One mutex for all such writes" (`:858-861`, over `:864`).
 static WRITE_IN_PLACE_MUTEX: Mutex<()> = Mutex::new(());
 
 /// `write_in_place` (`utils.cpp:862-867`), a file-scope `static`, so private here.
@@ -2341,7 +2341,7 @@ fn write_in_place(path: &Path, chunks: &[&str], binary: bool) -> std::io::Result
 
 /// The per-process counter `write_file_atomically` names its temporary with: "Unique per
 /// process and per call, so two threads writing one target without a lock never share a
-/// temporary." (`utils.cpp:884-885`).
+/// temporary." (`utils.cpp:884-886`).
 static WRITE_FILE_ATOMICALLY_COUNTER: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
 
@@ -2383,7 +2383,7 @@ pub fn write_file_atomically(path: &Path, chunks: &[&str], binary: bool) -> std:
         return write_in_place(path, chunks, binary);
     }
     // "Not on Windows, where a read-only bit on the temporary would stop the rename itself."
-    // (`:896-898`). The error is deliberately discarded, as the vendored `bec` is.
+    // (`:898`, over `:899-900`). The error is deliberately discarded, as the vendored `bec` is.
     if let Ok(meta) = &status {
         let _ = std::fs::set_permissions(&tmp_path, meta.permissions());
     }
@@ -2502,7 +2502,7 @@ pub fn copy_framework(from: &Path, to: &Path) -> bool {
             return false;
         };
         if meta.file_type().is_symlink() {
-            // `boost::filesystem::copy_symlink` (`:1204`): read the link and create the same
+            // `boost::filesystem::copy_symlink` (`:1206`): read the link and create the same
             // link at the destination.
             let Ok(target) = std::fs::read_link(&entry) else {
                 return false;
@@ -2566,7 +2566,7 @@ pub fn check_copy(origin: &Path, copy: &Path) -> CopyFileResult {
         }
         remaining -= n1 as u64;
         if eof1 || eof2 {
-            // "All data has been read and compared equal." (`:1251`)
+            // "All data has been read and compared equal." (`:1253-1254`)
             return if remaining == 0 {
                 CopyFileResult::Success
             } else {
@@ -2630,10 +2630,10 @@ pub fn load_string_file(p: &Path) -> std::io::Result<Vec<u8>> {
 /// vendored body can throw -- neither collapsed into the other, per `### Error sets`.
 #[derive(Debug)]
 pub enum CopyDirectoryError {
-    /// The `Slic3r::CriticalException` thrown at `utils.cpp:2022` when a file copy fails.
+    /// The `Slic3r::CriticalException` thrown at `utils.cpp:2024` when a file copy fails.
     Critical(slic3r_exception::exception::Exception),
     /// A `boost::filesystem::filesystem_error` from one of the body's own throwing filesystem
-    /// calls -- `remove_all` (`:2005`), `create_directories` (`:2006`) or the
+    /// calls -- `remove_all` (`:2006`), `create_directories` (`:2007`) or the
     /// `directory_iterator` constructor (`:2008`).
     Filesystem(std::io::Error),
 }
@@ -2643,7 +2643,7 @@ pub enum CopyDirectoryError {
 /// into `target`, skipping any file whose name `filter` accepts.
 ///
 /// `filter` is `nullptr` by default (`Utils.hpp:798`), which the vendored body tests with
-/// `if (filter && filter(name))` (`:2018`) -- so `None` here, not a closure that always answers
+/// `if (filter && filter(name))` (`:2019`) -- so `None` here, not a closure that always answers
 /// false.
 ///
 /// The directory is walked in [`read_dir_sorted`]'s fixed order; see its `// FIDELITY(port):`
@@ -2667,7 +2667,7 @@ pub fn copy_directory_recursively(
             .to_string_lossy()
             .to_string();
         let target_file = {
-            // `target.string() + "/" + name` (`:2013`), a string join, not `operator/`.
+            // `target.string() + "/" + name` (`:2012`), a string join, not `operator/`.
             let mut joined = target.as_os_str().to_os_string();
             joined.push("/");
             joined.push(&name);
@@ -2681,7 +2681,7 @@ pub fn copy_directory_recursively(
             }
             let (result, error_message) = copy_file(&entry, &target_file, false);
             if result != CopyFileResult::Success {
-                // PORT NOTE: src/libslic3r/utils.cpp:2021 (BOOST_LOG_TRIVIAL(error))
+                // PORT NOTE: src/libslic3r/utils.cpp:2023 (BOOST_LOG_TRIVIAL(error))
                 let template_ =
                     slic3r_i18n::i18_n::translate("Copying directory %1% to %2% failed: %3%");
                 let message = slic3r_format::format::format(

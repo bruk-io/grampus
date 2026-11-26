@@ -32,7 +32,7 @@ mod ffi {
         fn path1_get_time_hms(time_in_secs: f32) -> String;
         /// `Slic3r::get_bbl_monitor_time_dhm(float)` (`Utils.hpp:722-742`).
         fn path1_get_bbl_monitor_time_dhm(time_in_secs: f32) -> String;
-        /// `Slic3r::get_bbl_remain_time_dhms(float)` (`Utils.hpp:759-780`).
+        /// `Slic3r::get_bbl_remain_time_dhms(float)` (`Utils.hpp:759-779`).
         fn path1_get_bbl_remain_time_dhms(time_in_secs: f32) -> String;
 
         /// `Slic3r::is_path_within_root(const std::string&, const path&)` (`utils.cpp:1292`).
