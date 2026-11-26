@@ -1,4 +1,5 @@
 //! `slic3r-gcode`, one of the ported-libslic3r crates `port/cut.tsv` cuts the vendored
-//! tree into (plan step 20, task 34-foundation-spike). This skeleton carries no `mod`
-//! line yet: Phase B (plan step 23) adds one per ported module, in alphabetical order,
-//! as docs/WORKFLOW.md states.
+//! tree into (plan step 20, task 34-foundation-spike). Phase B (plan step 23) adds one
+//! `mod` line per ported module, in alphabetical order, as docs/WORKFLOW.md states.
+
+pub mod pchip_interpolator_helper;
