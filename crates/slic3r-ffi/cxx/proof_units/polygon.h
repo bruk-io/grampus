@@ -34,6 +34,16 @@ rust::Vec<float> path3_parameter_by_length(rust::Slice<const int64_t> xs,
                                             rust::Slice<const int64_t> ys);
 rust::Vec<int64_t> path3_densify(rust::Slice<const int64_t> xs, rust::Slice<const int64_t> ys,
                                   float min_length);
+rust::Vec<int64_t> path3_intersection(rust::Slice<const int64_t> xs, rust::Slice<const int64_t> ys,
+                                       int64_t ax, int64_t ay, int64_t bx, int64_t by);
+rust::Vec<int64_t> path3_first_intersection(rust::Slice<const int64_t> xs,
+                                             rust::Slice<const int64_t> ys, int64_t ax,
+                                             int64_t ay, int64_t bx, int64_t by);
+rust::Vec<int64_t> path3_intersections(rust::Slice<const int64_t> xs,
+                                        rust::Slice<const int64_t> ys, int64_t ax, int64_t ay,
+                                        int64_t bx, int64_t by);
+rust::Vec<int64_t> path3_douglas_peucker(rust::Slice<const int64_t> xs,
+                                          rust::Slice<const int64_t> ys, double tolerance);
 
 } // namespace polygon
 } // namespace proof_units

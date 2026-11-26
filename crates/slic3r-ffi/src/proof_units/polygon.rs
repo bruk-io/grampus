@@ -43,11 +43,45 @@ mod ffi {
         /// `Polygon::densify(float, std::vector<float>*)` (`:381-407`), the no-`lengths_ptr`
         /// overload; returning the resulting points flattened.
         fn path3_densify(xs: &[i64], ys: &[i64], min_length: f32) -> Vec<i64>;
+        /// `Polygon::intersection(const Line&, Point*) const` (`Polygon.cpp:171-181`), returning
+        /// `[found (0/1), x, y]`.
+        fn path3_intersection(
+            xs: &[i64],
+            ys: &[i64],
+            ax: i64,
+            ay: i64,
+            bx: i64,
+            by: i64,
+        ) -> Vec<i64>;
+        /// `Polygon::first_intersection(const Line&, Point*) const` (`:183-210`), returning
+        /// `[found (0/1), x, y]`.
+        fn path3_first_intersection(
+            xs: &[i64],
+            ys: &[i64],
+            ax: i64,
+            ay: i64,
+            bx: i64,
+            by: i64,
+        ) -> Vec<i64>;
+        /// `Polygon::intersections(const Line&, Points*) const` (`:212-227`), returning the
+        /// found points flattened.
+        fn path3_intersections(
+            xs: &[i64],
+            ys: &[i64],
+            ax: i64,
+            ay: i64,
+            bx: i64,
+            by: i64,
+        ) -> Vec<i64>;
+        /// `MultiPoint::_douglas_peucker(const Points&, double)` (`MultiPoint.hpp:107`, defined
+        /// `MultiPoint.cpp:175-241`), called directly as `Polygon::douglas_peucker` itself does.
+        fn path3_douglas_peucker(xs: &[i64], ys: &[i64], tolerance: f64) -> Vec<i64>;
     }
 }
 
 pub use ffi::{
-    path3_area, path3_centroid, path3_contains, path3_densify, path3_is_counter_clockwise,
+    path3_area, path3_centroid, path3_contains, path3_densify, path3_douglas_peucker,
+    path3_first_intersection, path3_intersection, path3_intersections, path3_is_counter_clockwise,
     path3_make_circle_num_segments, path3_parameter_by_length, path3_point_in_polygon,
     path3_point_projection, path3_polygon_is_convex, path3_remove_sticks,
 };

@@ -1394,10 +1394,17 @@ mod tests {
         )
         .expect("make_circle_num_segments must match the oracle exactly");
 
+        // Review finding: the first draft's input here (`(0,0),(50,0),(100,0),(100,100),
+        // (0,100)`) is collinear but never reverses direction, so `is_stick` returns `false`
+        // at every call (`dir > 0` at `Polygon.cpp:550`) and `remove_sticks`'s own mutation
+        // branches (the `poly.points[j] = poly.points[i]` shift, the trailing-point truncation,
+        // both trailing `while` loops) never ran. `(100,0) -> (50,0)` below is a genuine spike
+        // (it reverses), which `is_stick` does flag (`dir < 0`, then `dist2 < SCALED_EPSILON`
+        // at `Polygon.cpp:558,564`), exercising the shift this unit's proof had not reached.
         let sticky = Polygon::from_points(vec![
             Point::new(0, 0),
-            Point::new(50, 0),
             Point::new(100, 0),
+            Point::new(50, 0),
             Point::new(100, 100),
             Point::new(0, 100),
         ]);
@@ -1439,6 +1446,92 @@ mod tests {
             oracle_densified,
         )
         .expect("Polygon::densify must match the oracle exactly");
+
+        // `Polygon::intersection`/`first_intersection`/`intersections` each has its own
+        // traversal, independent of `MultiPoint`'s (see this module's own doc) -- a line that
+        // crosses two edges of the square distinguishes "first edge found" (`intersection`)
+        // from "nearest to `line.a`" (`first_intersection`) and exercises `intersections`'
+        // multi-result path.
+        let line_ax = -10i64;
+        let line_ay = 150i64;
+        let line_bx = 150i64;
+        let line_ay2 = -10i64;
+        let crossing = slic3r_line::line::Line::new(
+            Point::new(line_ax, line_ay),
+            Point::new(line_bx, line_ay2),
+        );
+        let actual_int = p.intersection(&crossing);
+        let actual_int_vec = match actual_int {
+            Some(pt) => vec![1i64, pt.x(), pt.y()],
+            None => vec![0, 0, 0],
+        };
+        let oracle_int = slic3r_proof::proof_units::polygon::path3_intersection(
+            &xs,
+            &ys,
+            crossing.a.x(),
+            crossing.a.y(),
+            crossing.b.x(),
+            crossing.b.y(),
+        );
+        compare_unit("Polygon.cpp", Oracle::Built, actual_int_vec, oracle_int)
+            .expect("Polygon::intersection must match the oracle exactly");
+
+        let actual_first = p.first_intersection(&crossing);
+        let actual_first_vec = match actual_first {
+            Some(pt) => vec![1i64, pt.x(), pt.y()],
+            None => vec![0, 0, 0],
+        };
+        let oracle_first = slic3r_proof::proof_units::polygon::path3_first_intersection(
+            &xs,
+            &ys,
+            crossing.a.x(),
+            crossing.a.y(),
+            crossing.b.x(),
+            crossing.b.y(),
+        );
+        compare_unit("Polygon.cpp", Oracle::Built, actual_first_vec, oracle_first)
+            .expect("Polygon::first_intersection must match the oracle exactly");
+
+        let actual_ints = p.intersections(&crossing);
+        let oracle_ints = slic3r_proof::proof_units::polygon::path3_intersections(
+            &xs,
+            &ys,
+            crossing.a.x(),
+            crossing.a.y(),
+            crossing.b.x(),
+            crossing.b.y(),
+        );
+        compare_unit(
+            "Polygon.cpp",
+            Oracle::Built,
+            flatten(&actual_ints),
+            oracle_ints,
+        )
+        .expect("Polygon::intersections must match the oracle exactly");
+
+        // `MultiPoint::_douglas_peucker`, called directly by `Polygon::douglas_peucker` (see
+        // this module's own doc) -- the stack/index logic is this task's most intricate, and
+        // had no differential comparison of its own beyond `polygon_douglas_peucker_simplifies_
+        // a_near_straight_edge`'s hand-written expected output.
+        let wiggly: Points = vec![
+            Point::new(0, 0),
+            Point::new(20, 3),
+            Point::new(40, -2),
+            Point::new(60, 1),
+            Point::new(100, 0),
+        ];
+        let wiggly_xs: Vec<i64> = wiggly.iter().map(|pt| pt.x()).collect();
+        let wiggly_ys: Vec<i64> = wiggly.iter().map(|pt| pt.y()).collect();
+        let actual_dp = multi_point::douglas_peucker(&wiggly, 5.0);
+        let oracle_dp =
+            slic3r_proof::proof_units::polygon::path3_douglas_peucker(&wiggly_xs, &wiggly_ys, 5.0);
+        compare_unit(
+            "MultiPoint.cpp",
+            Oracle::Built,
+            flatten(&actual_dp),
+            oracle_dp,
+        )
+        .expect("MultiPoint::_douglas_peucker must match the oracle exactly");
     }
 }
 

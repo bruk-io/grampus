@@ -8,9 +8,13 @@
 // vendored `.cpp` here. `Polygon.cpp` exports far more than `ClipperZUtils.cpp` did
 // (`Polygon::area`, `contains`, `get_extents`, `remove_sticks`, `polygons_simplify`, ...) and
 // pulls in `ClipperUtils.hpp`/`Polyline.hpp`, so this was measured empirically rather than
-// assumed: `cargo build -p slic3r-ffi` with only this shim present links clean, with no
-// duplicate-symbol or undefined-reference error (see this task's pull request body for the
-// exact command and its output). The mechanism is the one that comment states: on this pin's
+// assumed: `cargo build -p slic3r-ffi`, run with only this shim's `path3_point_in_polygon`
+// present (before the rest of this file existed), printed
+// `Finished \`dev\` profile [unoptimized + debuginfo] target(s) in 51.27s` with no
+// `duplicate symbol`/`undefined symbol` line anywhere in its output (this task's pull request
+// body quotes the exact command and that result; the sanity check that followed, calling the
+// linked function once to confirm a correct answer, ran locally and was not committed). The
+// mechanism is the one that comment states: on this pin's
 // macOS `ld`, a static-archive member is only extracted when something still unresolved needs
 // it, and nothing else this crate links calls into `Polygon.cpp`'s own externally linked
 // surface, so `liblibslic3r.a`'s copy of `Polygon.cpp.o` is never pulled in and this
@@ -135,6 +139,52 @@ rust::Vec<int64_t> path3_densify(rust::Slice<const int64_t> xs, rust::Slice<cons
     Slic3r::Polygon poly = make_polygon(xs, ys);
     poly.densify(min_length);
     return pack_points(poly.points);
+}
+
+rust::Vec<int64_t> path3_intersection(rust::Slice<const int64_t> xs, rust::Slice<const int64_t> ys,
+                                       int64_t ax, int64_t ay, int64_t bx, int64_t by) {
+    Slic3r::Polygon poly = make_polygon(xs, ys);
+    Slic3r::Line line(Slic3r::Point(ax, ay), Slic3r::Point(bx, by));
+    Slic3r::Point out;
+    bool found = poly.intersection(line, &out);
+    rust::Vec<int64_t> result;
+    result.push_back(found ? 1 : 0);
+    result.push_back(found ? static_cast<int64_t>(out.x()) : 0);
+    result.push_back(found ? static_cast<int64_t>(out.y()) : 0);
+    return result;
+}
+
+rust::Vec<int64_t> path3_first_intersection(rust::Slice<const int64_t> xs,
+                                             rust::Slice<const int64_t> ys, int64_t ax,
+                                             int64_t ay, int64_t bx, int64_t by) {
+    Slic3r::Polygon poly = make_polygon(xs, ys);
+    Slic3r::Line line(Slic3r::Point(ax, ay), Slic3r::Point(bx, by));
+    Slic3r::Point out;
+    bool found = poly.first_intersection(line, &out);
+    rust::Vec<int64_t> result;
+    result.push_back(found ? 1 : 0);
+    result.push_back(found ? static_cast<int64_t>(out.x()) : 0);
+    result.push_back(found ? static_cast<int64_t>(out.y()) : 0);
+    return result;
+}
+
+rust::Vec<int64_t> path3_intersections(rust::Slice<const int64_t> xs,
+                                        rust::Slice<const int64_t> ys, int64_t ax, int64_t ay,
+                                        int64_t bx, int64_t by) {
+    Slic3r::Polygon poly = make_polygon(xs, ys);
+    Slic3r::Line line(Slic3r::Point(ax, ay), Slic3r::Point(bx, by));
+    Slic3r::Points out;
+    poly.intersections(line, &out);
+    return pack_points(out);
+}
+
+rust::Vec<int64_t> path3_douglas_peucker(rust::Slice<const int64_t> xs,
+                                          rust::Slice<const int64_t> ys, double tolerance) {
+    Slic3r::Points pts;
+    pts.reserve(xs.size());
+    for (size_t i = 0; i < xs.size(); ++i)
+        pts.emplace_back(xs[i], ys[i]);
+    return pack_points(Slic3r::MultiPoint::_douglas_peucker(pts, tolerance));
 }
 
 } // namespace polygon
