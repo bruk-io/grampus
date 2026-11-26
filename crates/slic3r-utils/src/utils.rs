@@ -5,22 +5,29 @@
 //! `Utils.hpp` (inline functions and templates with no same-stem `.cpp` body), `no` for
 //! `utils.cpp`; both rows are in this one unit (one `target module` cell).
 //!
-//! # Scope of this single-pass port (read before trusting "ported, not drafted")
+//! # Scope of this port
 //!
-//! `utils.cpp` declares roughly 90 functions across logging, OS process/memory introspection,
-//! file-copy and atomic-write machinery, vendor-bundle installation and plain string/path
-//! helpers. This module ports the pure, deterministic, OS-independent half faithfully and
-//! leaves the rest unported, named individually below with a `// TODO(port): <vendored
-//! path>:<line>` marker naming each declaration (grep this file for `TODO(port)` to find every
-//! one), for three distinct reasons plus one honestly-disclosed non-reason:
+//! `Utils.hpp` and `utils.cpp` declare roughly 120 items between them: logging, OS process and
+//! memory introspection, file-copy and atomic-write machinery, vendor-bundle installation, time
+//! formatting and plain string/path helpers. This module ports every item whose behaviour the
+//! normative oracle at `vendor/OrcaSlicer/build/arm64` can be measured against, and leaves the
+//! rest unported, named individually in the "Deferred declarations" block at the end of this
+//! file (one `// TODO(port):` or `// PORT NOTE:` marker per declaration, naming its vendored
+//! line), under one of seven reasons -- each of which is a rule in `docs/PORTING.md`,
+//! `docs/WORKFLOW.md` or this task's own text, not a budget:
 //!
-//! 1. **Reaches a dependency no port crate may add.** `boost::log` (the whole logging family:
-//!    `set_logging_level`, `set_logging_file`, `level_string_to_boost`,
-//!    `get_string_logging_level`, `get_logging_level`, `trace`, `set_log_path_and_level`,
-//!    `flush_logs`, `shutdown_console_logging`, `get_log_file_name`), OpenSSL's MD5
-//!    (`bbl_calc_md5`), and `boost::locale`'s NFC normaliser (`normalize_utf8_nfc`) have no
-//!    workspace dependency to bind against, and a port task may not add one
-//!    (`docs/WORKFLOW.md`, "Conflict discipline").
+//! 1. **Reaches a dependency no port crate may add** (`docs/WORKFLOW.md`, "Conflict
+//!    discipline": a port task adds no dependency). `boost::log` (the whole logging family),
+//!    OpenSSL's MD5 (`bbl_calc_md5`), `boost::locale`'s NFC normaliser (`normalize_utf8_nfc`),
+//!    and the platform facilities std alone does not reach: `log_memory_info` (mach
+//!    `task_info` and `getrusage`, plus `boost::log`'s own severity global),
+//!    `get_process_name` (libproc `proc_pidpath`), `xdg_config_dir` (the
+//!    `getpwnam`/`getpwuid` passwd chain), `wayland_socket_available` (`fcntl(fd, F_GETFD)`),
+//!    `disable_multi_threading` (`tbb::global_control`, which the idiom map's TBB row leaves
+//!    nothing to switch off: every ported loop is already serial) and `total_physical_memory`
+//!    (`sysctl(CTL_HW, HW_MEMSIZE)`). That last one is here because the differential test
+//!    measured it: a first revision of this module read `utils.cpp:1957`'s `#else` branch as
+//!    the live one and ported `return 0L;`, and the oracle answered 103079215104 against 0.
 //! 2. **Reaches the out-of-scope preset layer (R11).** `is_vendor_installed`,
 //!    `installed_vendor_version`, `remove_installed_vendor`, `resource_vendor_version`,
 //!    `installable_cache_version`, `cache_covers` and `install_vendor_bundles_from_resources`
@@ -28,42 +35,46 @@
 //!    (`PresetCacheFormat.hpp`), both out of scope (`## Don't-translate list`: "Out-of-scope
 //!    code reached from an in-scope file"). `vendor_names_in` does not reach either and is
 //!    ported below.
-//! 3. **No in-scope caller has fixed an instantiation.** `convert_vector<From, To>` and the
-//!    generic `size_t`-dispatching overload of `next_highest_power_of_2` are templates with no
-//!    caller yet in the fan-out; the idiom map's rule ("a template is not force-collapsed to one
-//!    concrete type unless the manifest row's unit only ever instantiates one") argues against
-//!    guessing a pair of concrete types here. The three fixed-width overloads
-//!    (`uint16_t`/`uint32_t`/`uint64_t`) that `Utils.hpp` itself also declares are concrete and
-//!    are ported. `IsTriviallyCopyable` and the `SLIC3R_STDVEC_MEMSIZE`/
-//!    `SLIC3R_STDUNORDEREDSET_MEMSIZE` macros it backs are the same shape -- a compile-time
-//!    predicate/macro pair with no fixed instantiation in scope -- and are deferred with it.
-//! 4. **Deferred for this task's own time budget -- disclosed here as exactly that, not as a
-//!    rule above, because `docs/PORTING.md`'s don't-translate list has no "ran out of time"
-//!    entry.** This task did not reach: the eight pure `sprintf`/`sscanf`-based time formatters
-//!    (`short_time`, `get_time_dhms`, `get_bbl_time_dhms`, `get_timezone_utc_hm`,
-//!    `get_time_dhm`, `get_time_hms`, `get_bbl_monitor_time_dhm`, `get_bbl_remain_time_dhms`),
-//!    each of which needs C `sprintf`'s own field-width/precision rules (`%f`'s default 6
-//!    decimals, `sscanf`'s literal-text matching between `%d` conversions) reproduced and
-//!    checked against the real oracle one by one rather than guessed; `get_process_name`
-//!    (platform process-table probing); `string_printf`/`header_slic3r_generated`/
-//!    `header_gcodeviewer_generated`/`debug_out_path` (a variadic-`printf` engine with no
-//!    direct Rust equivalent and a build-time version macro this workspace does not expose
-//!    yet); `total_physical_memory`/`log_memory_info`/`disable_multi_threading` (platform
-//!    sysctl/sysconf probing and a global threading flag); `xdg_config_dir`/
-//!    `is_running_in_flatpak`/`wayland_socket_available`/`default_data_dir` (Linux
-//!    desktop-environment probing); `get_bbl_monitor_end_time_dhm` (wall-clock-dependent, needs
-//!    a timezone-aware local-time source this workspace has none of); `CopyFileResult` and the
-//!    whole file-mutation family it serves -- `makedir`, `save_string_file`,
-//!    `load_string_file`, `copy_file`/`copy_file_inner`/`copy_framework`/`check_copy`,
-//!    `rename_file`, `write_file_atomically` (and its `write_whole_file`/`write_in_place`
-//!    helpers) and `copy_directory_recursively` -- each of which needs the same care this task
-//!    gave the pure helpers below (exact errno/retry semantics, atomic-rename fallbacks); and
-//!    `is_path_within_root`, `is_symlink_target_within_root` and `is_absolute_path_within_root`,
-//!    whose security property depends on `boost::filesystem::weakly_canonical`'s exact
-//!    symlink-chasing semantics, which this task did not have the budget to reproduce and
-//!    verify to the same bar as the rest. **Because none of these has a rule-based excuse, this
-//!    unit is not substantively "ported" while they remain undone -- see this task's pull
-//!    request body for the honest completion state.**
+//! 3. **No in-scope caller has fixed an instantiation.** `convert_vector<From, To>`, the
+//!    generic `size_t`-dispatching overload of `next_highest_power_of_2`, and the
+//!    `SLIC3R_STDVEC_MEMSIZE`/`SLIC3R_STDUNORDEREDSET_MEMSIZE` macros: the idiom map's rule
+//!    ("a template is not force-collapsed to one concrete type unless the manifest row's unit
+//!    only ever instantiates one") argues against guessing a concrete type. The three
+//!    fixed-width `next_highest_power_of_2` overloads are concrete and are ported.
+//! 4. **A compile-time predicate with no oracle-comparable output.** `IsTriviallyCopyable<T>`.
+//!    Its two in-scope uses are `static_assert`s -- `src/libslic3r/Slicing.hpp:124`
+//!    (`SlicingParameters`) and `src/libslic3r/Fill/FillBase.hpp:137` (`FillParams`), both rows
+//!    `in` -- so both *do* fix an instantiation (this is the correction of an earlier revision
+//!    of this module, which filed it under reason 3 and said no caller did). What it has no way
+//!    to be is *proven*: a `static_assert` leaves no value behind for an exact-equality
+//!    comparison, and Rust spells the same property as a `Copy` bound at each use site. The two
+//!    `SLIC3R_*_MEMSIZE` macros it backs stay under reason 3, where they belong: they have no
+//!    use anywhere in the pinned tree.
+//! 5. **Not compiled into the normative oracle.** A branch the pin's own preprocessor removes
+//!    on the platform `vendor/OrcaSlicer/build/arm64` is built for has no oracle symbol and no
+//!    oracle behaviour to be held to exact equality against: `default_data_dir` (the whole
+//!    definition is inside `#ifdef __linux__`), the `WIN32` and `__linux__` branches of
+//!    `makedir`, `rename_file`'s
+//!    `WindowsSupport::rename` branch, `copy_file`'s `CopyFileW` branch, `extended_path`'s
+//!    extended-length-prefix branch, and `copy_file_linux`'s `sendfile` fast path. The live
+//!    branch of each enclosing function is ported.
+//! 6. **Needs an item from a module the Phase A/Phase B fan-out owns**, where this task's own
+//!    text says to "leave a `// TODO(port): <vendored path>:<line>` marker rather than a
+//!    guess": `header_slic3r_generated` and `header_gcodeviewer_generated`, whose
+//!    `SLIC3R_APP_NAME`/`SoftFever_VERSION` come from `libslic3r_version.h`, a header CMake
+//!    generates into the build tree from `libslic3r_version.h.in` -- not a tracked file of the
+//!    pin, and `crates/slic3r-libslic3r`'s own module records `SLIC3R_VERSION` as still
+//!    pending.
+//! 7. **The governing documents give no rendering, so it is a finding for this task's pull
+//!    request** rather than a guess on the branch (`docs/WORKFLOW.md`, "The rejection rule",
+//!    and this task's own "A unit that cannot be held to exact equality is a finding for the
+//!    pull request"): `string_printf` and `debug_out_path` are C variadic functions, which Rust
+//!    cannot declare and for which the idiom map has no row; `get_bbl_monitor_end_time_dhm`
+//!    reads the wall clock and the host time zone, so no two calls need agree and no
+//!    exact-equality proof against the oracle exists. One narrower case is named in the same
+//!    block: `short_time` with a negative seconds field returns a `char buffer[64]` the
+//!    vendored body never wrote (`Utils.hpp:620`), i.e. undefined behaviour, which this module
+//!    answers with the empty string and does not claim equality for.
 //!
 //! None of the above is stubbed with `todo!()`/`unimplemented!()`: each is simply not emitted,
 //! so `port/port-status`'s per-commit check (which fails on a live `todo!()`/`unimplemented!()`
@@ -94,8 +105,22 @@ use std::sync::Mutex;
 /// `GCode/GCodeProcessor.cpp:1171`, `:1177`, `:2049`, `:2054` all build a `FilePtr` directly
 /// from a possibly-failed `fopen`/`boost::nowide::fopen` result, with `close()`'s own null
 /// guard (`:538-543`) as the only check. So this wraps the ownership row's `std::fs::File` cell
-/// in `Option` to carry that null state, rather than the cell verbatim -- disclosed here and in
-/// this task's pull request body rather than reported as the cell unchanged.
+/// in `Option` to carry that null state, rather than the cell verbatim.
+///
+/// **This is a deviation from a Done-when line of this task, carried forward rather than
+/// hidden.** `port/ownership.tsv:207` reads
+/// `Utils.hpp 544 FilePtr f FILE * owned Utils.hpp:536, Utils.hpp:540 std::fs::File`, and the
+/// task's sixth Done-when line asks for that `rust type` cell verbatim. `docs/PORTING.md`'s
+/// type map has a rule for an `unknown`-class row and one for a blank-class row and none for a
+/// *nullable* owned pointer, so the cell and the vendored field genuinely disagree and nothing
+/// in the governing documents breaks the tie. Taking the cell literally would leave `FilePtr`
+/// unable to represent the state all five in-scope construction sites pass it, which is the
+/// divergence the first adversarial review of this unit rejected it for; keeping `Option`
+/// leaves that Done-when line unmet as written. Both ways to close it -- amending
+/// `port/ownership`'s generator, or recording the deviation as a `docs/PORTING.md` decision --
+/// are on this task's must-not-write list, so it is carried in this task's pull request body as
+/// a finding instead, exactly as pull requests #54, #56 and #57 carried theirs before
+/// `docs/PORTING.md`'s "Decisions recorded on 2026-11-26" closed them.
 pub struct FilePtr(Option<std::fs::File>);
 
 impl FilePtr {
@@ -1543,6 +1568,1187 @@ pub fn extended_path(path: &Path) -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------------------------
+// The Utils.hpp time formatters (Utils.hpp:572-780)
+//
+// Nine `inline` formatters built on C `sprintf`/`sscanf`. Eight are ported below; the ninth,
+// `get_bbl_monitor_end_time_dhm` (`Utils.hpp:744-757`), is not -- see the "Deferred
+// declarations" block for why.
+//
+// Three things these share, stated once here rather than on every function:
+//
+//  1. **Truncating float-to-int casts.** `(int)(time_in_secs / 86400.0f)` and `(int)
+//     time_in_secs` truncate towards zero, which Rust's `as` also does. Where the value does
+//     not fit in `i32` the vendored cast is undefined behaviour and Rust's saturates, so the
+//     two agree only on the defined range; the proof measures the defined range.
+//  2. **`f32` arithmetic, not `f64`.** Every divisor and multiplicand is an `f` literal and
+//     every intermediate is a `float` (`### Float widths`), so each step below is `f32` too --
+//     `86400.0_f32`, not `86400.0`. No step fuses (no `mul_add`), matching the oracle's own
+//     `-ffp-contract=off` build.
+//  3. **`%d` renders a plain decimal and `%02d` zero-pads to two digits**, which `{}` and
+//     `{:02}` reproduce for `i32`; `%f` renders six decimals of the `double`-promoted `float`,
+//     which `{:.6}` of the `f64`-widened value reproduces. Both are measured against the
+//     oracle, not assumed.
+// ---------------------------------------------------------------------------------------------
+
+/// `Slic3r::get_time_dhms(float)` (`Utils.hpp:624-646`): `time_in_secs` as `DDd HHh MMm SSs`.
+pub fn get_time_dhms(time_in_secs: f32) -> String {
+    let mut t = time_in_secs;
+    // PORT SRC: src/libslic3r/Utils.hpp:626
+    let days = (t / 86400.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:627
+    t -= days as f32 * 86400.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:628
+    let hours = (t / 3600.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:629
+    t -= hours as f32 * 3600.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:630
+    let minutes = (t / 60.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:631
+    t -= minutes as f32 * 60.0_f32;
+
+    if days > 0 {
+        format!("{}d {}h {}m {}s", days, hours, minutes, t as i32)
+    } else if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, t as i32)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, t as i32)
+        // `else if (time_in_secs > 1)` (`:640`): an `int` `1` promoted to `float`.
+    } else if t > 1_f32 {
+        format!("{}s", t as i32)
+    } else {
+        // `::sprintf(buffer, "%fs", time_in_secs)` (`:644`): `%f` on a `float` promoted to
+        // `double`, i.e. six decimals of the widened value.
+        format!("{}s", format_c_percent_f(t as f64))
+    }
+}
+
+/// `Slic3r::get_bbl_time_dhms(float)` (`Utils.hpp:648-668`): `get_time_dhms` without the spaces
+/// and with `%ds` rather than `%fs` as its last branch.
+pub fn get_bbl_time_dhms(time_in_secs: f32) -> String {
+    let mut t = time_in_secs;
+    // PORT SRC: src/libslic3r/Utils.hpp:650
+    let days = (t / 86400.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:651
+    t -= days as f32 * 86400.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:652
+    let hours = (t / 3600.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:653
+    t -= hours as f32 * 3600.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:654
+    let minutes = (t / 60.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:655
+    t -= minutes as f32 * 60.0_f32;
+
+    if days > 0 {
+        format!("{}d{}h{}m{}s", days, hours, minutes, t as i32)
+    } else if hours > 0 {
+        format!("{}h{}m{}s", hours, minutes, t as i32)
+    } else if minutes > 0 {
+        format!("{}m{}s", minutes, t as i32)
+    } else {
+        format!("{}s", t as i32)
+    }
+}
+
+/// `Slic3r::get_timezone_utc_hm(long)` (`Utils.hpp:670-686`): a UTC offset as `UTC±HH:MM`.
+///
+/// The two `second -= (float)… * …f` statements (`:679`, `:681`) are `long -= float`: the C++
+/// operands are widened to `float`, subtracted, and the result converted back to `long`, so the
+/// port widens and narrows at exactly the same two points rather than subtracting in `i64`.
+/// `second = -second` (`:674`) is undefined for `LONG_MIN` in C++ and panics in Rust under
+/// overflow checks, so the port uses `wrapping_neg`, which reproduces the two's-complement
+/// result the oracle's `neg` instruction produces.
+pub fn get_timezone_utc_hm(second: i64) -> String {
+    let mut second = second;
+    let mut pos = true;
+    if second < 0 {
+        pos = false;
+        second = second.wrapping_neg();
+    }
+
+    // PORT SRC: src/libslic3r/Utils.hpp:678
+    let hours = (second as f32 / 3600.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:679
+    second = (second as f32 - hours as f32 * 3600.0_f32) as i64;
+    // PORT SRC: src/libslic3r/Utils.hpp:680
+    let minutes = (second as f32 / 60.0_f32) as i32;
+
+    format!(
+        "UTC{}{:02}:{:02}",
+        if pos { "+" } else { "-" },
+        hours,
+        minutes
+    )
+}
+
+/// `Slic3r::get_time_dhm(float)` (`Utils.hpp:688-707`): `time_in_secs` as `DDd HHh MMm`.
+///
+/// The last branch (`:703-704`) formats the literal `0` through `"%dm"` rather than `minutes`,
+/// so it is `"0m"` and not the negative minute count a bare `minutes` would give; both are
+/// reproduced below. In-scope caller: `src/libslic3r/GCode/GCodeProcessor.cpp:1415`.
+pub fn get_time_dhm(time_in_secs: f32) -> String {
+    let mut t = time_in_secs;
+    // PORT SRC: src/libslic3r/Utils.hpp:690
+    let days = (t / 86400.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:691
+    t -= days as f32 * 86400.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:692
+    let hours = (t / 3600.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:693
+    t -= hours as f32 * 3600.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:694
+    let minutes = (t / 60.0_f32) as i32;
+
+    if days > 0 {
+        format!("{}d {}h {}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, minutes)
+    } else if minutes > 0 {
+        format!("{}m", minutes)
+    } else {
+        // `::sprintf(buffer, "%dm", 0)` (`:704`) -- the literal `0`, not `minutes`.
+        format!("{}m", 0)
+    }
+}
+
+/// `Slic3r::get_time_hms(float)` (`Utils.hpp:709-720`): `time_in_secs` as `HH:MM:SS`.
+pub fn get_time_hms(time_in_secs: f32) -> String {
+    let mut t = time_in_secs;
+    // PORT SRC: src/libslic3r/Utils.hpp:711
+    let hours = (t / 3600.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:712
+    t -= hours as f32 * 3600.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:713
+    let minutes = (t / 60.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:714
+    t -= minutes as f32 * 60.0_f32;
+    let secs = t as i32;
+
+    format!("{:02}:{:02}:{:02}", hours, minutes, secs)
+}
+
+/// `Slic3r::get_bbl_monitor_time_dhm(float)` (`Utils.hpp:722-742`): `DDdHHhMMm`, and the empty
+/// string where `minutes` is negative -- the one branch of this family that returns `""`
+/// explicitly (`:739`) rather than falling off the end.
+pub fn get_bbl_monitor_time_dhm(time_in_secs: f32) -> String {
+    let mut t = time_in_secs;
+    // PORT SRC: src/libslic3r/Utils.hpp:724
+    let days = (t / 86400.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:725
+    t -= days as f32 * 86400.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:726
+    let hours = (t / 3600.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:727
+    t -= hours as f32 * 3600.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:728
+    let minutes = (t / 60.0_f32) as i32;
+
+    if days > 0 {
+        format!("{}d{}h{}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{}h{}m", hours, minutes)
+    } else if minutes >= 0 {
+        format!("{}m", minutes)
+    } else {
+        String::new()
+    }
+}
+
+/// `Slic3r::get_bbl_remain_time_dhms(float)` (`Utils.hpp:759-780`): `DDdHHhMMmSSs`, with `%ds`
+/// as its last branch and no `minutes >= 0` guard.
+pub fn get_bbl_remain_time_dhms(time_in_secs: f32) -> String {
+    let mut t = time_in_secs;
+    // PORT SRC: src/libslic3r/Utils.hpp:761
+    let days = (t / 86400.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:762
+    t -= days as f32 * 86400.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:763
+    let hours = (t / 3600.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:764
+    t -= hours as f32 * 3600.0_f32;
+    // PORT SRC: src/libslic3r/Utils.hpp:765
+    let minutes = (t / 60.0_f32) as i32;
+    // PORT SRC: src/libslic3r/Utils.hpp:766
+    t -= minutes as f32 * 60.0_f32;
+
+    if days > 0 {
+        format!("{}d{}h{}m{}s", days, hours, minutes, t as i32)
+    } else if hours > 0 {
+        format!("{}h{}m{}s", hours, minutes, t as i32)
+    } else if minutes > 0 {
+        format!("{}m{}s", minutes, t as i32)
+    } else {
+        format!("{}s", t as i32)
+    }
+}
+
+/// C's `%f` conversion for a `double`: six fractional digits, no exponent, correctly rounded
+/// from the exact binary value. `{:.6}` is Rust's spelling of exactly that; both round a tie to
+/// even, and `f64` has no value whose decimal expansion ties at the sixth fractional digit
+/// unless it is exactly representable, so the two agree on every input.
+fn format_c_percent_f(v: f64) -> String {
+    // PORT SRC: external: ISO/IEC 9899:2018 7.21.6.1 p8 -- the `f` conversion specifier's
+    // default precision is 6
+    format!("{:.6}", v)
+}
+
+/// `Slic3r::short_time(const std::string&)` (`Utils.hpp:578-620`): the `dhms` string shortened
+/// to `dhm`, seconds rounded into the minutes. In-scope callers: `src/libslic3r/Print.cpp:5890`
+/// and `src/libslic3r/GCode/GCodeProcessor.cpp:1415`.
+///
+/// The vendored body reads its input with four `::sscanf` format strings, one per shape, chosen
+/// by the first of `'d'`/`'h'`/`'m'`/`'s'` that `time` contains (`:581-589`). [`CScan`] below
+/// reproduces `sscanf`'s own behaviour for the two conversions used -- `%d` and `%f` -- and for
+/// the literal and whitespace directives between them, including the part that matters here:
+/// **a directive that fails to match stops the scan and leaves every later variable at its
+/// initial value** (`days`/`hours`/`minutes`/`seconds` at `0`, `f_seconds` at `0.0`), so a
+/// partial `time` is not an error but a partially filled set of fields.
+///
+/// **One input range with no defined result**, like [`get_time_dhm`]: a `time` that leaves
+/// `seconds` negative and `days`/`hours`/`minutes` at zero reaches `:618`'s
+/// `else if (seconds == 0)` false, so `:620`'s `return buffer;` reads an unwritten
+/// `char buffer[64]`. This port returns the empty string there and the proof does not call the
+/// oracle with such an input; named in this task's pull request body.
+pub fn short_time(time: &str) -> String {
+    let mut days: i32 = 0;
+    let mut hours: i32 = 0;
+    let mut minutes: i32 = 0;
+    let mut seconds: i32 = 0;
+    // PORT SRC: src/libslic3r/Utils.hpp:585
+    let mut f_seconds: f32 = 0.0;
+
+    if time.contains('d') {
+        // `::sscanf(time.c_str(), "%dd %dh %dm %ds", …)` (`:582`).
+        let mut scan = CScan::new(time);
+        scan.scan_int_into(&mut days);
+        scan.literal(b'd');
+        scan.whitespace();
+        scan.scan_int_into(&mut hours);
+        scan.literal(b'h');
+        scan.whitespace();
+        scan.scan_int_into(&mut minutes);
+        scan.literal(b'm');
+        scan.whitespace();
+        scan.scan_int_into(&mut seconds);
+    } else if time.contains('h') {
+        // `::sscanf(time.c_str(), "%dh %dm %ds", …)` (`:584`).
+        let mut scan = CScan::new(time);
+        scan.scan_int_into(&mut hours);
+        scan.literal(b'h');
+        scan.whitespace();
+        scan.scan_int_into(&mut minutes);
+        scan.literal(b'm');
+        scan.whitespace();
+        scan.scan_int_into(&mut seconds);
+    } else if time.contains('m') {
+        // `::sscanf(time.c_str(), "%dm %ds", …)` (`:586`).
+        let mut scan = CScan::new(time);
+        scan.scan_int_into(&mut minutes);
+        scan.literal(b'm');
+        scan.whitespace();
+        scan.scan_int_into(&mut seconds);
+    } else if time.contains('s') {
+        // `::sscanf(time.c_str(), "%fs", &f_seconds); seconds = int(f_seconds);` (`:589-590`).
+        let mut scan = CScan::new(time);
+        scan.scan_float_into(&mut f_seconds);
+        seconds = f_seconds as i32;
+    }
+
+    // Round to full minutes (`:592-600`). `++minutes`/`++hours`/`++days` are plain `int`
+    // increments on values that cannot be near `INT_MAX` after the comparisons above.
+    // PORT SRC: src/libslic3r/Utils.hpp:597
+    if days + hours > 0 && seconds >= 30 {
+        minutes += 1;
+        // PORT SRC: src/libslic3r/Utils.hpp:598
+        if minutes == 60 {
+            minutes = 0;
+            hours += 1;
+            // PORT SRC: src/libslic3r/Utils.hpp:600
+            if hours == 24 {
+                hours = 0;
+                days += 1;
+            }
+        }
+    }
+
+    if days > 0 {
+        format!("{}d{}h{}m", days, hours, minutes)
+    } else if hours > 0 {
+        format!("{}h{}m", hours, minutes)
+    } else if minutes > 0 {
+        format!("{}m{}s", minutes, seconds)
+    } else if seconds >= 1 {
+        format!("{}s", seconds)
+        // `else if (f_seconds > 0 && f_seconds < 1)` (`:616`): the vendored comparands are the
+        // `int`s `0` and `1`, promoted to `float`, which `0_f32`/`1_f32` are.
+    } else if f_seconds > 0_f32 && f_seconds < 1_f32 {
+        "<1s".to_string()
+    } else if seconds == 0 {
+        "0s".to_string()
+    } else {
+        // See this function's doc comment: the vendored `:620` returns an unwritten buffer here.
+        String::new()
+    }
+}
+
+/// The part of C's `sscanf` the [`short_time`] formats use: the `%d` and `%f` conversions, a
+/// literal character directive, and a whitespace directive. Private, because it exists only to
+/// carry `sscanf`'s own semantics into the one function above.
+///
+/// `sscanf` stops at the first directive that does not match and performs no further
+/// assignment, which is why every method here is a no-op once [`CScan::stopped`] is set.
+struct CScan<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+    stopped: bool,
+}
+
+impl<'a> CScan<'a> {
+    fn new(s: &'a str) -> Self {
+        CScan {
+            bytes: s.as_bytes(),
+            pos: 0,
+            stopped: false,
+        }
+    }
+
+    /// C's `isspace` for the default locale: space, `\t`, `\n`, `\v`, `\f`, `\r`.
+    fn is_c_space(b: u8) -> bool {
+        b == b' ' || b == b'\t' || b == b'\n' || b == b'\x0b' || b == b'\x0c' || b == b'\r'
+    }
+
+    /// A whitespace directive in the format: matches any run of whitespace, including none.
+    /// Never fails, so it never stops the scan.
+    fn whitespace(&mut self) {
+        if self.stopped {
+            return;
+        }
+        while self.pos < self.bytes.len() && Self::is_c_space(self.bytes[self.pos]) {
+            self.pos += 1;
+        }
+    }
+
+    /// An ordinary character directive: the next input byte must be exactly `c`. No whitespace
+    /// is skipped first (only a whitespace directive and a conversion do that).
+    fn literal(&mut self, c: u8) {
+        if self.stopped {
+            return;
+        }
+        if self.pos < self.bytes.len() && self.bytes[self.pos] == c {
+            self.pos += 1;
+        } else {
+            self.stopped = true;
+        }
+    }
+
+    /// The `%d` conversion: skip leading whitespace, then `strtol`'s base-10 subject sequence
+    /// (an optional sign and one or more digits). A matching failure stops the scan and leaves
+    /// `out` untouched.
+    ///
+    /// A subject sequence whose value does not fit in `int` is undefined behaviour in C
+    /// (`sscanf` has no `ERANGE` report); this reproduces the two's-complement truncation the
+    /// oracle's own `strtol`-then-narrow produces for that case rather than panicking, with
+    /// `wrapping_mul`/`wrapping_add`.
+    fn scan_int_into(&mut self, out: &mut i32) {
+        if self.stopped {
+            return;
+        }
+        let start = self.pos;
+        while self.pos < self.bytes.len() && Self::is_c_space(self.bytes[self.pos]) {
+            self.pos += 1;
+        }
+        let negative = match self.bytes.get(self.pos) {
+            Some(b'-') => {
+                self.pos += 1;
+                true
+            }
+            Some(b'+') => {
+                self.pos += 1;
+                false
+            }
+            _ => false,
+        };
+        let digits_from = self.pos;
+        let mut value: i32 = 0;
+        while let Some(&b) = self.bytes.get(self.pos) {
+            if !b.is_ascii_digit() {
+                break;
+            }
+            // PORT SRC: external: ISO/IEC 9899:2018 7.21.6.2 p12 -- the `d` conversion
+            // specifier matches a `strtol` subject sequence with the value 10 for base
+            value = value.wrapping_mul(10).wrapping_add(i32::from(b - b'0'));
+            self.pos += 1;
+        }
+        if self.pos == digits_from {
+            // No digits: a matching failure. `sscanf` leaves the input position wherever it
+            // stopped, but since the scan is over, rewinding to `start` keeps `self.pos`
+            // meaningful for nothing and is simply tidier.
+            self.pos = start;
+            self.stopped = true;
+            return;
+        }
+        *out = if negative {
+            value.wrapping_neg()
+        } else {
+            value
+        };
+    }
+
+    /// The `%f` conversion: skip leading whitespace, then the longest prefix that is a C
+    /// floating-point subject sequence, converted as `strtod` would and narrowed to `float`.
+    ///
+    /// `strtod` also accepts `inf`, `nan` and C99 hexadecimal floats; this accepts the decimal
+    /// form only, which is the whole of what the one in-scope shape (`"%fs"` over
+    /// [`get_time_dhms`]'s own `"%fs"` output, e.g. `"0.500000s"`) can produce. An input
+    /// outside that subset is a matching failure here where the oracle would convert it;
+    /// recorded as a `// TODO(port):` in the "Deferred declarations" block below.
+    fn scan_float_into(&mut self, out: &mut f32) {
+        if self.stopped {
+            return;
+        }
+        let start = self.pos;
+        while self.pos < self.bytes.len() && Self::is_c_space(self.bytes[self.pos]) {
+            self.pos += 1;
+        }
+        let number_from = self.pos;
+        if matches!(self.bytes.get(self.pos), Some(b'-') | Some(b'+')) {
+            self.pos += 1;
+        }
+        let int_digits = self.consume_digits();
+        let mut frac_digits = 0;
+        if self.bytes.get(self.pos) == Some(&b'.') {
+            self.pos += 1;
+            frac_digits = self.consume_digits();
+        }
+        if int_digits == 0 && frac_digits == 0 {
+            self.pos = start;
+            self.stopped = true;
+            return;
+        }
+        // An exponent is part of the subject sequence only when at least one digit follows it.
+        let before_exponent = self.pos;
+        if matches!(self.bytes.get(self.pos), Some(b'e') | Some(b'E')) {
+            self.pos += 1;
+            if matches!(self.bytes.get(self.pos), Some(b'-') | Some(b'+')) {
+                self.pos += 1;
+            }
+            if self.consume_digits() == 0 {
+                self.pos = before_exponent;
+            }
+        }
+        let text = std::str::from_utf8(&self.bytes[number_from..self.pos]).unwrap_or("");
+        match text.parse::<f64>() {
+            // `strtod` is correctly rounded and so is `f64::from_str`; the narrowing to `float`
+            // the `%f` conversion then does is `as f32`.
+            Ok(v) => *out = v as f32,
+            Err(_) => {
+                self.pos = start;
+                self.stopped = true;
+            }
+        }
+    }
+
+    fn consume_digits(&mut self) -> usize {
+        let from = self.pos;
+        while matches!(self.bytes.get(self.pos), Some(b) if b.is_ascii_digit()) {
+            self.pos += 1;
+        }
+        self.pos - from
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The three canonicalization-based path-root checks (utils.cpp:1292-1335)
+//
+// These decide whether an archive entry may be written, so their whole value is in rejecting
+// what the oracle rejects. Each is externally linked in `utils.cpp.o` and each is measured
+// against the oracle directly in `crates/slic3r-utils/tests/utils_proof_path_3.rs`.
+// ---------------------------------------------------------------------------------------------
+
+/// `Slic3r::is_path_within_root(const std::string&, const path&)` (`utils.cpp:1292-1320`):
+/// `rel_path` is relative, carries no `".."` component and no embedded NUL, and joined to
+/// `root` still resolves inside it.
+///
+/// The textual half (`:1294-1305`) is byte work on the string as given: both `'/'` and `'\\'`
+/// count as separators on every platform (`:1293`), a leading separator or a `c:`-shaped second
+/// character is rejected, and the component scan compares each component against `".."` with
+/// `rel_path.compare(start, end - start, "..")`, which is a length-aware compare, not a prefix
+/// test.
+///
+/// The resolving half (`:1306-1319`) is `boost::filesystem::weakly_canonical` on `root` and on
+/// `root / rel_path`, a trailing-separator strip on the canonical root, and a prefix match that
+/// additionally requires the next byte of the full path to be the preferred separator -- so
+/// `/root/abc` is not inside `/root/ab`. [`weakly_canonical`] below is this port's rendering of
+/// that call.
+pub fn is_path_within_root(rel_path: &str, root: &Path) -> bool {
+    let is_separator = |c: u8| c == b'/' || c == b'\\';
+    let bytes = rel_path.as_bytes();
+    if bytes.is_empty() || is_separator(bytes[0]) || (bytes.len() > 1 && bytes[1] == b':') {
+        return false;
+    }
+    // "The filesystem calls stop at a NUL, so they would act on a shorter path than the one
+    // checked here." (`:1297`)
+    if bytes.contains(&0) {
+        return false;
+    }
+    let mut start = 0usize;
+    while start <= bytes.len() {
+        let mut end = start;
+        while end < bytes.len() && !is_separator(bytes[end]) {
+            end += 1;
+        }
+        if &bytes[start..end] == b".." {
+            return false;
+        }
+        start = end + 1;
+    }
+    // "Resolve against the canonical root so a symlink inside it cannot lead back out."
+    // (`:1307`). `weakly_canonical` reports failure as `None` where the vendored call throws
+    // `filesystem_error` into `:1317`'s `catch`, which returns `false` -- the same answer.
+    let Some(root_canonical) = weakly_canonical(root) else {
+        return false;
+    };
+    let mut root_bytes = root_canonical.as_os_str().as_encoded_bytes().to_vec();
+    // "A trailing separator on root would otherwise fail the prefix match below for every
+    // path." (`:1311`)
+    while root_bytes.last() == Some(&b'/') {
+        root_bytes.pop();
+    }
+    let joined = root.join(string_as_relative_path(rel_path));
+    let Some(full) = weakly_canonical(&joined) else {
+        return false;
+    };
+    let full_bytes = full.as_os_str().as_encoded_bytes();
+    // `full_str.compare(0, root_str.size(), root_str) == 0` (`:1314`) compares at most
+    // `root_str.size()` bytes of `full_str`, so a `full_str` shorter than `root_str` can never
+    // compare equal.
+    full_bytes.len() >= root_bytes.len()
+        && full_bytes[..root_bytes.len()] == root_bytes[..]
+        && (full_bytes.len() == root_bytes.len() || full_bytes[root_bytes.len()] == b'/')
+}
+
+/// `Slic3r::is_symlink_target_within_root(...)` (`utils.cpp:1322-1329`): a symlink stored at
+/// `link_rel_path` with this `target` stays inside `root`.
+pub fn is_symlink_target_within_root(link_rel_path: &str, target: &str, root: &Path) -> bool {
+    let t = target.as_bytes();
+    if t.is_empty() || t[0] == b'/' || t[0] == b'\\' || (t.len() > 1 && t[1] == b':') {
+        return false;
+    }
+    // `link_rel_path.find_last_of("/\\")` (`:1327`), then the link's directory prefix -- the
+    // separator included -- joined textually to `target` (`:1328`).
+    let link_bytes = link_rel_path.as_bytes();
+    let dir_prefix = match link_bytes.iter().rposition(|&c| c == b'/' || c == b'\\') {
+        Some(sep) => &link_rel_path[..sep + 1],
+        None => "",
+    };
+    is_path_within_root(&format!("{}{}", dir_prefix, target), root)
+}
+
+/// `Slic3r::is_absolute_path_within_root(const path&, const path&)` (`utils.cpp:1331-1335`):
+/// `path` names an entry strictly inside `root`.
+pub fn is_absolute_path_within_root(path: &Path, root: &Path) -> bool {
+    let rel = lexically_relative(path, root);
+    !rel.as_os_str().is_empty()
+        && rel != Path::new(".")
+        && is_path_within_root(&rel.to_string_lossy(), root)
+}
+
+/// `boost::filesystem::weakly_canonical(const path&)` as boost 1.84 computes it: the longest
+/// leading sub-path that exists is canonicalised (symlinks resolved), and the remainder is
+/// appended and then lexically normalised. `None` stands for the `filesystem_error` the
+/// vendored call throws, which every caller above turns into `false`.
+fn weakly_canonical(path: &Path) -> Option<PathBuf> {
+    // Walk the components from the front, keeping the longest prefix that exists.
+    let mut existing = PathBuf::new();
+    let mut remainder = PathBuf::new();
+    let mut still_existing = true;
+    for component in path.components() {
+        if still_existing {
+            let candidate = existing.join(component.as_os_str());
+            if candidate.symlink_metadata().is_ok() || candidate.as_os_str().is_empty() {
+                existing = candidate;
+                continue;
+            }
+            still_existing = false;
+        }
+        remainder.push(component.as_os_str());
+    }
+    let head = if existing.as_os_str().is_empty() {
+        existing
+    } else {
+        // `canonical` on the existing prefix: `std::fs::canonicalize` is `realpath(3)`, which
+        // resolves every symlink and `..` exactly as boost's `canonical` does.
+        existing.canonicalize().ok()?
+    };
+    Some(lexically_normal(&head.join(&remainder)))
+}
+
+/// `boost::filesystem::path::lexically_relative(const path& base)` for the shapes
+/// `is_absolute_path_within_root` passes it: both paths absolute and already normalised in
+/// spelling. The empty path stands for boost's own "no relation" result, which `:1333` tests
+/// for.
+fn lexically_relative(path: &Path, base: &Path) -> PathBuf {
+    let mut p = path.components();
+    let mut b = base.components();
+    // Drop the common prefix.
+    let mut p_rest: Vec<std::path::Component> = Vec::new();
+    let mut b_rest: Vec<std::path::Component> = Vec::new();
+    loop {
+        match (p.clone().next(), b.clone().next()) {
+            (Some(pc), Some(bc)) if pc == bc => {
+                p.next();
+                b.next();
+            }
+            _ => break,
+        }
+    }
+    p_rest.extend(p);
+    b_rest.extend(b);
+    if p_rest.is_empty() && b_rest.is_empty() {
+        return PathBuf::from(".");
+    }
+    // boost returns an empty path where the two share no root name/root directory at all.
+    if path.is_absolute() != base.is_absolute() {
+        return PathBuf::new();
+    }
+    let mut out = PathBuf::new();
+    for _ in &b_rest {
+        out.push("..");
+    }
+    for c in &p_rest {
+        out.push(c.as_os_str());
+    }
+    if out.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        out
+    }
+}
+
+/// `rel_path` as a relative path for `root / rel_path`. The vendored `operator/` takes the
+/// string as written, so a `'\\'` separator stays a literal backslash byte in a component on
+/// this port's targets, exactly as it does on the oracle's.
+fn string_as_relative_path(rel_path: &str) -> PathBuf {
+    PathBuf::from(rel_path)
+}
+
+// ---------------------------------------------------------------------------------------------
+// The file-mutation family (utils.cpp:818-911, :1107-1253, :1961-2030, :2229-2244)
+//
+// Two things stated once here rather than on every function:
+//
+//  1. **`BOOST_LOG_TRIVIAL` boundaries.** Several of these bodies log. `boost::log` has no
+//     workspace dependency to bind against and a port task may not add one, so each log
+//     statement is a `// PORT NOTE:` at the site naming its vendored line, and the port's
+//     behaviour is otherwise the vendored behaviour with the log statement absent. No log
+//     output reaches a compared artifact.
+//  2. **Error messages.** The `std::string& error_message` out-parameters carry
+//     `boost::system::error_code::message()`, i.e. the platform's `strerror` text. Rust's
+//     `std::io::Error` renders the same errno differently (`"No such file or directory
+//     (os error 2)"` against `"No such file or directory"`) and `strerror` is not reachable
+//     without a `libc` dependency a port task may not add, so the message *text* diverges while
+//     the `CopyFileResult` every in-scope caller branches on does not. The proof measures the
+//     result code; the text divergence is named in this task's pull request body.
+// ---------------------------------------------------------------------------------------------
+
+/// `Slic3r::makedir(const std::string)` (`utils.cpp:1961-1971`): true when the directory exists
+/// or was created.
+///
+/// On this port's targets the live branch is the vendored `#else` at `:1968`, whose comment is
+/// "I don't know how to make dir on Mac..." and whose body is empty, so the function falls
+/// through to `:1969`'s unconditional `return true;` -- it creates nothing. The `WIN32`
+/// (`:1963-1964`) and `__linux__` (`:1965-1967`) branches are not ported; see the "Deferred
+/// declarations" block.
+pub fn makedir(_path: &Path) -> bool {
+    true
+}
+
+/// `Slic3r::rename_file(const std::string&, const std::string&)` (`utils.cpp:818-838`), the
+/// non-Windows branch (`:823-837`).
+///
+/// `rename(2)` first; on failure, the errno decides whether the remove-then-rename retry is
+/// worth trying. The four errnos the vendored line excludes are C-library constants with no
+/// vendored line of their own, so each carries the external marker form.
+pub fn rename_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    // PORT SRC: external: <sys/errno.h> (Apple libc), ENOENT -- nothing at the source
+    const ENOENT: i32 = 2;
+    // PORT SRC: external: <sys/errno.h> (Apple libc), EXDEV -- a different device
+    const EXDEV: i32 = 18;
+    // PORT SRC: external: <sys/errno.h> (Apple libc), ENOTDIR -- a file where a directory was
+    // expected
+    const ENOTDIR: i32 = 20;
+    // PORT SRC: external: <sys/errno.h> (Apple libc), EISDIR -- a directory where a file was
+    // expected
+    const EISDIR: i32 = 21;
+
+    let first = match std::fs::rename(from, to) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
+    };
+    let err = first.raw_os_error().unwrap_or(0);
+    // "every error is worth the remove-then-rename this always did, except the ones no retry
+    // can help" (`:830-832`)
+    let worth_retrying = err != ENOENT && err != EXDEV && err != ENOTDIR && err != EISDIR;
+    if worth_retrying && c_remove(to).is_ok() && std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    Err(first)
+}
+
+/// C's `remove(3)`, which `boost::nowide::remove` is: `unlink` for anything but a directory and
+/// `rmdir` for a directory. Rust's `std::fs::remove_file` is `unlink` alone, so the directory
+/// case is spelled out.
+fn c_remove(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) => std::fs::remove_dir(path).map_err(|_| e),
+    }
+}
+
+/// `write_whole_file` (`utils.cpp:841-860`), a file-scope `static`, so a private function here
+/// (the idiom map's row for a `static` free function).
+///
+/// `binary` picks `"wb"` over `"w"` for `fopen`; the two modes are identical on every target
+/// this port has, so the flag changes nothing here and is kept only because the public
+/// functions above pass it through. The vendored body reports a write failure whose `errno` is
+/// 0 as `std::errc::io_error`; Rust's `write_all` always carries an errno, and the
+/// `ErrorKind::WriteZero` case it synthesises stands for the same "wrote fewer bytes than
+/// asked" condition the vendored `fwrite` comparison catches.
+fn write_whole_file(path: &Path, chunks: &[&str], _binary: bool) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    for chunk in chunks {
+        file.write_all(chunk.as_bytes())?;
+    }
+    file.flush()?;
+    // `std::fclose`'s own failure (`:857`) is the drop below in Rust, which cannot report one;
+    // `flush` above is where a deferred write error surfaces in both.
+    Ok(())
+}
+
+/// The one mutex `write_in_place` (`utils.cpp:862-867`) holds for every in-place write: "The
+/// in-place fallback truncates the target, so two threads of this process on the same file must
+/// not both be in it. One mutex for all such writes" (`:861-864`).
+static WRITE_IN_PLACE_MUTEX: Mutex<()> = Mutex::new(());
+
+/// `write_in_place` (`utils.cpp:862-867`), a file-scope `static`, so private here.
+fn write_in_place(path: &Path, chunks: &[&str], binary: bool) -> std::io::Result<()> {
+    let _guard = WRITE_IN_PLACE_MUTEX
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    write_whole_file(path, chunks, binary)
+}
+
+/// The per-process counter `write_file_atomically` names its temporary with: "Unique per
+/// process and per call, so two threads writing one target without a lock never share a
+/// temporary." (`utils.cpp:884-885`).
+static WRITE_FILE_ATOMICALLY_COUNTER: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0);
+
+/// `Slic3r::write_file_atomically(const std::string&, std::initializer_list<std::string_view>,
+/// bool)` (`utils.cpp:869-911`): write `chunks` through a temporary beside `path` renamed over
+/// it, so a concurrent reader sees the old file or the new one, never a partial one.
+pub fn write_file_atomically(path: &Path, chunks: &[&str], binary: bool) -> std::io::Result<()> {
+    let status = std::fs::symlink_metadata(path);
+    // `boost::filesystem::exists(const file_status&)` is true for anything the status call
+    // resolved, which is exactly "the `symlink_status` call did not fail" (`:872-873`).
+    let target_exists = status.is_ok();
+    if let Ok(meta) = &status {
+        if meta.file_type().is_symlink() {
+            // "A config or preset kept in a dotfiles repository: the link stays, the file it
+            // points to is replaced like any other." (`:875-876`)
+            if let Ok(resolved) = path.canonicalize() {
+                if resolved.is_file() {
+                    return write_file_atomically(&resolved, chunks, binary);
+                }
+            }
+        }
+        if !meta.file_type().is_file() {
+            return write_in_place(path, chunks, binary);
+        }
+    }
+
+    let counter = WRITE_FILE_ATOMICALLY_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut tmp_name = path.as_os_str().to_os_string();
+    tmp_name.push(format!(".{}.{}.tmp", get_current_pid(), counter));
+    let tmp_path = PathBuf::from(tmp_name);
+
+    if let Err(e) = write_whole_file(&tmp_path, chunks, binary) {
+        let _ = c_remove(&tmp_path);
+        if !target_exists {
+            return Err(e);
+        }
+        // PORT NOTE: src/libslic3r/utils.cpp:893 (BOOST_LOG_TRIVIAL(warning); boost::log has no
+        // workspace binding -- see this section's header comment)
+        return write_in_place(path, chunks, binary);
+    }
+    // "Not on Windows, where a read-only bit on the temporary would stop the rename itself."
+    // (`:896-898`). The error is deliberately discarded, as the vendored `bec` is.
+    if let Ok(meta) = &status {
+        let _ = std::fs::set_permissions(&tmp_path, meta.permissions());
+    }
+    if rename_file(&tmp_path, path).is_err() {
+        let _ = c_remove(&tmp_path);
+        // PORT NOTE: src/libslic3r/utils.cpp:905 (BOOST_LOG_TRIVIAL(warning))
+        return write_in_place(path, chunks, binary);
+    }
+    Ok(())
+}
+
+/// `Slic3r::write_file_atomically(const std::string&, const std::string&, bool)`
+/// (`Utils.hpp:271-272`), the `inline` overload that forwards one chunk to the function above.
+pub fn write_file_atomically_content(
+    path: &Path,
+    content: &str,
+    binary: bool,
+) -> std::io::Result<()> {
+    write_file_atomically(path, &[content], binary)
+}
+
+/// `Slic3r::copy_file_inner(const std::string&, const std::string&, std::string&)`
+/// (`utils.cpp:1107-1142`), the non-Linux branch (`:1128`): copy `from` over `to`, forcing the
+/// target's permissions to 644 before and after so the copy succeeds over a read-only file.
+///
+/// The `std::string& error_message` out-parameter is returned instead of taken by reference (the
+/// idiom map's row for a non-const reference out-parameter); see this section's header comment
+/// for the one disclosed divergence in its text.
+pub fn copy_file_inner(from: &Path, to: &Path) -> (CopyFileResult, String) {
+    // Both `permissions()` calls ignore their error on purpose: "if they fail, the copy_file()
+    // function will fail appropriately and we don't want the permission() calls to cause
+    // needless failures on permissionless filesystems" (`:1114-1118`).
+    let _ = set_copy_permissions(to);
+    match std::fs::copy(from, to) {
+        Ok(_) => {
+            let _ = set_copy_permissions(to);
+            (CopyFileResult::Success, String::new())
+        }
+        Err(e) => {
+            // PORT NOTE: src/libslic3r/utils.cpp:1133 (BOOST_LOG_TRIVIAL(error))
+            (CopyFileResult::FailCopyFile, e.to_string())
+        }
+    }
+}
+
+/// The `perms` `copy_file_inner` forces on its target (`utils.cpp:1111`).
+fn set_copy_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    // PORT SRC: external: <boost/filesystem/operations.hpp> perms --
+    // owner_read|owner_write|group_read|others_read, which utils.cpp:1111's own comment spells
+    // "aka 644"
+    const COPY_PERMISSIONS: u32 = 0o644;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(COPY_PERMISSIONS))
+}
+
+/// `Slic3r::copy_file(const std::string&, const std::string&, std::string&, const bool)`
+/// (`utils.cpp:1144-1189`), the non-Windows branch (`:1177-1188`): copy to `to + ".tmp"` first,
+/// optionally compare it against the source, then rename it over `to`.
+///
+/// `to_temp` is the target's path *string* with `".tmp"` appended (`:1177`), not a path join, so
+/// the port appends to the `OsString` rather than building a new component. When `with_check`
+/// finds a difference the vendored body returns that result and leaves `to_temp` behind, which
+/// this reproduces.
+pub fn copy_file(from: &Path, to: &Path, with_check: bool) -> (CopyFileResult, String) {
+    let mut to_temp_name = to.as_os_str().to_os_string();
+    to_temp_name.push(".tmp");
+    let to_temp = PathBuf::from(to_temp_name);
+
+    let (mut result, error_message) = copy_file_inner(from, &to_temp);
+    if result == CopyFileResult::Success {
+        if with_check {
+            result = check_copy(from, &to_temp);
+        }
+        // `ret_val == 0` is `SUCCESS` (`:1185`), and a truthy `rename_file(...)` is a non-zero
+        // `std::error_code`, i.e. a failure.
+        if result == CopyFileResult::Success && rename_file(&to_temp, to).is_err() {
+            result = CopyFileResult::FailRenaming;
+        }
+    }
+    (result, error_message)
+}
+
+/// `Slic3r::copy_framework(const std::string&, const std::string&)` (`utils.cpp:1192-1218`):
+/// copy a directory tree, keeping symlinks as symlinks.
+///
+/// The vendored body wraps everything in one `try` and answers `false` for any
+/// `boost::filesystem::filesystem_error`, which is what the `Err` arms below do. The directory
+/// is walked in [`read_dir_sorted`]'s fixed order; see its `// FIDELITY(port):` marker.
+pub fn copy_framework(from: &Path, to: &Path) -> bool {
+    if !from.is_dir() {
+        // `std::cerr << "Error: Source is not a directory: " << src << std::endl` (`:1196`).
+        // `operator<<` on a `boost::filesystem::path` writes it quoted, which
+        // [`boost_quoted_path`] reproduces.
+        eprintln!(
+            "Error: Source is not a directory: {}",
+            boost_quoted_path(from)
+        );
+        return false;
+    }
+    if std::fs::create_dir_all(to).is_err() {
+        // PORT NOTE: src/libslic3r/utils.cpp:1215 (BOOST_LOG_TRIVIAL(error) in the `catch`)
+        return false;
+    }
+    let Ok(entries) = read_dir_sorted(from) else {
+        return false;
+    };
+    for entry in entries {
+        let dest_path = to.join(entry.file_name().unwrap_or_default());
+        let Ok(meta) = entry.symlink_metadata() else {
+            return false;
+        };
+        if meta.file_type().is_symlink() {
+            // `boost::filesystem::copy_symlink` (`:1204`): read the link and create the same
+            // link at the destination.
+            let Ok(target) = std::fs::read_link(&entry) else {
+                return false;
+            };
+            if std::os::unix::fs::symlink(target, &dest_path).is_err() {
+                return false;
+            }
+        } else if meta.is_dir() {
+            if !copy_framework(&entry, &dest_path) {
+                return false;
+            }
+        } else if std::fs::copy(&entry, &dest_path).is_err() {
+            return false;
+        }
+    }
+    true
+}
+
+/// `Slic3r::check_copy(const std::string&, const std::string&)` (`utils.cpp:1220-1253`): whether
+/// two files hold identical bytes, compared 8 MiB at a time.
+pub fn check_copy(origin: &Path, copy: &Path) -> CopyFileResult {
+    use std::io::{Seek, SeekFrom};
+    // The two streams are opened `in|binary|ate`, so a failure to open is `fail()` (`:1225-1228`)
+    // and the open position is the end of the file.
+    let Ok(mut f1) = std::fs::File::open(origin) else {
+        return CopyFileResult::FailCheckOriginNotOpened;
+    };
+    let Ok(mut f2) = std::fs::File::open(copy) else {
+        return CopyFileResult::FailCheckTargetNotOpened;
+    };
+    let (Ok(size1), Ok(size2)) = (f1.seek(SeekFrom::End(0)), f2.seek(SeekFrom::End(0))) else {
+        return CopyFileResult::FailFilesDifferent;
+    };
+    let mut remaining = size1;
+    if size1 != size2 {
+        return CopyFileResult::FailFilesDifferent;
+    }
+    if f1.rewind().is_err() || f2.rewind().is_err() {
+        return CopyFileResult::FailFilesDifferent;
+    }
+
+    // "Compare by reading 8 MiB buffers one at a time." (`:1237`)
+    // PORT SRC: src/libslic3r/utils.cpp:1238
+    let buffer_size = 8 * 1024 * 1024;
+    let mut buffer_origin = vec![0u8; buffer_size];
+    let mut buffer_copy = vec![0u8; buffer_size];
+
+    // `ifstream::read` sets `eofbit` as soon as it reads fewer bytes than asked, which ends the
+    // `while (f1.good() && f2.good())` loop; a read error sets `badbit`, which ends it too and
+    // leaves `eof()` false, so the final test answers FAIL_FILES_DIFFERENT. Both are the `Err`
+    // and short-read arms below.
+    loop {
+        let (Ok((n1, eof1)), Ok((n2, eof2))) = (
+            read_up_to(&mut f1, &mut buffer_origin),
+            read_up_to(&mut f2, &mut buffer_copy),
+        ) else {
+            return CopyFileResult::FailFilesDifferent;
+        };
+        if n1 != n2 || (n1 > 0 && buffer_origin[..n1] != buffer_copy[..n2]) {
+            return CopyFileResult::FailFilesDifferent;
+        }
+        remaining -= n1 as u64;
+        if eof1 || eof2 {
+            // "All data has been read and compared equal." (`:1251`)
+            return if remaining == 0 {
+                CopyFileResult::Success
+            } else {
+                CopyFileResult::FailFilesDifferent
+            };
+        }
+    }
+}
+
+/// One `std::istream::read(buf, buf.size())`: the bytes read, and whether the stream hit end of
+/// file doing it (which is what sets `eofbit` and so ends `check_copy`'s loop).
+fn read_up_to(file: &mut std::fs::File, buffer: &mut [u8]) -> std::io::Result<(usize, bool)> {
+    use std::io::Read;
+    let mut filled = 0usize;
+    while filled < buffer.len() {
+        match file.read(&mut buffer[filled..]) {
+            Ok(0) => return Ok((filled, true)),
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok((filled, false))
+}
+
+/// `Slic3r::save_string_file(const path&, const std::string&)` (`utils.cpp:2229-2235`): write
+/// `str`'s bytes to `p`, binary.
+///
+/// The stream is opened with `failbit|badbit` in its exception mask (`:2232`), so the vendored
+/// function throws `std::ios_base::failure` on a failed open or write; this returns the same two
+/// failures as `Err`, which is this branch's existing rendering for a vendored throw that is not
+/// one of libslic3r's own exception types (`vendor_names_in` above does the same).
+///
+/// `str` is a `std::string` used as a byte buffer here (the stream is `std::ios_base::binary`
+/// and the content can be any file's bytes), so the port takes `&[u8]`: the type map's
+/// `std::string` -> `String` row is for text, and `String` cannot hold a byte string that is not
+/// UTF-8, which would narrow what this function accepts.
+pub fn save_string_file(p: &Path, str: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(p)?;
+    file.write_all(str)?;
+    file.flush()
+}
+
+/// `Slic3r::load_string_file(const path&, std::string&)` (`utils.cpp:2237-2244`): `p`'s bytes.
+///
+/// The vendored body sizes the output from `boost::filesystem::file_size(p)` and then reads
+/// exactly that many bytes (`:2242-2243`), so a file that shrank between the two calls is a
+/// short read and throws; `read_exact` below fails the same way. Returns `Vec<u8>` for the
+/// reason [`save_string_file`] takes `&[u8]`.
+pub fn load_string_file(p: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(p)?;
+    let size = std::fs::metadata(p)?.len();
+    let mut out = vec![0u8; size as usize];
+    file.read_exact(&mut out)?;
+    Ok(out)
+}
+
+/// What `Slic3r::copy_directory_recursively` lets out, one variant per exception type the
+/// vendored body can throw -- neither collapsed into the other, per `### Error sets`.
+#[derive(Debug)]
+pub enum CopyDirectoryError {
+    /// The `Slic3r::CriticalException` thrown at `utils.cpp:2022` when a file copy fails.
+    Critical(slic3r_exception::exception::Exception),
+    /// A `boost::filesystem::filesystem_error` from one of the body's own throwing filesystem
+    /// calls -- `remove_all` (`:2005`), `create_directories` (`:2006`) or the
+    /// `directory_iterator` constructor (`:2008`).
+    Filesystem(std::io::Error),
+}
+
+/// `Slic3r::copy_directory_recursively(const path&, const path&,
+/// std::function<bool(const std::string)>, bool)` (`utils.cpp:1997-2030`): copy `source`'s tree
+/// into `target`, skipping any file whose name `filter` accepts.
+///
+/// `filter` is `nullptr` by default (`Utils.hpp:798`), which the vendored body tests with
+/// `if (filter && filter(name))` (`:2018`) -- so `None` here, not a closure that always answers
+/// false.
+///
+/// The directory is walked in [`read_dir_sorted`]'s fixed order; see its `// FIDELITY(port):`
+/// marker for why that is a divergence worth recording.
+pub fn copy_directory_recursively(
+    source: &Path,
+    target: &Path,
+    filter: Option<&dyn Fn(&str) -> bool>,
+    merge_mode: bool,
+) -> Result<(), CopyDirectoryError> {
+    // PORT NOTE: src/libslic3r/utils.cpp:2002 (BOOST_LOG_TRIVIAL(info))
+    if !merge_mode && target.exists() {
+        std::fs::remove_dir_all(target).map_err(CopyDirectoryError::Filesystem)?;
+    }
+    std::fs::create_dir_all(target).map_err(CopyDirectoryError::Filesystem)?;
+    let entries = read_dir_sorted(source).map_err(CopyDirectoryError::Filesystem)?;
+    for entry in entries {
+        let name = entry
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let target_file = {
+            // `target.string() + "/" + name` (`:2013`), a string join, not `operator/`.
+            let mut joined = target.as_os_str().to_os_string();
+            joined.push("/");
+            joined.push(&name);
+            PathBuf::from(joined)
+        };
+        if entry.is_dir() {
+            copy_directory_recursively(&entry, &target.join(&name), filter, merge_mode)?;
+        } else {
+            if filter.is_some_and(|f| f(&name)) {
+                continue;
+            }
+            let (result, error_message) = copy_file(&entry, &target_file, false);
+            if result != CopyFileResult::Success {
+                // PORT NOTE: src/libslic3r/utils.cpp:2021 (BOOST_LOG_TRIVIAL(error))
+                let template_ =
+                    slic3r_i18n::i18_n::translate("Copying directory %1% to %2% failed: %3%");
+                let message = slic3r_format::format::format(
+                    &template_,
+                    &[
+                        slic3r_format::format::cook(boost_quoted_path(source)),
+                        slic3r_format::format::cook(boost_quoted_path(target)),
+                        slic3r_format::format::cook(error_message),
+                    ],
+                )
+                .unwrap_or_default();
+                return Err(CopyDirectoryError::Critical(
+                    slic3r_exception::exception::Exception::CriticalException(message),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A directory's entries, sorted by file name as byte strings -- the one order this module's
+/// two tree walks ([`copy_framework`] and [`copy_directory_recursively`]) use.
+// FIDELITY(port): src/libslic3r/utils.cpp:2008 and :1201 both walk a directory with
+// `boost::filesystem::directory_iterator`, whose order the standard leaves unspecified (it is
+// the platform's `readdir` order). This port fixes one order -- the entry names compared as
+// byte strings -- so that the sequence of copies, and which failure a partly-failing copy
+// reports first, are the same on every run, every filesystem and both implementations. The
+// finished tree is order-independent; only the order of the attempts and the identity of the
+// first error are not.
+fn read_dir_sorted(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)?
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|e| e.path())
+        .collect();
+    paths.sort_by(|a, b| {
+        a.file_name()
+            .unwrap_or_default()
+            .as_encoded_bytes()
+            .cmp(b.file_name().unwrap_or_default().as_encoded_bytes())
+    });
+    Ok(paths)
+}
+
+/// `boost::filesystem::path`'s `operator<<`, which writes the path through
+/// `boost::io::quoted(s, '&', '"')`: wrapped in double quotes, with `'&'` and `'"'` each
+/// preceded by `'&'`. Two vendored sites stream a path into text this way -- `copy_framework`'s
+/// `std::cerr` line (`utils.cpp:1196`) and `copy_directory_recursively`'s message (`:2023`).
+fn boost_quoted_path(path: &Path) -> String {
+    let mut out = String::from("\"");
+    for c in path.to_string_lossy().chars() {
+        if c == '&' || c == '"' {
+            out.push('&');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+/// `Slic3r::is_running_in_flatpak()` (`utils.cpp:403-407`): whether this process is inside a
+/// Flatpak sandbox. "Only the sandbox has this file, while a host process started from a
+/// Flatpak can inherit FLATPAK_ID." (`:405`)
+///
+/// `::access("/.flatpak-info", F_OK)` tests existence with the real uid; `Path::exists` is a
+/// `stat`, which tests it with the effective uid. The two differ only for a set-uid process,
+/// which neither the oracle's test binaries nor this port's are, and `access` is not reachable
+/// without a `libc` dependency a port task may not add.
+pub fn is_running_in_flatpak() -> bool {
+    Path::new("/.flatpak-info").exists()
+}
+
+// ---------------------------------------------------------------------------------------------
 // Deferred declarations -- every remaining unported item of this module's scope note, one
 // marker per declaration (grep this file for `TODO(port)` or `PORT NOTE` to find them all),
 // naming the vendored line where it lives. None is a live `todo!()`/`unimplemented!()`: each
@@ -1563,6 +2769,20 @@ pub fn extended_path(path: &Path) -> PathBuf {
 // Scope note reason 1: OpenSSL MD5 and boost::locale NFC normalisation.
 // TODO(port): src/libslic3r/Utils.hpp:781 (bbl_calc_md5)
 // TODO(port): src/libslic3r/Utils.hpp:251 (normalize_utf8_nfc)
+// Scope note reason 1: a platform or process facility std alone does not reach, and whose only
+// binding would be a `libc`/TBB dependency a port task may not add.
+// TODO(port): src/libslic3r/Utils.hpp:112 (log_memory_info; mach task_info + getrusage, and it
+//   reads boost::log's own logSeverity)
+// TODO(port): src/libslic3r/Utils.hpp:387 (get_process_name; libproc proc_pidpath)
+// TODO(port): src/libslic3r/utils.cpp:379 (xdg_config_dir; the getpwnam/getpwuid passwd chain)
+// TODO(port): src/libslic3r/utils.cpp:409 (wayland_socket_available; fcntl(fd, F_GETFD))
+// TODO(port): src/libslic3r/Utils.hpp:113 (disable_multi_threading; tbb::global_control, and
+//   the idiom map's TBB row already makes every ported loop serial, so there is no
+//   parallelism for it to switch off)
+// TODO(port): src/libslic3r/utils.cpp:1922 (total_physical_memory; the live branch on this
+//   platform is `sysctl(CTL_HW, HW_MEMSIZE)`, not the `#else`'s `return 0L;` -- measured, not
+//   read: a first revision of this module ported the `#else` branch and the differential test
+//   against the oracle answered 103079215104 against 0 on this machine)
 
 // Scope note reason 2 (reaches the out-of-scope preset layer, R11): the vendor-bundle install
 // family. `// PORT NOTE:` rather than `// TODO(port):`, per the don't-translate list's rule for
@@ -1576,52 +2796,65 @@ pub fn extended_path(path: &Path) -> PathBuf {
 // PORT NOTE: src/libslic3r/utils.cpp:2041 (cache_covers; reaches PresetCacheFormat.hpp)
 // PORT NOTE: src/libslic3r/Utils.hpp:837 (install_vendor_bundles_from_resources; reaches Preset.hpp)
 
-// Scope note reason 3 (no in-scope caller has fixed an instantiation).
-// TODO(port): src/libslic3r/Utils.hpp:528 (IsTriviallyCopyable, GCC < 5 branch)
-// TODO(port): src/libslic3r/Utils.hpp:530 (IsTriviallyCopyable, the live branch)
+// Scope note reason 3 (no in-scope caller has fixed an instantiation): the idiom map's rule
+// ("a template is not force-collapsed to one concrete type unless the manifest row's unit only
+// ever instantiates one") argues against guessing a concrete type here.
+// TODO(port): src/libslic3r/Utils.hpp:446 (convert_vector<From, To>; no in-scope caller fixes a
+//   From/To pair)
+// TODO(port): src/libslic3r/Utils.hpp:428 (the generic size_t-dispatching overload of
+//   next_highest_power_of_2; the three fixed-width overloads beside it are ported above)
 // TODO(port): src/libslic3r/Utils.hpp:857 (SLIC3R_STDVEC_MEMSIZE, WIN32 branch)
 // TODO(port): src/libslic3r/Utils.hpp:859 (SLIC3R_STDUNORDEREDSET_MEMSIZE, WIN32 branch)
 // TODO(port): src/libslic3r/Utils.hpp:861 (SLIC3R_STDVEC_MEMSIZE, non-WIN32 branch)
 // TODO(port): src/libslic3r/Utils.hpp:863 (SLIC3R_STDUNORDEREDSET_MEMSIZE, non-WIN32 branch)
 
-// Scope note reason 4 (this task's own time budget, with no excuse from a rule above -- see
-// the module doc comment and this task's pull request body for why the unit is not
-// substantively complete while these remain).
-// TODO(port): src/libslic3r/Utils.hpp:578 (short_time)
-// TODO(port): src/libslic3r/Utils.hpp:624 (get_time_dhms)
-// TODO(port): src/libslic3r/Utils.hpp:648 (get_bbl_time_dhms)
-// TODO(port): src/libslic3r/Utils.hpp:670 (get_timezone_utc_hm)
-// TODO(port): src/libslic3r/Utils.hpp:688 (get_time_dhm)
-// TODO(port): src/libslic3r/Utils.hpp:709 (get_time_hms)
-// TODO(port): src/libslic3r/Utils.hpp:722 (get_bbl_monitor_time_dhm)
-// TODO(port): src/libslic3r/Utils.hpp:744 (get_bbl_monitor_end_time_dhm)
-// TODO(port): src/libslic3r/Utils.hpp:759 (get_bbl_remain_time_dhms)
-// TODO(port): src/libslic3r/Utils.hpp:387 (get_process_name)
-// TODO(port): src/libslic3r/Utils.hpp:367 (string_printf)
-// TODO(port): src/libslic3r/Utils.hpp:371 (header_slic3r_generated)
-// TODO(port): src/libslic3r/Utils.hpp:375 (header_gcodeviewer_generated)
-// TODO(port): src/libslic3r/Utils.hpp:230 (debug_out_path)
-// TODO(port): src/libslic3r/Utils.hpp:115 (total_physical_memory)
-// TODO(port): src/libslic3r/Utils.hpp:112 (log_memory_info)
-// TODO(port): src/libslic3r/Utils.hpp:113 (disable_multi_threading)
-// TODO(port): src/libslic3r/utils.cpp:379 (xdg_config_dir)
-// TODO(port): src/libslic3r/utils.cpp:403 (is_running_in_flatpak)
-// TODO(port): src/libslic3r/utils.cpp:409 (wayland_socket_available)
-// TODO(port): src/libslic3r/utils.cpp:432 (default_data_dir)
-// TODO(port): src/libslic3r/Utils.hpp:225 (makedir)
-// TODO(port): src/libslic3r/Utils.hpp:842 (save_string_file)
-// TODO(port): src/libslic3r/Utils.hpp:843 (load_string_file)
-// TODO(port): src/libslic3r/Utils.hpp:283 (copy_file_inner)
-// TODO(port): src/libslic3r/Utils.hpp:288 (copy_file)
-// TODO(port): src/libslic3r/Utils.hpp:289 (copy_framework)
-// TODO(port): src/libslic3r/Utils.hpp:291 (check_copy)
-// TODO(port): src/libslic3r/Utils.hpp:257 (rename_file)
-// TODO(port): src/libslic3r/Utils.hpp:270 (write_file_atomically, the chunked overload)
-// TODO(port): src/libslic3r/Utils.hpp:271 (write_file_atomically, the single-string overload)
-// TODO(port): src/libslic3r/Utils.hpp:796 (copy_directory_recursively)
-// TODO(port): src/libslic3r/Utils.hpp:308 (is_path_within_root)
-// TODO(port): src/libslic3r/Utils.hpp:311 (is_symlink_target_within_root)
-// TODO(port): src/libslic3r/Utils.hpp:314 (is_absolute_path_within_root)
+// Scope note reason 4 (a compile-time predicate with no oracle-comparable output):
+// `IsTriviallyCopyable<T>`. Its two in-scope uses -- `src/libslic3r/Slicing.hpp:124` and
+// `src/libslic3r/Fill/FillBase.hpp:137`, both rows `in` -- are `static_assert`s, which the
+// compiler consumes and which produce no value a proof held to exact equality could compare.
+// Rust's own `Copy` bound is where the same property is spelled, at each future use site.
+// TODO(port): src/libslic3r/Utils.hpp:528 (IsTriviallyCopyable, GCC < 5 branch)
+// TODO(port): src/libslic3r/Utils.hpp:530 (IsTriviallyCopyable, the live branch)
+
+// Scope note reason 5 (not compiled into the normative oracle): a branch the pin's own
+// preprocessor removes on the platform `vendor/OrcaSlicer/build/arm64` is built for, so there
+// is no oracle symbol or oracle behaviour to hold it to exact equality against. The live branch
+// of each enclosing function is ported above.
+// TODO(port): src/libslic3r/utils.cpp:432 (default_data_dir; the whole definition is inside
+//   `#ifdef __linux__`, so the macOS oracle holds no such symbol)
+// TODO(port): src/libslic3r/utils.cpp:1963 (makedir, the WIN32 branch)
+// TODO(port): src/libslic3r/utils.cpp:1965 (makedir, the __linux__ branch)
+// TODO(port): src/libslic3r/utils.cpp:820 (rename_file, the WindowsSupport::rename branch)
+// TODO(port): src/libslic3r/utils.cpp:1147 (copy_file, the WIN32 CopyFileW branch)
+// TODO(port): src/libslic3r/utils.cpp:917 (copy_file_linux_read_write and the __linux__
+//   sendfile fast path copy_file_inner takes there)
+
+// Scope note reason 6 (needs an item from a module the Phase A/Phase B fan-out owns -- this
+// task's own rule: "leave a `// TODO(port):` marker rather than a guess").
+// TODO(port): src/libslic3r/Utils.hpp:371 (header_slic3r_generated; `SLIC3R_APP_NAME` and
+//   `SoftFever_VERSION` come from `libslic3r_version.h`, which CMake generates from
+//   `src/libslic3r/libslic3r_version.h.in` into the build tree -- it is not a tracked file of
+//   the pin, and `crates/slic3r-libslic3r`'s own module records `SLIC3R_VERSION` as still
+//   pending)
+// TODO(port): src/libslic3r/Utils.hpp:375 (header_gcodeviewer_generated; same, although
+//   `GCODEVIEWER_APP_NAME` itself is already `slic3r_libslic3r::libslic3r::GCODEVIEWER_APP_NAME`)
+// Scope note reason 7 (the governing documents give no rendering, so this is a finding for
+// this task's pull request rather than a guess on the branch -- `docs/WORKFLOW.md`, "The
+// rejection rule", and the task's own "A unit that cannot be held to exact equality is a
+// finding for the pull request").
+// TODO(port): src/libslic3r/Utils.hpp:367 (string_printf; a C variadic function, which Rust
+//   cannot declare and for which `docs/PORTING.md`'s idiom map has no row -- every caller's
+//   format string has to become a Rust format at the call site, in that caller's own unit)
+// TODO(port): src/libslic3r/Utils.hpp:230 (debug_out_path; the same C variadic shape, plus a
+//   first-call console notice; `SLIC3R_DEBUG*`-guarded debug output is on the don't-translate
+//   list, but this declaration is not itself inside such a guard)
+// TODO(port): src/libslic3r/Utils.hpp:744 (get_bbl_monitor_end_time_dhm; its output is
+//   `boost::posix_time::second_clock::local_time()` plus a `time_facet`, i.e. the wall clock
+//   and the host time zone, so two calls a minute apart differ and no exact-equality proof
+//   against the oracle exists)
+// TODO(port): src/libslic3r/Utils.hpp:589 (the `%f` conversion's `inf`/`nan`/C99-hexadecimal
+//   subject sequences, which `CScan::scan_float_into` above does not accept; `short_time`'s
+//   only in-scope input is `get_time_dhms`'s own `"%fs"` output, which is always decimal)
 
 #[cfg(test)]
 mod tests {

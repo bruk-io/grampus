@@ -43,6 +43,10 @@
 
 #include "Utils.hpp"
 
+#include <boost/filesystem/path.hpp>
+#include <functional>
+#include <string>
+
 namespace slic3r_ffi {
 namespace proof_units {
 namespace utils {
@@ -53,6 +57,143 @@ namespace utils {
 std::uint64_t path1_get_utf8_sequence_length(rust::Vec<std::uint8_t> seq) {
     return static_cast<std::uint64_t>(
         Slic3r::get_utf8_sequence_length(reinterpret_cast<const char *>(seq.data()), seq.size()));
+}
+
+// --- The Utils.hpp time formatters -----------------------------------------------------------
+//
+// Each of these is `inline` in the pinned header, so the body this calls is the vendored body
+// compiled into this translation unit from `Utils.hpp` itself -- nothing is retyped here.
+//
+// `short_time` has one input range in which the vendored body returns a `char buffer[64]` it
+// never wrote (`Utils.hpp:620`, reached when `seconds < 0` and `days`/`hours`/`minutes` are all
+// zero) -- undefined behaviour, reading uninitialised stack. The Rust-side proof never calls
+// that range; see the ported module's doc comment for the disclosure.
+
+rust::String path1_short_time(rust::String time) {
+    return rust::String(Slic3r::short_time(std::string(time)));
+}
+
+rust::String path1_get_time_dhms(float time_in_secs) {
+    return rust::String(Slic3r::get_time_dhms(time_in_secs));
+}
+
+rust::String path1_get_bbl_time_dhms(float time_in_secs) {
+    return rust::String(Slic3r::get_bbl_time_dhms(time_in_secs));
+}
+
+rust::String path1_get_timezone_utc_hm(std::int64_t second) {
+    return rust::String(Slic3r::get_timezone_utc_hm(static_cast<long>(second)));
+}
+
+rust::String path1_get_time_dhm(float time_in_secs) {
+    return rust::String(Slic3r::get_time_dhm(time_in_secs));
+}
+
+rust::String path1_get_time_hms(float time_in_secs) {
+    return rust::String(Slic3r::get_time_hms(time_in_secs));
+}
+
+rust::String path1_get_bbl_monitor_time_dhm(float time_in_secs) {
+    return rust::String(Slic3r::get_bbl_monitor_time_dhm(time_in_secs));
+}
+
+rust::String path1_get_bbl_remain_time_dhms(float time_in_secs) {
+    return rust::String(Slic3r::get_bbl_remain_time_dhms(time_in_secs));
+}
+
+// --- The three canonicalization-based path-root checks ---------------------------------------
+
+bool path1_is_path_within_root(rust::String rel_path, rust::String root) {
+    return Slic3r::is_path_within_root(std::string(rel_path),
+                                       boost::filesystem::path(std::string(root)));
+}
+
+bool path1_is_symlink_target_within_root(rust::String link_rel_path, rust::String target,
+                                         rust::String root) {
+    return Slic3r::is_symlink_target_within_root(std::string(link_rel_path), std::string(target),
+                                                 boost::filesystem::path(std::string(root)));
+}
+
+bool path1_is_absolute_path_within_root(rust::String path, rust::String root) {
+    return Slic3r::is_absolute_path_within_root(boost::filesystem::path(std::string(path)),
+                                                boost::filesystem::path(std::string(root)));
+}
+
+// --- The file-mutation family ----------------------------------------------------------------
+
+bool path1_is_running_in_flatpak() { return Slic3r::is_running_in_flatpak(); }
+
+bool path1_makedir(rust::String path) { return Slic3r::makedir(std::string(path)); }
+
+std::int32_t path1_rename_file(rust::String from, rust::String to) {
+    return static_cast<std::int32_t>(Slic3r::rename_file(std::string(from), std::string(to)).value());
+}
+
+std::int32_t path1_write_file_atomically(rust::String path, rust::String content, bool binary) {
+    // The single-string overload (`Utils.hpp:271`), which forwards one `string_view` chunk to
+    // the `initializer_list` overload (`utils.cpp:869`).
+    const std::string content_str(content);
+    return static_cast<std::int32_t>(
+        Slic3r::write_file_atomically(std::string(path), content_str, binary).value());
+}
+
+std::int32_t path1_check_copy(rust::String origin, rust::String copy) {
+    return static_cast<std::int32_t>(Slic3r::check_copy(std::string(origin), std::string(copy)));
+}
+
+std::int32_t path1_copy_file_inner(rust::String from, rust::String to) {
+    std::string error_message;
+    return static_cast<std::int32_t>(
+        Slic3r::copy_file_inner(std::string(from), std::string(to), error_message));
+}
+
+std::int32_t path1_copy_file(rust::String from, rust::String to, bool with_check) {
+    std::string error_message;
+    return static_cast<std::int32_t>(
+        Slic3r::copy_file(std::string(from), std::string(to), error_message, with_check));
+}
+
+bool path1_copy_framework(rust::String from, rust::String to) {
+    return Slic3r::copy_framework(std::string(from), std::string(to));
+}
+
+bool path1_copy_directory_recursively(rust::String source, rust::String target, bool merge_mode) {
+    // The vendored function throws `Slic3r::CriticalException` on a failed per-file copy
+    // (`utils.cpp:2022`) and lets `boost::filesystem`'s own throwing calls out; a C++ exception
+    // may not cross the bridge, so both are reported as `false`.
+    try {
+        Slic3r::copy_directory_recursively(boost::filesystem::path(std::string(source)),
+                                           boost::filesystem::path(std::string(target)),
+                                           std::function<bool(const std::string)>(), merge_mode);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool path1_save_string_file(rust::String p, rust::Vec<std::uint8_t> str) {
+    try {
+        Slic3r::save_string_file(boost::filesystem::path(std::string(p)),
+                                 std::string(reinterpret_cast<const char *>(str.data()),
+                                             str.size()));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool path1_load_string_file(rust::String p, rust::Vec<std::uint8_t> &out) {
+    try {
+        std::string str;
+        Slic3r::load_string_file(boost::filesystem::path(std::string(p)), str);
+        out.clear();
+        out.reserve(str.size());
+        for (const char byte : str)
+            out.push_back(static_cast<std::uint8_t>(byte));
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 } // namespace utils
