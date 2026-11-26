@@ -33,3 +33,19 @@ path = "fuzz_targets/slic3r-ffi_roundtrip.rs"
 test = false
 doc = false
 bench = false
+
+# `slic3r-point`, added by task `56-foundation-point`: the first ported module this fuzz crate's
+# own [[bin]] targets drive, alongside the FFI side `slic3r-ffi` already gives every target
+# (R19, plan step 20's "the first truly differential fuzz target"). `docs/WORKFLOW.md`'s
+# "A `required` fuzz target" rule names this file as the one crate manifest a foundation task may
+# touch; appended here, at the end, so two branches conflict textually rather than reordering
+# silently.
+[dependencies.slic3r-point]
+path = "../../slic3r-point"
+
+[[bin]]
+name = "slic3r-point_point"
+path = "fuzz_targets/slic3r-point_point.rs"
+test = false
+doc = false
+bench = false
