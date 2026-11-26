@@ -178,3 +178,123 @@ the same form a unit's pull request uses: both review verdicts, each citing `sou
 before fan-out.
 
 This section is filled by `35-trial-run`.
+
+Dated 2026-11-26, before any fan-out pull request is opened.
+
+**On the review loop, stated plainly rather than overclaimed.** This trial ran with one builder
+agent and no tool to spawn a second, separate-context subagent for a reviewer role (recorded in
+this task's own plan, "Not a risk, withdrawn" — later corrected again when the trial was actually
+built: that withdrawal reasoned the orchestration around a task supplies the two reviewers, which
+holds for an ordinary fan-out task but not for this trial, which had no such orchestration to
+delegate to). Each unit's "both review verdicts" below are therefore two **sequential** adversarial
+passes by that one agent — each a fresh re-read of the vendored source against the diff, from an
+"assume the module is wrong" stance, before looking at the other pass's findings — not two
+independently-run contexts. One genuine divergence was found and fixed this way (the float unit,
+below); the other two units' second pass confirmed the first rather than finding anything further.
+A later task with real separate-context reviewers available should not read this shape as the
+loop's steady state.
+
+### Unit 1 — fixed-point (near-miss): `MaterialType.cpp` / `MaterialType.hpp`
+
+- **Manifest row:** MaterialType.cpp
+- **Manifest row:** MaterialType.hpp
+- **Reviewer 1:** `src/libslic3r/MaterialType.cpp:21` against
+  `crates/slic3r-materialtype/src/material_type.rs:60` — the `ABS` row's seven numeric fields
+  (`190, 300, 50, 65, 1, 0.1, 100`) transcribe exactly, covered by the `// PORT SRC:
+  MaterialType.cpp:21` line directly above it; `src/libslic3r/MaterialType.cpp:108-120` against
+  `crates/slic3r-materialtype/src/material_type.rs:216-223` — `get_temperature_range`'s
+  always-write-the-default-then-overwrite-on-a-hit behaviour (`:110-111`, `:114-115`) is
+  reproduced by the `match`'s two arms returning `(info.min_temp, info.max_temp, true)` /
+  `(DEFAULT_MIN_TEMP, DEFAULT_MAX_TEMP, false)`, not merely the hit path. No divergence found.
+- **Reviewer 2:** `src/libslic3r/MaterialType.cpp:101-106` against
+  `crates/slic3r-materialtype/src/material_type.rs:212-214` — `find()`'s linear scan and
+  case-sensitive, exact-string `name` comparison (`info.name == name`, `:104`) match
+  `info.name == name` in `find()`'s Rust body exactly, including the not-found `nullptr`/`None`
+  case; `src/libslic3r/MaterialType.cpp:31` (`FLEX`, `adhesion_coefficient` written as the bare
+  integer `1` meaning `1.0`) against
+  `crates/slic3r-materialtype/src/material_type.rs:80` — the `1f64` suffix form normalises to
+  the exempt literal `1` under `port/port-status`'s own rule while still typing as `f64`,
+  checked against every other whole-number float field in the table, not only this row. No
+  divergence found.
+- **Fixer:** no fix needed; both passes agreed.
+
+### Unit 2 — float: `GCode/PchipInterpolatorHelper.cpp` / `GCode/PchipInterpolatorHelper.hpp`
+
+- **Manifest row:** GCode/PchipInterpolatorHelper.cpp
+- **Manifest row:** GCode/PchipInterpolatorHelper.hpp
+- **Reviewer 1:** `src/libslic3r/GCode/PchipInterpolatorHelper.cpp:59-81` against
+  `crates/slic3r-gcode/src/pchip_interpolator_helper.rs:107-130` — `computePCHIP`'s derivative
+  recurrence (`d_[i] = (w1 + w2) / (w1 / delta_[i-1] + w2 / delta_[i])`, `:76`, matching
+  `pchip_interpolator_helper.rs:126`) transcribes with the same operator precedence and operand
+  order; `src/libslic3r/GCode/PchipInterpolatorHelper.cpp:86-104` against
+  `crates/slic3r-gcode/src/pchip_interpolator_helper.rs:135-155` — `interpolate`'s
+  `std::lower_bound` (`:90`) against `Vec::partition_point(|&v| v < xi)` (`:145`): both return
+  the first index whose element is not less than `xi` on a sorted ascending slice, so `i = that
+  index - 1` agrees on both sides, including the exactly-on-a-knot queries this unit's own test
+  exercises (`3.0`, `4.25`, `6.0`, `8.0`, `10.0`). No divergence found in either cited range.
+- **Reviewer 2 (found a divergence):** `src/libslic3r/GCode/PchipInterpolatorHelper.cpp:43-54`
+  against `crates/slic3r-gcode/src/pchip_interpolator_helper.rs:85-96` — the first pass's own
+  module doc comment, and this row's first `tolerance` reason text, both claimed `sortData()`'s
+  `std::sort -> slice::sort_unstable` idiom mapping leaves a divergence when two input points
+  share an x-coordinate. Checked against the vendored line: `std::sort` on
+  `std::vector<std::pair<double,double>>` (`:44-48`) uses `std::pair`'s default `operator<`,
+  which compares **both** fields in order — the sort key is `(x, y)`, not `x` alone — so two
+  elements compare equal only when `x` *and* `y` both match, and swapping genuinely-equal
+  elements is not observable. There is nothing here for an unstable sort to diverge from a
+  stable one on, with or without a duplicate `x`. The claim was wrong.
+- **Fixer:** corrected `sort_data`'s doc comment
+  (`crates/slic3r-gcode/src/pchip_interpolator_helper.rs:85-96`) and the test's own comment
+  (`:170`) to state the real reasoning above, and rewrote this row's `tolerance` reason text
+  in `port/manifest.tsv` to the same effect (the measured bound stands — `0`, over this proof's
+  own distinct-`x` input — the withdrawn claim was about *why* a tolerance row rather than an
+  exact one, not about the measured number itself). `cargo test -p slic3r-gcode pchip` re-run
+  clean after the fix (both rows still pass at `tier=float`).
+
+### Unit 3 — throw / non-const-ref-out-param: `InstanceLock.cpp` / `InstanceLock.hpp`
+
+- **Manifest row:** InstanceLock.cpp
+- **Manifest row:** InstanceLock.hpp
+- **Reviewer 1:** `src/libslic3r/InstanceLock.cpp:122-148` against
+  `crates/slic3r-instancelock/src/instance_lock.rs:212-264` — the constructor's `if (depth==0 &&
+  now>=cooldown_until && open_lock_file(...))` guard, the retry loop's `try_lock`/deadline/sleep
+  sequence, and `++depth` *before* `m_locked = file_lock != nullptr` (`:146-148`, matching
+  `instance_lock.rs:263-264`) all appear in the same order in the port;
+  `src/libslic3r/InstanceLock.cpp:150-161` against
+  `crates/slic3r-instancelock/src/instance_lock.rs:277-291` — the destructor's own body runs
+  before its member destructors release the mutex in C++ (reverse declaration order), which the
+  port reproduces by running `Drop::drop`'s explicit body on the taken `guard` before that local
+  `guard` goes out of scope and releases the reentrant lock itself. No divergence found.
+- **Reviewer 2:** `src/libslic3r/InstanceLock.cpp:37-54` against
+  `crates/slic3r-instancelock/src/instance_lock.rs:69-99` — `NativeFileLock`'s constructor
+  (`O_RDWR|O_CREAT|O_CLOEXEC`, mode `0644`, throwing `std::system_error` on failure) and
+  `try_lock()`'s `EWOULDBLOCK`/`EINTR` → "keep trying", anything else → the unit's other throw,
+  against `OpenOptions`'s equivalent flags/mode and `io::ErrorKind::WouldBlock`/`Interrupted` →
+  `Ok(false)`, anything else → `Err`; `src/libslic3r/InstanceLock.hpp:52-53` (the `private:`
+  non-const-reference out-params this leg is chosen for) against
+  `crates/slic3r-instancelock/src/instance_lock.rs:165-186` — `open_lock_file`/`defer` take `Slot
+  &slot` in the vendored source and `&mut SlotState` here, both mutating shared state the caller
+  already holds locked, matching the idiom map's "a non-const reference out-parameter -> a
+  return value" by returning `bool`/`()` rather than adopting a second `&mut` parameter to mirror
+  the C++ signature. No divergence found. Noted, not a finding: this unit's shim can drive only
+  the public surface (`InstanceLock`'s constructor, destructor, `locked()`) — `open_lock_file`/
+  `defer` are `private:`, so the out-params and the caught throw are exercised transitively, and
+  the record above says so rather than claiming a direct comparison that was not made.
+- **Fixer:** no fix needed; both passes agreed.
+
+## Corrections to `docs/PORTING.md`
+
+None. Every rule this trial actually exercised — the idiom map's "non-const reference
+out-parameter -> a return value" (units 1 and 3), the error-set rule (units 2 and 3), the
+`std::sort`/`slice::sort_unstable` idiom entry (unit 2, where the adversarial-review finding above
+was about this task's own draft misreading that entry, not about the entry itself) — held exactly
+as stated. What this trial *did* find is two mismatches between a row's seeded `proof path` cell
+and the mechanism that cell names (`MaterialType`'s rows name proof path 3, the
+include-the-vendored-`.cpp` mechanism, but `MaterialType`'s methods are externally linked, not
+internal-linkage, so including the `.cpp` whole would duplicate-define them against the archive;
+`GCode/PchipInterpolatorHelper.hpp`'s row names proof path 2, but the dump corpus it is seeded
+from carries no field this unit produces) — both handled the same way
+`crates/slic3r-commondefs/src/common_defs.rs`'s own `// PROOF: 2` finding already established
+(keep the cell's marker literal, prove the row by the mechanism that actually works, record the
+mismatch in the module and the pull request) before this trial ran. That precedent, not a new
+`docs/PORTING.md` rule, is what already governs a seeded-proof-path mismatch; this trial adds two
+more measured instances of it rather than a reason to change the document.
