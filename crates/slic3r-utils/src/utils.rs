@@ -1394,7 +1394,12 @@ pub fn vendor_names_in(dir: &Path) -> std::io::Result<std::collections::BTreeSet
 fn stoi_prefix(s: &str) -> Option<i32> {
     let bytes = s.as_bytes();
     let mut i = 0usize;
-    let negative = match bytes.first() {
+    // `std::stoi` delegates to `strtol`, which skips leading whitespace (the full C
+    // `isspace` class: space, '\t', '\n', '\v', '\f', '\r') before the optional sign.
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\x0B' | b'\x0C' | b'\r') {
+        i += 1;
+    }
+    let negative = match bytes.get(i) {
         Some(b'+') => {
             i += 1;
             false
@@ -1432,8 +1437,10 @@ pub fn check_layer_id_pattern(pattern: &str, layer_id: i32) -> bool {
     if pattern.is_empty() || layer_id < 0 {
         return false;
     }
-    // Layers are 1-based in the pattern; `layer_id` arrives 0-based.
-    let layer_id = layer_id + 1;
+    // Layers are 1-based in the pattern; `layer_id` arrives 0-based. `wrapping_add` reproduces
+    // the vendored `layer_id++`'s own signed-overflow-is-UB-that-wraps-in-practice behaviour at
+    // `i32::MAX` rather than panicking (`cargo test`'s dev profile has overflow checks on).
+    let layer_id = layer_id.wrapping_add(1);
 
     let mut p: String = pattern
         .chars()
@@ -1466,10 +1473,14 @@ pub fn check_layer_id_pattern(pattern: &str, layer_id: i32) -> bool {
                 } else {
                     continue;
                 };
+                // `base_layer + local_count` (`utils.cpp:2297`) is `int + int` -- signed-overflow
+                // UB that wraps in practice (the compiled oracle), reproduced with
+                // `wrapping_add` rather than panicking (`cargo test`'s dev profile has overflow
+                // checks on): e.g. `base_layer = 1, local_count = i32::MAX` must not panic here.
                 if base_layer > 0
                     && local_count > 0
                     && layer_id >= base_layer
-                    && layer_id < base_layer + local_count
+                    && layer_id < base_layer.wrapping_add(local_count)
                 {
                     return true;
                 }
@@ -2255,6 +2266,23 @@ mod tests {
         assert!(check_layer_id_pattern("1,7x,9", 6)); // explicit-list token "7x" -> stoi gives 7
         assert!(check_layer_id_pattern("1-5", 0)); // interval "1-5" -> stoi gives interval 1
         assert!(!check_layer_id_pattern("0x10", 0)); // interval "0x10" -> stoi gives interval 0
+    }
+
+    #[test]
+    fn check_layer_id_pattern_does_not_panic_on_a_near_i32_max_count() {
+        // `base_layer + local_count` is `1 + i32::MAX`, which overflows `i32`; the vendored
+        // `int + int` is UB that wraps in practice rather than panicking, reproduced here with
+        // `wrapping_add` rather than `cargo test`'s overflow-checked `+` panicking.
+        assert!(!check_layer_id_pattern("1#2147483647,2", 0));
+    }
+
+    #[test]
+    fn stoi_prefix_skips_leading_whitespace_like_strtol() {
+        // `std::stoi` delegates to `strtol`, which skips the full C `isspace` class before the
+        // sign/digits -- not just the four characters `check_layer_id_pattern`'s own preamble
+        // strips (` \t\n\r`), so a token with a stray '\x0B'/'\x0C' still parses.
+        assert_eq!(stoi_prefix("\u{0B}5"), Some(5));
+        assert_eq!(stoi_prefix("\u{0C}-3"), Some(-3));
     }
 
     #[test]
