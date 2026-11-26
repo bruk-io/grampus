@@ -23,7 +23,7 @@
 //! `processNearby` form `stitch`'s own closure needs** (`PolylineStitcher.hpp:120-168`,
 //! `grid.processNearby(from, max_stitch_distance, [...](const PathsPointIndex<Paths>& nearby)
 //! -> bool {...})`: the closure updates `closest`/`closest_distance` on every candidate it is
-//! shown, *then* returns `false` to stop the walk once `dist < snap_distance` (`:160-163`) --
+//! shown, *then* returns `false` to stop the walk once `dist < snap_distance` (`:155-158`) --
 //! stopping early changes which candidates are even visited, and so can change which one ends
 //! up `closest` relative to visiting every candidate and keeping the global minimum. Collapsing
 //! this to `get_nearby`'s own full-collection-then-scan shape would silently diverge from the
@@ -88,28 +88,28 @@ impl StitchJunction for Point {
 pub trait StitchPath: Clone {
     type Junction: StitchJunction;
 
-    /// `line.size()` at every call site in `stitch` (`:69,99,109,...`).
+    /// `line.size()` at every call site in `stitch` (`:73,118,172`).
     fn junction_count(&self) -> usize;
     /// `line[idx]`, read-only.
     fn junction_at(&self, idx: usize) -> Self::Junction;
-    /// `chain.reverse()` (`:91`).
+    /// `chain.reverse()` (`:94`).
     fn reverse(&mut self);
-    /// `chain.polylineLength()` (`:94`).
+    /// `chain.polylineLength()` (`:96`).
     fn polyline_length(&self) -> i64;
     /// `chain.insert(chain.end(), start_pos, (*closest.polygons)[closest.poly_idx].end())`
-    /// (`:177`): append `other`'s junctions from `start_idx` (inclusive) to its end, in order.
+    /// (`:180`): append `other`'s junctions from `start_idx` (inclusive) to its end, in order.
     fn extend_from_front(&mut self, other: &Self, start_idx: usize);
     /// `chain.insert(chain.end(), start_pos, (*closest.polygons)[closest.poly_idx].rend())`
-    /// (`:186`): append `other`'s junctions from `start_idx_from_end` (inclusive, counted from
+    /// (`:189`): append `other`'s junctions from `start_idx_from_end` (inclusive, counted from
     /// the end) back to its front, in reverse order.
     fn extend_from_back(&mut self, other: &Self, start_idx_from_end: usize);
 
-    /// `static bool canReverse(const PathsPointIndex<Paths> &polyline);` (`:214-215`) -- no
+    /// `static bool canReverse(const PathsPointIndex<Paths> &polyline);` (`:230`) -- no
     /// generic body; see the module doc.
     fn can_reverse(polyline: &PathsPointIndex<'_, Vec<Self>>) -> bool;
-    /// `static bool canConnect(const Path &a, const Path &b);` (`:217-220`).
+    /// `static bool canConnect(const Path &a, const Path &b);` (`:236`).
     fn can_connect(a: &Self, b: &Self) -> bool;
-    /// `static bool isOdd(const Path &line);` (`:222`).
+    /// `static bool isOdd(const Path &line);` (`:238`).
     fn is_odd(line: &Self) -> bool;
 }
 
@@ -171,7 +171,7 @@ impl StitchPath for Polygon {
     }
 }
 
-/// `PolylineStitcher<Paths, Path, Junction>::stitch(...)` (`:34-209`). See the module doc for
+/// `PolylineStitcher<Paths, Path, Junction>::stitch(...)` (`:61-225`). See the module doc for
 /// why this is unreachable and for the generic collapse from the vendored three parameters to
 /// one.
 pub fn stitch<Path: StitchPath>(
@@ -181,7 +181,7 @@ pub fn stitch<Path: StitchPath>(
     max_stitch_distance: i64,
     snap_distance: i64,
 ) {
-    // `if (lines.empty()) return;` (`:36-37`).
+    // `if (lines.empty()) return;` (`:63-64`).
     if lines.is_empty() {
         return;
     }
@@ -189,7 +189,7 @@ pub fn stitch<Path: StitchPath>(
     let lines_vec: Vec<Path> = lines.to_vec();
 
     // `SparsePointGrid<PathsPointIndex<Paths>, PathsPointIndexLocator<Paths>> grid(...)`
-    // (`:39`) -- see the module doc, finding 2: `SparsePointGrid` does not yet expose the
+    // (`:66`) -- see the module doc, finding 2: `SparsePointGrid` does not yet expose the
     // early-exit `processNearby` this closure needs, so `grid` below is written against the
     // method it should have, not the one it does.
     // TODO(port): crates/slic3r-arachne-utils/src/sparse_point_grid.rs -- add a
@@ -205,7 +205,7 @@ pub fn stitch<Path: StitchPath>(
     );
 
     // `for (size_t line_idx = 0; line_idx < lines.size(); line_idx++) { ... grid.insert(...); }`
-    // (`:42-47`).
+    // (`:69-74`).
     for line_idx in 0..lines_vec.len() {
         let line = &lines_vec[line_idx];
         grid.insert(PathsPointIndex::new(&lines_vec, line_idx, 0));
@@ -242,7 +242,7 @@ pub fn stitch<Path: StitchPath>(
                 let mut closest_distance = i64::MAX;
 
                 // `grid.processNearby(from, max_stitch_distance, [...] -> bool {...})`
-                // (`:120-168`) -- see the module doc, finding 2, for `process_nearby` vs.
+                // (`:104-161`) -- see the module doc, finding 2, for `process_nearby` vs.
                 // `get_nearby`.
                 grid.process_nearby(from, max_stitch_distance, |nearby: &PathsPointIndex<
                     '_,
@@ -250,7 +250,7 @@ pub fn stitch<Path: StitchPath>(
                 >| {
                     let mut is_closing_segment = false;
                     let np = nearby.p();
-                    // PORT SRC: src/libslic3r/Arachne/utils/PolylineStitcher.hpp:131
+                    // PORT SRC: src/libslic3r/Arachne/utils/PolylineStitcher.hpp:110
                     let dx = np.x().wrapping_sub(from.x());
                     let dy = np.y().wrapping_sub(from.y());
                     let mut dist = ((dx * dx + dy * dy) as f64).sqrt() as i64;
@@ -304,7 +304,7 @@ pub fn stitch<Path: StitchPath>(
                 }
 
                 let closest_p = closest_idx.p();
-                // PORT SRC: src/libslic3r/Arachne/utils/PolylineStitcher.hpp:171
+                // PORT SRC: src/libslic3r/Arachne/utils/PolylineStitcher.hpp:170
                 let sdx = chain
                     .junction_at(chain.junction_count() - 1)
                     .as_point()

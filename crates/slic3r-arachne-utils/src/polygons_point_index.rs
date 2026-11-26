@@ -23,7 +23,7 @@
 //! an oversight.** `port/ownership.tsv`'s `borrowed` row for `PathsPointIndex::polygons`
 //! (`:32`) gives the field's Rust type as `&'a Paths` verbatim -- a live reference, never
 //! null -- so `PathsPointIndex()` (`:38-44`, the zero-argument constructor whose own comment
-//! admits "you can't ever make this initialisation useful") and `initialized()` (`:67`, `return
+//! admits "you can't ever make this initialisation useful") and `initialized()` (`:71`, `return
 //! polygons;`, i.e. "is this the non-null state") have no faithful counterpart here: writing
 //! `initialized()` to always return `true` would be a method whose body contradicts what its
 //! name and its source say, which is exactly the "green result that is not real" this project's
@@ -53,7 +53,7 @@
 //! is not a second order choice of this module's own, so it carries no `// FIDELITY(port):` of
 //! its own -- the marker already sits on `Point::cmp`, where the order was actually chosen.
 //!
-//! **`std::hash<PolygonsPointIndex>` (`:148-157`) hashes `PointHash{}(lpi.p())` -- `PointHash`
+//! **`std::hash<PolygonsPointIndex>` (`:169-176`) hashes `PointHash{}(lpi.p())` -- `PointHash`
 //! is not ported.** `crates/slic3r-point/src/point.rs`'s own module doc states "`PointHash` is
 //! not ported as a standalone hasher" (it exists upstream only to key one `unordered_multimap`
 //! that module ports differently). No in-scope caller of *this* unit's own header needs
@@ -148,7 +148,7 @@ where
     Paths::Output: PointPath,
 {
     /// `Point p() const { if (!polygons) return {0, 0}; return make_point((*polygons)[poly_idx][point_idx]); }`
-    /// (`:56-62`). The `!polygons` null guard has no counterpart -- see the module doc, "No
+    /// (`:60-66`). The `!polygons` null guard has no counterpart -- see the module doc, "No
     /// default-constructed ... state is ported".
     pub fn p(&self) -> Point {
         make_point(self.polygons[self.poly_idx].point_at(self.point_idx))
@@ -160,15 +160,15 @@ where
         self.p() < other.p()
     }
 
-    /// `PathsPointIndex &operator++()` (`:105-108`): advance, wrapping at the polygon's own
+    /// `PathsPointIndex &operator++()` (`:104-108`): advance, wrapping at the polygon's own
     /// point count.
     pub fn advance(&mut self) {
-        // PORT SRC: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:107
+        // PORT SRC: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:106
         let len = self.polygons[self.poly_idx].point_count();
         self.point_idx = (self.point_idx + 1) % len;
     }
 
-    /// `PathsPointIndex &operator--()` (`:110-115`): retreat, wrapping at the polygon's own
+    /// `PathsPointIndex &operator--()` (`:110-116`): retreat, wrapping at the polygon's own
     /// point count.
     pub fn retreat(&mut self) {
         let len = self.polygons[self.poly_idx].point_count();
@@ -180,7 +180,7 @@ where
     }
 
     /// `PathsPointIndex next() const { PathsPointIndex ret(*this); ++ret; return ret; }`
-    /// (`:117-121`).
+    /// (`:118-123`).
     pub fn next(&self) -> Self {
         let mut ret = *self;
         ret.advance();
@@ -188,7 +188,7 @@ where
     }
 
     /// `PathsPointIndex prev() const { PathsPointIndex ret(*this); --ret; return ret; }`
-    /// (`:123-127`, numbered against this header's own `prev` doc comment block).
+    /// (`:125-130`).
     pub fn prev(&self) -> Self {
         let mut ret = *self;
         ret.retreat();
@@ -196,11 +196,11 @@ where
     }
 }
 
-/// `using PolygonsPointIndex = PathsPointIndex<Polygons>;` (`:131`).
+/// `using PolygonsPointIndex = PathsPointIndex<Polygons>;` (`:133`).
 pub type PolygonsPointIndex<'a> = PathsPointIndex<'a, Polygons>;
 
 impl<'a> PathsPointIndex<'a, Polygons> {
-    /// `const Polygon &getPolygon() const { return (*polygons)[poly_idx]; }` (`:70`) -- given
+    /// `const Polygon &getPolygon() const { return (*polygons)[poly_idx]; }` (`:76`) -- given
     /// its own `impl` block, rather than the generic one above, because the vendored method's
     /// body only type-checks when `Paths` yields a real `Polygon` (every other method above
     /// only needs `Paths::Output: PointPath`); this is the Rust analogue of a C++ member
@@ -223,7 +223,7 @@ impl<'a, Paths> PartialEq for PathsPointIndex<'a, Paths> {
     }
 }
 
-// TODO(port): src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:148-157 -- `std::hash<
+// TODO(port): src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:169-176 -- `std::hash<
 // Slic3r::Arachne::PolygonsPointIndex>`, hashing via a ported `PointHash` that
 // `crates/slic3r-point/src/point.rs` does not provide (see that module's own doc, "`PointHash`
 // is not ported as a standalone hasher"). No in-scope caller of this header needs
@@ -231,19 +231,19 @@ impl<'a, Paths> PartialEq for PathsPointIndex<'a, Paths> {
 // whichever fan-out task first does.
 
 /// `struct PolygonsPointIndexSegmentLocator { std::pair<Point, Point> operator()(const
-/// PolygonsPointIndex &val) const {...} };` (`:135-144`): a C++ functor, ported as a unit
+/// PolygonsPointIndex &val) const {...} };` (`:138-148`): a C++ functor, ported as a unit
 /// struct with a plain associated function -- this port has no generic callback type that would
 /// need the functor's call-operator shape, and every in-scope use of a locator in this crate
 /// (`sparse_point_grid.rs`, `sparse_line_grid.rs`) already takes a plain closure.
 pub struct PolygonsPointIndexSegmentLocator;
 
 impl PolygonsPointIndexSegmentLocator {
-    /// `operator()` body (`:137-143`): the directed segment starting at `val`'s own point and
+    /// `operator()` body (`:140-146`): the directed segment starting at `val`'s own point and
     /// ending at the next point around its polygon.
     pub fn locate(val: &PathsPointIndex<'_, Polygons>) -> (Point, Point) {
         let poly = &val.polygons[val.poly_idx];
         let start = poly.points[val.point_idx];
-        // PORT SRC: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:140
+        // PORT SRC: src/libslic3r/Arachne/utils/PolygonsPointIndex.hpp:144
         let next_point_idx = (val.point_idx + 1) % poly.points.len();
         let end = poly.points[next_point_idx];
         (start, end)
@@ -251,7 +251,7 @@ impl PolygonsPointIndexSegmentLocator {
 }
 
 /// `template<typename Paths> struct PathsPointIndexLocator { Point operator()(const
-/// PathsPointIndex<Paths> &val) const { return make_point(val.p()); } };` (`:149-156`) -- same
+/// PathsPointIndex<Paths> &val) const { return make_point(val.p()); } };` (`:153-160`) -- same
 /// functor-to-associated-function treatment as [`PolygonsPointIndexSegmentLocator`] above.
 pub struct PathsPointIndexLocator;
 

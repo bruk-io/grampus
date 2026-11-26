@@ -15,7 +15,7 @@
 //! an explicit field instead of an implicit upcast.
 //!
 //! **No default constructor, for the same reason `polygons_point_index.rs` gives.**
-//! `PolygonsSegmentIndex() : PolygonsPointIndex(){}` (`:14`) delegates straight to the base's own
+//! `PolygonsSegmentIndex() : PolygonsPointIndex(){}` (`:23`) delegates straight to the base's own
 //! zero-argument constructor, which that module does not port (`port/ownership.tsv`'s
 //! `borrowed` row makes the base's `polygons` field a live `&'a Paths`, never null) -- see that
 //! module's doc for the full reasoning. This task found no in-scope caller of either default
@@ -25,7 +25,7 @@
 //! request.**
 //!
 //! **The `boost::polygon::geometry_concept`/`segment_traits<PolygonsSegmentIndex>`
-//! specialisations (`:30-46`) are not ported, with no marker site of its own** -- the same
+//! specialisations (`:33-49`) are not ported, with no marker site of its own** -- the same
 //! treatment `crates/slic3r-polygon/src/polygon.rs`'s own module doc already gives the
 //! equivalent `Slic3r::Polygon`/`Polygons` specialisations: template-customisation glue teaching
 //! Boost.Polygon's generic algorithms how to read `PolygonsSegmentIndex` as a segment, with no
@@ -37,7 +37,7 @@ use slic3r_polygon::polygon::Polygons;
 
 use crate::polygons_point_index::PathsPointIndex;
 
-/// `class PolygonsSegmentIndex : public PolygonsPointIndex` (`:13-22`) -- see the module doc for
+/// `class PolygonsSegmentIndex : public PolygonsPointIndex` (`:20-29`) -- see the module doc for
 /// why the base is a field rather than a flattened set of members.
 #[derive(Debug, Clone, Copy)]
 pub struct PolygonsSegmentIndex<'a> {
@@ -49,20 +49,20 @@ pub struct PolygonsSegmentIndex<'a> {
 
 impl<'a> PolygonsSegmentIndex<'a> {
     /// `PolygonsSegmentIndex(const Polygons *polygons, unsigned int poly_idx, unsigned int
-    /// point_idx) : PolygonsPointIndex(polygons, poly_idx, point_idx){}` (`:15`). The
-    /// zero-argument constructor (`:14`) is not ported -- see the module doc.
+    /// point_idx) : PolygonsPointIndex(polygons, poly_idx, point_idx){}` (`:24`). The
+    /// zero-argument constructor (`:23`) is not ported -- see the module doc.
     pub fn new(polygons: &'a Polygons, poly_idx: usize, point_idx: usize) -> Self {
         PolygonsSegmentIndex {
             base: PathsPointIndex::new(polygons, poly_idx, point_idx),
         }
     }
 
-    /// `Point from() const { return PolygonsPointIndex::p(); }` (`:17`).
+    /// `Point from() const { return PolygonsPointIndex::p(); }` (`:26`).
     pub fn from(&self) -> Point {
         self.base.p()
     }
 
-    /// `Point to() const { return PolygonsSegmentIndex::next().p(); }` (`:19`) -- `next()` here
+    /// `Point to() const { return PolygonsSegmentIndex::next().p(); }` (`:28`) -- `next()` here
     /// resolves to the inherited `PolygonsPointIndex::next()` (no override in this class), so
     /// this calls straight through the base field.
     pub fn to(&self) -> Point {

@@ -5,7 +5,7 @@
 //!
 //! **The four template parameters collapse to one.** The vendored class is
 //! `template<typename node_data_t, typename edge_data_t, typename derived_node_t, typename
-//! derived_edge_t> class HalfEdgeNode` (`:17-32`), but only two of the four are used inside the
+//! derived_edge_t> class HalfEdgeNode` (`:17-35`), but only two of the four are used inside the
 //! class body at all: `node_data_t` (the `data` field) and `derived_node_t` (aliased `node_t`,
 //! used only as `operator==`'s parameter type). `edge_data_t` is declared and never referenced
 //! inside this class; `derived_edge_t` is aliased `edge_t` and used only for `incident_edge`'s
@@ -21,7 +21,7 @@
 //! so there is no concrete caller yet to monomorphise against and check this choice against.
 //!
 //! **`operator==` is identity, not a field comparison, and has no `PartialEq` counterpart
-//! here.** `bool operator==(const node_t& other) { return this == &other; }` (`:27-30`)
+//! here.** `bool operator==(const node_t& other) { return this == &other; }` (`:31-34`)
 //! compares `this` (a `HalfEdgeNode*`, implicitly upcast from `&other`'s derived-type address)
 //! against `&other` -- are the two the same object in memory, not whether their fields agree.
 //! A `#[derive(PartialEq)]` here would silently do the opposite (compare `data`, `p` and
@@ -53,20 +53,20 @@
 
 use slic3r_point::point::Point;
 
-/// `template<...> class HalfEdgeNode` (`:17-32`) -- see the module doc for why this is one
+/// `template<...> class HalfEdgeNode` (`:17-35`) -- see the module doc for why this is one
 /// generic parameter rather than the vendored four.
 pub struct HalfEdgeNode<NodeData> {
-    /// `node_data_t data;` (`:20`).
+    /// `node_data_t data;` (`:23`).
     pub data: NodeData,
-    /// `Point p;` (`:21`).
+    /// `Point p;` (`:24`).
     pub p: Point,
-    /// `edge_t* incident_edge = nullptr;` (`:22`) -- see the module doc for why this is a plain
+    /// `edge_t* incident_edge = nullptr;` (`:25`) -- see the module doc for why this is a plain
     /// `usize` with no `Option` wrapper, and for the unresolved "no edge yet" sentinel gap.
     pub incident_edge: usize,
 }
 
 impl<NodeData> HalfEdgeNode<NodeData> {
-    /// `HalfEdgeNode(node_data_t data, Point p) : data(data), p(p) {}` (`:23-26`) --
+    /// `HalfEdgeNode(node_data_t data, Point p) : data(data), p(p) {}` (`:26-29`) --
     /// `incident_edge` is left at its in-class default, `nullptr`; see the module doc for why
     /// `0` here is a placeholder, not a sentinel this module defines the meaning of.
     pub fn new(data: NodeData, p: Point) -> Self {
@@ -77,7 +77,7 @@ impl<NodeData> HalfEdgeNode<NodeData> {
         }
     }
 
-    /// `bool operator==(const node_t& other) { return this == &other; }` (`:27-30`) -- pointer
+    /// `bool operator==(const node_t& other) { return this == &other; }` (`:31-34`) -- pointer
     /// identity of the node objects themselves, not a field comparison; see the module doc for
     /// why this is a named method rather than a `PartialEq` impl.
     pub fn is_same_node(&self, other: &Self) -> bool {
