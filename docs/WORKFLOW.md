@@ -269,25 +269,25 @@ landed) — recorded as each reviewer actually gave it, not softened:**
   (`material_type.rs:219-225`, citing `MaterialType.cpp:18-99`/`MaterialType.hpp:21`); gave
   `DEFAULT_CHAMBER_MIN_TEMP` and `DEFAULT_ADHESION_COEFFICIENT` real `// PORT SRC:` markers
   (`MaterialType.cpp:11`, `:13`) and rewrote `DEFAULT_ADHESION_COEFFICIENT` as `1.0`, deleting
-  the comment that had documented the exempt-set reliance as a technique. The same commit also
-  corrected this record's first review pass's own wrong `module:line` citations above in place
-  (the `get_temperature_range`, `find()` and FLEX-row entries), re-derived against the file as
-  committed after the fix, rather than leaving them wrong beside a note that they were — a
-  citation that does not resolve is corrected, not preserved as history.
+  the comment that had documented the exempt-set reliance as a technique.
   `cargo test -p slic3r-materialtype` and `./port/port-status` (0 findings) confirmed clean
-  after the fix.
+  after the fix. **This record's own first review pass's wrong `module:line` citations above
+  are corrected in commit `2d6071a`** (the documentation commit that added this second-pass
+  section) — the `get_temperature_range`, `find()` and FLEX-row entries, re-derived against
+  `material_type.rs` as committed in `166c759` — rather than left wrong beside a note that
+  they were: a citation that does not resolve is corrected, not preserved as history.
 
 ### Unit 2 — float: `GCode/PchipInterpolatorHelper.cpp` / `GCode/PchipInterpolatorHelper.hpp`
 
 - **Manifest row:** GCode/PchipInterpolatorHelper.cpp
 - **Manifest row:** GCode/PchipInterpolatorHelper.hpp
 - **Reviewer 1:** `src/libslic3r/GCode/PchipInterpolatorHelper.cpp:59-81` against
-  `crates/slic3r-gcode/src/pchip_interpolator_helper.rs:108-134` — `computePCHIP`'s derivative
+  `crates/slic3r-gcode/src/pchip_interpolator_helper.rs:113-139` — `computePCHIP`'s derivative
   recurrence (`d_[i] = (w1 + w2) / (w1 / delta_[i-1] + w2 / delta_[i])`, `:76`, matching
-  `pchip_interpolator_helper.rs:132`) transcribes with the same operator precedence and operand
+  `pchip_interpolator_helper.rs:137`) transcribes with the same operator precedence and operand
   order; `src/libslic3r/GCode/PchipInterpolatorHelper.cpp:86-104` against
-  `crates/slic3r-gcode/src/pchip_interpolator_helper.rs:142-165` — `interpolate`'s
-  `std::lower_bound` (`:90`) against `Vec::partition_point(|&v| v < xi)` (`:168`): both return
+  `crates/slic3r-gcode/src/pchip_interpolator_helper.rs:152-175` — `interpolate`'s
+  `std::lower_bound` (`:90`) against `Vec::partition_point(|&v| v < xi)` (`:178`): both return
   the first index whose element is not less than `xi` on a sorted ascending slice, so `i = that
   index - 1` agrees on both sides, including the exactly-on-a-knot queries this unit's own test
   exercises (`3.0`, `4.25`, `6.0`, `8.0`, `10.0`). No divergence found in either cited range.
@@ -303,7 +303,7 @@ landed) — recorded as each reviewer actually gave it, not softened:**
   stable one on, with or without a duplicate `x`. The claim was wrong.
 - **Fixer:** corrected `sort_data`'s doc comment
   (`crates/slic3r-gcode/src/pchip_interpolator_helper.rs:86-96`) and the test's own comment
-  (near `:194`) to state the real reasoning above, and rewrote this row's `tolerance` reason text
+  (near `:204`) to state the real reasoning above, and rewrote this row's `tolerance` reason text
   in `port/manifest.tsv` to the same effect (the measured bound stands — `0`, over this proof's
   own distinct-`x` input — the withdrawn claim was about *why* a tolerance row rather than an
   exact one, not about the measured number itself). `cargo test -p slic3r-gcode pchip` re-run
@@ -334,7 +334,12 @@ landed) — recorded as each reviewer actually gave it, not softened:**
   text in `port/manifest.tsv` to state plainly that this leg exercises the tolerance-dispatch
   path rather than a non-zero bound, so fan-out does not read `tolerance: 0` as this leg's
   general pattern -- the number itself was not changed, since both reviewers independently
-  measured it as real). `cargo test -p slic3r-gcode` re-run clean after both fixes.
+  measured it as real). `cargo test -p slic3r-gcode` re-run clean after both fixes. The two
+  `// PORT NOTE:` insertions shift every later line of `pchip_interpolator_helper.rs` by +5
+  (sort_data's) and +10 (interpolate's, on top of the first); the first review pass's own
+  citations above (`:113-139`, `:137`, `:152-175`, `:178`, and the fixer's "near `:204`") are
+  given at their post-fix line numbers, re-derived from the file as committed in `166c759`,
+  not the numbers either pass actually saw.
 
 ### Unit 3 — throw / non-const-ref-out-param: `InstanceLock.cpp` / `InstanceLock.hpp`
 
@@ -414,10 +419,14 @@ three units in this pass, recorded as each reviewer actually gave it:**
   so it -- and therefore `InstanceLock` -- is `!Send`, and rewrote the `Send`/`Sync` `SAFETY`
   comments to state the real invariant instead of the false claim that this was "the same
   contract `std::sync::Mutex<T>` itself relies on"; re-derived every wrong prose citation this
-  module carried, including the `BOOST_LOG_TRIVIAL` count, against the file as committed (see
-  the module's own doc comments for the corrected citations; the entries above are corrected in
-  place rather than left wrong beside a note that they were). `cargo test -p slic3r-instancelock`
-  and `./port/port-status` (0 findings) confirmed clean after the fix.
+  **module itself** carried, including the `BOOST_LOG_TRIVIAL` count, against the file as
+  committed (see `instance_lock.rs`'s own doc comments for those corrected citations).
+  `cargo test -p slic3r-instancelock` and `./port/port-status` (0 findings) confirmed clean
+  after the fix. **This record's own Reviewer 1/Reviewer 2 entries above** (the `module:line`
+  halves of their citations, which described `instance_lock.rs` as it stood before the fix) **are
+  corrected in commit `2d6071a`**, the documentation commit that added this second-pass section
+  — re-derived against the file as committed in `166c759` — rather than left wrong beside a
+  note that they were.
 - **LOCK_EX and the `0o644` open mode, two related findings also raised on this pass (majors, not
   blockers): fixed and recorded, respectively.** `LOCK_EX`'s value (`2`) carries no `// PORT SRC:`
   marker even though the module's own doc comment claimed all three flock flags had one — `2` is

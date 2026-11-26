@@ -724,10 +724,13 @@ as a divergence.
 The three port tasks merged as pull requests #54, #56 and #57 each carried forward a finding they
 were not allowed to fix: every file that would have to change was on their own must-not-write
 list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1.
-Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
-2026-11-26; the owner was away and had handed
-over this intent's decisions. Like the section above, this is a record: where a decision changes
-a rule above, the rule's own text says so and points here.
+Decision 6 is unrelated to the other five — it is task `35-trial-run`'s own trial-run finding,
+landing here because that task's pull request was still open when #54/#56/#57's fixes (decisions
+1-5) merged into `main` first and this section had to be merged, not rewritten. Every one of
+decisions 1 to 5 was made by Claude acting for Bruk Habtu, under the delegation for this intent,
+on 2026-11-26; the owner was away and had handed over this intent's decisions. Like the section
+above, this is a record: where a decision changes a rule above, the rule's own text says so and
+points here.
 
 ### 1. A `let`'s type annotation is not part of its binding
 
@@ -901,7 +904,8 @@ marker is honest and sufficient:
   substring of a line that writes `0644`, so a marker citing that exact line fails
   `_vendored_line_holds` and the porter is left with no vendored-line marker that can pass — the
   external form is the only one `port-status` currently accepts, even though the constant's origin
-  is not outside the vendored tree (decision 2's criterion), only differently spelled.
+  is not outside the vendored tree (decision 2 of 2026-11-25's criterion), only differently
+  spelled.
 
 **The decision.** A transcribed numeric constant's Rust spelling must be chosen, among the
 spellings that type-check and have the correct value, so its normalised text (after
@@ -917,8 +921,8 @@ set un-marked.
 
 Where no Rust spelling of a value can be made to match the cited line's text (the octal case
 above, until `port-status` gains a numeric-equality fallback), the external marker form is used as
-a stated workaround — not under decision 2's "origin outside the vendored tree" criterion, which
-does not apply — and the module's own comment says so plainly, naming the vendored line the
+a stated workaround — not under decision 2 of 2026-11-25's "origin outside the vendored tree"
+criterion, which does not apply — and the module's own comment says so plainly, naming the vendored line the
 constant actually comes from and the reviewer's job of checking that disclosure rather than taking
 the external form's usual meaning on faith. This document's idiom map (the `#define` numeric
-constant row) and decision 2 are read together with this rule, not in place of it.
+constant row) and decision 2 of 2026-11-25 are read together with this rule, not in place of it.

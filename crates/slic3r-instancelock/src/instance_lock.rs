@@ -100,7 +100,7 @@ impl NativeFileLock {
             // substring `0o644` on the cited line, which a C source spelling the same value
             // `0644` never contains. The external form is used here only because it is the one
             // spelling `just port-check` currently accepts for this value, not because
-            // decision 2's criterion (an origin outside the vendored tree) applies -- it does
+            // decision 2 of 2026-11-25's criterion (an origin outside the vendored tree) applies -- it does
             // not. This is recorded as a `port-status` gap in this task's pull request, not
             // worked around silently.
             .mode(0o644)
