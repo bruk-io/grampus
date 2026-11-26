@@ -199,26 +199,33 @@ its `rust type` cell verbatim. A porter never chooses a pointer's Rust type inde
 file, because `port/ownership.tsv` is R30's committed classification and this document only points
 at it.
 
-The column is filled in two different ways, and the two cases are not interchangeable, because
-only one of them has a Rust type to take yet:
+Every row has a cell to take, and `just ownership-check` is what guarantees it:
 
-- **A row whose `class` cell is `unknown`:** the row names a conservative Rust type, and
-  `just ownership-check` fails an `unknown` row that carries no conservative Rust type — so this
-  cell is guaranteed present. Take it.
-- **A row whose `class` cell is still blank:** `16-ownership-spike` deliberately leaves no `class`
-  cell filled, and no check requires a blank-class row's `rust type` cell to be filled, so that
-  cell is guaranteed *empty* for the whole window the fan-out drafts are written in (the window
-  step 12's classification tasks, cut from `port/ownership-batches.tsv`, are still open). **No
-  module may invent a Rust type for a blank-class row.** Instead, leave the field with a
-  `// TODO(port): <header path>:<line> — Rust type pending the classification task for this row's
-  batch (port/ownership-batches.tsv)` marker, and move on; the step-12 classification task cut for
-  that row's batch fills the cell in, later, on `main`.
+- **Every row's `class` cell is one of `owned`, `shared`, `borrowed`, `back-reference`, `ffi` or
+  `unknown`.** A blank class is not among them (`port/ownership`'s `VALID_CLASSES`, `:95`) and
+  `validate_rows` (`:747-749`) fails any row whose class is not, saying so in as many words — "a
+  blank class is no longer accepted". When this document was first written every row's class was
+  blank and the classification tasks cut from `port/ownership-batches.tsv` were still open; they
+  have since filled all 208, so a blank-class row can no longer exist on `main` at all.
+- **An `unknown`-class row names a conservative Rust type**, and `validate_rows` (`:752-755`)
+  fails an `unknown` row carrying no Rust type and no evidence — so that cell is guaranteed
+  present. Take it. `unknown` does not mean "no type to take": it means the type is the
+  conservative one.
+- **Every other class's `rust type` cell is the field's type, taken as the cell reads it.** See
+  `## Decisions recorded on 2026-11-26`, decision 6, for a nullable `owned` field. Measured on the
+  committed file: 143 `borrowed`, 31 `back-reference`, 20 `owned`, 7 `unknown`, 6 `ffi`, 1
+  `shared`, no blank-class row — and all 208 rows carry a filled `rust type` cell.
 
-When this document was first written every row of `port/ownership.tsv` had a blank `class` cell.
-The classification tasks have since filled all 208: a blank class is now a failure of
-`just ownership-check`, and only the `unknown` rows still take the `// TODO(port):` marker. For every
-other class, the row's `rust type` cell is the field's type, written as the cell reads; see
-`## Decisions recorded on 2026-11-26`, decision 6, for a nullable field.
+**The one case with no type to take, and the only one left.** `validate_rows` requires a `rust
+type` cell only on an `unknown` row, so a row of some *other* class with an empty cell would pass
+every check. No row is in that state today (measured above), and if a porter ever meets one it is
+a finding to report, not a type to invent: leave the field with a
+`// TODO(port): <header path>:<line> — Rust type pending the classification task for this row's
+batch (port/ownership-batches.tsv)` marker, say so in the pull request body, and move on; the cell
+is corrected on `main` by an amendment pull request, as decision 6's was. **No module invents a
+Rust type for a row whose cell is empty**, and no module writes a type that differs from a cell
+that is filled — #60 reported the mismatch that produced decision 6 rather than silently picking
+one side, which is the behaviour this rule wants.
 
 **Foundation types.** `Point`, the Eigen vector aliases at `src/libslic3r/Point.hpp:52-69`
 (`Vec2crd`, `Vec3crd`, `Vec2i32`, `Vec2i64`, `Vec3i32`, `Vec3i64`, `Vec4i32`, `Vec2f`, `Vec3f`,
@@ -725,11 +732,13 @@ as a divergence.
 
 The three port tasks merged as pull requests #54, #56 and #57 each carried forward a finding they
 were not allowed to fix: every file that would have to change was on their own must-not-write
-list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1.
+list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while fixing decision 1;
+decision 6 closes one `57-foundation-utils` (#60) carried forward for the same reason; and
+decision 7 reconciles the section decision 6 corrected, whose older text contradicted it.
 Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
-2026-11-26; the owner was away and had handed
-over this intent's decisions. Like the section above, this is a record: where a decision changes
-a rule above, the rule's own text says so and points here.
+2026-11-26; the owner was away and had handed over this intent's decisions. Like the section
+above, this is a record: where a decision changes a rule above, the rule's own text says so and
+points here.
 
 ### 1. A `let`'s type annotation is not part of its binding
 
@@ -899,3 +908,38 @@ cell wraps the owned type in `Option`. A port task that finds such a row without
 reports it and stops on that field, as #60 did; the cell is corrected on `main` by a pull request
 like this one, not inside the task. Made by Claude acting for Bruk Habtu under the delegation for
 this intent, on 2026-11-26.
+
+### 7. What the ownership column's cases are, now that every row has a class
+
+**The gap.** Decision 6 corrected the stale sentence that closed "Raw-pointer fields" above, but
+the two bullets over it were written for the pre-classification window and were left in place, so
+the section then said three things that cannot all be true: that a blank class is "guaranteed" and
+is the expected state "for the whole window the fan-out drafts are written in"; that a blank class
+"is now a failure of `just ownership-check`"; and that "only the `unknown` rows still take the
+`// TODO(port):` marker", when the `unknown` bullet directly above says an `unknown` row's cell is
+guaranteed present and is to be taken.
+
+**What the code says, which settles all three.** `port/ownership`'s `VALID_CLASSES` (`:95`) does
+not contain the empty string, and `validate_rows` (`:747-749`) fails any row whose class is not in
+it — with the literal detail "a blank class is no longer accepted". So a blank-class row cannot
+exist on `main`: decision 6's sentence is right, and the blank-class bullet described a state the
+checks now forbid. And `validate_rows` (`:752-755`) fails an `unknown` row with no evidence or no
+Rust type, so an `unknown` row always has a cell to take: the "only the `unknown` rows still take
+the `// TODO(port):` marker" clause had it backwards.
+
+**The decision.** The section is rewritten around what is true: every row carries a class from
+that set, every row's `rust type` cell is taken verbatim, and `unknown` means the type is the
+conservative one rather than that there is no type. The `// TODO(port):` route is kept with its
+one real trigger — `validate_rows` requires a `rust type` cell only on an `unknown` row, so a row
+of another class with an empty cell would pass every check — and is stated as a finding to report
+rather than a type to invent. Measured on the committed file: 143 `borrowed`, 31 `back-reference`,
+20 `owned`, 7 `unknown`, 6 `ffi`, 1 `shared`, no blank-class row, and all 208 rows carrying a
+filled `rust type` cell, so that route has no row today.
+
+**Recorded against myself.** A closed pull request of mine (#63) proposed the same correction and
+asserted the opposite of the first paragraph above — that "nothing stops a future row of the
+vendored tree arriving unclassified" and that a porter should fall back to the blank-class route.
+That was false, from a reading of `validate_rows` that grepped only its `rust type` lines and
+missed the `VALID_CLASSES` gate. #62's author got it right; this decision follows the code, not
+that pull request. Made by Claude acting for Bruk Habtu under the delegation for this intent, on
+2026-11-26.
