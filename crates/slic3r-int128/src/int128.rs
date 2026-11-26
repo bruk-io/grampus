@@ -186,6 +186,15 @@ impl Int128 {
         let a22s = a22.wrapping_add(ROUND_BIAS) >> 32;
         let det = a11s * a22s - a12s * a21s;
         let err = ((a11s.abs() + a12s.abs() + a21s.abs() + a22s.abs()) << 1) + 1;
+        // `assert(std::abs(det) <= err || ((det > 0) ? 1 : -1) == sign_determinant_2x2(...));`
+        // -- transcribed as `debug_assert!`, never a live `panic!` (`docs/PORTING.md`'s
+        // error-sets rule).
+        //
+        // PORT SRC: src/libslic3r/Int128.hpp:272
+        debug_assert!(
+            det.abs() <= err
+                || (if det > 0 { 1 } else { -1 }) == Self::sign_determinant_2x2(a11, a12, a21, a22)
+        );
         if det.abs() > err {
             // `(det > 0) ? 1 : -1` -- transcribed literally (Int128.hpp:274), not rendered via
             // the strict-sign formula used elsewhere in this file: a workaround needing a
@@ -220,6 +229,16 @@ impl Int128 {
             let p2s = p2.wrapping_add(ROUND_BIAS) >> 32;
             let det = p1s * q2s - p2s * q1s;
             let err = ((p1s.abs() + q1s.abs() + p2s.abs() + q2s.abs()) << 1) + 1;
+            // `assert(std::abs(det) <= err || ((det > 0) ? 1 : -1) * invert ==
+            // compare_rationals(...));` -- same transcription rule as
+            // `sign_determinant_2x2_filtered` above.
+            //
+            // PORT SRC: src/libslic3r/Int128.hpp:293
+            debug_assert!(
+                det.abs() <= err
+                    || (if det > 0 { 1 } else { -1 }) * invert
+                        == Self::compare_rationals(p1, q1, p2, q2)
+            );
             if det.abs() > err {
                 // `(det > 0) ? 1 : -1` -- transcribed literally (Int128.hpp:295), same
                 // rejection-rule reasoning as `sign_determinant_2x2_filtered` above.
