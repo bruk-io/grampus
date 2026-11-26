@@ -42,8 +42,8 @@
 //! R10 puts the whole GUI out of scope -- so this task ports the four with a current in-scope
 //! caller and leaves the fifth, `BoundingBox3Base<Vec3f>`, for the task that first needs it, the
 //! same treatment `crates/slic3r-point/src/point.rs` gives its own `Vec4<T>` ("no in-scope
-//! caller... carries no arithmetic impls yet"). See the `// TODO(port):` marker below the last
-//! `impl` block for the exact vendored lines this leaves unported.
+//! caller... carries no arithmetic impls yet"). See the `// TODO(port):` marker after
+//! `impl BoundingBox` below for the exact vendored lines this leaves unported.
 //!
 //! A true Rust generic over all four would need `slic3r_point::point`'s `Point`/`Vec2`/`Vec3` to
 //! expose a shared arithmetic surface -- component-wise min/max, a scalar multiply, a cast to
@@ -430,6 +430,13 @@ impl std::fmt::Display for BoundingBox {
 // Points &points, double angle);` is declared here only to grant `MultiPoint.cpp` access to
 // `BoundingBox`'s private `construct`; the function itself is `MultiPoint.hpp`/`MultiPoint.cpp`'s
 // own row, not this unit's, and is not ported here.
+// TODO(port): src/libslic3r/BoundingBox.hpp:198,202,206,208 -- the fifth instantiation,
+// `BoundingBox3Base<Vec3f>` (`merge`, `size`, `center`, `max_size` explicitly instantiated at
+// those lines): has real in-scope callers (`src/libslic3r/Fill/FillAdaptive.cpp:2030`,
+// `src/libslic3r/BuildVolume.cpp:404,460,554`, both manifest `in`) but no in-scope *Rust*
+// caller yet -- `slic3r-fill`/`slic3r-buildvolume` are both `not-started` at the pin -- so it is
+// left unported here rather than invented as a fifth near-duplicate struct with nothing to call
+// it. See the module doc's second paragraph for the measurement this corrects.
 
 // -------------------------------------------------------------------------------------------
 // BoundingBoxf (BoundingBoxBase<Vec2d>, BoundingBox.hpp:256-262)
