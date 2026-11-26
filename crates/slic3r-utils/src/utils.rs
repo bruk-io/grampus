@@ -7,8 +7,8 @@
 //!
 //! # Scope of this port
 //!
-//! `Utils.hpp` and `utils.cpp` declare roughly 120 items between them: logging, OS process and
-//! memory introspection, file-copy and atomic-write machinery, vendor-bundle installation, time
+//! Between them `Utils.hpp` and `utils.cpp` cover logging, OS process and memory
+//! introspection, file-copy and atomic-write machinery, vendor-bundle installation, time
 //! formatting and plain string/path helpers. This module ports every item whose behaviour the
 //! normative oracle at `vendor/OrcaSlicer/build/arm64` can be measured against, and leaves the
 //! rest unported, named individually in the "Deferred declarations" block at the end of this
@@ -2423,6 +2423,12 @@ pub fn copy_file_inner(from: &Path, to: &Path) -> (CopyFileResult, String) {
             (CopyFileResult::Success, String::new())
         }
         Err(e) => {
+            // PORT NOTE: src/libslic3r/utils.cpp:1132 -- `error_message = ec.message()` is the
+            // platform `strerror` text, which `std::io::Error`'s own rendering does not
+            // reproduce (it appends " (os error N)") and which `strerror` itself is not
+            // reachable for without a `libc` dependency a port task may not add. The
+            // `CopyFileResult` beside it, which is what every in-scope caller branches on, does
+            // not diverge and is what the proof measures.
             // PORT NOTE: src/libslic3r/utils.cpp:1133 (BOOST_LOG_TRIVIAL(error))
             (CopyFileResult::FailCopyFile, e.to_string())
         }
