@@ -41,6 +41,12 @@ rust::String path2_slicing_errors_from_message_what(rust::Str msg);
 rust::String path2_slicing_errors_from_vector_what(uint32_t count);
 int64_t path2_slicing_errors_from_vector_count(uint32_t count);
 
+// The four `catch`-set predicates (`Exception.hpp:18-27`'s inheritance graph) against a real
+// `try`/`catch`, confined to this translation unit (see the `.cpp` for why). `type_index` names
+// one of the fourteen concrete types in the hierarchy, 0-13 in the same order this unit's own
+// `Exception` enum lists them.
+uint8_t path2_catch_set_bitmask(uint8_t type_index);
+
 } // namespace exception
 } // namespace proof_units
 } // namespace slic3r_ffi

@@ -35,14 +35,24 @@
 //! `crates/slic3r-ffi/src/proof_units/exception.rs`) constructs each concrete vendored type
 //! directly and reads its real, compiled `what()`/`objectId()` -- never throwing or catching a
 //! C++ exception across the bridge, which `cxx` aborts on without the `Result` convention the
-//! shim does not use.
+//! shim does not use. **Fixed by adversarial review:** that left the hierarchy's own four
+//! `catch`-set predicates ([`Exception::is_critical_exception`] and friends below) unproven,
+//! since `what()`/`objectId()` are pass-throughs that cannot distinguish a correct hierarchy
+//! from a wrong one. The shim's `path2_catch_set_bitmask` now throws and catches each concrete
+//! type by reference to each base class through a real `try`/`catch`, still confined entirely
+//! to its own translation unit -- no exception crosses the bridge even for that.
 
 /// `Slic3r::SlicingError` (`Exception.hpp:31-40`): its base's message plus the `objectId`
 /// (`size_t` -> `usize`) the two-argument constructor adds.
+///
+/// **Fixed by adversarial review: both fields are private, not `pub`.** `objectId_` is a
+/// private member reachable only through the `objectId()` getter at `Exception.hpp:36`; an
+/// earlier version of this struct made `object_id` a `pub` field beside its own `object_id()`
+/// method, so a port call site could write what the vendored class only exposes for reading.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlicingError {
-    pub message: String,
-    pub object_id: usize,
+    message: String,
+    object_id: usize,
 }
 
 impl SlicingError {
@@ -61,6 +71,11 @@ impl SlicingError {
             message: message.into(),
             object_id,
         }
+    }
+
+    /// `std::runtime_error::what()`, inherited unchanged (`Exception.hpp` adds no override).
+    pub fn message(&self) -> &str {
+        &self.message
     }
 
     /// `SlicingError::objectId()` (`Exception.hpp:36`).
@@ -156,7 +171,7 @@ impl Exception {
             | Exception::HostNetworkError(m)
             | Exception::ExportError(m)
             | Exception::PlaceholderParserError(m) => m,
-            Exception::SlicingError(e) => &e.message,
+            Exception::SlicingError(e) => e.message(),
             Exception::SlicingErrors { message, .. } => message,
         }
     }
@@ -265,6 +280,67 @@ mod tests {
         assert_eq!(e.to_string(), "boom");
     }
 
+    /// **Added by adversarial review.** The four `catch`-set predicates
+    /// (`is_critical_exception`, `is_runtime_error`, `is_logic_error`, `is_io_error`) are this
+    /// module's own distinctive ported content -- they encode `Exception.hpp:18-27`'s
+    /// inheritance graph because Rust has no `catch (X&)` -- but
+    /// `exception_what_and_object_id_match_the_oracle`'s shim proves only `what()`/`objectId()`,
+    /// both pass-throughs that cannot distinguish a correct hierarchy from a wrong one. This
+    /// test compares a bitmask of the four predicates, for each of the fourteen concrete types,
+    /// against `path2_catch_set_bitmask`, which throws and catches each type by reference to
+    /// each base class through a real `try`/`catch` confined to the shim's own translation unit
+    /// (`crates/slic3r-ffi/cxx/proof_units/exception.cpp`) -- no exception crosses the `cxx`
+    /// bridge. Not a second `// PROOF: 2` marker: this unit's row needs only the one already on
+    /// `exception_what_and_object_id_match_the_oracle` above, and this test strengthens that
+    /// row's proof rather than standing in for it.
+    #[test]
+    fn exception_catch_set_bitmask_matches_the_oracle() {
+        use slic3r_proof::proof_units::exception::path2_catch_set_bitmask;
+
+        fn port_bitmask(e: &Exception) -> u8 {
+            let mut mask = 0u8;
+            if e.is_critical_exception() {
+                mask |= 0x1;
+            }
+            if e.is_runtime_error() {
+                mask |= 0x2;
+            }
+            if e.is_logic_error() {
+                mask |= 0x4;
+            }
+            if e.is_io_error() {
+                mask |= 0x8;
+            }
+            mask
+        }
+
+        let msg = "x";
+        let cases: &[(u8, Exception)] = &[
+            (0, Exception::Exception(msg.to_string())),
+            (1, Exception::CriticalException(msg.to_string())),
+            (2, Exception::RuntimeError(msg.to_string())),
+            (3, Exception::LogicError(msg.to_string())),
+            (4, Exception::HardCrash(msg.to_string())),
+            (5, Exception::InvalidArgument(msg.to_string())),
+            (6, Exception::OutOfRange(msg.to_string())),
+            (7, Exception::IOError(msg.to_string())),
+            (8, Exception::FileIOError(msg.to_string())),
+            (9, Exception::HostNetworkError(msg.to_string())),
+            (10, Exception::ExportError(msg.to_string())),
+            (11, Exception::PlaceholderParserError(msg.to_string())),
+            (12, Exception::SlicingError(SlicingError::new(msg))),
+            (13, Exception::new_slicing_errors(Vec::new())),
+        ];
+        for (type_index, ported) in cases {
+            let oracle_mask = path2_catch_set_bitmask(*type_index);
+            let ported_mask = port_bitmask(ported);
+            assert_eq!(
+                oracle_mask, ported_mask,
+                "catch-set mismatch for type_index {type_index}"
+            );
+        }
+    }
+
     /// Every concrete type in the vendored hierarchy (`Exception.hpp:13-28`), constructed from
     /// the same message on both sides and compared by `what()`/`message()`, plus
     /// `SlicingError`'s `objectId()` (both its default and its two-argument form) and
@@ -320,7 +396,7 @@ mod tests {
         }
 
         let oracle_slicing_error_what = path2_slicing_error_what(msg);
-        let ported_slicing_error_what = SlicingError::new(msg).message;
+        let ported_slicing_error_what = SlicingError::new(msg).message().to_string();
         assert_eq!(oracle_slicing_error_what, ported_slicing_error_what);
 
         let oracle_default_object_id = path2_slicing_error_default_object_id(msg);

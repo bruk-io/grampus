@@ -83,6 +83,98 @@ int64_t path2_slicing_errors_from_vector_count(uint32_t count) {
     return static_cast<int64_t>(Slic3r::SlicingErrors(errors).errors_.size());
 }
 
+// **`path2_catch_set_bitmask`, fixed by adversarial review.** The four functions above prove
+// only `what()`/`objectId()`, both pass-throughs of the string/size_t the constructor was
+// handed, which cannot distinguish a correct `catch`-set hierarchy from a wrong one. This
+// throws each of the fourteen concrete types in turn and catches it by reference to each of
+// the four base classes a port call site can `match` on (`CriticalException`, `RuntimeError`,
+// `LogicError`, `IOError`), entirely inside this one translation unit -- no C++ exception
+// crosses the `cxx` bridge, which aborts on one without the `Result` convention this shim does
+// not use.
+namespace {
+
+enum ConcreteType : uint8_t {
+    kException = 0,
+    kCriticalException = 1,
+    kRuntimeError = 2,
+    kLogicError = 3,
+    kHardCrash = 4,
+    kInvalidArgument = 5,
+    kOutOfRange = 6,
+    kIOError = 7,
+    kFileIOError = 8,
+    kHostNetworkError = 9,
+    kExportError = 10,
+    kPlaceholderParserError = 11,
+    kSlicingError = 12,
+    kSlicingErrors = 13,
+};
+
+void throw_concrete(uint8_t type_index) {
+    switch (type_index) {
+    case kException:
+        throw Slic3r::Exception("x");
+    case kCriticalException:
+        throw Slic3r::CriticalException("x");
+    case kRuntimeError:
+        throw Slic3r::RuntimeError("x");
+    case kLogicError:
+        throw Slic3r::LogicError("x");
+    case kHardCrash:
+        throw Slic3r::HardCrash("x");
+    case kInvalidArgument:
+        throw Slic3r::InvalidArgument("x");
+    case kOutOfRange:
+        throw Slic3r::OutOfRange("x");
+    case kIOError:
+        throw Slic3r::IOError("x");
+    case kFileIOError:
+        throw Slic3r::FileIOError("x");
+    case kHostNetworkError:
+        throw Slic3r::HostNetworkError("x");
+    case kExportError:
+        throw Slic3r::ExportError("x");
+    case kPlaceholderParserError:
+        throw Slic3r::PlaceholderParserError("x");
+    case kSlicingError:
+        throw Slic3r::SlicingError("x");
+    case kSlicingErrors:
+        throw Slic3r::SlicingErrors(std::vector<Slic3r::SlicingError>{});
+    default:
+        throw Slic3r::Exception("path2_catch_set_bitmask: unknown type_index");
+    }
+}
+
+template <typename CatchType> bool catches(uint8_t type_index) {
+    try {
+        throw_concrete(type_index);
+    } catch (CatchType &) {
+        return true;
+    } catch (...) {
+        return false;
+    }
+    return false; // unreachable: throw_concrete always throws
+}
+
+} // namespace
+
+uint8_t path2_catch_set_bitmask(uint8_t type_index) {
+    uint8_t mask = 0;
+    if (catches<Slic3r::CriticalException>(type_index)) {
+        mask |= 0x1;
+    }
+    if (catches<Slic3r::RuntimeError>(type_index)) {
+        mask |= 0x2;
+    }
+    if (catches<Slic3r::LogicError>(type_index)) {
+        mask |= 0x4;
+    }
+    if (catches<Slic3r::IOError>(type_index)) {
+        mask |= 0x8;
+    }
+    return mask;
+}
+
 } // namespace exception
 } // namespace proof_units
 } // namespace slic3r_ffi
