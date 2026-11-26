@@ -2,7 +2,7 @@
 kind: task
 step: 22
 delivers: []
-depends: [15-task-cuts, 34-foundation-spike, 35-trial-run]
+depends: [15-task-cuts, 34-foundation-spike, 35-trial-run, 52-foundation-common-defs, 53-foundation-int128-queue, 54-foundation-objectid-clonable, 55-foundation-libslic3r-execution, 56-foundation-point, 57-foundation-utils, 58-foundation-bounding-box, 59-foundation-config, 60-foundation-trees-grids, 61-foundation-line-slicing, 62-foundation-polygon, 63-foundation-polyline, 64-foundation-print-config, 65-foundation-expolygon-flow, 66-foundation-geometry, 67-foundation-extrusion-entity, 68-foundation-surface, 69-foundation-clipper-utils, 70-foundation-triangle-mesh, 71-foundation-sla-indexed-mesh, 72-foundation-arachne-grids, 73-foundation-arachne-indices, 74-foundation-arachne-half-edge, 75-foundation-edge-grid, 76-foundation-voronoi-curves, 77-foundation-voronoi-offset, 78-foundation-layer-skeletal, 79-foundation-model, 80-foundation-print-base, 81-foundation-print, 82-foundation-fill-base, 83-foundation-support-params, 84-foundation-precise-seam]
 size: 2
 ---
 # Task: Spike: batch every in-scope unit into Phase A tasks
