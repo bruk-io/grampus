@@ -854,8 +854,8 @@ record it asked for.
 
 ### 5. `port/port-status --self-test` runs in `just port-check`
 
-**The gap.** Every rule `port/port-status` enforces is pinned by its own `--self-test`: 45 fixture
-trees, the differential rule's 20 accept/reject shapes, the `enclosing:` cases and the
+**The gap.** Every rule `port/port-status` enforces is pinned by its own `--self-test`: all 50
+fixture trees, the differential rule's 20 accept/reject shapes, the `enclosing:` cases and the
 external-marker cases. It ran in no `justfile` recipe and no CI job — measured by grep over the
 `justfile` and `.github/workflows/` — so nothing in the repository ever asked whether the checker
 still held its own rules, and decision 1's new fixture would have bitten only for whoever ran it by

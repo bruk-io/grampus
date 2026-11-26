@@ -32,8 +32,8 @@ check:
 port-check:
     just port-status --per-commit
     # `./port/port-status --self-test` is where every one of this script's own rules is pinned --
-    # 45 fixture trees, the differential rule's 20 accept/reject shapes, the `enclosing:` cases
-    # and the external-marker cases -- and until now it ran in no recipe and no CI job, so
+    # all 50 fixture trees, the differential rule's 20 accept/reject shapes, the `enclosing:`
+    # cases and the external-marker cases -- and until now it ran in no recipe and no CI job, so
     # nothing in the repository ever asked whether the checker still held its own rules
     # (docs/PORTING.md, "Decisions recorded on 2026-11-26", decisions 1 and 5; decision 1's
     # fixture would otherwise bite only for whoever ran it by hand). It reads the fixture trees
