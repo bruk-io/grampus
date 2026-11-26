@@ -426,6 +426,27 @@ pub fn stitch<Path: StitchPath>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// Flatten one of `stitch`'s two output containers into the flat `Vec<i64>` shape every
+    /// proof shim in this crate's family returns (compare
+    /// `proof_units::polygons_point_index::path1_p_next_prev`): the path count, then, per path,
+    /// its junction count followed by each junction's `x` and `y`. Carrying the counts inside
+    /// the same vector lets one `assert_eq!` below cover *both* which paths came out and every
+    /// coordinate in them, to exact integer equality with no tolerance.
+    fn flatten(paths: &[Polygon]) -> Vec<i64> {
+        let mut out = vec![paths.len() as i64];
+        for path in paths {
+            out.push(path.junction_count() as i64);
+            for i in 0..path.junction_count() {
+                let p = path.junction_at(i).as_point();
+                out.push(p.x());
+                out.push(p.y());
+            }
+        }
+        out
+    }
+
     // Unreachable until `extrusion_line.rs` and `sparse_point_grid.rs`'s own `mod` lines land
     // (and a `process_nearby` method on `SparsePointGrid`, this module's own finding) -- see
     // the module doc. Left here, in position, so the translation is reviewable now, per
@@ -445,12 +466,12 @@ mod tests {
     // `PolylineStitcher<VariableWidthLines, ExtrusionLine, ExtrusionJunction>::stitch`
     // (`WallToolPaths.cpp:593`) -- which means driving `stitch::<ExtrusionLine>`, not
     // `stitch::<Polygon>`, once `extrusion_line.rs` implements [`StitchPath`] for
-    // `ExtrusionLine`.
+    // `ExtrusionLine`. The assertion below is already coordinate-exact against the oracle's
+    // returned coordinates, with no tolerance, so that retarget is a change of `Path` type and
+    // of the shim's own instantiation -- not a rewrite of what the proof holds.
     // PROOF: 1
     #[test]
     fn polyline_stitcher_matches_the_oracle() {
-        use super::*;
-
         let a = Polygon::from_points(vec![Point::new(0, 0), Point::new(100, 0)]);
         let b = Polygon::from_points(vec![Point::new(100, 0), Point::new(200, 0)]);
         let lines = vec![a, b];
@@ -465,13 +486,17 @@ mod tests {
             slic3r_point::point::scaled_coord(0.01f64),
         );
 
+        // Both containers, in `stitch`'s own output order, flattened to integer coordinates.
+        let mut actual = flatten(&result_lines);
+        actual.extend(flatten(&result_polygons));
+
         let oracle = slic3r_proof::proof_units::polyline_stitcher::path1_stitch_two_open_lines(
             0, 0, 100, 0, 100, 0, 200, 0,
         );
         assert_eq!(
-            result_lines.len() + result_polygons.len(),
-            oracle.len() as usize,
-            "PolylineStitcher::stitch's output count must match the oracle exactly"
+            actual, oracle,
+            "PolylineStitcher::stitch's stitched integer coordinates -- and the shape of both \
+             output containers -- must match the oracle exactly, with no tolerance"
         );
     }
 }
