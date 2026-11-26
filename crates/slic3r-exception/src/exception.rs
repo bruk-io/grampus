@@ -24,17 +24,18 @@
 //! `Exception::SlicingError`'s payload and inside `Exception::SlicingErrors`'s `errors` field,
 //! rather than `Vec<Exception>` (which would also, wrongly, accept every other variant).
 //!
-//! **Proof path 2 could not be honoured as a real proof (a finding for this pull request, not a
-//! tolerance or a stand-in invented on this branch).** Exactly as
-//! `crates/slic3r-commondefs/src/common_defs.rs`'s doc comment records for `CommonDefs.hpp`:
+//! **Proof path 2, reached via `slic3r-proof`'s re-export of `slic3r-ffi`'s per-unit proof
+//! bridges (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decisions 1 and 4).** Exactly
+//! as `crates/slic3r-commondefs/src/common_defs.rs`'s doc comment records for `CommonDefs.hpp`:
 //! this row's `proof path` is seeded `2` from its `pipeline stage` cell (`posSlice`) alone, and
-//! no field across the committed stage-dump corpus (`port/dumps/*/*.dump`) carries an exception
-//! message, an object id or any other value this hierarchy produces -- the corpus's full field
-//! set (`fill_surfaces, fills, height, lslices, object_skirt, perimeters, print_z, raw_slices,
-//! skirt, skirt_brim_groups, slice_z, slices, thin_fills, wipe_tower_*`) holds none of it, and no
-//! oracle run that reaches a compared dump throws (a thrown `SlicingError` aborts that slice
-//! before any `posSlice` dump is written). This module therefore carries no `// PROOF:` marker;
-//! `port/port-status` derives it as `drafted`, not `ported`.
+//! no field across the committed stage-dump corpus carries an exception message, an object id or
+//! any other value this hierarchy produces. Decision 4 names the per-unit proof bridges, not
+//! only the dump corpus, as a "2" row's oracle entry point, so this unit's shim
+//! (`crates/slic3r-ffi/cxx/proof_units/exception.{h,cpp}`,
+//! `crates/slic3r-ffi/src/proof_units/exception.rs`) constructs each concrete vendored type
+//! directly and reads its real, compiled `what()`/`objectId()` -- never throwing or catching a
+//! C++ exception across the bridge, which `cxx` aborts on without the `Result` convention the
+//! shim does not use.
 
 /// `Slic3r::SlicingError` (`Exception.hpp:31-40`): its base's message plus the `objectId`
 /// (`size_t` -> `usize`) the two-argument constructor adds.
@@ -217,10 +218,9 @@ impl std::error::Error for Exception {}
 mod tests {
     use super::*;
 
-    /// Not a `// PROOF:` marker (see this module's doc comment: no dump field holds this unit's
-    /// output, so proof path 2 cannot be honoured here) -- a plain correctness check of the
-    /// hierarchy's `catch`-set relations (`Exception.hpp:18-28`) and of `SlicingError`'s two
-    /// constructors (`:34-35`).
+    /// A plain correctness check of the hierarchy's `catch`-set relations (`Exception.hpp:18-28`)
+    /// and of `SlicingError`'s two constructors (`:34-35`). Not a `// PROOF:` marker -- see
+    /// `exception_what_and_object_id_match_the_oracle` below for that.
     #[test]
     fn exception_catch_sets_match_the_vendored_hierarchy() {
         let hard_crash = Exception::HardCrash("critical".to_string());
@@ -263,6 +263,92 @@ mod tests {
     fn exception_display_is_the_message() {
         let e = Exception::RuntimeError("boom".to_string());
         assert_eq!(e.to_string(), "boom");
+    }
+
+    /// Every concrete type in the vendored hierarchy (`Exception.hpp:13-28`), constructed from
+    /// the same message on both sides and compared by `what()`/`message()`, plus
+    /// `SlicingError`'s `objectId()` (both its default and its two-argument form) and
+    /// `SlicingErrors`' always-`"Errors"` message and element count. Each side is driven
+    /// independently -- the oracle through `slic3r-proof`'s re-export of `slic3r-ffi`'s
+    /// per-unit proof bridge, the port through this module's own types.
+    // PROOF: 2
+    #[test]
+    fn exception_what_and_object_id_match_the_oracle() {
+        use slic3r_proof::proof_units::exception::{
+            path2_critical_exception_what, path2_exception_what, path2_export_error_what,
+            path2_file_io_error_what, path2_hard_crash_what, path2_host_network_error_what,
+            path2_invalid_argument_what, path2_io_error_what, path2_logic_error_what,
+            path2_out_of_range_what, path2_placeholder_parser_error_what, path2_runtime_error_what,
+            path2_slicing_error_default_object_id, path2_slicing_error_object_id,
+            path2_slicing_error_what, path2_slicing_errors_from_message_what,
+            path2_slicing_errors_from_vector_count, path2_slicing_errors_from_vector_what,
+        };
+
+        let msg = "a message this test chose";
+        let cases: &[(&str, fn(String) -> Exception)] = &[
+            ("Exception", Exception::Exception),
+            ("CriticalException", Exception::CriticalException),
+            ("RuntimeError", Exception::RuntimeError),
+            ("LogicError", Exception::LogicError),
+            ("HardCrash", Exception::HardCrash),
+            ("InvalidArgument", Exception::InvalidArgument),
+            ("OutOfRange", Exception::OutOfRange),
+            ("IOError", Exception::IOError),
+            ("FileIOError", Exception::FileIOError),
+            ("HostNetworkError", Exception::HostNetworkError),
+            ("ExportError", Exception::ExportError),
+            ("PlaceholderParserError", Exception::PlaceholderParserError),
+        ];
+        let oracle_fns: &[fn(&str) -> String] = &[
+            path2_exception_what,
+            path2_critical_exception_what,
+            path2_runtime_error_what,
+            path2_logic_error_what,
+            path2_hard_crash_what,
+            path2_invalid_argument_what,
+            path2_out_of_range_what,
+            path2_io_error_what,
+            path2_file_io_error_what,
+            path2_host_network_error_what,
+            path2_export_error_what,
+            path2_placeholder_parser_error_what,
+        ];
+        for ((name, make), oracle_fn) in cases.iter().zip(oracle_fns.iter()) {
+            let oracle_what = oracle_fn(msg);
+            let ported_what = make(msg.to_string()).message().to_string();
+            assert_eq!(oracle_what, ported_what, "mismatch for {name}");
+        }
+
+        let oracle_slicing_error_what = path2_slicing_error_what(msg);
+        let ported_slicing_error_what = SlicingError::new(msg).message;
+        assert_eq!(oracle_slicing_error_what, ported_slicing_error_what);
+
+        let oracle_default_object_id = path2_slicing_error_default_object_id(msg);
+        let ported_default_object_id = SlicingError::new(msg).object_id() as u64;
+        assert_eq!(oracle_default_object_id, ported_default_object_id);
+
+        let oracle_object_id = path2_slicing_error_object_id(msg, 42);
+        let ported_object_id = SlicingError::with_object_id(msg, 42).object_id() as u64;
+        assert_eq!(oracle_object_id, ported_object_id);
+
+        let oracle_from_message = path2_slicing_errors_from_message_what(msg);
+        let ported_from_message = Exception::new_slicing_errors_with_message(msg)
+            .message()
+            .to_string();
+        assert_eq!(oracle_from_message, ported_from_message);
+
+        for count in [0u32, 1, 3] {
+            let oracle_vector_what = path2_slicing_errors_from_vector_what(count);
+            let ported_errors = vec![SlicingError::new("e"); count as usize];
+            let ported_vector_what = Exception::new_slicing_errors(ported_errors.clone())
+                .message()
+                .to_string();
+            assert_eq!(oracle_vector_what, ported_vector_what);
+
+            let oracle_vector_count = path2_slicing_errors_from_vector_count(count);
+            let ported_vector_count = ported_errors.len() as i64;
+            assert_eq!(oracle_vector_count, ported_vector_count);
+        }
     }
 }
 
