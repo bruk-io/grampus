@@ -747,20 +747,25 @@ impl BoundingBox3 {
     }
 
     /// `void translate(coordf_t x, coordf_t y, coordf_t z)` (`BoundingBox.hpp:154`): asserts
-    /// `defined`; rounds through [`slic3r_point::point::Point3::from_f64_rounded`]'s own ctor
-    /// rule -- `Vec3crd(x, y, z)` has no dedicated rounding constructor of its own at the pin (it
-    /// is a bare Eigen vector, not `Point3`), so the three components round independently with
-    /// `std::round`, the same rule `Point(double, double)` uses.
+    /// `defined`; `PointType v(x, y, z)` constructs a bare `Vec3crd`
+    /// (`Eigen::Matrix<coord_t, 3, 1>`), **not** `Point3`, which has no dedicated rounding
+    /// constructor of its own at the pin -- unlike `Point(double, double)`
+    /// (`Point.hpp:208`, ported as [`slic3r_point::point::Point::from_f64_rounded`]), a bare
+    /// Eigen vector's own per-component `double` -> `coord_t` conversion truncates toward zero,
+    /// the same rule `docs/PORTING.md`'s "Scaling conversions" states for `.cast<Tout>()`
+    /// (`Point.hpp:689`) -- there being no evidence anywhere at the pin of a bare Eigen integer
+    /// vector rounding a floating constructor argument instead of truncating it.
     pub fn translate(&mut self, x: f64, y: f64, z: f64) {
         debug_assert!(self.defined);
-        let v = Vec3::new(x.round() as i64, y.round() as i64, z.round() as i64);
+        let v = Vec3::new(x as i64, y as i64, z as i64);
         self.min = self.min + v;
         self.max = self.max + v;
     }
 
-    /// `void offset(coordf_t delta)` (`:219-224`).
+    /// `void offset(coordf_t delta)` (`:219-224`); see [`BoundingBox3::translate`]'s doc for why
+    /// this truncates rather than rounds.
     pub fn offset(&mut self, delta: f64) {
-        let d = delta.round() as i64;
+        let d = delta as i64;
         let v = Vec3::new(d, d, d);
         self.min = self.min - v;
         self.max = self.max + v;
@@ -892,6 +897,23 @@ impl BoundingBoxf3 {
         }
     }
 
+    /// `void merge(const PointsType &points) { this->merge(BoundingBox3Base(points)); }`
+    /// (`BoundingBox.cpp:153-157`), explicitly instantiated only at `Vec3d`
+    /// (`:158`, `template void BoundingBox3Base<Vec3d>::merge(const Pointf3s &points);`) --
+    /// `BoundingBox3` (`Vec3crd`) has no in-scope instantiation of this overload, so only this
+    /// `f64` instantiation is ported, per the idiom map's "monomorphised the same way ... used
+    /// in in-scope code" rule. `BoundingBox3Base(const PointsType &points) :
+    /// BoundingBox3Base(points.begin(), points.end()) {}` (`BoundingBox.hpp:144-146`) forwards
+    /// to the throwing iterator constructor unconditionally, so this returns `Err` on an empty
+    /// `points` the same way that constructor throws, per `docs/PORTING.md`'s "Error sets" rule
+    /// (a `throw` site and its catch keep the same set of cases across the port) -- never a
+    /// silently-empty merge.
+    pub fn merge_points(&mut self, points: &[slic3r_point::point::Vec3d]) -> Result<(), Exception> {
+        let bb = BoundingBoxf3::from_vec3_slice(points)?;
+        self.merge_bb(&bb);
+        Ok(())
+    }
+
     /// See [`BoundingBox3::merge_bb`]'s doc.
     pub fn merge_bb(&mut self, bb: &BoundingBoxf3) {
         debug_assert!(
@@ -996,30 +1018,29 @@ pub fn empty3_f(bb: &BoundingBoxf3) -> bool {
 
 /// `inline BoundingBox scaled(const BoundingBoxf &bb) { return {scaled(bb.min), scaled(bb.max)};
 /// }` (`:284`): `Slic3r::scaled(const Vec2d&)` is `scaled_eigen2` (already ported,
-/// `crates/slic3r-point/src/point.rs`), so this calls it on `min` and `max` and wraps the result
-/// in a [`BoundingBox`] *without* re-deriving `defined` from the two new points (a direct field
-/// construction `{scaled(bb.min), scaled(bb.max)}`, not a call to the two-point constructor).
+/// `crates/slic3r-point/src/point.rs`). The braced return **is** a call to `BoundingBox`'s own
+/// two-point constructor (`BoundingBox` is not an aggregate -- its base declares constructors
+/// -- so C++ list-initialization resolves `{a, b}` against `BoundingBox(const Point&, const
+/// Point&)` rather than initialising fields positionally), which re-derives `defined` from the
+/// *scaled* min/max's own strict ordering; it does **not** carry `bb.defined` through
+/// unchanged, a divergence this module's own first draft got wrong and corrected before
+/// the pull request's own review found it (its own `vendored_eq`/`corner` doc comments
+/// elsewhere in this module are about the opposite case -- a field read directly, never
+/// through a constructor -- which is why this one call site needs its own note).
 pub fn scaled(bb: &BoundingBoxf) -> BoundingBox {
     let min = slic3r_point::point::scaled_eigen2(bb.min);
     let max = slic3r_point::point::scaled_eigen2(bb.max);
-    BoundingBox {
-        min: Point::new(min.x(), min.y()),
-        max: Point::new(max.x(), max.y()),
-        defined: bb.defined,
-    }
+    BoundingBox::from_min_max(Point::new(min.x(), min.y()), Point::new(max.x(), max.y()))
 }
 
 /// `template<class T = double> BoundingBoxBase<Vec<2, T>> unscaled(const BoundingBox &bb)`
 /// (`:292-293`), at its default `T = double`: `Slic3r::unscaled<double>(const Vec2crd&)` is
-/// [`slic3r_point::point::unscaled_eigen2`].
+/// [`slic3r_point::point::unscaled_eigen2`]. See [`scaled`]'s doc for why this also re-derives
+/// `defined` through the two-point constructor rather than carrying `bb.defined` through.
 pub fn unscaled(bb: &BoundingBox) -> BoundingBoxf {
     let min = slic3r_point::point::unscaled_eigen2(Vec2::new(bb.min.x(), bb.min.y()));
     let max = slic3r_point::point::unscaled_eigen2(Vec2::new(bb.max.x(), bb.max.y()));
-    BoundingBoxf {
-        min,
-        max,
-        defined: bb.defined,
-    }
+    BoundingBoxf::from_min_max(min, max)
 }
 
 // TODO(port): src/libslic3r/BoundingBox.hpp:286-287 -- `template<class T = coord_t>
