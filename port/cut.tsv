@@ -11,7 +11,6 @@ crate	slic3r-instancelock	0	InstanceLock	2	230
 crate	slic3r-int128	0	Int128	1	301					
 crate	slic3r-lifecycleevents	0	LifecycleEvents	1	249					
 crate	slic3r-localesutils	0	LocalesUtils	2	201					
-crate	slic3r-macutils	0	MacUtils	1	10					
 crate	slic3r-materialtype	0	MaterialType	2	204					
 crate	slic3r-mutablepriorityqueue	0	MutablePriorityQueue	1	457					
 crate	slic3r-objectid	0	ObjectID	2	243					
@@ -1110,7 +1109,6 @@ dep						slic3r-utils	slic3r-exception	1
 dep						slic3r-utils	slic3r-format	1		
 dep						slic3r-utils	slic3r-i18n	1		
 dep						slic3r-utils	slic3r-libslic3r	2		
-dep						slic3r-utils	slic3r-macutils	1		
 dep						slic3r-utils	slic3r-platform	1		
 dep						slic3r-utils	slic3r-semver	2		
 dep						slic3r-variablewidth	slic3r-extrusionentity	2		

@@ -23,28 +23,23 @@ pub const INITIAL_REDUCE_CROSSING_WALL: bool = false;
 mod tests {
     use super::*;
 
-    // The proof-path-1 oracle (R19): `shim/print_config_constants_shim.cpp`, which `#include`s
-    // the vendored `PrintConfigConstants.hpp` unmodified and is compiled from the pin by this
-    // crate's own `build.rs` with `-ffp-contract=off` -- see that file for why this crate carries
-    // its own build step instead of calling through `crates/slic3r-ffi`.
-    extern "C" {
-        fn slic3r_printconfigconstants_shim_initial_layer_height() -> f64;
-        fn slic3r_printconfigconstants_shim_initial_raft_layers() -> i32;
-        fn slic3r_printconfigconstants_shim_initial_reduce_crossing_wall() -> i32;
-    }
+    // The proof-path-1 oracle (R19):
+    // `crates/slic3r-ffi/cxx/proof_units/print_config_constants.cpp`, which `#include`s the
+    // vendored `PrintConfigConstants.hpp` unmodified and is compiled from the pin onto the FFI
+    // crate's shared `cxx_build::Build` with `-ffp-contract=off`. Reached here through
+    // `slic3r-proof`, which re-exports the FFI crate's per-unit proof bridges -- the one
+    // sanctioned route (`docs/PORTING.md`, "Decisions recorded on 2026-11-25"), needing no
+    // dependency of this crate's own beyond the dev-dependency on `slic3r-proof` it already has.
+    use slic3r_proof::proof_units::print_config_constants::{
+        path1_initial_layer_height, path1_initial_raft_layers, path1_initial_reduce_crossing_wall,
+    };
 
     // PROOF: 1
     #[test]
     fn print_config_constants_match_the_oracle() {
-        // SAFETY: each of the three calls takes no argument and returns a plain scalar by value
-        // -- no pointers, no allocation and no precondition to uphold on either side.
-        let (oracle_layer_height, oracle_raft_layers, oracle_reduce_crossing_wall) = unsafe {
-            (
-                slic3r_printconfigconstants_shim_initial_layer_height(),
-                slic3r_printconfigconstants_shim_initial_raft_layers(),
-                slic3r_printconfigconstants_shim_initial_reduce_crossing_wall(),
-            )
-        };
+        let oracle_layer_height = path1_initial_layer_height();
+        let oracle_raft_layers = path1_initial_raft_layers();
+        let oracle_reduce_crossing_wall = path1_initial_reduce_crossing_wall();
 
         // Exact equality with no tolerance, as this row's `exact` equality tier requires:
         // compared on the `f64` bit pattern, so a value that merely prints the same cannot pass.
@@ -59,8 +54,7 @@ mod tests {
             "INITIAL_RAFT_LAYERS"
         );
         assert_eq!(
-            i32::from(INITIAL_REDUCE_CROSSING_WALL),
-            oracle_reduce_crossing_wall,
+            INITIAL_REDUCE_CROSSING_WALL, oracle_reduce_crossing_wall,
             "INITIAL_REDUCE_CROSSING_WALL"
         );
     }

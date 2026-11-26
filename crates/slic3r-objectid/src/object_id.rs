@@ -471,19 +471,20 @@ mod tests {
     use super::*;
     use slic3r_proof::dumps;
 
-    // The oracle for the `ObjectID.hpp` row: `shim/object_id_shim.cpp`'s scripted sequence over
-    // the vendored header's own inline methods, compiled from the pin by this crate's `build.rs`
-    // -- see that file for why this crate carries its own build step. Every value the shim
-    // records is a delta or a relation, never an absolute id or timestamp, so this comparison
-    // does not depend on where either side's process-global counter stood when it ran and cannot
-    // become order-dependent on what else this test binary did first. The absolute first-id
-    // values belong to the `ObjectID.cpp` row and are proven in
-    // `tests/object_id_proof_path_1.rs`, which is a separate binary for exactly that reason.
-    extern "C" {
-        fn slic3r_objectid_shim_header_observations(out: *mut i64, capacity: i32) -> i32;
-    }
+    // The oracle for the `ObjectID.hpp` row:
+    // `crates/slic3r-ffi/cxx/proof_units/object_id.cpp`'s scripted sequence over the vendored
+    // header's own inline methods, compiled from the pin onto the FFI crate's shared
+    // `cxx_build::Build` and reached here through `slic3r-proof`, which re-exports the FFI
+    // crate's per-unit proof bridges -- the one sanctioned route (`docs/PORTING.md`, "Decisions
+    // recorded on 2026-11-25"). Every value the shim records is a delta or a relation, never an
+    // absolute id or timestamp, so this comparison does not depend on where either side's
+    // process-global counter stood when it ran and cannot become order-dependent on what else
+    // this test binary did first. The absolute first-id values belong to the `ObjectID.cpp` row
+    // and are proven in `tests/object_id_proof_path_1.rs`, which is a separate binary for
+    // exactly that reason.
+    use slic3r_proof::proof_units::object_id::path2_header_observations;
 
-    /// Every observation `slic3r_objectid_shim_header_observations` records, in its own order,
+    /// Every observation `path2_header_observations` records, in its own order,
     /// named so a failure names the vendored behaviour that diverged rather than an index.
     const OBSERVATION_NAMES: &[&str] = &[
         "consecutive ObjectBase ids differ by (ObjectID.hpp:100)",
@@ -654,18 +655,12 @@ mod tests {
         );
 
         let ported = ported_header_observations();
-        let mut oracle = vec![i64::MIN; ported.len()];
-        // SAFETY: `oracle` is a live, exclusively borrowed `Vec<i64>` of exactly `oracle.len()`
-        // elements, and that same length is passed as the capacity; the shim writes `count`
-        // elements only when `capacity >= count` and otherwise writes nothing and returns
-        // `-count`, which the assertion below rejects.
-        let count = unsafe {
-            slic3r_objectid_shim_header_observations(oracle.as_mut_ptr(), oracle.len() as i32)
-        };
+        let oracle = path2_header_observations();
         assert_eq!(
-            count,
-            ported.len() as i32,
-            "the oracle records {count} observation(s) where this test scripts {}",
+            oracle.len(),
+            ported.len(),
+            "the oracle records {} observation(s) where this test scripts {}",
+            oracle.len(),
             ported.len()
         );
         assert_eq!(

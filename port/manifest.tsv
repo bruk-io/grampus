@@ -362,7 +362,7 @@ Line.hpp	root	341	4	5	in	slic3r-line	crates/slic3r-line/src/line.rs	posSlice	yes
 LocalesUtils.cpp	root	144	1	0	in	slic3r-localesutils	crates/slic3r-localesutils/src/locales_utils.rs	none	no	exact			1	n/a	not-started
 LocalesUtils.hpp	root	57	0	0	in	slic3r-localesutils	crates/slic3r-localesutils/src/locales_utils.rs	posSlice	no	exact			2	n/a	not-started
 MTUtils.hpp	root	143	3	3	in	slic3r-mtutils	crates/slic3r-mtutils/src/mt_utils.rs	posPrepareInfill	yes	exact			2	n/a	not-started
-MacUtils.hpp	root	10	0	0	in	slic3r-macutils	crates/slic3r-macutils/src/mac_utils.rs	none	yes	exact			1	n/a	not-started
+MacUtils.hpp	root	10	0		out: MacUtils.hpp is a declaration-only header, and every definition of its declared surface (is_mac_version_15, is_macos_support_boost_add_file_log) is in MacUtils.mm, which this manifest marks out of scope -- so the unit has no in-scope body to port and no in-scope symbol to prove against.			none	yes	exact			1	n/a	not-started
 MacUtils.mm	root	23	0		out: MacUtils.mm is 23 lines holding is_macos_support_boost_add_file_log and is_mac_version_15, two OS-version predicates no in-scope caller reaches.			none	no					n/a	not-started
 MarchingSquares.hpp	root	657	5	4	in	slic3r-marchingsquares	crates/slic3r-marchingsquares/src/marching_squares.rs	none	yes	exact			1	n/a	not-started
 MaterialType.cpp	root	172	1	0	in	slic3r-materialtype	crates/slic3r-materialtype/src/material_type.rs	none	no	exact			3	n/a	not-started
@@ -398,8 +398,8 @@ NormalUtils.cpp	root	147	16	18	in	slic3r-normalutils	crates/slic3r-normalutils/s
 NormalUtils.hpp	root	70	15	18	in	slic3r-normalutils	crates/slic3r-normalutils/src/normal_utils.rs	none	no	exact			1	n/a	not-started
 ObjColorUtils.cpp	root	16	2		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 ObjColorUtils.hpp	root	274	1		out: No caller in the four entry points' closure.			none	no					n/a	not-started
-ObjectID.cpp	root	25	1	0	in	slic3r-objectid	crates/slic3r-objectid/src/object_id.rs	none	no	exact			1	n/a	not-started
-ObjectID.hpp	root	218	0	0	in	slic3r-objectid	crates/slic3r-objectid/src/object_id.rs	posSlice	yes	exact			2	n/a	not-started
+ObjectID.cpp	root	25	1	0	in	slic3r-objectid	crates/slic3r-objectid/src/object_id.rs	none	no	exact			1	n/a	ported
+ObjectID.hpp	root	218	0	0	in	slic3r-objectid	crates/slic3r-objectid/src/object_id.rs	posSlice	yes	exact			2	n/a	ported
 OpenVDBUtils.cpp	root	151	11		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 OpenVDBUtils.hpp	root	51	10		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 Optimize/BruteforceOptimizer.hpp	Optimize	145	1		out: No caller in the four entry points' closure.			none	no					n/a	not-started
@@ -441,7 +441,7 @@ PrintBase.cpp	root	171	16	18	in	slic3r-printbase	crates/slic3r-printbase/src/pri
 PrintBase.hpp	root	699	15	18	in	slic3r-printbase	crates/slic3r-printbase/src/print_base.rs	posSlice	yes	exact			2	required	not-started
 PrintConfig.cpp	root	14438	11	8	in	slic3r-printconfig	crates/slic3r-printconfig/src/print_config.rs	none	no	exact			3	n/a	not-started
 PrintConfig.hpp	root	2809	8	8	in	slic3r-printconfig	crates/slic3r-printconfig/src/print_config.rs	posSlice	yes	exact			3	n/a	not-started
-PrintConfigConstants.hpp	root	7	0	0	in	slic3r-printconfigconstants	crates/slic3r-printconfigconstants/src/print_config_constants.rs	none	yes	exact			1	n/a	not-started
+PrintConfigConstants.hpp	root	7	0	0	in	slic3r-printconfigconstants	crates/slic3r-printconfigconstants/src/print_config_constants.rs	none	yes	exact			1	n/a	ported
 PrintObject.cpp	root	5574	23	23	in	slic3r-printobject	crates/slic3r-printobject/src/print_object.rs	posSlice	no	exact			3	n/a	not-started
 PrintObjectSlice.cpp	root	1816	17	24	in	slic3r-printobjectslice	crates/slic3r-printobjectslice/src/print_object_slice.rs	posSlice	no	exact			3	n/a	not-started
 PrintRegion.cpp	root	120	17	21	in	slic3r-printregion	crates/slic3r-printregion/src/print_region.rs	none	no	exact			1	n/a	not-started
@@ -527,7 +527,7 @@ Surface.hpp	root	319	9	10	in	slic3r-surface	crates/slic3r-surface/src/surface.rs
 SurfaceCollection.cpp	root	174	11	14	in	slic3r-surfacecollection	crates/slic3r-surfacecollection/src/surface_collection.rs	none	no	exact			1	required	not-started
 SurfaceCollection.hpp	root	92	10	14	in	slic3r-surfacecollection	crates/slic3r-surfacecollection/src/surface_collection.rs	posSlice	yes	exact			2	required	not-started
 SurfaceMesh.hpp	root	168	10		out: No caller in the four entry points' closure.			none	no					n/a	not-started
-Technologies.hpp	root	54	0	0	in	slic3r-technologies	crates/slic3r-technologies/src/technologies.rs	none	yes	exact			1	n/a	not-started
+Technologies.hpp	root	54	0	0	in	slic3r-technologies	crates/slic3r-technologies/src/technologies.rs	none	yes	exact			1	n/a	ported
 Tesselate.cpp	root	260	9	10	in	slic3r-tesselate	crates/slic3r-tesselate/src/tesselate.rs	none	no	exact			1	required	not-started
 Tesselate.hpp	root	26	4	10	in	slic3r-tesselate	crates/slic3r-tesselate/src/tesselate.rs	posSlice	no	exact			2	required	not-started
 TextConfiguration.hpp	root	189	4		out: No caller in the four entry points' closure.			none	no					n/a	not-started
@@ -596,7 +596,7 @@ Zipper.cpp	root	155	1		out: No caller in the four entry points' closure.			none	
 Zipper.hpp	root	95	0		out: No caller in the four entry points' closure.			none	no					n/a	not-started
 calib.cpp	root	1008	19	15	in	slic3r-calib	crates/slic3r-calib/src/calib.rs	none	no	exact			1	n/a	not-started
 calib.hpp	root	398	10	15	in	slic3r-calib	crates/slic3r-calib/src/calib.rs	posSlice	no	exact			2	n/a	not-started
-clonable_ptr.hpp	root	170	0	0	in	slic3r-clonable-ptr	crates/slic3r-clonable-ptr/src/clonable_ptr.rs	posSlice	yes	exact			2	n/a	not-started
+clonable_ptr.hpp	root	170	0	0	in	slic3r-clonable-ptr	crates/slic3r-clonable-ptr/src/clonable_ptr.rs	posSlice	yes	exact			2	n/a	ported
 enum_bitmask.hpp	root	91	0	0	in	slic3r-enum-bitmask	crates/slic3r-enum-bitmask/src/enum_bitmask.rs	posSlice	yes	exact			2	n/a	not-started
 format.hpp	root	58	0	0	in	slic3r-format	crates/slic3r-format/src/format.rs	posSlice	yes	exact			2	n/a	not-started
 libslic3r.cpp	root	3	3	2	in	slic3r-libslic3r	crates/slic3r-libslic3r/src/libslic3r.rs	none	no	exact			1	n/a	not-started

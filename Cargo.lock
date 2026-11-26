@@ -1319,13 +1319,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "slic3r-macutils"
-version = "0.1.0"
-dependencies = [
- "slic3r-proof",
-]
-
-[[package]]
 name = "slic3r-marchingsquares"
 version = "0.1.0"
 dependencies = [
@@ -2129,7 +2122,6 @@ dependencies = [
  "slic3r-format",
  "slic3r-i18n",
  "slic3r-libslic3r",
- "slic3r-macutils",
  "slic3r-platform",
  "slic3r-proof",
  "slic3r-semver",

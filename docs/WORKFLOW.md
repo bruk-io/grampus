@@ -1,7 +1,9 @@
 # The porting workflow
 
 `just port-status` reads the six headings below to check that this document says what it must
-(R29); renaming one breaks that check. This document is committed before any unit is ported, and
+(R29); renaming one breaks that check. `## Decisions that govern over a task's file list` is a
+later addition and is not one of the six; adding a heading does not break the check, renaming one
+of the six does. This document is committed before any unit is ported, and
 every Phase A and Phase B task is built against it: a builder is given one task, this repository
 and nothing else. `docs/PORTING.md` is the per-file translation contract this document refers to
 by path and by section name; it is not quoted here.
@@ -65,6 +67,14 @@ One implementer, then two adversarial reviewers in separate contexts, then one f
 reads the diff **and** the vendored source file the module came from, is told to assume the module
 is wrong, cites every divergence as `source:line` against `module:line`, and **may not implement**.
 
+A reviewer also checks, by hand, **every `// PORT SRC: external:` marker the unit adds**, against
+the source it cites. `port/port-status` accepts that form without a vendored-line lookup —
+there is no vendored line to look up — and counts and prints each one, with its text, for exactly
+this purpose (`docs/PORTING.md`, "Decisions recorded on 2026-11-25", decision 2). Nothing else
+checks it: an external marker a reviewer did not read is an unchecked claim about a standard or a
+library, and a reviewer who cannot find what it cites rejects the unit rather than accepting the
+marker's word for it.
+
 Both verdicts go in the unit's pull request body in that form, together with the module's manifest
 row. `just pr-body-check <file>` fails a pull request without them, and the check fails closed — an
 empty, absent or non-conforming body is a failure — and is skipped only for a pull request that
@@ -121,6 +131,41 @@ The port's own order choices, which `docs/PORTING.md` carries as rules, are the 
 use insertion-ordered maps wherever iteration order reaches output, so the port is deterministic
 where the oracle is not. Each such site carries the marker that puts it in
 `port/reports/divergences.md`.
+
+## Decisions that govern over a task's file list
+
+A port task's body enumerates exactly which files `git diff main` may touch, and a task file on
+`main` is not edited after acceptance. `docs/PORTING.md`'s "Decisions recorded on 2026-11-25"
+moved where a proof shim lives, what form a numeric constant's marker may take, and which units
+are in scope at all, so some task bodies now enumerate files that no longer exist and omit files
+a unit now needs.
+
+**Where a port task's enumerated file list disagrees with the proof route, the marker rules or
+the scope rule in `docs/PORTING.md` as they stand on `main`, `docs/PORTING.md` governs.** The
+builder says so in the pull request body, naming the task's line and the rule that overrides it,
+and a reviewer does not count that as a divergence. The task's own list still governs everything
+the rules do not reach: a builder does not take the override as licence to write a file neither
+the task nor `docs/PORTING.md` puts in its path.
+
+Two corollaries, both measured on the first port attempts:
+
+- A task whose body says to append to `crates/slic3r-ffi/cxx/proof_shims.cpp`, `proof_shims.h` or
+  `src/proof.rs` creates `cxx/proof_units/<unit>.{h,cpp}` and `src/proof_units/<unit>.rs`
+  instead. Those three shared files no longer exist.
+- A task whose unit list names a file `port/manifest.tsv` now marks out of scope drops that unit,
+  says so in the pull request body, and does not count the task's `ported` line against itself.
+  `port/foundation.tsv` is regenerated from the manifest and so can also re-batch: where it and
+  an accepted task body disagree about which units a task holds, **the task body governs its own
+  scope** and the manifest governs what is in scope at all. No check reads
+  `port/foundation.tsv`; re-cutting the tasks to match it is a separate pull request's work.
+
+**Shared append points that remain.** After decision 1 a port task appends to exactly one shared
+file: its crate's `src/lib.rs` `mod` line. That one is deliberately **not** given a
+`merge=union` rule in `.gitattributes`, unlike the `justfile` and `.gitignore` entries there. A
+union merge would keep both branches' lines but not at their alphabetical positions, and would
+duplicate a line two branches added identically — producing a `lib.rs` that does not compile,
+silently, in place of the textual conflict "Conflict discipline" above deliberately wants. No
+other file a port task writes is shared, so no other union rule is needed.
 
 ## Trial-run record
 
