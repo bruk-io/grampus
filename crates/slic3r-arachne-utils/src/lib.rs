@@ -3,4 +3,7 @@
 //! line yet: Phase B (plan step 23) adds one per ported module, in alphabetical order,
 //! as docs/WORKFLOW.md states.
 
+pub mod half_edge_node;
 pub mod linear_alg2_d;
+pub mod polygons_point_index;
+pub mod polygons_segment_index;
