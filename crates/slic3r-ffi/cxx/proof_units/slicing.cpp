@@ -114,6 +114,44 @@ rust::Vec<double> path1_smooth_height_profile(rust::Slice<const double> profile,
     return result;
 }
 
+// `path1_generate_layer_height_texture` calls `Slic3r::generate_layer_height_texture`
+// (`Slicing.cpp:916-1026`), genuinely linked `Slicing.cpp` code, proof path 1 -- added on
+// review: no shim or test anywhere in the tree compared this function's own output (109
+// transcribed lines of palette and cell arithmetic) against the oracle. The `void *data` buffer
+// becomes a real byte vector sized exactly as `crates/slic3r-slicing/src/slicing.rs`'s own doc
+// describes (`rows * cols * 4`, plus `(rows/2) * (cols/2) * 4` more when
+// `level_of_detail_2nd_level` is set, immediately after), and the result is `[ncells, byte0,
+// byte1, ...]` -- `cxx` has no `Vec<u8>` of its own in this bridge's existing style, so the
+// bytes widen to `int64_t` the same way the other per-unit bridges return every scalar.
+rust::Vec<int64_t> path1_generate_layer_height_texture(
+    double min_layer_height, double max_layer_height, double layer_height,
+    double object_print_z_min, double object_print_z_max, rust::Slice<const double> layers,
+    int32_t rows, int32_t cols, bool level_of_detail_2nd_level) {
+    Slic3r::SlicingParameters params;
+    params.min_layer_height = min_layer_height;
+    params.max_layer_height = max_layer_height;
+    params.layer_height = layer_height;
+    params.object_print_z_min = object_print_z_min;
+    params.object_print_z_max = object_print_z_max;
+
+    std::vector<coordf_t> layer_vec(layers.begin(), layers.end());
+    size_t data_len = static_cast<size_t>(rows) * static_cast<size_t>(cols) * 4;
+    if (level_of_detail_2nd_level) {
+        data_len += static_cast<size_t>(rows / 2) * static_cast<size_t>(cols / 2) * 4;
+    }
+    std::vector<unsigned char> data(data_len, 0);
+    int ncells = Slic3r::generate_layer_height_texture(params, layer_vec, data.data(), rows, cols,
+                                                         level_of_detail_2nd_level);
+
+    rust::Vec<int64_t> out;
+    out.reserve(data.size() + 1);
+    out.push_back(static_cast<int64_t>(ncells));
+    for (unsigned char b : data) {
+        out.push_back(static_cast<int64_t>(b));
+    }
+    return out;
+}
+
 } // namespace slicing
 } // namespace proof_units
 } // namespace slic3r_ffi

@@ -85,7 +85,6 @@ pub struct SlicingParameters {
 }
 
 impl Default for SlicingParameters {
-    // PORT SRC: src/libslic3r/Slicing.hpp:121
     fn default() -> Self {
         SlicingParameters {
             valid: false,
@@ -177,6 +176,10 @@ pub fn equal_layering(sp1: &SlicingParameters, sp2: &SlicingParameters) -> bool 
 /// `typedef std::pair<coordf_t, coordf_t> t_layer_height_range;` (`:158`).
 pub type TLayerHeightRange = (f64, f64);
 
+// TODO(port): src/libslic3r/Slicing.hpp:232 -- `cereal::serialize(Archive&,
+// t_layer_height_range&)`. The cereal/Undo-Redo serialisation boundary is out of scope for this
+// task's own units (`slic3r-config`'s module doc names the same boundary for `Config.hpp`/
+// `Config.cpp`); no in-scope caller serialises a bare `(f64, f64)` through it.
 // TODO(port): src/libslic3r/Slicing.hpp:159 -- `t_layer_config_ranges =
 // std::map<t_layer_height_range, ModelConfig>`, needs `ModelConfig` (`slic3r-model`, not a
 // dependency of this crate).
@@ -235,7 +238,6 @@ pub enum LayerHeightEditActionType {
 /// -- a file-local helper [`generate_object_layers`] alone calls, so `pub(crate)` rather than
 /// `pub`, matching the idiom map's "a free function in an anonymous namespace" rule read against
 /// this file's own linkage (external, but with no other in-scope caller).
-// PORT SRC: src/libslic3r/Slicing.cpp:734
 pub(crate) fn adjust_layer_series_to_align_object_height(
     slicing_params: &SlicingParameters,
     layer_series: &mut Vec<f64>,
@@ -485,6 +487,10 @@ fn gauss_kernel(radius: u32) -> Vec<f64> {
     let mut ret = Vec::with_capacity(size as usize);
     // Reworked from static inline int getGaussianKernelSize(float sigma) taken from
     // opencv-4.1.2\modules\features2d\src\kaze\AKAZEFeatures.cpp
+    // PORT NOTE: Slicing.cpp:428 -- `radius` is `unsigned int` there, so `radius - 1` wraps to
+    // `4294967295` (not `-1`) when `radius == 0`, which would widen to a huge positive `sigma`
+    // rather than this port's `-0.3 + 0.8`. Unreachable today: this function is private, and
+    // its only call site (`:448`) clamps `radius` to at least `1` first.
     // PORT SRC: src/libslic3r/Slicing.cpp:428
     let sigma = 0.3 * (radius as f64 - 1f64) + 0.8;
     let two_sq_sigma = 2f64 * sigma * sigma;
@@ -561,6 +567,11 @@ fn gauss_blur(
             j += 2;
         }
 
+        // PORT NOTE: Slicing.cpp:491 -- `std::clamp(v, lo, hi)` has no precondition on `lo`/
+        // `hi`'s relative order (it is undefined behaviour, not a check, when `lo > hi`);
+        // `f64::clamp` asserts `min <= max` unconditionally, so this is a live panic at a site
+        // the oracle has no assertion for, reachable whenever a caller's
+        // `min_layer_height > max_layer_height`.
         height = (if weight_total == 0f64 {
             hi
         } else {
@@ -635,6 +646,11 @@ pub fn generate_layer_height_texture(
         debug_assert!(mid <= slicing_params.object_print_z_height());
         let h = hi - lo;
         hi = hi.min(slicing_params.object_print_z_height());
+        // PORT NOTE: Slicing.cpp:954-955 -- `std::clamp(v, 0, ncells - 1)` has no precondition
+        // on `ncells - 1 >= 0` (undefined behaviour, not a check, when it is negative);
+        // `i32::clamp` asserts `min <= max` unconditionally, so this is a live panic at a site
+        // the oracle has no assertion for, reachable whenever `ncells <= 0` (`object_print_z_
+        // height()` is `0`, `:936`'s own `std::min` can produce that).
         let cell_first = ((lo * z_to_cell).ceil() as i32).clamp(0, ncells - 1);
         let cell_last = ((hi * z_to_cell).floor() as i32).clamp(0, ncells - 1);
         for cell in cell_first..=cell_last {
@@ -752,6 +768,11 @@ pub fn min_layer_height_from_nozzle(
     print_config: &slic3r_config::config::DynamicConfig<'_>,
     idx_nozzle: i32,
 ) -> f64 {
+    // PORT NOTE: Config.cpp:2097-2112 -- the vendored `opt_float` asserts and then dereferences
+    // a null `ConfigOptionFloatsNullable*` for a missing key (the assert is compiled out under
+    // NDEBUG); this substitutes `0.0`, which is exactly the value both this function and
+    // `max_layer_height_from_nozzle` below already read as "unset" on their very next line, for
+    // that undefined behaviour.
     let min_layer_height = print_config
         .opt_float_at("min_layer_height", (idx_nozzle - 1) as usize)
         .unwrap_or(0f64);
@@ -768,6 +789,9 @@ pub fn max_layer_height_from_nozzle(
     idx_nozzle: i32,
 ) -> f64 {
     let min_layer_height = min_layer_height_from_nozzle(print_config, idx_nozzle);
+    // PORT NOTE: Config.cpp:2097-2112 -- see `min_layer_height_from_nozzle`'s identical note
+    // above; same substitution, same "0.0 means unset" reading at both of this function's own
+    // uses below.
     let max_layer_height = print_config
         .opt_float_at("max_layer_height", (idx_nozzle - 1) as usize)
         .unwrap_or(0f64);
@@ -901,6 +925,55 @@ mod tests {
         assert!(ncells > 0, "the cell count must be positive");
         let ptr = 3; // row 0, col 0, alpha byte.
         assert_eq!(data[ptr], 255, "the first cell must be painted opaque");
+    }
+
+    /// Proof path 1 (R19, `port/manifest.tsv`'s `Slicing.cpp` row): `generate_layer_height_texture`
+    /// is externally linked, genuine `Slicing.cpp` code, called here through
+    /// `crates/slic3r-ffi/cxx/proof_units/slicing.cpp`'s `path1_generate_layer_height_texture`
+    /// -- added on review: no shim or test anywhere in the tree compared this function's own
+    /// output (109 lines of transcribed palette and cell arithmetic) against the oracle before
+    /// this. A varying, multi-segment profile and `level_of_detail_2nd_level: true`, so both
+    /// the 0th- and 2nd-LOD cell-painting arms run, not only the single-cell case the
+    /// property test above exercises.
+    // PROOF: 1
+    #[test]
+    fn slicing_generate_layer_height_texture_matches_the_oracle() {
+        let params = params_with(0.2, 0.2);
+        let rows = 4;
+        let cols = 8;
+        // Four contiguous, ascending `(lo, hi)` z-boundary pairs (`layers[idx_layer]`/
+        // `layers[idx_layer + 1]`, `Slicing.cpp:947-948`), each a different height within
+        // `[min_layer_height, max_layer_height]` (0.1..=0.3) so the palette index (`idxf`,
+        // keyed on `h - layer_height`) differs segment to segment while staying inside
+        // `lerp`'s own `t` assertion -- a span wider than a real layer height (unlike a z range)
+        // drives `idxf`, and so `t`, far outside `[0, 1]`.
+        let layers = vec![0f64, 0.1, 0.1, 0.22, 0.22, 0.45, 0.45, 0.75];
+        let mut data = vec![0u8; (rows * cols * 4) as usize + (rows / 2 * cols / 2 * 4) as usize];
+
+        let actual_ncells =
+            generate_layer_height_texture(&params, &layers, &mut data, rows, cols, true);
+
+        let oracle = slic3r_proof::proof_units::slicing::path1_generate_layer_height_texture(
+            params.min_layer_height,
+            params.max_layer_height,
+            params.layer_height,
+            params.object_print_z_min,
+            params.object_print_z_max,
+            &layers,
+            rows,
+            cols,
+            true,
+        );
+        assert_eq!(
+            actual_ncells as i64, oracle[0],
+            "generate_layer_height_texture's returned cell count must match the oracle"
+        );
+        let actual_bytes: Vec<i64> = data.iter().map(|&b| b as i64).collect();
+        assert_eq!(
+            actual_bytes,
+            oracle[1..],
+            "generate_layer_height_texture's own texture bytes must match the oracle exactly"
+        );
     }
 
     /// Proof path 1 (R19, `port/manifest.tsv`'s `Slicing.cpp` row): `generate_object_layers`

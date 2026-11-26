@@ -65,10 +65,28 @@ mod ffi {
             radius: u32,
             keep_min: bool,
         ) -> Vec<f64>;
+
+        /// `Slic3r::generate_layer_height_texture(params, layers, data, rows, cols,
+        /// level_of_detail_2nd_level)` (`Slicing.cpp:916-1026`), with `params` constructed from
+        /// the given scalar fields and `data` a real byte buffer this shim allocates. Returns
+        /// `[ncells, byte0, byte1, ...]` -- added on review: this function had no proof of any
+        /// kind before.
+        #[allow(clippy::too_many_arguments)]
+        fn path1_generate_layer_height_texture(
+            min_layer_height: f64,
+            max_layer_height: f64,
+            layer_height: f64,
+            object_print_z_min: f64,
+            object_print_z_max: f64,
+            layers: &[f64],
+            rows: i32,
+            cols: i32,
+            level_of_detail_2nd_level: bool,
+        ) -> Vec<i64>;
     }
 }
 
 pub use ffi::{
-    path1_check_object_layers_fixed, path1_generate_object_layers, path1_smooth_height_profile,
-    path2_slicing_params_header_only,
+    path1_check_object_layers_fixed, path1_generate_layer_height_texture,
+    path1_generate_object_layers, path1_smooth_height_profile, path2_slicing_params_header_only,
 };

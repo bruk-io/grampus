@@ -16,8 +16,6 @@
 // of this shim proved only `distance_from_lines_extra`/`outside`, leaving these two unproven.
 #include "aabb_tree_lines.h"
 
-#include <algorithm>
-
 #include "libslic3r/AABBTreeLines.hpp"
 #include "libslic3r/Line.hpp"
 
@@ -62,8 +60,13 @@ rust::Vec<int64_t> path2_all_lines_in_radius(rust::Slice<const double> ax,
 
     Slic3r::AABBTreeLines::LinesDistancer<Slic3r::Linef> distancer(std::move(lines));
     const Eigen::Vector2d point(qx, qy);
+    // Review finding: this used to sort the oracle's own result before returning it. The
+    // vendored `all_lines_in_radius` (`AABBTreeLines.hpp:228-243`) returns indices in the
+    // deterministic push order of `indexed_primitives_within_distance_squared_recurisve`
+    // (`AABBTreeIndirect.hpp:650-666`), with no sort anywhere in its own call chain, and the
+    // row's equality tier is `exact`; sorting both sides stood a set comparison in for the
+    // sequence comparison the tier asks for.
     std::vector<size_t> found = distancer.all_lines_in_radius(point, radius);
-    std::sort(found.begin(), found.end());
 
     rust::Vec<int64_t> out;
     out.reserve(found.size());

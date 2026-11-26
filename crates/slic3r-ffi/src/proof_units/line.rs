@@ -34,7 +34,22 @@ mod ffi {
         /// `Slic3r::Line(Point(ax,ay), Point(bx,by)).midpoint()`/`.normal()` (`Line.hpp:167,183`),
         /// returning `[midpoint.x, midpoint.y, normal.x, normal.y]`.
         fn path2_line_midpoint_normal(ax: i64, ay: i64, bx: i64, by: i64) -> Vec<i64>;
+
+        /// `Slic3r::Line(Point(ax,ay), Point(bx,by)).distance_to_infinite_squared(Point(px,py),
+        /// &closest)` (`Line.hpp:173`), returning `[sq_dist, closest.x, closest.y]` -- added on
+        /// review: this function had no proof of any kind before.
+        fn path2_line_distance_to_infinite_squared(
+            ax: i64,
+            ay: i64,
+            bx: i64,
+            by: i64,
+            px: i64,
+            py: i64,
+        ) -> Vec<f64>;
     }
 }
 
-pub use ffi::{path1_intersection_infinite, path2_line_length, path2_line_midpoint_normal};
+pub use ffi::{
+    path1_intersection_infinite, path2_line_distance_to_infinite_squared, path2_line_length,
+    path2_line_midpoint_normal,
+};

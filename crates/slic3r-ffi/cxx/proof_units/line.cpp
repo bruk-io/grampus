@@ -56,6 +56,23 @@ rust::Vec<int64_t> path2_line_midpoint_normal(int64_t ax, int64_t ay, int64_t bx
     return out;
 }
 
+// `path2_line_distance_to_infinite_squared` drives `Line.hpp`'s own header-only, inline
+// `distance_to_infinite_squared(const Point&, Point*)` (`:173`) -- added on review: this
+// function's own row (proof path 2, the `Line.hpp` cell) had no oracle comparison anywhere in
+// the tree, which is what let `line_distance_to_infinite_squared_i64`'s wrong formula stand.
+rust::Vec<double> path2_line_distance_to_infinite_squared(int64_t ax, int64_t ay, int64_t bx,
+                                                           int64_t by, int64_t px, int64_t py) {
+    const Slic3r::Line line(Slic3r::Point(ax, ay), Slic3r::Point(bx, by));
+    const Slic3r::Point point(px, py);
+    Slic3r::Point closest;
+    double sq_dist = line.distance_to_infinite_squared(point, &closest);
+    rust::Vec<double> out;
+    out.push_back(sq_dist);
+    out.push_back(static_cast<double>(closest.x()));
+    out.push_back(static_cast<double>(closest.y()));
+    return out;
+}
+
 } // namespace line
 } // namespace proof_units
 } // namespace slic3r_ffi

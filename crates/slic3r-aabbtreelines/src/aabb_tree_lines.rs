@@ -272,8 +272,15 @@ fn indexed_primitives_within_distance_squared_recursive(
 }
 
 /// `squared_distance_to_indexed_lines(...)` (`AABBTreeLines.hpp:210-225`). Returns `(-1, NPOS,
-/// origin)` for an empty tree, else `(squared_distance, hit_idx, hit_point)` -- the idiom map's
+/// [0, 0])` for an empty tree, else `(squared_distance, hit_idx, hit_point)` -- the idiom map's
 /// "a non-const reference out-parameter" -> "a return value" rule, folded into one tuple.
+///
+/// Review finding: this used to initialise (and, on a miss, return) `hit_point` as the query
+/// `point`. The vendored function (`:210-225`) never writes its `hit_idx_out`/`hit_point_out`
+/// out-parameters unless a hit is recorded (`:220-221`'s empty-tree arm returns `Scalar(-1)`
+/// without touching either); the only caller, `distance_from_lines_extra` (`:338-344`),
+/// initialises them to `size_t(-1)` and `Vec<Dim,Floating>::Zero()` before the call, so a miss
+/// leaves them at the origin, not at the query point.
 pub fn squared_distance_to_indexed_lines(
     lines: &[Linef],
     tree: &LineTree,
@@ -281,10 +288,10 @@ pub fn squared_distance_to_indexed_lines(
     max_sqr_dist: f64,
 ) -> (f64, usize, [f64; 2]) {
     if tree.empty() {
-        return (-1f64, NPOS, point);
+        return (-1f64, NPOS, [0f64, 0f64]);
     }
     let mut hit_idx = NPOS;
-    let mut hit_point = point;
+    let mut hit_point = [0f64, 0f64];
     let sq = squared_distance_to_indexed_primitives_recursive(
         lines,
         tree,
@@ -525,7 +532,14 @@ pub fn get_intersections_with_line(
 
     let mut intersections = get_intersections_with_line_recursive(lines, tree, line, line_bb, 0);
     if sorted {
-        intersections.sort_by(|left, right| {
+        // FIDELITY(port): src/libslic3r/AABBTreeLines.hpp:295-297 -- `std::sort` (no stability
+        // guarantee between equal elements) is `slice::sort_unstable_by`, per
+        // `docs/PORTING.md`'s idiom map (`std::sort` -> `sort_unstable`, reserving plain `sort`
+        // for `std::stable_sort`). The comparator itself (`left.first < right.first`) is not a
+        // total order on `f64` (NaN is incomparable); `port/reports/order-comparators.md` has
+        // no resolved shape for this site, so this falls to that report's own default --
+        // `partial_cmp(..).unwrap_or(Equal)`, a total-order comparator.
+        intersections.sort_unstable_by(|left, right| {
             let dl = [left.0[0] - line.a.x(), left.0[1] - line.a.y()];
             let dr = [right.0[0] - line.a.x(), right.0[1] - line.a.y()];
             let sq_l = dl[0] * dl[0] + dl[1] * dl[1];
@@ -551,6 +565,12 @@ impl LinesDistancer {
         let tree = build_aabb_tree_over_indexed_lines(&lines);
         LinesDistancer { lines, tree }
     }
+
+    // TODO(port): src/libslic3r/AABBTreeLines.hpp:329 -- `LinesDistancer() = default`, an
+    // empty-lines/empty-tree default constructor. No in-scope caller default-constructs a
+    // `LinesDistancer` rather than building one from a `Vec<Linef>` (an empty `Vec` through
+    // [`LinesDistancer::new`] above already yields the same empty tree a default construction
+    // would), so this gets no separate `fn` of its own.
 
     /// `int outside(const Vec<Dim,Scalar>& point) const` (`:332`).
     pub fn outside(&self, point: [f64; 2]) -> i32 {
@@ -654,6 +674,29 @@ mod tests {
         assert_eq!(nearest, [5.0, 0f64]);
     }
 
+    /// Review finding: an empty tree's miss used to leave `hit_point` at the query point
+    /// instead of the oracle's own `Vec::Zero()` (see [`squared_distance_to_indexed_lines`]'s
+    /// doc). Proves both the free function and `distance_from_lines_extra`, which propagates
+    /// the same miss out of its own `pub` surface.
+    #[test]
+    fn squared_distance_to_indexed_lines_on_an_empty_tree_yields_the_oracles_zero_not_the_query_point(
+    ) {
+        let lines: Vec<Linef> = Vec::new();
+        let tree = build_aabb_tree_over_indexed_lines(&lines);
+        assert!(tree.empty());
+        let (sq, idx, nearest) =
+            squared_distance_to_indexed_lines(&lines, &tree, [5.0, -3.0], f64::INFINITY);
+        assert_eq!(sq, -1f64);
+        assert_eq!(idx, NPOS);
+        assert_eq!(nearest, [0f64, 0f64]);
+
+        let distancer = LinesDistancer::new(lines);
+        let (distance, idx, nearest) = distancer.distance_from_lines_extra([5.0, -3.0], true);
+        assert_eq!(distance, f64::INFINITY);
+        assert_eq!(idx, NPOS);
+        assert_eq!(nearest, [0f64, 0f64]);
+    }
+
     #[test]
     fn lines_distancer_signed_distance_is_negative_inside() {
         let distancer = LinesDistancer::new(square_lines());
@@ -729,15 +772,18 @@ mod tests {
 
         let distancer = LinesDistancer::new(lines);
 
-        let mut actual_radius = distancer.all_lines_in_radius([5.0, -1.0], 2.0);
-        actual_radius.sort_unstable();
+        // Review finding: this used to sort both sides before comparing. The vendored
+        // `all_lines_in_radius` has no sort anywhere in its own call chain (see the proof
+        // shim's own updated doc), so its returned order is part of the `exact`-tier output;
+        // comparing unsorted is what the tier asks for.
+        let actual_radius = distancer.all_lines_in_radius([5.0, -1.0], 2.0);
         let oracle_radius = slic3r_proof::proof_units::aabb_tree_lines::path2_all_lines_in_radius(
             &ax, &ay, &bx, &by, 5.0, -1.0, 2.0,
         );
         assert_eq!(
             actual_radius.iter().map(|&i| i as i64).collect::<Vec<_>>(),
             oracle_radius,
-            "LinesDistancer::all_lines_in_radius must match the oracle exactly"
+            "LinesDistancer::all_lines_in_radius must match the oracle exactly, in traversal order"
         );
 
         // A probe line crossing two sides of the square at different distances from its own

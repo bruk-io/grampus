@@ -41,8 +41,8 @@
 //! needs `Geometry::liang_barsky_line_clipping`, same crate), `transform(const Linef3&, const
 //! Transform3d&)` (`Line.cpp:15-25`, needs the deferred `Transform3d` `Point.rs`'s own module doc
 //! names), and the Boost.Polygon `geometry_concept`/`segment_traits<Line>` specialisations
-//! (`Line.hpp:324-339`, the same don't-translate-able plumbing `Point.rs:786-813`'s own
-//! deferred Boost specialisations are). Each is named at its own `// TODO(port):` site below.
+//! (`Line.hpp:324-339`, the same don't-translate-able plumbing `point.rs:203`'s own deferred
+//! Boost specialisations are). Each is named at its own `// TODO(port):` site below.
 //!
 //! **`ThickLine`/`CurledLine` inherit `Line` (`:205-223`).** Rust has no inheritance; each is its
 //! own struct carrying a plain `Line` field plus its own extra data, per [`Point`]'s own doc on
@@ -110,7 +110,6 @@ fn midpoint_coord(a: i64, b: i64) -> i64 {
 /// v).cast<Scalar<L>>()` (`:70`) is the one site that rounds, and it truncates toward zero
 /// (Eigen's `.cast<T>()` to an integral `T` is a C-style `static_cast`), not away from zero or to
 /// nearest -- `docs/PORTING.md`'s "Rounding modes" rule is what pins this reading.
-// PORT SRC: src/libslic3r/Line.hpp:70
 fn line_distance_to_squared_i64(a: Point, b: Point, point: Point) -> (f64, Point) {
     let v = Vec2d::new(delta_f64(b.x(), a.x()), delta_f64(b.y(), a.y()));
     let va = Vec2d::new(delta_f64(point.x(), a.x()), delta_f64(point.y(), a.y()));
@@ -140,7 +139,6 @@ fn line_distance_to_squared_i64(a: Point, b: Point, point: Point) -> (f64, Point
 /// Vec<Dim,Scalar>*)` (`Line.hpp:91-107`), `Dim = 2, Scalar = i64`; see
 /// [`line_distance_to_squared_i64`]'s doc for the same out-parameter and rounding notes -- this
 /// template never clamps `t` to `[0, 1]`, so it has no `t <= 0f64`/`t >= 1f64` early-out arm at all.
-// PORT SRC: src/libslic3r/Line.hpp:105
 fn line_distance_to_infinite_squared_i64(a: Point, b: Point, point: Point) -> (f64, Point) {
     let v = Vec2d::new(delta_f64(b.x(), a.x()), delta_f64(b.y(), a.y()));
     let va = Vec2d::new(delta_f64(point.x(), a.x()), delta_f64(point.y(), a.y()));
@@ -151,8 +149,13 @@ fn line_distance_to_infinite_squared_i64(a: Point, b: Point, point: Point) -> (f
     let t = (va.x() * v.x() + va.y() * v.y()) / l2;
     let closest_x = a.x() as f64 + t * v.x();
     let closest_y = a.y() as f64 + t * v.y();
-    let dx = point.x() as f64 - closest_x;
-    let dy = point.y() as f64 - closest_y;
+    // Review finding: this used to return `(point - closest).squaredNorm()` -- the formula
+    // `Linef3::distance_to_infinite_squared` (`Line.hpp:298`) uses -- instead of the vendored
+    // `(t * v - va).squaredNorm()` this template actually returns. The two are algebraically
+    // equal and not equal in `f64` (no `-ffp-contract=off` FMA collapses the difference), and
+    // this row's equality tier is `exact`.
+    let dx = t * v.x() - va.x();
+    let dy = t * v.y() - va.y();
     (
         dx * dx + dy * dy,
         Point::new(closest_x as i64, closest_y as i64),
@@ -165,7 +168,6 @@ fn line_distance_to_infinite_squared_i64(a: Point, b: Point, point: Point) -> (f
 /// local the vendored no-out-parameter overload at `:76-80` allocates and drops), so this returns
 /// `f64` alone rather than the unused nearest point -- the algorithm itself is unchanged, the
 /// return value is merely narrowed to what the one in-scope caller reads.
-// PORT SRC: src/libslic3r/Line.hpp:70
 fn line3_distance_to_squared_i64(a: Point3, b: Point3, point: Point3) -> f64 {
     let vx = delta_f64(b.x(), a.x());
     let vy = delta_f64(b.y(), a.y());
@@ -223,7 +225,6 @@ pub fn line_distance_to_squared_f64(a: Vec2d, b: Vec2d, point: Vec2d) -> (f64, V
 /// intermediate is `f64` and the result is cast back to `i64` only at the very end --
 /// `docs/PORTING.md`'s "Rounding modes" rule: Eigen's `.cast<Scalar<L>>()` truncates toward zero.
 /// `#if 0`'d dead branch at `:134-139` is not ported (`docs/PORTING.md`'s don't-translate list).
-// PORT SRC: src/libslic3r/Line.hpp:147
 fn line_intersection_i64(l1a: Point, l1b: Point, l2a: Point, l2b: Point) -> Option<Point> {
     let v1 = Vec2d::new(delta_f64(l1b.x(), l1a.x()), delta_f64(l1b.y(), l1a.y()));
     let v2 = Vec2d::new(delta_f64(l2b.x(), l2a.x()), delta_f64(l2b.y(), l2a.y()));
@@ -283,6 +284,12 @@ pub struct Line {
 /// `typedef std::vector<Line> Lines;` (`:20`).
 pub type Lines = Vec<Line>;
 
+// TODO(port): src/libslic3r/Line.hpp:201-202 -- `static const constexpr int Dim = 2;`/`using
+// Scalar = Point::Scalar;`, the `line_alg::Traits<Line>` default's own `Dim`/`Scalar` members.
+// This unit monomorphizes each `line_alg` template by hand per the module doc rather than
+// porting the generic `Traits` machinery itself, so there is no `line_alg::Traits<Line>` impl
+// for these to be associated items of.
+
 impl Line {
     /// `Line(const Point& _a, const Point& _b)` (`:159`).
     pub fn new(a: Point, b: Point) -> Self {
@@ -334,7 +341,6 @@ impl Line {
     /// `operator/` at the pin -- the vendored expression relies on `Eigen::Matrix`'s own
     /// elementwise `operator/(Scalar)` through `Point`'s base-class conversion, integer division
     /// truncating toward zero exactly as Rust's `/` on `i64` does.
-    // PORT SRC: src/libslic3r/Line.hpp:167
     pub fn midpoint(&self) -> Point {
         Point::new(
             midpoint_coord(self.a.x(), self.b.x()),
@@ -346,7 +352,6 @@ impl Line {
     /// Returns `None` where the vendored body returns `false` -- both the near-parallel
     /// (`denom` near zero) and the overflow-guard arms (`result.x()`/`y()` outside `coord_t`'s
     /// range, `:38-39`) -- and `Some(point)` otherwise.
-    // PORT SRC: src/libslic3r/Line.cpp:44
     pub fn intersection_infinite(&self, other: &Line) -> Option<Point> {
         let a1 = Vec2d::new(self.a.x() as f64, self.a.y() as f64);
         let v12 = Vec2d::new(
@@ -399,7 +404,6 @@ impl Line {
     }
 
     /// `double perp_distance_to(const Point &point) const` (`Line.cpp:48-56`).
-    // PORT SRC: src/libslic3r/Line.cpp:55
     pub fn perp_distance_to(&self, point: Point) -> f64 {
         let v = Vec2d::new(
             delta_f64(self.b.x(), self.a.x()),
@@ -442,14 +446,18 @@ impl Line {
 
     /// `bool overlap(const Line &line, double &overlap_length) const` (`Line.cpp:84-97`), the
     /// `double&` out-parameter folded into `Some(overlap_length)`/`None` (idiom map).
-    // PORT SRC: src/libslic3r/Line.cpp:88
     pub fn overlap(&self, line: &Line) -> Option<f64> {
         if !self.parallel_to_line(line) {
             return None;
         }
         let line_ = Line::new(self.a, line.a);
-        // `scaled(EPSILON)` (`:88`): `EPSILON` (millimetres) through the port's own `scale_`.
-        if line_.length() > slic3r_libslic3r::libslic3r::scale_(EPSILON)
+        // Review finding: `Line.cpp:88`'s `scaled(EPSILON)` is the *integral* overload
+        // (`Point.hpp:669-678`, `Tout` defaults to `coord_t`), which truncates toward zero --
+        // not the `scale_()` macro (`libslic3r.h:106`, a plain `f64` division with no
+        // truncation) this used to call. `slic3r_point::point::scaled_coord` is that same
+        // truncating overload, already ported for exactly this call shape (`docs/PORTING.md`'s
+        // "Scaling conversions" rule).
+        if line_.length() > slic3r_point::point::scaled_coord(EPSILON) as f64
             && !self.parallel_to_line(&line_)
         {
             return None;
@@ -461,6 +469,10 @@ impl Line {
         if a_min > b_max || a_max < b_min {
             return None;
         }
+        // FIDELITY(port): src/libslic3r/Line.cpp:94 -- `std::min(a_max, b_max) -
+        // std::max(a_min, b_min)` subtracts two `coord_t` values with the result kept as
+        // `coord_t`; reproduces the oracle's own wraparound with `wrapping_sub` rather than
+        // panicking on overflow (see [`delta_f64`]'s doc).
         let mut overlap_length = 0i64.max(a_max.min(b_max).wrapping_sub(a_min.max(b_min))) as f64;
         overlap_length /= (a_max as f64 - a_min as f64) / self.length();
         Some(overlap_length)
@@ -552,7 +564,6 @@ impl Line {
     // doc).
 
     /// `void extend(double offset)` (`Line.cpp:126-131`).
-    // PORT SRC: src/libslic3r/Line.cpp:128
     pub fn extend(&mut self, offset: f64) {
         let vx = delta_f64(self.b.x(), self.a.x());
         let vy = delta_f64(self.b.y(), self.a.y());
@@ -606,8 +617,8 @@ pub fn get_extents(lines: &Lines) -> BoundingBox {
 
 // TODO(port): src/libslic3r/Line.hpp:324-339 -- the Boost.Polygon
 // `geometry_concept<Line>`/`segment_traits<Line>` specialisations; no in-scope caller reaches
-// Boost.Polygon through this port, the same don't-translate-able plumbing `Point.rs:786-813`'s
-// own deferred Boost specialisations are.
+// Boost.Polygon through this port, the same don't-translate-able plumbing `point.rs:203`'s own
+// deferred Boost specialisations are.
 
 // -------------------------------------------------------------------------------------------
 // ThickLine (Line.hpp:205-213)
@@ -626,7 +637,8 @@ pub struct ThickLine {
 pub type ThickLines = Vec<ThickLine>;
 
 impl ThickLine {
-    /// `ThickLine() : a_width(0), b_width(0) {}` (`:208`).
+    /// `ThickLine(const Point& a, const Point& b) : Line(a, b), a_width(0), b_width(0) {}`
+    /// (`:209`).
     pub fn new(a: Point, b: Point) -> Self {
         ThickLine {
             line: Line::new(a, b),
@@ -659,7 +671,8 @@ pub struct CurledLine {
 pub type CurledLines = Vec<CurledLine>;
 
 impl CurledLine {
-    /// `CurledLine() : curled_height(0.0f) {}` (`:218`).
+    /// `CurledLine(const Point& a, const Point& b) : Line(a, b), curled_height(0.0f) {}`
+    /// (`:219`).
     pub fn new(a: Point, b: Point) -> Self {
         CurledLine {
             line: Line::new(a, b),
@@ -691,6 +704,11 @@ pub type Lines3 = Vec<Line3>;
 
 impl Line3 {
     /// `Line3(const Point3& _a, const Point3& _b)` (`:231`).
+    // TODO(port): src/libslic3r/Line.hpp:233 -- `Line3(const Vec3crd&, const Vec3crd&)`, the
+    // "backward compatibility with Vec3crd" overload. `Vec3crd` is `Point3`'s own Eigen base at
+    // the pin (`Point3 : public Vec3crd`, `Point.hpp:283`), so passing a `Vec3crd` is passing a
+    // `Point3` by its base-class reference -- a no-op duplicate of the constructor above, not a
+    // second shape this port must give its own `fn`.
     pub fn new(a: Point3, b: Point3) -> Self {
         Line3 { a, b }
     }
@@ -719,7 +737,6 @@ impl Line3 {
     /// `Point3 midpoint() const` (`:237`): each component divided by the vendored body's own
     /// literal `2` (integer division, truncating toward zero), not through `Point3::operator/`
     /// (which does not exist at the pin either).
-    // PORT SRC: src/libslic3r/Line.hpp:237
     pub fn midpoint(&self) -> Point3 {
         Point3::new(
             midpoint_coord(self.a.x(), self.b.x()),
@@ -812,7 +829,6 @@ impl Linef3 {
     }
 
     /// `Vec3d intersect_plane(double z) const` (`Line.cpp:133-138`).
-    // PORT SRC: src/libslic3r/Line.cpp:137
     pub fn intersect_plane(&self, z: f64) -> Vec3d {
         let vx = self.b.x() - self.a.x();
         let vy = self.b.y() - self.a.y();
@@ -983,6 +999,29 @@ mod tests {
             vec![mid.x(), mid.y(), normal.x(), normal.y()],
             oracle,
             "Line::midpoint()/normal() must match the oracle exactly"
+        );
+
+        // Review finding: `distance_to_infinite_squared` had no oracle comparison anywhere in
+        // the tree, which is what let it return `(point - closest).squaredNorm()` instead of
+        // the vendored `(t * v - va).squaredNorm()` (`Line.hpp:106`) stand. `point = (50, 50)`
+        // against this `line` puts `t` strictly inside `(0, 1)` -- the one branch both formulas
+        // can disagree on.
+        let point = Point::new(50, 50);
+        let (actual_sq, actual_closest) = line.distance_to_infinite_squared(point);
+        let oracle_dist = slic3r_proof::proof_units::line::path2_line_distance_to_infinite_squared(
+            line.a.x(),
+            line.a.y(),
+            line.b.x(),
+            line.b.y(),
+            point.x(),
+            point.y(),
+        );
+        compare_unit("Line.hpp", Oracle::Built, actual_sq, oracle_dist[0])
+            .expect("Line::distance_to_infinite_squared must match the oracle exactly");
+        assert_eq!(
+            vec![actual_closest.x() as f64, actual_closest.y() as f64],
+            oracle_dist[1..],
+            "Line::distance_to_infinite_squared's own closest point must match the oracle"
         );
     }
 }

@@ -33,6 +33,11 @@ rust::Vec<double> path1_smooth_height_profile(rust::Slice<const double> profile,
                                                double max_layer_height, uint32_t radius,
                                                bool keep_min);
 
+rust::Vec<int64_t> path1_generate_layer_height_texture(
+    double min_layer_height, double max_layer_height, double layer_height,
+    double object_print_z_min, double object_print_z_max, rust::Slice<const double> layers,
+    int32_t rows, int32_t cols, bool level_of_detail_2nd_level);
+
 } // namespace slicing
 } // namespace proof_units
 } // namespace slic3r_ffi

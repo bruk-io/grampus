@@ -15,6 +15,8 @@ rust::Vec<int64_t> path1_intersection_infinite(int64_t ax, int64_t ay, int64_t b
                                                 int64_t cx, int64_t cy, int64_t dx, int64_t dy);
 double path2_line_length(int64_t ax, int64_t ay, int64_t bx, int64_t by);
 rust::Vec<int64_t> path2_line_midpoint_normal(int64_t ax, int64_t ay, int64_t bx, int64_t by);
+rust::Vec<double> path2_line_distance_to_infinite_squared(int64_t ax, int64_t ay, int64_t bx,
+                                                           int64_t by, int64_t px, int64_t py);
 
 } // namespace line
 } // namespace proof_units
