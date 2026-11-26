@@ -46,6 +46,37 @@
 //! bit for bit; this is a simplification of *which code path runs*, not of *what is computed*,
 //! and needs no `// FIDELITY(port):` marker because nothing a comparison could observe differs.
 //!
+//! **FIDELITY(port) -- see the `// FIDELITY(port):` markers on `closest_point_on_triangle_to_origin`
+//! and `ray_box_intersect_invdir`'s callers below. The closest-point/distance path
+//! (`squared_distance_to_indexed_triangle_set`,
+//! `is_any_triangle_in_radius`, `all_triangles_in_radius`, and the box test and accumulation
+//! inside their shared recursion) is forced to `f64` throughout, where the vendored template
+//! keeps it independent of the query point's own type.** `:536`'s `using ScalarType = typename
+//! VectorType::Scalar` (with `:547-550`) runs `closest_point_to_triangle` in `VectorType::Scalar`,
+//! not in `VertexType::Scalar`; `:617`'s `distancer.origin.template cast<BBoxScalar>()` *narrows*
+//! the query origin to the tree's own `BoundingBox::Scalar`, and `:622`'s
+//! `squaredExteriorDistance` returns and accumulates in that same box scalar (Eigen's
+//! `AlignedBox::squaredExteriorDistance`), not in `f64`. Three in-scope callers instantiate this
+//! independently of `f64`: `GCode/SeamPlacer.cpp:379`'s `is_any_triangle_in_radius(enforcers.vertices,
+//! enforcers.indices, enforcers_tree, position /* Vec3f */, radius_sqr /* float */)` runs the
+//! whole path in `float`, and `SLA/IndexedMesh.cpp:76`/`AABBMesh.cpp:69` each call
+//! `squared_distance_to_indexed_triangle_set` with `std::vector<Vec3f>` vertices against a
+//! `Vec3d` query point -- the independent-`VectorType` shape `:797-798`'s own comment names
+//! ("performed with the accuracy of `VectorType::Scalar` even if the triangle mesh and the AABB
+//! Tree are built with floats"). This module's single [`Vec3<C>`] collapses the vertex type and
+//! the query-point type to the same `C`, so that call shape cannot be expressed at all, and every
+//! query through this path -- including one built over `Tree2f`/`Tree3f` -- always computes in
+//! `f64`. The justification two paragraphs up (the `intersect_triangle` SFINAE collapse) does
+//! **not** cover this path: those four overloads really do all compute in `double`; the
+//! closest-point/distance path's vendored `Scalar` is `float` whenever `VectorType::Scalar` is,
+//! and this module silently widens it. **This is not held to exact equality against the oracle
+//! for a `Tree2f`/`Tree3f` (all-`f32`) query**: `aabb_tree_indirect_matches_the_oracle` only
+//! builds `Eigen::Vector3d`/`Tree<3, double>` (`crates/slic3r-ffi/cxx/proof_units/
+//! aabb_tree_indirect.cpp`), so nothing above is exercised by this task's proof. Reported as a
+//! finding in this task's pull request rather than redesigned here: fixing it needs `Scalar` to
+//! vary independently of the vertex/query-point type, which is a second generic parameter this
+//! task did not have time to thread through every call site under review.
+//!
 //! **`BoundingBoxWrapper` (`:228-241`) is not ported.** It wraps `Slic3r::BoundingBox` (2D,
 //! `coord_t`) and constructs from a `Point` inflated by `SCALED_EPSILON` -- `Point`,
 //! `Slic3r::BoundingBox` and `SCALED_EPSILON` are `slic3r-point`/`slic3r-boundingbox`/
@@ -132,14 +163,6 @@ impl<C: TreeCoord, const D: usize> AlignedBox<C, D> {
     /// `AlignedBox(const VectorType &p)`: a box containing exactly one point.
     pub fn from_point(p: [C; D]) -> Self {
         AlignedBox { min: p, max: p }
-    }
-
-    /// `AlignedBox(const VectorType &p1, const VectorType &p2)`: the box containing both points
-    /// (Eigen's own two-point constructor takes the component-wise min/max of the two).
-    pub fn from_two_points(p1: [C; D], p2: [C; D]) -> Self {
-        let mut b = AlignedBox::from_point(p1);
-        b.extend_point(p2);
-        b
     }
 
     pub fn min(&self) -> [C; D] {
@@ -478,12 +501,12 @@ impl<C: TreeCoord, const D: usize> Tree<C, D> {
 /// `using Tree2f = Tree<2, float>;` (`:221`).
 pub type Tree2f = Tree<f32, 2>;
 /// `using Tree3f = Tree<3, float>;` (`:222`).
-// PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+// PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222
 pub type Tree3f = Tree<f32, 3>;
 /// `using Tree2d = Tree<2, double>;` (`:223`).
 pub type Tree2d = Tree<f64, 2>;
 /// `using Tree3d = Tree<3, double>;` (`:224`).
-// PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+// PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:224
 pub type Tree3d = Tree<f64, 3>;
 
 /// `template<class G> struct Intersecting {};` / the `Eigen::AlignedBox` specialisation
@@ -539,9 +562,10 @@ fn traverse_recurse<C: TreeCoord, const D: usize>(
     if tree.node(idx).is_leaf() {
         callback(tree.node(idx))
     } else {
-        let left = traverse_recurse(tree, Tree::<C, D>::left_child_idx(idx), pred, callback);
-        let right = traverse_recurse(tree, Tree::<C, D>::right_child_idx(idx), pred, callback);
-        left && right
+        // `:974`'s `&&` short-circuits: the right subtree is not visited once the left call
+        // returns `false` (the callback's "stop traversal" signal, `:961`/`:984`).
+        traverse_recurse(tree, Tree::<C, D>::left_child_idx(idx), pred, callback)
+            && traverse_recurse(tree, Tree::<C, D>::right_child_idx(idx), pred, callback)
     }
 }
 
@@ -613,7 +637,9 @@ impl<C: TreeCoord> Vec3<C> {
             _ => panic!("Vec3::get: index out of range"),
         }
     }
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/Point.hpp:65 (the literal `3` is Vec3's own dimensionality, the
+    // `Eigen::Matrix<float, 3, 1, ...>` Vec3f alias Point.hpp:68's Vec3d mirrors), not from
+    // AABBTreeIndirect.hpp:677, which fixes an unrelated `3` (the tree's NumDimensions).
     pub fn to_array(&self) -> [C; 3] {
         [self.x, self.y, self.z]
     }
@@ -687,7 +713,7 @@ impl<C: TreeCoord> SourceNode<C, 3> for TriangleInput<C> {
 /// `build_aabb_tree_over_indexed_triangle_set(vertices, faces, eps)` (`:676-722`).
 pub fn build_aabb_tree_over_indexed_triangle_set<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
     eps: C,
     // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
@@ -722,10 +748,12 @@ pub fn build_aabb_tree_over_indexed_triangle_set<C: TreeCoord>(
 }
 
 /// `igl::Hit<float>`: the ray-intersection hit record (`:24-25`'s own `#include <igl/Hit.h>`).
+/// `id`/`gid` are `int` at `deps_src/libigl/igl/Hit.h:20-22`, narrowed explicitly at
+/// `AABBTreeIndirect.hpp:422`'s `int(node.idx)` construction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Hit {
-    pub id: i64,
-    pub gid: i64,
+    pub id: i32,
+    pub gid: i32,
     pub u: f32,
     pub v: f32,
     pub t: f32,
@@ -736,7 +764,8 @@ pub struct Hit {
 fn ray_box_intersect_invdir(
     origin: Vec3<f64>,
     inv_dir: Vec3<f64>,
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:277 (`Eigen::AlignedBox<Scalar,3> box`, this
+    // function's own parameter, not :677's unrelated tree-level `3`).
     mut bbox: AlignedBox<f64, 3>,
     t0: f64,
     t1: f64,
@@ -858,9 +887,11 @@ fn intersect_triangle(
 
 fn intersect_ray_recursive_first_hit<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`, which
+    // this port's query functions fix `TreeType` to, mirroring `Tree2f`/`Tree3f`/`Tree2d`/
+    // `Tree3d` at :221-224 rather than the vendored template's generic `TreeType`).
     tree: &Tree<C, 3>,
     origin: Vec3<f64>,
     dir: Vec3<f64>,
@@ -883,7 +914,7 @@ fn intersect_ray_recursive_first_hit<C: TreeCoord>(
         let v2 = vertices[face[2]].to_f64();
         match intersect_triangle(origin, dir, v0, v1, v2, eps) {
             Some((t, u, v)) if t > 0f64 => Some(Hit {
-                id: node.idx as i64,
+                id: node.idx as i32,
                 gid: -1,
                 u: u as f32,
                 v: v as f32,
@@ -921,9 +952,10 @@ fn intersect_ray_recursive_first_hit<C: TreeCoord>(
 /// `intersect_ray_first_hit(...)` (`:727-752`).
 pub fn intersect_ray_first_hit<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     origin: Vec3<C>,
     dir: Vec3<C>,
@@ -950,9 +982,10 @@ pub fn intersect_ray_first_hit<C: TreeCoord>(
 
 fn intersect_ray_recursive_all_hits<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     origin: Vec3<f64>,
     dir: Vec3<f64>,
@@ -976,7 +1009,7 @@ fn intersect_ray_recursive_all_hits<C: TreeCoord>(
         if let Some((t, u, v)) = intersect_triangle(origin, dir, v0, v1, v2, eps) {
             if t > 0f64 {
                 hits.push(Hit {
-                    id: node.idx as i64,
+                    id: node.idx as i32,
                     gid: -1,
                     u: u as f32,
                     v: v as f32,
@@ -999,9 +1032,10 @@ fn intersect_ray_recursive_all_hits<C: TreeCoord>(
 /// `intersect_ray_all_hits(...)` (`:759-793`): every intersection, sorted by `t`.
 pub fn intersect_ray_all_hits<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     origin: Vec3<C>,
     dir: Vec3<C>,
@@ -1017,7 +1051,14 @@ pub fn intersect_ray_all_hits<C: TreeCoord>(
     intersect_ray_recursive_all_hits(
         vertices, faces, tree, origin, dir, invdir, eps, 0, &mut hits,
     );
-    hits.sort_by(|l, r| {
+    // `:790`'s `std::sort` renders as `sort_unstable_by` (idiom map: no ordering guarantee
+    // between equal elements, matching `std::sort`'s own lack of a stability guarantee); a
+    // shared edge's two triangles (`:758`) can tie on `t`, and `sort_by`'s stable tie order
+    // would diverge from `std::sort`'s unspecified one.
+    // PORT NOTE: `:790`'s comparator (`l.t < r.t`) is undefined behaviour under `std::sort`'s
+    // strict-weak-ordering precondition if `t` is NaN, with no panic in the oracle's release
+    // build. This port makes that undefined behaviour a live panic instead.
+    hits.sort_unstable_by(|l, r| {
         l.t.partial_cmp(&r.t)
             .expect("ray hit `t` must never be NaN")
     });
@@ -1068,9 +1109,14 @@ fn closest_point_to_triangle(p: Vec3<f64>, a: Vec3<f64>, b: Vec3<f64>, c: Vec3<f
     a.add(ab.scale(v)).add(ac.scale(w))
 }
 
+// FIDELITY(port): always computes in `f64`, where `:536`'s `using ScalarType = typename
+// VectorType::Scalar` (with `:547-550`) runs the vendored `closest_point_to_origin` in
+// `VectorType::Scalar` -- `float` for `GCode/SeamPlacer.cpp:379`'s `is_any_triangle_in_radius`
+// caller. See the module doc's FIDELITY(port) paragraph; not held to exact equality for a
+// `Tree2f`/`Tree3f` query, and no oracle comparison in this task's proof reaches that case.
 fn closest_point_on_triangle_to_origin<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
     primitive_index: usize,
     origin: Vec3<f64>,
@@ -1094,9 +1140,10 @@ fn closest_point_on_triangle_to_origin<C: TreeCoord>(
 #[allow(clippy::too_many_arguments, unused_assignments)]
 fn squared_distance_to_indexed_primitives_recursive<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     origin: Vec3<f64>,
     node_idx: usize,
@@ -1177,6 +1224,10 @@ fn squared_distance_to_indexed_primitives_recursive<C: TreeCoord>(
             }};
         }
 
+        // FIDELITY(port): `:617`'s `distancer.origin.template cast<BBoxScalar>()` narrows the
+        // *origin* to the box's own scalar; this widens the *box* to `f64` instead, and
+        // `:622`'s `squaredExteriorDistance` likewise accumulates in `BBoxScalar`, not `f64`.
+        // See the module doc's FIDELITY(port) paragraph.
         if node_left.bbox.to_f64().contains_point(origin.to_array()) {
             look_left!();
         }
@@ -1216,9 +1267,10 @@ fn squared_distance_to_indexed_primitives_recursive<C: TreeCoord>(
 /// non-const reference out-parameter -> A return value").
 pub fn squared_distance_to_indexed_triangle_set<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     point: Vec3<C>,
 ) -> (f64, usize, Vec3<f64>) {
@@ -1245,9 +1297,10 @@ pub fn squared_distance_to_indexed_triangle_set<C: TreeCoord>(
 /// `is_any_triangle_in_radius(...)` (`:826-854`).
 pub fn is_any_triangle_in_radius<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     point: Vec3<C>,
     max_distance_squared: f64,
@@ -1274,9 +1327,10 @@ pub fn is_any_triangle_in_radius<C: TreeCoord>(
 
 fn indexed_primitives_within_distance_squared_recursive<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     origin: Vec3<f64>,
     node_idx: usize,
@@ -1336,9 +1390,10 @@ fn indexed_primitives_within_distance_squared_recursive<C: TreeCoord>(
 /// `all_triangles_in_radius(...)` (`:858-881`).
 pub fn all_triangles_in_radius<C: TreeCoord>(
     vertices: &[Vec3<C>],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:710 (`(1./3.) * (v1 + v2 + v3)`, the one line in this header that spells out a triangle's vertex count as a literal; distinct from :677's unrelated NumDimensions `3`).
     faces: &[[usize; 3]],
-    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:677
+    // PORT SRC: src/libslic3r/AABBTreeIndirect.hpp:222 (`Tree3f`'s NumDimensions `3`; see the
+    // note on `intersect_ray_recursive_first_hit`'s own `tree` parameter above).
     tree: &Tree<C, 3>,
     point: Vec3<C>,
     max_distance_squared: f64,
@@ -1376,6 +1431,39 @@ mod tests {
                 Vec3::new(10.0, 14.0, 0.0),
             ],
             vec![[0, 1, 2], [3, 4, 5]],
+        )
+    }
+
+    /// Five triangles with distinct, spread-out centroids, so `partition_input`'s (`:161-215`)
+    /// QuickSelect loop body (`:190-205`) actually runs: with the two-triangle fixture above,
+    /// `build_recursive`'s only call is `right (1) <= left (0) + 2`, which is `:187-189`'s early
+    /// break, so the swap-partition loop never executes in any oracle comparison. `right (4) <=
+    /// left (0) + 2` is false for five elements, so this fixture reaches it.
+    fn unit_triangle_mesh_wide() -> (Vec<Vec3<f64>>, Vec<[usize; 3]>) {
+        (
+            vec![
+                // Triangle 0: centroid (1.33, 1.33, 0).
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+                Vec3::new(0.0, 4.0, 0.0),
+                // Triangle 1: centroid (11.33, 11.33, 0).
+                Vec3::new(10.0, 10.0, 0.0),
+                Vec3::new(14.0, 10.0, 0.0),
+                Vec3::new(10.0, 14.0, 0.0),
+                // Triangle 2: centroid (0, 1.33, 11.33).
+                Vec3::new(0.0, 0.0, 10.0),
+                Vec3::new(0.0, 4.0, 10.0),
+                Vec3::new(0.0, 0.0, 14.0),
+                // Triangle 3: centroid (21.33, 1.33, 0).
+                Vec3::new(20.0, 0.0, 0.0),
+                Vec3::new(24.0, 0.0, 0.0),
+                Vec3::new(20.0, 4.0, 0.0),
+                // Triangle 4: centroid (1.33, 21.33, 5).
+                Vec3::new(0.0, 20.0, 5.0),
+                Vec3::new(4.0, 20.0, 5.0),
+                Vec3::new(0.0, 24.0, 5.0),
+            ],
+            vec![[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11], [12, 13, 14]],
         )
     }
 
@@ -1424,7 +1512,7 @@ mod tests {
     // PROOF: 2
     #[test]
     fn aabb_tree_indirect_matches_the_oracle() {
-        let (vertices, faces) = unit_triangle_mesh();
+        let (vertices, faces) = unit_triangle_mesh_wide();
         let flat_vertices: Vec<f64> = vertices.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
         let flat_faces: Vec<i64> = faces
             .iter()
@@ -1437,7 +1525,7 @@ mod tests {
         let origin = Vec3::new(1.0, 1.0, -5.0);
         let dir = Vec3::new(0.0, 0.0, 1.0);
         let actual_hit = intersect_ray_first_hit(&vertices, &faces, &tree, origin, dir, eps)
-            .map(|h| h.id)
+            .map(|h| h.id as i64)
             .unwrap_or(-1);
         let oracle_hit = proof_units::aabb_tree_indirect::path2_intersect_ray_first_hit(
             &flat_vertices,
@@ -1479,6 +1567,6 @@ mod tests {
 
 // PORT STATUS
 // source: src/libslic3r/AABBTreeIndirect.hpp
-// confidence: medium
+// confidence: low
 // tier: exact
 // oracle: built
