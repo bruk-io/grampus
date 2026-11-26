@@ -2838,15 +2838,14 @@ pub fn get_bed_temp_1st_layer_key(bed_type: BedType) -> String {
 use slic3r_config::config::ConfigDef;
 use slic3r_config::config::ConfigOptionBool;
 use slic3r_config::config::ConfigOptionBools;
+use slic3r_config::config::ConfigOptionEnum;
 use slic3r_config::config::ConfigOptionEnumGeneric;
 use slic3r_config::config::ConfigOptionFloat;
 use slic3r_config::config::ConfigOptionFloatOrPercent;
-use slic3r_config::config::ConfigOptionFloats;
 use slic3r_config::config::ConfigOptionFloatsNullable;
 use slic3r_config::config::ConfigOptionInt;
 use slic3r_config::config::ConfigOptionInts;
 use slic3r_config::config::ConfigOptionPercent;
-use slic3r_config::config::ConfigOptionPoint;
 use slic3r_config::config::ConfigOptionPoints;
 use slic3r_config::config::ConfigOptionPointsGroups;
 use slic3r_config::config::ConfigOptionString;
@@ -3413,6 +3412,491 @@ impl PrintConfigDef {
 
     /// `PrintConfigDef::init_fff_params()` (`PrintConfig.cpp:1317-8991`).
     fn init_fff_params(&mut self) {
+        // `const int max_temp = 1500` (`PrintConfig.cpp:1322`), a local of the vendored body,
+        // used as the `max` of every nozzle-temperature option below. "Maximum extruder
+        // temperature, bumped to 1500 to support printing of glass."
+        // PORT SRC: src/libslic3r/PrintConfig.cpp:1322
+        let max_temp: i32 = 1500;
+        let _ = max_temp;
+
+        {
+            let def = self.def.add("reduce_crossing_wall", ConfigOptionType::Bool);
+            def.label = "Avoid crossing walls".to_string();
+            def.category = "Quality".to_string();
+            def.tooltip =
+                "This detours to avoid traveling across walls, which may cause blobs on the surface."
+                    .to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionBool::new(
+                slic3r_printconfigconstants::print_config_constants::INITIAL_REDUCE_CROSSING_WALL,
+            )));
+        }
+        {
+            let def = self.def.add(
+                "max_travel_detour_distance",
+                ConfigOptionType::FloatOrPercent,
+            );
+            def.label = "Avoid crossing walls - Max detour length".to_string();
+            def.category = "Quality".to_string();
+            def.tooltip = "Maximum detour distance for avoiding crossing wall: The printer won't detour if the detour distance is larger than this value. Detour length could be specified either as an absolute value or as percentage (for example 50%) of a direct travel path. A value of 0 will disable this.".to_string();
+            def.sidetext = "mm or %".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1337
+            def.max_literal = 1000_f64;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1339
+            def.set_default_value(Box::new(ConfigOptionFloatOrPercent::new(0., false)));
+        }
+        // The seven "other layers" bed-temperature options (`PrintConfig.cpp:1342-1447`): one
+        // pair per plate type, each pair an "other layers" and a "first layer" option. The
+        // sidetext is the degree-Celsius sign written as a UTF-8 escape in the vendored source.
+        {
+            let def = self.def.add("supertack_plate_temp", ConfigOptionType::Ints);
+            def.label = "Other layers".to_string();
+            def.tooltip = "This is the bed temperature for layers except for the first one. A value of 0 means the filament does not support printing on the Cool Plate SuperTack.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.full_label = "Bed temperature".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1348
+            def.max = 120_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1349
+            v.values.push(35);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("cool_plate_temp", ConfigOptionType::Ints);
+            def.label = "Other layers".to_string();
+            def.tooltip = "This is the bed temperature for layers except for the first one. A value of 0 means the filament does not support printing on the Cool Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.full_label = "Bed temperature".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1357
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1358
+            v.values.push(35);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("textured_cool_plate_temp", ConfigOptionType::Ints);
+            def.label = "Other layers".to_string();
+            def.tooltip = "This is the bed temperature for layers except for the first one. A value of 0 means the filament does not support printing on the Textured Cool Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.full_label = "Bed temperature".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1366
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1367
+            v.values.push(40);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("eng_plate_temp", ConfigOptionType::Ints);
+            def.label = "Other layers".to_string();
+            def.tooltip = "This is the bed temperature for layers except for the first one. A value of 0 means the filament does not support printing on the Engineering Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.full_label = "Bed temperature".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1375
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1376
+            v.values.push(45);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("hot_plate_temp", ConfigOptionType::Ints);
+            def.label = "Other layers".to_string();
+            def.tooltip = "This is the bed temperature for layers except for the first one. A value of 0 means the filament does not support printing on the High Temp Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.full_label = "Bed temperature".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1384
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1385
+            v.values.push(45);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("textured_plate_temp", ConfigOptionType::Ints);
+            def.label = "Other layers".to_string();
+            def.tooltip = "This is the bed temperature for layers except for the first one. A value of 0 means the filament does not support printing on the Textured PEI Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.full_label = "Bed temperature".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1393
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1394
+            v.values.push(45);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("supertack_plate_temp_initial_layer", ConfigOptionType::Ints);
+            def.label = "First layer".to_string();
+            def.full_label = "First layer bed temperature".to_string();
+            def.tooltip = "This is the bed temperature of the first layer. A value of 0 means the filament does not support printing on the Cool Plate SuperTack.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1402
+            def.max = 120_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1403
+            v.values.push(35);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("cool_plate_temp_initial_layer", ConfigOptionType::Ints);
+            def.label = "First layer".to_string();
+            def.full_label = "First layer bed temperature".to_string();
+            def.tooltip = "This is the bed temperature of the first layer. A value of 0 means the filament does not support printing on the Cool Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1411
+            def.max = 120_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1412
+            v.values.push(35);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add(
+                "textured_cool_plate_temp_initial_layer",
+                ConfigOptionType::Ints,
+            );
+            def.label = "First layer".to_string();
+            def.full_label = "First layer bed temperature".to_string();
+            def.tooltip = "This is the bed temperature of the first layer. A value of 0 means the filament does not support printing on the Textured Cool Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1420
+            def.max = 120_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1421
+            v.values.push(40);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("eng_plate_temp_initial_layer", ConfigOptionType::Ints);
+            def.label = "First layer".to_string();
+            def.full_label = "First layer bed temperature".to_string();
+            def.tooltip = "This is the bed temperature of the first layer. A value of 0 means the filament does not support printing on the Engineering Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1429
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1430
+            v.values.push(45);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            // `hot_plate_temp_initial_layer` is the one plate option with **no** `min` at the
+            // pin (`PrintConfig.cpp:1432-1438`): every sibling sets `def->min = 0` and this one
+            // does not, so it keeps `ConfigOptionDef`'s own default. Transcribed as written.
+            let def = self
+                .def
+                .add("hot_plate_temp_initial_layer", ConfigOptionType::Ints);
+            def.label = "First layer".to_string();
+            def.full_label = "First layer bed temperature".to_string();
+            def.tooltip = "This is the bed temperature of the first layer. A value of 0 means the filament does not support printing on the High Temp Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1437
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1438
+            v.values.push(45);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("textured_plate_temp_initial_layer", ConfigOptionType::Ints);
+            def.label = "First layer".to_string();
+            def.full_label = "First layer bed temperature".to_string();
+            def.tooltip = "This is the bed temperature of the first layer. A value of 0 means the filament does not support printing on the Textured PEI Plate.".to_string();
+            def.sidetext = "\u{2103}".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1446
+            def.max = 300_f32;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1447
+            v.values.push(45);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("curr_bed_type", ConfigOptionType::Enum);
+            def.label = "Bed type".to_string();
+            def.tooltip = "Plate types supported by the printer".to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Simple;
+            def.enum_keys_map = keys_map_bed_type();
+            def.enum_values.push("Cool Plate".to_string());
+            def.enum_values.push("Engineering Plate".to_string());
+            def.enum_values.push("High Temp Plate".to_string());
+            def.enum_values.push("Textured PEI Plate".to_string());
+            def.enum_values.push("Textured Cool Plate".to_string());
+            def.enum_values.push("Supertack Plate".to_string());
+            def.enum_labels.push("Smooth Cool Plate".to_string());
+            def.enum_labels.push("Engineering Plate".to_string());
+            def.enum_labels.push("Smooth High Temp Plate".to_string());
+            def.enum_labels.push("Textured PEI Plate".to_string());
+            def.enum_labels.push("Textured Cool Plate".to_string());
+            def.enum_labels.push("Cool Plate (SuperTack)".to_string());
+            def.set_default_value(Box::new(ConfigOptionEnum::new(BedType::btPC)));
+        }
+        {
+            let def = self.def.add("default_bed_type", ConfigOptionType::String);
+            def.label = "Default bed type".to_string();
+            def.tooltip =
+                "Default bed type for the printer (supports both numeric and string format)."
+                    .to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_print_sequence", ConfigOptionType::Ints);
+            def.label = "First layer print sequence".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1481
+            def.max = 16_f32;
+            let mut v = ConfigOptionInts::new();
+            v.values.push(0);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("other_layers_print_sequence", ConfigOptionType::Ints);
+            def.label = "Other layers print sequence".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1487
+            def.max = 16_f32;
+            let mut v = ConfigOptionInts::new();
+            v.values.push(0);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("other_layers_print_sequence_nums", ConfigOptionType::Int);
+            def.label = "The number of other layers print sequence".to_string();
+            def.set_default_value(Box::new(ConfigOptionInt::new(0)));
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_sequence_choice", ConfigOptionType::Enum);
+            def.category = "Quality".to_string();
+            def.label = "First layer filament sequence".to_string();
+            def.enum_keys_map = keys_map_layer_seq();
+            def.enum_values.push("Auto".to_string());
+            def.enum_values.push("Customize".to_string());
+            def.enum_labels.push("Auto".to_string());
+            def.enum_labels.push("Customize".to_string());
+            def.mode = slic3r_config::config::ConfigOptionMode::Simple;
+            def.set_default_value(Box::new(ConfigOptionEnum::new(LayerSeq::flsAuto)));
+        }
+        {
+            let def = self
+                .def
+                .add("other_layers_sequence_choice", ConfigOptionType::Enum);
+            def.category = "Quality".to_string();
+            def.label = "Other layers filament sequence".to_string();
+            def.enum_keys_map = keys_map_layer_seq();
+            def.enum_values.push("Auto".to_string());
+            def.enum_values.push("Customize".to_string());
+            def.enum_labels.push("Auto".to_string());
+            def.enum_labels.push("Customize".to_string());
+            def.mode = slic3r_config::config::ConfigOptionMode::Simple;
+            def.set_default_value(Box::new(ConfigOptionEnum::new(LayerSeq::flsAuto)));
+        }
+        {
+            let def = self
+                .def
+                .add("before_layer_change_gcode", ConfigOptionType::String);
+            def.label = "Before layer change G-code".to_string();
+            def.tooltip =
+                "This G-code is inserted at every layer change before the Z lift.".to_string();
+            def.multiline = true;
+            def.full_width = true;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1521
+            def.height = 5;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("bottom_shell_layers", ConfigOptionType::Int);
+            def.label = "Bottom shell layers".to_string();
+            def.category = "Strength".to_string();
+            def.sidetext = "layers".to_string();
+            def.tooltip = concat!(
+                "This is the number of solid layers of bottom shell, including the bottom ",
+                "surface layer. When the thickness calculated by this value is thinner ",
+                "than bottom shell thickness, the bottom shell layers will be increased."
+            )
+            .to_string();
+            def.full_label = "Bottom shell layers".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1534
+            def.set_default_value(Box::new(ConfigOptionInt::new(3)));
+        }
+        {
+            let def = self
+                .def
+                .add("bottom_shell_thickness", ConfigOptionType::Float);
+            def.label = "Bottom shell thickness".to_string();
+            def.category = "Strength".to_string();
+            def.tooltip = "The number of bottom solid layers is increased when slicing if the thickness calculated by bottom shell layers is thinner than this value. This can avoid having too thin a shell when layer height is small. 0 means that this setting is disabled and the thickness of the bottom shell is determined simply by the number of bottom shell layers.".to_string();
+            def.full_label = "Bottom shell thickness".to_string();
+            def.sidetext = "mm".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1543
+            def.set_default_value(Box::new(ConfigOptionFloat::new(0.)));
+        }
+        {
+            let def = self
+                .def
+                .add("bottom_color_penetration_layers", ConfigOptionType::Int);
+            def.label = "Bottom paint penetration layers".to_string();
+            def.category = "Strength".to_string();
+            def.sidetext = "layers".to_string();
+            def.tooltip = concat!(
+                "The number of layers, including the bottom surface layer, that take the color painted on a bottom surface. ",
+                "Set to 0 to use the bottom shell layers. A value larger than the bottom shell also colors the sparse ",
+                "infill above the painted area."
+            ).to_string();
+            def.min = 0_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionInt::new(0)));
+        }
+        {
+            let def = self.def.add("gap_fill_target", ConfigOptionType::Enum);
+            def.label = "Apply gap fill".to_string();
+            def.category = "Strength".to_string();
+            def.tooltip = concat!(
+                "Enables gap fill for the selected solid surfaces. The minimum gap length that will be filled can be controlled ",
+                "from the filter out tiny gaps option below.\n\n",
+                "Options:\n",
+                "1. Everywhere: Applies gap fill to top, bottom and internal solid surfaces for maximum strength\n",
+                "2. Top and Bottom surfaces: Applies gap fill to top and bottom surfaces only, balancing print speed, ",
+                "reducing potential over extrusion in the solid infill and making sure the top and bottom surfaces have ",
+                "no pinhole gaps\n",
+                "3. Nowhere: Disables gap fill for all solid infill areas\n\n",
+                "Note that if using the classic perimeter generator, gap fill may also be generated between perimeters, ",
+                "if a full width line cannot fit between them. That perimeter gap fill is not controlled by this setting.\n\n",
+                "If you would like all gap fill, including the classic perimeter generated one, removed, ",
+                "set the filter out tiny gaps value to a large number, like 999999.\n\n",
+                "However this is not advised, as gap fill between perimeters is contributing to the model's strength. ",
+                "For models where excessive gap fill is generated between perimeters, a better option would be to ",
+                "switch to the arachne wall generator and use this option to control whether the cosmetic top and ",
+                "bottom surface gap fill is generated."
+            ).to_string();
+            def.enum_keys_map = keys_map_gap_fill_target();
+            def.enum_values.push("everywhere".to_string());
+            def.enum_values.push("topbottom".to_string());
+            def.enum_values.push("nowhere".to_string());
+            def.enum_labels.push("Everywhere".to_string());
+            def.enum_labels.push("Top and bottom surfaces".to_string());
+            def.enum_labels.push("Nowhere".to_string());
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            def.set_default_value(Box::new(ConfigOptionEnum::new(GapFillTarget::gftNowhere)));
+        }
+        {
+            let def = self
+                .def
+                .add("enable_overhang_bridge_fan", ConfigOptionType::Bools);
+            def.label = "Force cooling for overhangs and bridges".to_string();
+            def.tooltip = concat!(
+                "Enable this option to allow adjustment of the part cooling fan speed for specifically for overhangs, internal and external ",
+                "bridges. Setting the fan speed specifically for these features can improve overall print quality and reduce warping."
+            ).to_string();
+            def.mode = slic3r_config::config::ConfigOptionMode::Simple;
+            let mut v = ConfigOptionBools::new();
+            v.values.push(1);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("overhang_fan_speed", ConfigOptionType::Ints);
+            def.label = "Overhangs and external bridges fan speed".to_string();
+            def.tooltip = concat!(
+                "Use this part cooling fan speed when printing bridges or overhang walls with an overhang threshold that exceeds ",
+                "the value set in the 'Overhangs cooling threshold' parameter above. Increasing the cooling specifically for overhangs ",
+                "and bridges can improve the overall print quality of these features.\n\n",
+                "Please note, this fan speed is clamped on the lower end by the minimum fan speed threshold set above. It is also adjusted ",
+                "upwards up to the maximum fan speed threshold when the minimum layer time threshold is not met."
+            ).to_string();
+            def.sidetext = "%".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1601
+            def.max = 100_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            let mut v = ConfigOptionInts::new();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1603
+            v.values.push(100);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self
+                .def
+                .add("overhang_fan_threshold", ConfigOptionType::Enums);
+            def.label = "Overhang cooling activation threshold".to_string();
+            def.tooltip = concat!(
+                "When the overhang exceeds this specified threshold, force the cooling fan to run at the 'Overhang Fan Speed' set below. ",
+                "This threshold is expressed as a percentage, indicating the portion of each line's width that is unsupported by the layer ",
+                "beneath it. Setting this value to 0% forces the cooling fan to run for all outer walls, regardless of the overhang degree."
+            ).to_string();
+            def.enum_keys_map = keys_map_overhang_fan_threshold();
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            for s in ["0%", "10%", "25%", "50%", "75%", "95%"] {
+                def.enum_values.push(s.to_string());
+                def.enum_labels.push(s.to_string());
+            }
+            // PORT NOTE: the vendored default is
+            // `new ConfigOptionEnumsGeneric{ (int)Overhang_threshold_bridge }`
+            // (`PrintConfig.cpp:1626`), a brace-init that fills the inherited value vector and
+            // leaves `keys_map` at its own default, so the oracle's `default_value->serialize()`
+            // finds no name for the value and yields the empty string. `ConfigOptionEnumsGeneric::default()`
+            // reproduces that exactly (its `keys_map` is `EMPTY_ENUM_VALUES`); giving it this
+            // option's key map here would serialize `"95%"` and diverge from the oracle.
+            let mut v = slic3r_config::config::ConfigOptionEnumsGeneric::default();
+            v.values
+                .push(OverhangFanThreshold::Overhang_threshold_bridge as i32);
+            def.set_default_value(Box::new(v));
+        }
+        {
+            let def = self.def.add("bridge_angle", ConfigOptionType::Float);
+            def.label = "External bridge infill direction".to_string();
+            def.category = "Strength".to_string();
+            def.tooltip = concat!(
+                "External Bridging angle override.\n",
+                "If left to zero, the bridging angle will be calculated automatically for each specific bridge.\n",
+                "Otherwise the provided angle will be used according to:\n",
+                " - The absolute coordinates\n",
+                " - The absolute coordinates + Model rotation: If Align directions to model is enabled\n",
+                " - The optimal automatic angle + this value: If 'Relative Bridge Angle' is enabled\n\n",
+                "Use 180\u{b0} for zero absolute angle."
+            ).to_string();
+            def.sidetext = "\u{b0}".to_string();
+            def.min = 0_f32;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1641
+            def.max = 180_f32;
+            def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:1643
+            def.set_default_value(Box::new(ConfigOptionFloat::new(0.)));
+        }
         // <<<STEP5-FFF>>>
     }
 
@@ -3431,6 +3915,683 @@ impl PrintConfigDef {
     fn init_sla_params(&mut self) {
         // <<<STEP5-SLA>>>
     }
+}
+
+// --------------------------------------------------------------------------------------------
+// Step 3: `StaticPrintConfig`, `StaticCacheBase` and `StaticCache<T>`
+// (`PrintConfig.hpp:1041-1135`), and the one `port/ownership.tsv` row of this unit.
+// --------------------------------------------------------------------------------------------
+
+/// One option field's reachability on its owning config class: the pair of functions that turn
+/// a borrow of the owner into a borrow of that field as a `dyn ConfigOption`.
+///
+/// **PORT NOTE: this stands in for `m_map_name_to_offset`'s `ptrdiff_t`
+/// (`PrintConfig.hpp:1069,1073`), and it is a divergence from this task's own plan's Step 3,
+/// which specified `std::mem::offset_of!` plus one `unsafe fn` reproducing
+/// `optptr`'s pointer arithmetic.** Building it that way does not work. The vendored
+/// `optptr` is `reinterpret_cast<ConfigOption*>((char*)owner + offset)` (`:1090`), which relies
+/// on every option field being a C++ class with `ConfigOption` as a base, so a byte address is
+/// already a valid `ConfigOption*`. Rust's `&dyn ConfigOption` is a *fat* pointer: it carries a
+/// vtable chosen by the field's concrete type, and no byte offset alone can produce one. The
+/// concrete type therefore has to be known where the borrow is formed, which is exactly what a
+/// per-field function pair is. Keeping the offset beside it would add an `unsafe` block, a
+/// `// SAFETY:` invariant that is wrong for all 11 classes at once if it is wrong at all (this
+/// plan's own named second risk), and a real undefined-behaviour surface, in exchange for a
+/// number nothing observable reads: the offsets never reach `keys()`, `optptr`'s result,
+/// `hash()`, `operator==` or `apply_to()`, and this unit's proof compares the registry, never a
+/// `StaticPrintConfig` instance. `port/ownership.tsv` has no row for
+/// `m_map_name_to_offset` either -- it is a `std::map<std::string, ptrdiff_t>`, not a
+/// raw-pointer field -- so nothing in the committed inputs requires the offset form. The
+/// divergence is named here and in this task's pull request body.
+pub struct OptionAccessor<T: 'static> {
+    /// `optptr(name, const T *owner) const` (`PrintConfig.hpp:1093-1097`).
+    pub get: fn(&T) -> &dyn slic3r_config::config::ConfigOption,
+    /// `optptr(name, T *owner) const` (`PrintConfig.hpp:1087-1091`).
+    pub get_mut: fn(&mut T) -> &mut dyn slic3r_config::config::ConfigOption,
+}
+impl<T: 'static> Clone for OptionAccessor<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T: 'static> Copy for OptionAccessor<T> {}
+impl<T: 'static> std::fmt::Debug for OptionAccessor<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("OptionAccessor")
+    }
+}
+
+/// `class StaticCacheBase` (`PrintConfig.hpp:1060-1074`), "Internal class for keeping a dynamic
+/// map to static options".
+#[derive(Debug)]
+pub struct StaticCacheBase<T: 'static> {
+    /// `m_map_name_to_offset` (`PrintConfig.hpp:1073`), a `std::map<std::string, ptrdiff_t>`.
+    /// See [`OptionAccessor`] for why the value is a function pair here rather than a byte
+    /// offset. A `BTreeMap` iterates in the same bytewise key order the `std::map` does.
+    m_map_name_to_option: std::collections::BTreeMap<String, OptionAccessor<T>>,
+}
+
+impl<T: 'static> Default for StaticCacheBase<T> {
+    fn default() -> Self {
+        StaticCacheBase {
+            m_map_name_to_option: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl<T: 'static> StaticCacheBase<T> {
+    /// `opt_add(name, base_ptr, opt)` (`PrintConfig.hpp:1065-1070`). The vendored body asserts
+    /// the name is not already present and then records the field's offset from `base_ptr`;
+    /// there is no `base_ptr` here because there is no offset, and `debug_assert!` carries the
+    /// same assertion.
+    pub fn opt_add(&mut self, name: &str, accessor: OptionAccessor<T>) {
+        debug_assert!(
+            !self.m_map_name_to_option.contains_key(name),
+            "StaticCacheBase::opt_add: {name} is already registered"
+        );
+        self.m_map_name_to_option.insert(name.to_string(), accessor);
+    }
+}
+
+/// `class StaticCache<T> : public StaticCacheBase` (`PrintConfig.hpp:1077-1134`), "Parametrized
+/// by the type of the topmost class owning the options".
+///
+/// `m_defaults` carries `port/ownership.tsv`'s cell for `PrintConfig.hpp:1132`
+/// (`StaticCache::m_defaults`, `T *`, class `borrowed`) **verbatim**: `&'a mut T`, with no
+/// `Option<_>` wrapper and no owned `T` -- the same way `slic3r-config` takes its own
+/// `borrowed` cells verbatim. The vendored constructor sets the pointer to `nullptr` and
+/// `initialized()` reports `! m_keys.empty()` (`:1082,1085`), because the cache is a file-scope
+/// `static` that exists before anything fills it. A `&'a mut T` cannot be null, so this port
+/// makes the cache constructible only through [`StaticCache::finalize`], and the
+/// not-yet-initialized state is the enclosing `OnceLock`/`thread_local`'s rather than a null
+/// field. `initialized()` is kept and still reads `! m_keys.is_empty()`, so a cache finalized
+/// against a `ConfigDef` that resolved no key reports `false` exactly as the vendored one does.
+#[derive(Debug)]
+pub struct StaticCache<'a, T: 'static> {
+    base: StaticCacheBase<T>,
+    /// `T *m_defaults` (`PrintConfig.hpp:1132`); `port/ownership.tsv` cell, verbatim.
+    m_defaults: &'a mut T,
+    /// `std::vector<std::string> m_keys` (`PrintConfig.hpp:1133`).
+    m_keys: Vec<String>,
+}
+
+impl<'a, T: 'static> StaticCache<'a, T> {
+    /// `finalize(T *defaults, const ConfigDef *defs)` (`PrintConfig.hpp:1105-1129`), which is
+    /// also the only way to build a cache here; see this struct's own doc comment.
+    ///
+    /// FIDELITY(port): `m_keys` is filled by walking `defs->options` -- the registry's own
+    /// bytewise-by-key order -- and keeping only the keys this `T` actually has a field for, so
+    /// `keys()` is in **registry order, not field-declaration order**. That order reaches
+    /// output through `ConfigBase::keys()` and everything built on it, so it is transcribed
+    /// rather than replaced by the declaration order `StaticCacheBase` was filled in.
+    pub fn finalize(base: StaticCacheBase<T>, defaults: &'a mut T, defs: &ConfigDef<'_>) -> Self {
+        let mut m_keys: Vec<String> = Vec::with_capacity(base.m_map_name_to_option.len());
+        for key in defs.options.keys() {
+            let Some(accessor) = base.m_map_name_to_option.get(key).copied() else {
+                // "This option is not defined by the ConfigBase of type T."
+                continue;
+            };
+            m_keys.push(key.clone());
+            let def = defs.get(key);
+            debug_assert!(def.is_some(), "StaticCache::finalize: def is null");
+            let Some(def) = def else { continue };
+            if let Some(default_value) = def.default_value.as_ref() {
+                let opt = (accessor.get_mut)(defaults);
+                if default_value.option_type() == ConfigOptionType::Enums {
+                    // "Enum list defaults are built without a keys map; set() adopts the one
+                    // create_default_option() adds." (`PrintConfig.hpp:1121-1124`).
+                    if let Ok(default_option) = def.create_default_option() {
+                        let _ = opt.set(default_option.as_ref());
+                    }
+                } else {
+                    let _ = opt.set(default_value.as_ref());
+                }
+            }
+        }
+        StaticCache {
+            base,
+            m_defaults: defaults,
+            m_keys,
+        }
+    }
+
+    /// `initialized()` (`PrintConfig.hpp:1085`).
+    pub fn initialized(&self) -> bool {
+        !self.m_keys.is_empty()
+    }
+
+    /// `const ConfigOption* optptr(name, const T *owner) const`
+    /// (`PrintConfig.hpp:1093-1097`).
+    pub fn optptr<'o>(
+        &self,
+        name: &str,
+        owner: &'o T,
+    ) -> Option<&'o dyn slic3r_config::config::ConfigOption> {
+        self.base
+            .m_map_name_to_option
+            .get(name)
+            .map(|a| (a.get)(owner))
+    }
+
+    /// `ConfigOption* optptr(name, T *owner) const` (`PrintConfig.hpp:1087-1091`).
+    pub fn optptr_mut<'o>(
+        &self,
+        name: &str,
+        owner: &'o mut T,
+    ) -> Option<&'o mut dyn slic3r_config::config::ConfigOption> {
+        let accessor = *self.base.m_map_name_to_option.get(name)?;
+        Some((accessor.get_mut)(owner))
+    }
+
+    /// `keys()` (`PrintConfig.hpp:1099`).
+    pub fn keys(&self) -> &Vec<String> {
+        &self.m_keys
+    }
+
+    /// `defaults()` (`PrintConfig.hpp:1100`): the vendored body is `return *m_defaults;`.
+    pub fn defaults(&self) -> &T {
+        self.m_defaults
+    }
+}
+
+/// `class StaticPrintConfig : public StaticConfig` (`PrintConfig.hpp:1041-1135`). The vendored
+/// class contributes three things to each concrete config class -- `def()` returning
+/// `&print_config_def`, the pure-virtual `keys_ref()`, and a `handle_legacy` override
+/// delegating to `PrintConfigDef::handle_legacy` -- plus the two nested cache classes, ported
+/// above. Rust has no inheritance, so it is a trait the 11 concrete classes implement, with
+/// `def()` and `handle_legacy()` provided here so no concrete class repeats them.
+pub trait StaticPrintConfig: slic3r_config::config::StaticConfig {
+    /// `virtual const t_config_option_keys& keys_ref() const = 0` (`PrintConfig.hpp:1049`).
+    fn keys_ref(&self) -> &Vec<String>;
+
+    /// `def()` (`PrintConfig.hpp:1047`): "Overrides ConfigBase::def(). Static configuration
+    /// definition."
+    fn static_print_config_def() -> &'static ConfigDef<'static>
+    where
+        Self: Sized,
+    {
+        &print_config_def().def
+    }
+
+    /// `handle_legacy()` (`PrintConfig.hpp:1056-1057`): "Verify whether the opt_key has not
+    /// been obsoleted or renamed", delegating to `PrintConfigDef::handle_legacy`.
+    fn static_print_config_handle_legacy(opt_key: &mut String, value: &mut String)
+    where
+        Self: Sized,
+    {
+        PrintConfigDef::handle_legacy(opt_key, value);
+    }
+}
+
+// --------------------------------------------------------------------------------------------
+// Step 6: the anonymous-namespace string helpers (`PrintConfig.cpp:55-85`) and
+// `PrintConfigDef::handle_legacy` (`PrintConfig.cpp:9748-10041`).
+//
+// `SplitStringAndRemoveDuplicateElement` and `ReplaceString` are defined inside this
+// translation unit's own anonymous namespace, so they have internal linkage and no symbol any
+// other object file can call -- together with `enum_names_from_keys_map` and
+// `assign_printer_technology_to_unknown`, they are what makes this unit's manifest rows read
+// `proof path: 3`.
+// --------------------------------------------------------------------------------------------
+
+/// `SplitStringAndRemoveDuplicateElement` (`PrintConfig.cpp:56-75`).
+///
+/// FIDELITY(port): the vendored return type is a `std::set<std::string>`, which iterates in
+/// bytewise order and drops duplicates; `BTreeSet<String>` does both the same way. The order
+/// reaches output through `handle_legacy`'s `different_settings_to_system` branch, which
+/// rewrites the value one split key at a time in this order.
+fn split_string_and_remove_duplicate_element(
+    s: &str,
+    separator: &str,
+) -> std::collections::BTreeSet<String> {
+    let mut result = std::collections::BTreeSet::new();
+    if s.is_empty() {
+        return result;
+    }
+    // The vendored body appends one separator so the final field is terminated, then walks the
+    // string byte by byte, taking the text up to the next separator and jumping past it. The
+    // `i` index is advanced inside the loop, so this is a `while` here rather than a `for`.
+    let strs: Vec<u8> = {
+        let mut v = s.as_bytes().to_vec();
+        v.extend_from_slice(separator.as_bytes());
+        v
+    };
+    let size = strs.len();
+    let sep = separator.as_bytes();
+    let mut i: usize = 0;
+    while i < size {
+        match find_subslice(&strs, sep, i) {
+            Some(pos) if pos < size => {
+                let sub_str = String::from_utf8_lossy(&strs[i..pos]).into_owned();
+                result.insert(sub_str);
+                // `i = pos + separator.size() - 1` then the loop's `++i`.
+                i = pos + sep.len();
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    result
+}
+
+/// `std::string::find(needle, from)` over bytes, the one operation
+/// [`split_string_and_remove_duplicate_element`] and [`replace_string`] both need and which
+/// Rust's `str` has no direct equivalent of (`str::find` searches from the start only).
+fn find_subslice(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
+    if needle.is_empty() || from > haystack.len() || needle.len() > haystack.len() - from {
+        return None;
+    }
+    (from..=haystack.len() - needle.len()).find(|&i| &haystack[i..i + needle.len()] == needle)
+}
+
+/// `ReplaceString(resource_str, old_str, new_str)` (`PrintConfig.cpp:77-84`): replaces **every**
+/// occurrence, advancing past each replacement rather than rescanning it, so a `new_str`
+/// containing `old_str` does not loop. `str::replace` has the same every-occurrence,
+/// no-rescan behaviour, but it is spelt out here as the vendored loop so the advance is visible.
+fn replace_string(resource_str: &mut String, old_str: &str, new_str: &str) {
+    if old_str.is_empty() {
+        return;
+    }
+    let mut bytes = resource_str.as_bytes().to_vec();
+    let mut pos: usize = 0;
+    while let Some(found) = find_subslice(&bytes, old_str.as_bytes(), pos) {
+        bytes.splice(found..found + old_str.len(), new_str.bytes());
+        // "advance position to continue after replacement"
+        pos = found + new_str.len();
+    }
+    *resource_str = String::from_utf8_lossy(&bytes).into_owned();
+}
+
+impl PrintConfigDef {
+    /// `PrintConfigDef::handle_legacy(t_config_option_key &opt_key, std::string &value)`
+    /// (`PrintConfig.cpp:9748-10041`). "Verify whether the opt_key has not been obsoleted or
+    /// renamed. Both opt_key and value may be modified. If the opt_key is no more valid in this
+    /// version of Slic3r, opt_key is cleared."
+    ///
+    /// The whole body is one `else if` chain, so at most one branch runs; it is transcribed as
+    /// one chain for the same reason, not reordered into a match on `opt_key` (two branches test
+    /// the same key with different values, and one tests a prefix).
+    pub fn handle_legacy(opt_key: &mut String, value: &mut String) {
+        if opt_key == "curr_bed_type" && value == "SuperTack Plate" {
+            *value = "Supertack Plate".to_string();
+        } else if opt_key == "enable_wipe_tower" {
+            *opt_key = "enable_prime_tower".to_string();
+        } else if opt_key == "wipe_tower_width" {
+            *opt_key = "prime_tower_width".to_string();
+        } else if opt_key == "wiping_volume" {
+            *opt_key = "prime_volume".to_string();
+        } else if opt_key == "wipe_tower_brim_width" {
+            *opt_key = "prime_tower_brim_width".to_string();
+        } else if opt_key == "tool_change_gcode" {
+            *opt_key = "change_filament_gcode".to_string();
+        } else if opt_key == "bridge_fan_speed" {
+            *opt_key = "overhang_fan_speed".to_string();
+        } else if opt_key == "tpms_adaptive" {
+            *opt_key = "adaptive_infill_mode".to_string();
+        } else if opt_key == "tpms_interior_density" {
+            *opt_key = "adaptive_infill_interior_density".to_string();
+        } else if opt_key == "tpms_adaptive_gradient" {
+            *opt_key = "adaptive_infill_gradient".to_string();
+        } else if opt_key == "infill_extruder" || opt_key == "sparse_infill_filament" {
+            // "legacy feature-filament selector. Pre-2.4.0-dev these keys were 1-based and the
+            // default value "1" meant "the first/active filament". ... Map the legacy default
+            // "1" to "0" (inherit); keep explicit values >1."
+            *opt_key = "sparse_infill_filament_id".to_string();
+            if value == "1" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "solid_infill_extruder" || opt_key == "solid_infill_filament" {
+            *opt_key = "internal_solid_filament_id".to_string();
+            if value == "1" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "top_solid_infill_filament" {
+            *opt_key = "top_surface_filament_id".to_string();
+            if value == "1" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "bottom_solid_infill_filament" {
+            *opt_key = "bottom_surface_filament_id".to_string();
+            if value == "1" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "perimeter_extruder"
+            || opt_key == "wall_filament"
+            || opt_key == "wall_filament_id"
+        {
+            *opt_key = "outer_wall_filament_id".to_string();
+            if value == "1" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "inner_wall_filament" {
+            *opt_key = "inner_wall_filament_id".to_string();
+            if value == "1" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "outer_wall_filament" {
+            *opt_key = "outer_wall_filament_id".to_string();
+            if value == "1" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "wipe_tower_extruder" {
+            *opt_key = "wipe_tower_filament".to_string();
+        } else if opt_key == "support_material_extruder" {
+            *opt_key = "support_filament".to_string();
+        } else if opt_key == "support_material_interface_extruder" {
+            *opt_key = "support_interface_filament".to_string();
+        } else if opt_key == "support_material_angle" {
+            *opt_key = "support_angle".to_string();
+        } else if opt_key == "support_material_enforce_layers" {
+            *opt_key = "enforce_support_layers".to_string();
+        } else if (opt_key == "initial_layer_print_height"
+            || opt_key == "initial_layer_speed"
+            || opt_key == "internal_solid_infill_speed"
+            || opt_key == "top_surface_speed"
+            || opt_key == "support_interface_speed"
+            || opt_key == "outer_wall_speed"
+            || opt_key == "support_object_xy_distance")
+            && value.contains('%')
+        {
+            // "this is old profile in which value is expressed as percentage. But now these
+            // key-value must be absolute value. Reset to default value by erasing these key to
+            // avoid parsing error."
+            opt_key.clear();
+        } else if opt_key == "inherits_cummulative" {
+            *opt_key = "inherits_group".to_string();
+        } else if opt_key == "compatible_printers_condition_cummulative" {
+            *opt_key = "compatible_machine_expression_group".to_string();
+        } else if opt_key == "compatible_prints_condition_cummulative" {
+            *opt_key = "compatible_process_expression_group".to_string();
+        } else if opt_key == "cooling" {
+            *opt_key = "slow_down_for_layer_cooling".to_string();
+        } else if opt_key == "timelapse_no_toolhead" {
+            *opt_key = "timelapse_type".to_string();
+        } else if opt_key == "timelapse_type" && value == "2" {
+            // "old file "0" is None, "2" is Traditional; new file "0" is Traditional, erase "2""
+            *value = "0".to_string();
+        } else if opt_key == "support_type" && value == "normal" {
+            *value = "normal(manual)".to_string();
+        } else if opt_key == "support_type" && value == "tree" {
+            *value = "tree(manual)".to_string();
+        } else if opt_key == "support_type" && value == "hybrid(auto)" {
+            *value = "tree(auto)".to_string();
+        } else if opt_key == "support_base_pattern" && value == "none" {
+            *value = "hollow".to_string();
+        } else if opt_key == "tree_support_wall_count" && value == "-1" {
+            *value = "0".to_string();
+        } else if opt_key == "different_settings_to_system" {
+            // The one recursive branch: each `;`-separated key in the value is run through
+            // `handle_legacy` on its own, and where that renames it the whole value has the old
+            // spelling replaced by the new one.
+            let copy_value: String = value.chars().filter(|c| *c != '"').collect();
+            let split_keys = split_string_and_remove_duplicate_element(&copy_value, ";");
+            for split_key in split_keys {
+                let mut copy_key = split_key.clone();
+                let mut copy_inner_value = String::new();
+                PrintConfigDef::handle_legacy(&mut copy_key, &mut copy_inner_value);
+                if copy_key != split_key {
+                    replace_string(value, &split_key, &copy_key);
+                }
+            }
+        } else if opt_key == "overhang_fan_threshold" && value == "5%" {
+            *value = "10%".to_string();
+        } else if opt_key == "wall_infill_order" {
+            if value == "inner wall/outer wall/infill" || value == "infill/inner wall/outer wall" {
+                *opt_key = "wall_sequence".to_string();
+                *value = "inner wall/outer wall".to_string();
+            } else if value == "outer wall/inner wall/infill"
+                || value == "infill/outer wall/inner wall"
+            {
+                *opt_key = "wall_sequence".to_string();
+                *value = "outer wall/inner wall".to_string();
+            } else if value == "inner-outer-inner wall/infill" {
+                *opt_key = "wall_sequence".to_string();
+                *value = "inner-outer-inner wall".to_string();
+            } else {
+                *opt_key = "wall_sequence".to_string();
+            }
+        } else if opt_key == "nozzle_volume_type"
+            || opt_key == "default_nozzle_volume_type"
+            || opt_key == "printer_extruder_variant"
+            || opt_key == "print_extruder_variant"
+            || opt_key == "filament_extruder_variant"
+            || opt_key == "extruder_variant_list"
+        {
+            replace_string(value, "Normal", "Standard");
+            replace_string(value, "Big Traffic", "High Flow");
+        } else if opt_key == "extruder_type" {
+            replace_string(value, "DirectDrive", "Direct Drive");
+        } else if opt_key == "enable_power_loss_recovery" {
+            // PORT NOTE: `boost::iequals` (`PrintConfig.cpp:9883,9890`) is locale-sensitive in
+            // general; both call sites compare against the ASCII literals "true"/"false", for
+            // which `eq_ignore_ascii_case` is the same function. Named rather than assumed.
+            if value == "1" || value.eq_ignore_ascii_case("true") {
+                *value = "enable".to_string();
+            } else if value == "0" || value.eq_ignore_ascii_case("false") {
+                *value = "disable".to_string();
+            }
+        } else if opt_key == "enable_arc_fitting" {
+            if value == "1" || value.eq_ignore_ascii_case("true") {
+                *value = "enabled".to_string();
+            } else if value == "0" || value.eq_ignore_ascii_case("false") {
+                *value = "disabled".to_string();
+            }
+        } else if opt_key == "ensure_vertical_shell_thickness" {
+            if value == "1" {
+                *value = "ensure_all".to_string();
+            } else if value == "0" {
+                *value = "ensure_moderate".to_string();
+            }
+        } else if opt_key == "rotate_solid_infill_direction" {
+            *opt_key = "solid_infill_rotate_template".to_string();
+            if value == "1" {
+                *value = "0,90".to_string();
+            } else if value == "0" {
+                *value = "0".to_string();
+            }
+        } else if opt_key == "sparse_infill_anchor" {
+            *opt_key = "infill_anchor".to_string();
+        } else if opt_key == "sparse_infill_anchor_max" {
+            *opt_key = "infill_anchor_max".to_string();
+        } else if opt_key == "chamber_temperatures" {
+            *opt_key = "chamber_temperature".to_string();
+        } else if opt_key == "thumbnail_size" {
+            *opt_key = "thumbnails".to_string();
+        } else if opt_key == "top_one_wall_type" && value != "none" {
+            *opt_key = "only_one_wall_top".to_string();
+            *value = "1".to_string();
+        } else if opt_key == "initial_layer_flow_ratio" {
+            *opt_key = "bottom_solid_infill_flow_ratio".to_string();
+        } else if opt_key == "ironing_direction" {
+            *opt_key = "ironing_angle".to_string();
+        } else if opt_key == "ironing_angle" && value.starts_with('-') {
+            *value = "0".to_string();
+        } else if opt_key == "counterbole_hole_bridging" {
+            *opt_key = "counterbore_hole_bridging".to_string();
+        } else if opt_key == "draft_shield" && value == "limited" {
+            *value = "disabled".to_string();
+        } else if (opt_key == "sparse_infill_pattern"
+            || opt_key == "top_surface_pattern"
+            || opt_key == "bottom_surface_pattern"
+            || opt_key == "internal_solid_infill_pattern"
+            || opt_key == "ironing_pattern"
+            || opt_key == "support_ironing_pattern")
+            && value == "zig-zag"
+        {
+            *value = "rectilinear".to_string();
+        } else if opt_key == "filament_map_mode" {
+            if value == "Auto" {
+                *value = "Auto For Flush".to_string();
+            }
+        } else if opt_key == "filament_type" {
+            // `std::getline(ss, token, ';')` over the value, unquoting each token, renaming
+            // "ASA-Aero" to "ASA-AERO", and rebuilding the whole quoted, `;`-joined value only
+            // if at least one token was renamed.
+            let mut type_list: Vec<String> = Vec::new();
+            let mut rebuild_value = false;
+            for raw in cpp_getline_split(value, ';') {
+                let mut token = raw;
+                if token.len() >= 2 && token.starts_with('"') && token.ends_with('"') {
+                    token = token[1..token.len() - 1].to_string();
+                }
+                if token == "ASA-Aero" {
+                    token = "ASA-AERO".to_string();
+                    rebuild_value = true;
+                }
+                type_list.push(token);
+            }
+            if rebuild_value {
+                value.clear();
+                for (idx, t) in type_list.iter().enumerate() {
+                    if idx != 0 {
+                        value.push(';');
+                    }
+                    value.push('"');
+                    value.push_str(t);
+                    value.push('"');
+                }
+            }
+        } else if opt_key == "prime_tower_rib_wall" {
+            if value == "1" {
+                *opt_key = "wipe_tower_wall_type".to_string();
+                *value = "rib".to_string();
+            } else {
+                opt_key.clear();
+            }
+        } else if opt_key == "prime_tower_extra_rib_length" {
+            *opt_key = "wipe_tower_extra_rib_length".to_string();
+        } else if opt_key == "prime_tower_rib_width" {
+            *opt_key = "wipe_tower_rib_width".to_string();
+        } else if opt_key == "prime_tower_fillet_wall" {
+            *opt_key = "wipe_tower_fillet_wall".to_string();
+        } else if opt_key == "extruder_clearance_max_radius" {
+            *opt_key = "extruder_clearance_radius".to_string();
+        } else if opt_key == "machine_switch_extruder_time" {
+            *opt_key = "machine_tool_change_time".to_string();
+        } else if opt_key == "wall_direction" && value == "auto" {
+            *value = "ccw".to_string();
+        } else if opt_key == "is_ixex" {
+            // "the IDEX/IQEX parallel printing keys shipped to testers as ixex_* before the
+            // feature was renamed IMEX ... is_ixex is the master gate."
+            *opt_key = "is_imex".to_string();
+        } else if opt_key.starts_with("ixex_") {
+            // `opt_key.compare(0, 5, "ixex_") == 0` (`PrintConfig.cpp:9997`): a five-byte
+            // prefix test, which `starts_with` reproduces including for a shorter `opt_key`.
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:9998
+            *opt_key = format!("imex_{}", &opt_key[5..]);
+            if opt_key == "imex_carriage_width_x" {
+                *opt_key = "imex_nozzle_clearance_x".to_string();
+            } else if opt_key == "imex_carriage_width_y" {
+                *opt_key = "imex_nozzle_clearance_y".to_string();
+            }
+        }
+
+        // "Ignore the following obsolete configuration keys" (`PrintConfig.cpp:10005-10030`), a
+        // function-scope `static std::set<std::string>`.
+        if obsolete_option_keys().contains(opt_key.as_str()) {
+            opt_key.clear();
+            return;
+        }
+
+        if !print_config_def().def.has(opt_key) {
+            opt_key.clear();
+        }
+    }
+}
+
+/// `std::getline(ss, token, sep)` over a whole string: the fields between separators, dropping
+/// a trailing empty field after a trailing separator (which `str::split` keeps). The same
+/// distinction `slic3r-config`'s own `normalize_cli_bool_value` records for its `getline` loop.
+fn cpp_getline_split(s: &str, sep: char) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut saw_any = false;
+    for c in s.chars() {
+        if c == sep {
+            out.push(std::mem::take(&mut current));
+            saw_any = true;
+        } else {
+            current.push(c);
+            saw_any = true;
+        }
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    let _ = saw_any;
+    out
+}
+
+/// The `static std::set<std::string> ignore` of `handle_legacy`
+/// (`PrintConfig.cpp:10006-10030`): the obsolete keys whose `opt_key` is cleared on load.
+fn obsolete_option_keys() -> &'static std::collections::BTreeSet<&'static str> {
+    static KEYS: std::sync::OnceLock<std::collections::BTreeSet<&'static str>> =
+        std::sync::OnceLock::new();
+    KEYS.get_or_init(|| {
+        [
+            "acceleration",
+            "scale",
+            "rotate",
+            "duplicate",
+            "duplicate_grid",
+            "bed_size",
+            "print_center",
+            "g0",
+            "wipe_tower_per_color_wipe",
+            "support_sharp_tails",
+            "support_remove_small_overhangs",
+            "support_with_sheath",
+            "tree_support_collision_resolution",
+            "tree_support_with_infill",
+            "max_volumetric_speed",
+            "max_print_speed",
+            "support_closing_radius",
+            "remove_freq_sweep",
+            "remove_bed_leveling",
+            "remove_extrusion_calibration",
+            "support_transition_line_width",
+            "support_transition_speed",
+            "bed_temperature",
+            "bed_temperature_initial_layer",
+            "can_switch_nozzle_type",
+            "can_add_auxiliary_fan",
+            "extra_flush_volume",
+            "spaghetti_detector",
+            "adaptive_layer_height",
+            "z_hop_type",
+            "z_lift_type",
+            "bed_temperature_difference",
+            "long_retraction_when_cut",
+            "retraction_distance_when_cut",
+            "internal_bridge_support_thickness",
+            "top_area_threshold",
+            "reduce_wall_solid_infill",
+            "filament_load_time",
+            "filament_unload_time",
+            "smooth_coefficient",
+            "overhang_totally_speed",
+            "silent_mode",
+            "overhang_speed_classic",
+            // "superseded by top_surface_fill_order / bottom_surface_fill_order"
+            "anisotropic_surfaces",
+            // "Belt printer keys retired before the first release ..."
+            "belt_slice_rotation_global",
+            "preslice_remap_x",
+            "preslice_remap_y",
+            "preslice_remap_z",
+            "preslice_remap_global",
+            "belt_support_z_offset_mode",
+            "first_layer_plane",
+            "first_layer_plane_offset",
+            "belt_preslice_global",
+            "gcode_back_transform",
+            "belt_support_floor_mode",
+            "first_layer_plane_thickness",
+        ]
+        .into_iter()
+        .collect()
+    })
 }
 
 // <<<APPEND>>>
