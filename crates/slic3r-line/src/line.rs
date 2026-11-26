@@ -1003,10 +1003,18 @@ mod tests {
 
         // Review finding: `distance_to_infinite_squared` had no oracle comparison anywhere in
         // the tree, which is what let it return `(point - closest).squaredNorm()` instead of
-        // the vendored `(t * v - va).squaredNorm()` (`Line.hpp:106`) stand. `point = (50, 50)`
-        // against this `line` puts `t` strictly inside `(0, 1)` -- the one branch both formulas
-        // can disagree on.
-        let point = Point::new(50, 50);
+        // the vendored `(t * v - va).squaredNorm()` (`Line.hpp:106`) stand. `point = (0, 28)`
+        // is chosen because it *discriminates* between those two expressions, not merely
+        // because `t` is interior: against this `line` it gives `t = 0.007352941176470588`,
+        // where the vendored formula yields `161.05882352941177` in `f64` and the pre-fix one
+        // `161.0588235294118`. An interior `t` alone is not enough -- the earlier probe
+        // `(50, 50)` has `t = 0.19852941176470587` and both expressions return bit-identical
+        // `355.8823529411765`, so it could not have failed against the pre-fix code. Measured
+        // over the integer points of the `0..=119` square: 3,815 of the 13,797 with interior
+        // `t` discriminate, and `(0, 28)` is the first. The `closest_point` half of this
+        // assertion is unaffected by that fix (the fix touched only the returned squared
+        // distance), so it proves the out-parameter, not the formula.
+        let point = Point::new(0, 28);
         let (actual_sq, actual_closest) = line.distance_to_infinite_squared(point);
         let oracle_dist = slic3r_proof::proof_units::line::path2_line_distance_to_infinite_squared(
             line.a.x(),

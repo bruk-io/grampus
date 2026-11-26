@@ -536,9 +536,14 @@ pub fn get_intersections_with_line(
         // guarantee between equal elements) is `slice::sort_unstable_by`, per
         // `docs/PORTING.md`'s idiom map (`std::sort` -> `sort_unstable`, reserving plain `sort`
         // for `std::stable_sort`). The comparator itself (`left.first < right.first`) is not a
-        // total order on `f64` (NaN is incomparable); `port/reports/order-comparators.md` has
-        // no resolved shape for this site, so this falls to that report's own default --
-        // `partial_cmp(..).unwrap_or(Equal)`, a total-order comparator.
+        // total order on `f64` (NaN is incomparable). `AABBTreeLines.hpp:295` has no row at all
+        // in `port/reports/order-comparators.md` -- that report classifies no site in this
+        // header -- so per `docs/PORTING.md`'s banned-substitution row for comparators, where
+        // 85 classified sites "are still `undecided` and are judged per-site during porting",
+        // this site is the porter's own per-site judgement, not a reading of the report.
+        // The deliberate choice made here is `partial_cmp(..).unwrap_or(Ordering::Equal)`: a
+        // total-order comparator substituted for the vendored non-total `left.first <
+        // right.first`, which is the substitution this marker exists to record.
         intersections.sort_unstable_by(|left, right| {
             let dl = [left.0[0] - line.a.x(), left.0[1] - line.a.y()];
             let dr = [right.0[0] - line.a.x(), right.0[1] - line.a.y()];
