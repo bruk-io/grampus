@@ -25,7 +25,7 @@
 //! is owned elsewhere.
 //!
 //! **`GridMap` (`:34`, `std::unordered_multimap<GridPoint, Elem, PointHash>`).** `GridPoint` is
-//! `SquareGrid::GridPoint`, itself `Point` (`SquareGrid.hpp:38`, `using GridPoint = Point;`) --
+//! `SquareGrid::GridPoint`, itself `Point` (`SquareGrid.hpp:41`, `using GridPoint = Point;`) --
 //! not re-aliased here, since that alias belongs to `square_grid.rs`'s own unit; this module
 //! uses `slic3r_point::point::Point` directly. `std::unordered_multimap` is not one of the five
 //! hash-container shapes `docs/PORTING.md`'s "Insertion-ordered containers" rule converts to
@@ -36,6 +36,22 @@
 //! `HashMap` shape the type map's silence leaves it at is used: one bucket (`Vec<Elem>`) per
 //! `GridPoint`, which is also the only way to keep more than one element per key at all, since
 //! Rust's std has no multimap.
+//!
+//! **Two separate order choices, both marked `// FIDELITY(port):`.** (1) Within one `GridPoint`'s
+//! bucket, `Vec::push` reproduces `unordered_multimap::equal_range`'s own order: measured
+//! directly against libc++ (`emplace` of one key five times, `equal_range` walked -- insertion
+//! order came back), so [`process_from_cell`]'s walk and therefore [`SparseGrid::get_nearby`]'s
+//! returned vector match the oracle's own order; this is the order the in-scope caller at
+//! `Arachne/WallToolPaths.cpp:306` (`getNearby`) and `:878` observes. (2) [`SparseGrid::iter`]'s
+//! top-level order across *different* `GridPoint` keys is `HashMap`'s per-process-randomised
+//! order, substituting for `unordered_multimap::begin()/end()`'s bucket order (deterministic for
+//! a fixed insertion sequence) -- reached today by no in-scope caller (the one caller that walks
+//! a grid by `begin()/end()`, `WallToolPaths.cpp:874`, does so on a `SparsePointGrid`, not
+//! `SparseGrid` directly, through the same flattened shape this module's `iter` gives it), but
+//! named here because `square_grid.rs`'s own fan-out task inherits this module as-is. Both are
+//! marked at their own site below rather than only in this doc comment, so each lands its own
+//! row in `port/reports/divergences.md` (task.md's own marker rule: "every order choice ...
+//! carries a `// FIDELITY(port):`").
 //!
 //! **Finding, named in this task's pull request.** `docs/PORTING.md`'s own "Insertion-ordered
 //! containers" section states that `34-foundation-spike` already added `indexmap` as a workspace
@@ -59,14 +75,21 @@ use slic3r_point::point::Point;
 pub struct SparseGrid<Elem> {
     /// The `SquareGrid` base (`SparseGrid.hpp:27`), held by composition -- see the module doc.
     square_grid: crate::square_grid::SquareGrid,
-    /// `GridMap m_grid;` (`:90`, `protected`), `std::unordered_multimap<GridPoint, Elem,
+    /// `GridMap m_grid;` (`:96`, `protected`), `std::unordered_multimap<GridPoint, Elem,
     /// PointHash>` (`:34`) -- see the module doc for why this is `HashMap<Point, Vec<Elem>>`.
+    // FIDELITY(port): src/libslic3r/Arachne/utils/SparseGrid.hpp:34 and :48-51 --
+    // `std::unordered_multimap<GridPoint, Elem, PointHash>` ported as `HashMap<Point,
+    // Vec<Elem>>`. The per-bucket order (within one `GridPoint`) matches the oracle -- see
+    // `process_from_cell` below. The cross-bucket order `iter()` exposes (`HashMap`'s
+    // per-process-randomised order, substituting for `m_grid.begin()/end()`'s deterministic
+    // bucket order) does not; see `iter` below for which in-scope caller this does and does not
+    // reach today.
     grid: HashMap<Point, Vec<Elem>>,
 }
 
 impl<Elem> SparseGrid<Elem> {
     /// `SparseGrid<ElemT>::SparseGrid(coord_t cell_size, size_t elem_reserve, float
-    /// max_load_factor)` (`:94-99`). `max_load_factor` is an `std::unordered_multimap` tuning
+    /// max_load_factor)` (`:99-105`). `max_load_factor` is an `std::unordered_multimap` tuning
     /// knob (rehash threshold) with no `HashMap` counterpart; kept as a parameter for a
     /// faithful signature, acted on only where `HashMap` has an equivalent (`elem_reserve`, via
     /// `HashMap::with_capacity`).
@@ -74,6 +97,16 @@ impl<Elem> SparseGrid<Elem> {
     // constructor (`SquareGrid.cpp`, template-heavy: no, not this task's to write); this calls
     // the name and signature `square_grid.rs`'s Phase A/B task is expected to give it, named as
     // scope for that task in this task's pull request.
+    //
+    // FIDELITY(port): src/libslic3r/Arachne/utils/SparseGrid.hpp:101-104 -- the vendored
+    // constructor calls `m_grid.max_load_factor(max_load_factor)` *before* `m_grid.reserve(...)`
+    // ("Must be before the reserve call."), because `max_load_factor` can change the bucket
+    // layout a later rehash produces, which in turn can change `m_grid.begin()/end()`'s bucket
+    // order (the same order `iter()` below substitutes `HashMap`'s own order for). Dropping the
+    // parameter here (no `HashMap` equivalent exists) means this constructor cannot reproduce
+    // that effect even for the cross-bucket order a future caller of `iter()` might observe;
+    // `HashMap::with_capacity`'s own internal layout is unaffected by this port's choice of
+    // `max_load_factor`, which is simply never applied.
     pub fn new(cell_size: i64, elem_reserve: usize, max_load_factor: f32) -> Self {
         let _ = max_load_factor; // no HashMap equivalent -- see the doc above.
         SparseGrid {
@@ -87,7 +120,7 @@ impl<Elem> SparseGrid<Elem> {
     }
 
     /// `SparseGrid<ElemT>::getNearby(const Point &query_pt, coord_t radius) const`
-    /// (`:122-130`): collects every element `processNearby` below visits, in visiting order.
+    /// (`:122-131`): collects every element `processNearby` below visits, in visiting order.
     pub fn get_nearby(&self, query_pt: Point, radius: i64) -> Vec<Elem>
     where
         Elem: Clone,
@@ -101,10 +134,10 @@ impl<Elem> SparseGrid<Elem> {
     }
 
     /// `SparseGrid<ElemT>::processNearby(const Point &query_pt, coord_t radius, const
-    /// std::function<bool(const ElemT &)> &process_func) const` (`:117-120`): delegates to the
+    /// std::function<bool(const ElemT &)> &process_func) const` (`:116-120`): delegates to the
     /// `SquareGrid` base's own `processNearby` (cell-coordinate iteration), binding each visited
     /// cell to [`process_from_cell`] below -- the same closure-over-`this` shape the vendored
-    /// lambda at `:118` uses.
+    /// lambda at `:119` uses.
     pub fn process_nearby(
         &self,
         query_pt: Point,
@@ -118,10 +151,16 @@ impl<Elem> SparseGrid<Elem> {
     }
 
     /// `SparseGrid<ElemT>::processFromCell(const GridPoint &grid_pt, const
-    /// std::function<bool(const Elem &)> &process_func) const` (`:106-111`, `protected`):
+    /// std::function<bool(const Elem &)> &process_func) const` (`:107-114`, `protected`):
     /// `equal_range` over the multimap's one key's bucket -- the faithful translation for this
     /// `HashMap<Point, Vec<Elem>>` shape is a lookup by key followed by an in-order walk of its
     /// bucket.
+    // FIDELITY(port): src/libslic3r/Arachne/utils/SparseGrid.hpp:109-113 -- `m_grid.equal_range`
+    // over one key visits that key's elements in the multimap's own per-bucket insertion order;
+    // this walks `Vec<Elem>` by `push` order instead, which is the same order measured directly
+    // against libc++ (`unordered_multimap::emplace` of one key five times, `equal_range` walked
+    // -- insertion order came back). This order reaches `SparseGrid::get_nearby`'s returned
+    // vector, and through it the in-scope caller at `Arachne/WallToolPaths.cpp:306` and `:878`.
     fn process_from_cell(
         &self,
         grid_pt: Point,
@@ -138,17 +177,25 @@ impl<Elem> SparseGrid<Elem> {
     }
 
     /// `iterator begin() { return m_grid.begin(); }` / `end()` and their `const` overloads
-    /// (`:45-48`): no single `GridMap::iterator` counterpart exists for `HashMap<Point,
+    /// (`:48-51`): no single `GridMap::iterator` counterpart exists for `HashMap<Point,
     /// Vec<Elem>>`'s two-level shape, so this is a flattened iterator over `(GridPoint, &Elem)`
     /// pairs -- the same pairs a multimap iterator yields, in this map's (not the multimap's)
     /// order.
+    // FIDELITY(port): src/libslic3r/Arachne/utils/SparseGrid.hpp:48-51 -- `m_grid.begin()/end()`
+    // walks `unordered_multimap`'s own bucket order, deterministic for a fixed insertion
+    // sequence (and sensitive to `max_load_factor`, see `new` above); `self.grid.iter()` walks
+    // `HashMap`'s per-process-randomised order instead for the cross-bucket (different
+    // `GridPoint`) order, while the within-bucket order still matches (see `process_from_cell`
+    // above). No in-scope caller reaches `SparseGrid::iter` directly today -- the one caller
+    // that range-for's a grid, `Arachne/WallToolPaths.cpp:874`, does so on a `SparsePointGrid`
+    // through this same flattened shape, inherited unchanged once `square_grid.rs` lands.
     pub fn iter(&self) -> impl Iterator<Item = (Point, &Elem)> {
         self.grid
             .iter()
             .flat_map(|(grid_pt, bucket)| bucket.iter().map(move |elem| (*grid_pt, elem)))
     }
 
-    /// `protected: GridMap m_grid;` (`:90`), reached by `SparseLineGrid`/`SparsePointGrid`'s own
+    /// `protected: GridMap m_grid;` (`:96`), reached by `SparseLineGrid`/`SparsePointGrid`'s own
     /// `insert` (`SparseGrid<ElemT>::m_grid.emplace(...)`). `pub(crate)`, not `pub`, is Rust's
     /// closest analogue to C++ `protected` here: visible to this crate's own derived modules,
     /// not to a caller outside it.
@@ -197,8 +244,13 @@ mod tests {
             .push(42);
         let actual = grid.get_nearby(Point::new(100, 100), 2000);
 
-        let oracle = slic3r_proof::proof_units::sparse_grid::path1_get_nearby(1000, 0, 0, 42, 100, 100, 2000);
-        assert_eq!(actual, oracle, "SparseGrid::getNearby must match the oracle exactly");
+        let oracle = slic3r_proof::proof_units::sparse_grid::path1_get_nearby(
+            1000, 0, 0, 42, 100, 100, 2000,
+        );
+        assert_eq!(
+            actual, oracle,
+            "SparseGrid::getNearby must match the oracle exactly"
+        );
     }
 }
 

@@ -39,7 +39,7 @@
 use slic3r_point::point::Point;
 
 /// `static inline int64_t pointIsLeftOfLine(const Point &p, const Point &a, const Point &b)`
-/// (`linearAlg2D.hpp:27-30`): the 2x2 determinant of `[b-a; p-a]`. Positive when `p` lies to the
+/// (`linearAlg2D.hpp:26-29`): the 2x2 determinant of `[b-a; p-a]`. Positive when `p` lies to the
 /// left of the directed line `a -> b`, negative to the right, zero exactly on the line.
 pub fn point_is_left_of_line(p: Point, a: Point, b: Point) -> i64 {
     // PORT SRC: src/libslic3r/Arachne/utils/linearAlg2D.hpp:28
@@ -52,27 +52,27 @@ pub fn point_is_left_of_line(p: Point, a: Point, b: Point) -> i64 {
 }
 
 /// `static inline float getAngleLeft(const Point &a, const Point &b, const Point &c)`
-/// (`linearAlg2D.hpp:46-70`): the angle at `b`, measured from the left side of segment `b->c`
+/// (`linearAlg2D.hpp:48-65`): the angle at `b`, measured from the left side of segment `b->c`
 /// when looking from `a`, in `[0, 2*pi)`.
 pub fn get_angle_left(a: Point, b: Point, c: Point) -> f32 {
     // `const Vec2i64 ba = (a - b).cast<int64_t>();` / `bc = (c - b).cast<int64_t>();`
-    // (`:49-50`) -- `a`/`b`/`c` are already `int64_t`-component `Point`s, so `.cast<int64_t>()`
+    // (`:50-51`) -- `a`/`b`/`c` are already `int64_t`-component `Point`s, so `.cast<int64_t>()`
     // is a no-op; written out component-wise (not through `Point`'s own `Sub` impl) so every
     // subtraction here uses `wrapping_sub`, per this module's doc comment.
-    // PORT SRC: src/libslic3r/Arachne/utils/linearAlg2D.hpp:49
+    // PORT SRC: src/libslic3r/Arachne/utils/linearAlg2D.hpp:50
     let ba_x = a.x().wrapping_sub(b.x());
     let ba_y = a.y().wrapping_sub(b.y());
-    // PORT SRC: src/libslic3r/Arachne/utils/linearAlg2D.hpp:50
+    // PORT SRC: src/libslic3r/Arachne/utils/linearAlg2D.hpp:51
     let bc_x = c.x().wrapping_sub(b.x());
     let bc_y = c.y().wrapping_sub(b.y());
 
-    // `const int64_t dott = ba.dot(bc);` (`:51`) -- `Eigen::MatrixBase::dot` is a generic
+    // `const int64_t dott = ba.dot(bc);` (`:52`) -- `Eigen::MatrixBase::dot` is a generic
     // library operation with no line of its own in the vendored tree to cite; the two-term sum
     // it computes for a 2-vector is written out directly.
     let dott = ba_x
         .wrapping_mul(bc_x)
         .wrapping_add(ba_y.wrapping_mul(bc_y));
-    // `const int64_t det = cross2(ba, bc);` (`:52`), `cross2`'s generic body
+    // `const int64_t det = cross2(ba, bc);` (`:53`), `cross2`'s generic body
     // (`src/libslic3r/Point.hpp:118`, `v1.x() * v2.y() - v1.y() * v2.x()`) -- see this module's
     // doc comment on the missing generic `cross2`.
     // PORT SRC: src/libslic3r/Point.hpp:118
@@ -81,32 +81,32 @@ pub fn get_angle_left(a: Point, b: Point, c: Point) -> f32 {
         .wrapping_sub(ba_y.wrapping_mul(bc_x));
 
     if det == 0 {
-        // `:53-57`.
+        // `:55-58`.
         if (ba_x != 0 && (ba_x > 0) == (bc_x > 0)) || (ba_x == 0 && (ba_y > 0) == (bc_y > 0)) {
-            // `return 0;` (`:54`) -- written `0f32`, not `0.0`, so this literal's own text stays
+            // `return 0;` (`:56`) -- written `0f32`, not `0.0`, so this literal's own text stays
             // in `port/port-status`'s exempt `{0, 1, 2}` set rather than silently failing to
             // match any vendored line's spelling (`docs/PORTING.md`, "Decisions recorded on
             // 2026-11-26", decision 8).
             return 0f32; // pointy bit
         }
-        // `return float(M_PI);` (`:56`).
+        // `return float(M_PI);` (`:58`).
         // PORT SRC: external: ISO C <math.h>/POSIX `M_PI` -- the same constant Rust's
         // `std::f64::consts::PI` defines; `linearAlg2D.hpp:9` includes `<math.h>`/`<cmath>` and
         // uses `M_PI` directly, with no OrcaSlicer-defined value of its own to cite.
         return std::f64::consts::PI as f32; // straight bit
     }
 
-    // `const float angle = -atan2(double(det), double(dott));` (`:59`) -- computed in `f64`
+    // `const float angle = -atan2(double(det), double(dott));` (`:60`) -- computed in `f64`
     // (`atan2`'s own precision), negated in `f64`, and narrowed to `f32` only once, by the
     // assignment, exactly as the vendored declaration's type does. Parenthesised explicitly
     // (Rust's unary `-` binds tighter than `as`, so the unparenthesised form already negates
     // before narrowing -- same order, written out so a reviewer need not re-derive precedence).
     let angle: f32 = (-(det as f64).atan2(dott as f64)) as f32;
     if angle >= 0f32 {
-        // `:60-61`.
+        // `:61-62`.
         angle
     } else {
-        // `return M_PI * 2 + angle;` (`:63`) -- `angle` (`float`) promotes to `double` for the
+        // `return M_PI * 2 + angle;` (`:64`) -- `angle` (`float`) promotes to `double` for the
         // addition (the usual arithmetic conversions), and the function's `float` return type
         // narrows the sum back down; `2f64`, not `2.0`, for the same exempt-literal reason as
         // the `0f32` above (`docs/PORTING.md` decision 8) -- `2` is itself in the exempt set.
@@ -132,10 +132,16 @@ mod tests {
     fn get_angle_left_straight_and_right_angle() {
         let a = Point::new(0, 0);
         let b = Point::new(100, 0);
-        // `c` straight ahead of `b` from `a`: a straight bit, angle `pi`.
+        // `c` straight ahead of `b` from `a`: the det==0 "straight bit" branch, which returns
+        // `std::f64::consts::PI as f32` directly with no `atan2` in the path -- exact, not a
+        // tolerance, matching this unit's `exact` equality tier (`port/manifest.tsv:51`, both
+        // tolerance cells empty); this smoke test is not the proof, see `// PROOF: 1` below.
         let straight = get_angle_left(a, b, Point::new(200, 0));
-        assert!((straight - std::f32::consts::PI).abs() < 1e-6);
-        // `c` turning left by a right angle.
+        assert_eq!(straight, std::f32::consts::PI);
+        // `c` turning left by a right angle: this path does go through `atan2`, whose result is
+        // not bitwise `std::f32::consts::FRAC_PI_2` for an arbitrary libm, so a tolerance is kept
+        // here deliberately -- this smoke test is not this unit's `// PROOF: 1` exact-equality
+        // proof against the oracle (below), only a sanity check of the shape of the result.
         let right_angle = get_angle_left(a, b, Point::new(100, 100));
         assert!((right_angle - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
     }

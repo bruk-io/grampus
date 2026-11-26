@@ -14,8 +14,9 @@ use slic3r_point::point::Point;
 use crate::sparse_grid::SparseGrid;
 
 /// `template<class ElemT, class Locator> class SparseLineGrid : public SparseGrid<ElemT>`
-/// (`:28`). `Locator` is the vendored template's own functor bound: "must have
-/// `std::pair<Point, Point> operator()(const ElemT &elem) const`" (`:24-25`) -- a `Fn(&Elem) ->
+/// (`:28`, **public** inheritance -- see [`SparseLineGrid::get_nearby`] below). `Locator` is the
+/// vendored template's own functor bound: "must have
+/// `std::pair<Point, Point> operator()(const ElemT &elem) const`" (`:25-26`) -- a `Fn(&Elem) ->
 /// (Point, Point)`, the idiomatic Rust rendering of a `const`, by-value-returning callable
 /// (`docs/PORTING.md`'s idiom map, "A template" -> "with the same bound").
 pub struct SparseLineGrid<Elem, Locator>
@@ -23,7 +24,7 @@ where
     Locator: Fn(&Elem) -> (Point, Point),
 {
     base: SparseGrid<Elem>,
-    /// `Locator m_locator;` (`:49`, `protected`).
+    /// `Locator m_locator;` (`:52`, `protected`).
     locator: Locator,
 }
 
@@ -31,18 +32,23 @@ impl<Elem, Locator> SparseLineGrid<Elem, Locator>
 where
     Locator: Fn(&Elem) -> (Point, Point),
 {
-    /// `SparseLineGrid<ElemT, Locator>::SparseLineGrid(coord_t, size_t, float)` (`:52-53`):
+    /// `SparseLineGrid<ElemT, Locator>::SparseLineGrid(coord_t, size_t, float)` (`:56-57`):
     /// forwards to the `SparseGrid<ElemT>` base constructor verbatim, exactly as the vendored
     /// member-initialiser list does.
-    pub fn new(cell_size: i64, elem_reserve: usize, max_load_factor: f32, locator: Locator) -> Self {
+    pub fn new(
+        cell_size: i64,
+        elem_reserve: usize,
+        max_load_factor: f32,
+        locator: Locator,
+    ) -> Self {
         SparseLineGrid {
             base: SparseGrid::new(cell_size, elem_reserve, max_load_factor),
             locator,
         }
     }
 
-    /// `SparseLineGrid<ElemT, Locator>::insert(const Elem &elem)` (`:56-68`). The vendored body
-    /// is a workaround (its own comment, `:62-63`) for a lambda not being able to reach a
+    /// `SparseLineGrid<ElemT, Locator>::insert(const Elem &elem)` (`:59-74`). The vendored body
+    /// is a workaround (its own comment, `:63-64`) for a lambda not being able to reach a
     /// protected base member directly, built with `std::bind` over a second lambda; both are
     /// collapsed here into the one closure Rust's own borrow rules allow directly -- the
     /// faithful behaviour (emplace `elem.clone()` into every grid cell the line passes through)
@@ -76,6 +82,22 @@ where
     }
 }
 
+impl<Elem, Locator> SparseLineGrid<Elem, Locator>
+where
+    Elem: Clone,
+    Locator: Fn(&Elem) -> (Point, Point),
+{
+    /// `SparseLineGrid<ElemT, Locator> : public SparseGrid<ElemT>` (`:28`) is **public**
+    /// inheritance, so `SparseGrid<ElemT>::getNearby` (`SparseGrid.hpp:68`) is part of
+    /// `SparseLineGrid`'s own public surface, the same way it is `SparsePointGrid`'s --
+    /// `Arachne/WallToolPaths.cpp:269` typedefs `LocToLineGrid = SparseLineGrid<...>` and `:306`
+    /// calls `query_grid->getNearby(pt, epsilon)` on it directly. A thin pass-through, not a
+    /// method this type declares of its own.
+    pub fn get_nearby(&self, query_pt: Point, radius: i64) -> Vec<Elem> {
+        self.base.get_nearby(query_pt, radius)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Unreachable until `crate::square_grid::SquareGrid` and `crate::sparse_grid::SparseGrid`'s
@@ -99,7 +121,7 @@ mod tests {
             (Point::new(0, 0), Point::new(*elem, 0))
         });
         grid.insert(5000);
-        let actual = grid.base.get_nearby(Point::new(2000, 0), 1500);
+        let actual = grid.get_nearby(Point::new(2000, 0), 1500);
 
         let oracle = slic3r_proof::proof_units::sparse_line_grid::path1_insert_and_get_nearby(
             1000, 0, 0, 5000, 0, 2000, 0, 1500,

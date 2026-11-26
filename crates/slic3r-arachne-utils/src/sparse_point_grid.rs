@@ -14,15 +14,16 @@ use slic3r_point::point::Point;
 use crate::sparse_grid::SparseGrid;
 
 /// `template<class ElemT, class Locator> class SparsePointGrid : public SparseGrid<ElemT>`
-/// (`:26`). `Locator` is the vendored template's own functor bound: "must have `Point
-/// operator()(const ElemT &elem) const`" (`:22-23`) -- a `Fn(&Elem) -> Point`
+/// (`:26`, **public** inheritance -- see [`SparsePointGrid::get_nearby`] below). `Locator` is
+/// the vendored template's own functor bound: "must have `Point
+/// operator()(const ElemT &elem) const`" (`:23-24`) -- a `Fn(&Elem) -> Point`
 /// (`docs/PORTING.md`'s idiom map, "A template" -> "with the same bound").
 pub struct SparsePointGrid<Elem, Locator>
 where
     Locator: Fn(&Elem) -> Point,
 {
     base: SparseGrid<Elem>,
-    /// `Locator m_locator;` (`:47`, `protected`).
+    /// `Locator m_locator;` (`:50`, `protected`).
     locator: Locator,
 }
 
@@ -30,19 +31,24 @@ impl<Elem, Locator> SparsePointGrid<Elem, Locator>
 where
     Locator: Fn(&Elem) -> Point,
 {
-    /// `SparsePointGrid<ElemT, Locator>::SparsePointGrid(coord_t, size_t, float)` (`:50`):
+    /// `SparsePointGrid<ElemT, Locator>::SparsePointGrid(coord_t, size_t, float)` (`:53-54`):
     /// forwards to the `SparseGrid<ElemT>` base constructor verbatim.
-    pub fn new(cell_size: i64, elem_reserve: usize, max_load_factor: f32, locator: Locator) -> Self {
+    pub fn new(
+        cell_size: i64,
+        elem_reserve: usize,
+        max_load_factor: f32,
+        locator: Locator,
+    ) -> Self {
         SparsePointGrid {
             base: SparseGrid::new(cell_size, elem_reserve, max_load_factor),
             locator,
         }
     }
 
-    /// `SparsePointGrid<ElemT, Locator>::insert(const Elem &elem)` (`:54-59`): locate the
+    /// `SparsePointGrid<ElemT, Locator>::insert(const Elem &elem)` (`:57-63`): locate the
     /// element, convert its location to a grid coordinate through the inherited
     /// `SquareGrid::toGridPoint`, and emplace into `m_grid` at that one cell. `loc.cast<int64_t>()`
-    /// (`:57`) is a no-op here (`Point`'s own fields are already `int64_t`), as it is at every
+    /// (`:60`) is a no-op here (`Point`'s own fields are already `int64_t`), as it is at every
     /// other such call site this task's units carry.
     pub fn insert(&mut self, elem: Elem) {
         let loc = (self.locator)(&elem);
@@ -56,10 +62,13 @@ where
     Elem: Clone,
     Locator: Fn(&Elem) -> Point,
 {
-    /// Not a method the vendored class declares; a thin pass-through to the inherited
-    /// `SparseGrid<ElemT>::getNearby` this unit's own proof test (below) and fuzz target drive
-    /// the insert/query round-trip through -- `SparsePointGrid` otherwise has no query method
-    /// of its own, only `insert`, so the round-trip is the unit's own observable behaviour.
+    /// `SparsePointGrid<ElemT, Locator> : public SparseGrid<ElemT>` (`:26`) is **public**
+    /// inheritance, so `SparseGrid<ElemT>::getNearby` (`SparseGrid.hpp:68`) *is* part of
+    /// `SparsePointGrid`'s own public surface, even though this class declares no query method
+    /// of its own (only `insert`) -- `Arachne/WallToolPaths.cpp:877` calls
+    /// `grid.getNearby(loc_here, searching_radius)` on one directly. A thin pass-through, not a
+    /// method this type declares of its own; this unit's own proof test (below) and fuzz target
+    /// drive the insert/query round-trip through it.
     pub fn get_nearby(&self, query_pt: Point, radius: i64) -> Vec<Elem> {
         self.base.get_nearby(query_pt, radius)
     }
