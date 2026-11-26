@@ -53,6 +53,19 @@ use std::marker::PhantomData;
 /// trait every bitmask-enabled enum implements, rather than a free-floating alias (see
 /// `crates/slic3r-libslic3r/src/libslic3r.rs`'s module doc for the same SFINAE-to-trait-bound
 /// move, stated once there for the whole port).
+///
+/// `discriminant`'s return type, and [`EnumBitmask`]'s own storage below, are fixed to `u32`
+/// where `:16`'s `underlying_type` is the enum's own `std::underlying_type<option_type>` -- `int`
+/// for all three in-scope bitmask enums (`CutUtils.hpp:18`'s `ModelObjectCutAttribute`, ten
+/// values; `GCode/Thumbnails.hpp:21`'s `ThumbnailError`; `PresetBundle.hpp:609`'s
+/// `LoadConfigBundleAttribute`). Review finding, recorded rather than carried as a type
+/// parameter: this changes [`EnumBitmask::lower`]'s ordering from signed to unsigned and
+/// [`mask_value`]'s behaviour at a bit-31 discriminant from defined (C++ signed overflow) to
+/// well-defined (`u32` wraps) -- unreachable at the pin, since the widest in-scope enum has ten
+/// enumerators, so this is a type-fidelity divergence, not a wrong answer today.
+// PORT NOTE: src/libslic3r/enum_bitmask.hpp:16 -- underlying_type fixed to u32 rather than
+// carried per-enum; every in-scope bitmask enum is `: int` with at most ten values, so no sign
+// or width difference is reachable at the pin.
 pub trait BitmaskOption: Copy + Eq {
     /// `using underlying_type = typename std::underlying_type<option_type>::type;` (`:16`).
     fn discriminant(self) -> u32;
@@ -110,11 +123,27 @@ impl<O: BitmaskOption> EnumBitmask<O> {
     }
 
     /// `constexpr void operator|=(option_type t)` (`:40`).
+    ///
+    /// Review finding: `:40` and `:43` are ill-formed if instantiated at the pin -- each
+    /// assigns an `enum_bitmask` temporary to `m_bits`, which is `underlying_type`, and
+    /// `enum_bitmask` declares no conversion operator to it (confirmed by compiling a probe
+    /// against the unmodified vendored header: `error: assigning to 'underlying_type' (aka
+    /// 'int') from incompatible type 'enum_bitmask<...>'`). No caller in the tree instantiates
+    /// either, which is why the pin still builds. This port carries their evidently intended
+    /// meaning (`*self = self.with(t)`/`self.union(t)`) rather than the ill-formed body, since
+    /// a header this port's own callers reach only through `only_if`/`with`/`union` should not
+    /// lack the mutating spelling those names imply.
+    // PORT NOTE: src/libslic3r/enum_bitmask.hpp:40,43 -- both overloads are uninstantiable as
+    // written at the pin (assign enum_bitmask to underlying_type with no conversion operator);
+    // no caller instantiates either, so this port supplies the evidently intended operation
+    // rather than an oracle-observed one.
     pub fn insert(&mut self, t: O) {
         *self = self.with(t);
     }
 
-    /// `constexpr void operator|=(enum_bitmask<option_type> t)` (`:43`).
+    /// `constexpr void operator|=(enum_bitmask<option_type> t)` (`:43`) -- see [`insert`]'s own
+    /// doc comment for why this is this port's intended meaning, not the pin's own (uninstantiable)
+    /// body.
     pub fn insert_bitmask(&mut self, t: Self) {
         *self = self.union(t);
     }
@@ -187,6 +216,10 @@ impl<O: BitmaskOption> From<O> for EnumBitmask<O> {
 /// port needs is lost, but it has no direct counterpart below (review finding: an earlier
 /// version of this doc comment's own `only_if` citations were mis-numbered onto this overload's
 /// lines, so it had never actually been read against the header).
+// TODO(port): src/libslic3r/enum_bitmask.hpp:71-75 -- the second free `operator|` (`option_type
+// lhs, enum_bitmask<option_type> rhs`) is not ported as its own function; reachable today as
+// `rhs.with(lhs)` (see the doc comment above), so a later caller needing the exact overload
+// adds it rather than this prelude guessing at a form no in-scope call site needs yet.
 pub fn bitor<O: BitmaskOption>(lhs: O, rhs: O) -> EnumBitmask<O> {
     EnumBitmask::from_option(lhs).with(rhs)
 }

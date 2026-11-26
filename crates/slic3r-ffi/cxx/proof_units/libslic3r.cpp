@@ -39,6 +39,19 @@ double path1_scaling_factor() {
     return ::SCALING_FACTOR;
 }
 
+// Added on a review pass, for the `libslic3r.h` unit's own `// PROOF: 2` test
+// (`crates/slic3r-libslic3r/tests/libslic3r_proof.rs`): that test used to read a scaled
+// coordinate from a real committed stage dump but then compare the port's `unscale::<f64>` of
+// it only against a hand-derived literal `10.0` -- the oracle produced the input but neither
+// side of the actual comparison (`docs/PORTING.md` decision 4, second half, the same
+// `proof-marker-not-differential` shape `cxx/proof_units/format.cpp` closes for the
+// `format.hpp` unit). This calls the vendored template directly, `Slic3r::unscale<double>(v)`
+// (`libslic3r.h:137-138`), so the test can compare the port's own `unscale::<f64>` against what
+// the oracle itself computes for the exact same scaled input.
+double path2_unscale_double(int64_t scaled) {
+    return ::Slic3r::unscale<double>(static_cast<::coord_t>(scaled));
+}
+
 } // namespace libslic3r
 } // namespace proof_units
 } // namespace slic3r_ffi

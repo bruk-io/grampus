@@ -12,6 +12,7 @@ namespace proof_units {
 namespace libslic3r {
 
 double path1_scaling_factor();
+double path2_unscale_double(int64_t scaled);
 
 } // namespace libslic3r
 } // namespace proof_units

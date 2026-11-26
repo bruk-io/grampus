@@ -20,6 +20,12 @@
 //!
 //! **Items this module does not port**, each a language-level C++ construct with no Rust
 //! counterpart to carry over, rather than a workaround:
+//! - `GCODEVIEWER_BUILD_ID` (`libslic3r.h:14`): unlike its three sibling macros just above it
+//!   (ported below as [`SLIC3R_APP_FULL_NAME`], [`GCODEVIEWER_APP_NAME`],
+//!   [`GCODEVIEWER_APP_KEY`]), this one is a runtime string expression built from
+//!   `SLIC3R_VERSION`, which this prelude has no type or value for yet -- it is pending
+//!   `slic3r-semver`'s own ported module, exactly the same gap `SEMVER` below is left at
+//!   (`// TODO(port): src/libslic3r/libslic3r.h:14`, next to the const block below).
 //! - The SFINAE type-constraint aliases `FloatingOnly`/`ScaledCoordOnly`/`IntegerOnly`/
 //!   `ArithmeticOnly`/`IteratorOnly` and the `is_scaled_coord` predicate they are built from
 //!   (`libslic3r.h:333-367`): Rust expresses the same constraint as a trait bound directly on
@@ -38,6 +44,35 @@
 //! scaling arithmetic against the committed stage dumps -- see each test for which.
 
 use std::collections::VecDeque;
+
+// ---------------------------------------------------------------------------------------------
+// App identity (libslic3r.h:11-14) -- review finding: these four macros were silently absent,
+// with no marker and no "items this module does not port" entry, though two in-scope callers
+// reach them (AppConfig.cpp:1927, utils.cpp:1550; a third, Config.cpp:1439, reaches the first).
+// ---------------------------------------------------------------------------------------------
+
+/// `#define SLIC3R_APP_FULL_NAME "Orca Slicer"` (`libslic3r.h:11`). In-scope caller:
+/// `src/libslic3r/Config.cpp:1439`.
+// PORT SRC: src/libslic3r/libslic3r.h:11
+pub const SLIC3R_APP_FULL_NAME: &str = "Orca Slicer";
+
+/// `#define GCODEVIEWER_APP_NAME "OrcaSlicer G-code Viewer"` (`:12`). In-scope caller:
+/// `src/libslic3r/utils.cpp:1550`.
+// PORT SRC: src/libslic3r/libslic3r.h:12
+pub const GCODEVIEWER_APP_NAME: &str = "OrcaSlicer G-code Viewer";
+
+/// `#define GCODEVIEWER_APP_KEY "OrcaSlicerGcodeViewer"` (`:13`). In-scope caller:
+/// `src/libslic3r/AppConfig.cpp:1927`.
+// PORT SRC: src/libslic3r/libslic3r.h:13
+pub const GCODEVIEWER_APP_KEY: &str = "OrcaSlicerGcodeViewer";
+
+// `#define GCODEVIEWER_BUILD_ID std::string("OrcaSlicer G-code Viewer-") +
+// std::string(SLIC3R_VERSION) + std::string("-RC")` (`:14`): not a constant but a runtime string
+// expression built from `SLIC3R_VERSION` -- see the module doc's "items this module does not
+// port" entry for why it is not ported here.
+// TODO(port): src/libslic3r/libslic3r.h:14 -- Rust type and value pending slic3r-semver's own
+// ported module (Phase A/B fan-out); built as "OrcaSlicer G-code Viewer-" + SLIC3R_VERSION +
+// "-RC".
 
 // ---------------------------------------------------------------------------------------------
 // Type map (libslic3r.h:48, :51)
@@ -134,9 +169,11 @@ impl UnscaleOutput for f32 {
 ///
 /// `Q` is narrowed to [`CoordT`] (`coord_t`, the scaled-coordinate input every in-scope caller
 /// this task reaches instantiates it with); a later unit needing a different `Q` adds its own
-/// overload and names the gap in its own pull request
-/// (`// TODO(port): src/libslic3r/libslic3r.h:137-138 -- unscale<T> instantiated with a Q other
-/// than coord_t`).
+/// overload and names the gap in its own pull request.
+// TODO(port): src/libslic3r/libslic3r.h:137-138 -- unscale<T> instantiated with a Q other than
+// coord_t. (Review finding: this marker used to sit inside the `///` block above, wrapped in
+// backticks as prose, where `just port-check`'s TODO(port) scanner does not count it; moved to
+// its own `//` line so it does.)
 pub fn unscale<T: UnscaleOutput>(v: CoordT) -> T {
     T::__from_coord(v) * T::__scaling_factor()
 }
@@ -418,6 +455,13 @@ pub fn lower_bound_by_predicate<T>(
 /// first, ForwardIt last, const T& value, Compare comp={})` (`:267-276`): `Compare` defaults to
 /// `std::less<>`, which `Ord` is the direct Rust counterpart of; a index (`Some`/`None`) replaces
 /// the "found/`last`" iterator convention per the idiom map.
+///
+/// This narrows the template: the explicit `Compare` parameter itself is dropped, so a caller
+/// that passes a non-default comparator has no overload to call (review finding).
+// PORT NOTE: src/libslic3r/libslic3r.h:267-276 -- the vendored template's `Compare comp={}`
+// parameter is not carried over; this signature is `Ord`-only (the `std::less<>` default). A
+// later caller needing a custom comparator adds its own overload taking one, rather than this
+// prelude inventing a generic-comparator version no in-scope caller needs yet.
 pub fn binary_find<T: Ord>(slice: &[T], value: &T) -> Option<usize> {
     let idx = slice.partition_point(|x| x < value);
     if idx < slice.len() && &slice[idx] == value {
@@ -473,6 +517,14 @@ pub fn is_zero(value: f64) -> bool {
 /// `template <typename T, typename Number> constexpr inline T lerp(const T& a, const T& b,
 /// Number t)` (`:312-317`): `assert` is `debug_assert!` per "Error sets" (compiled out of the
 /// oracle's release build, so it is never a live check in the port either).
+///
+/// This is a real narrowing, named per review: the vendored template is generic over `T`, and an
+/// in-scope caller already instantiates it with a type this signature cannot accept --
+/// `src/libslic3r/ExtrusionEntity.cpp:505`'s `const Vec3d a = lerp(line.a, line.b, (length -
+/// acc_length) / line.length());`. The fan-out task for that call site adds its own `Vec3d`
+/// overload rather than reusing this `f64`-only one.
+// PORT NOTE: src/libslic3r/libslic3r.h:312-317 -- T narrowed to f64; ExtrusionEntity.cpp:505
+// instantiates the vendored template with Vec3d, which this signature cannot accept.
 pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
     debug_assert!((-EPSILON..=1f64 + EPSILON).contains(&t));
     (1f64 - t) * a + t * b
@@ -480,6 +532,12 @@ pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
 
 /// `template <typename Number> constexpr inline bool is_approx(Number value, Number test_value,
 /// Number precision = EPSILON)` (`:319-323`).
+///
+/// `Number` is narrowed to `f64` (review finding, same class as [`unscale`]'s own `Q`
+/// narrowing); no in-scope caller this task reaches instantiates it with a different numeric
+/// type, and a later unit that needs one adds its own overload.
+// PORT NOTE: src/libslic3r/libslic3r.h:319-323 -- Number narrowed to f64; a later caller
+// instantiating the vendored template with a different numeric type adds its own overload.
 pub fn is_approx(value: f64, test_value: f64, precision: f64) -> bool {
     (value - test_value).abs() < precision
 }
@@ -516,8 +574,10 @@ pub fn reserve_vector<T>(capacity: usize) -> Vec<T> {
 /// view" shape for the index-based case every in-scope caller needs (no in-scope file
 /// instantiates `Range` over a node-based iterator at the pin), so the port reuses it directly
 /// rather than reimplementing a second range type.
-/// `// TODO(port): src/libslic3r/libslic3r.h:384-408 -- a non-index Range instantiation, if a
-/// later unit needs one.`
+// TODO(port): src/libslic3r/libslic3r.h:384-408 -- a non-index Range instantiation, if a later
+// unit needs one. (Review finding: this marker used to sit inside the `///` block above, wrapped
+// in backticks as prose, where `just port-check`'s TODO(port) scanner does not count it; moved
+// to its own `//` line so it does.)
 pub fn range_of_len(len: usize) -> std::ops::Range<usize> {
     0..len
 }
@@ -598,6 +658,17 @@ mod tests {
         let mut dest: Vec<i32> = vec![0];
         append_reversed(&mut dest, vec![1, 2, 3].into_iter());
         assert_eq!(dest, vec![0, 3, 2, 1]);
+    }
+
+    /// Review finding: `libslic3r.h:11-13`'s three string macros were silently absent. Not a
+    /// substitute for an oracle differential (these are string literals, not computed values --
+    /// `// PROOF: 1`/`// PROOF: 2` below cover this unit's two rows already), just a direct check
+    /// that the transcription matches the vendored source cited in each `// PORT SRC:` marker.
+    #[test]
+    fn app_identity_macros_match_vendored_literals() {
+        assert_eq!(SLIC3R_APP_FULL_NAME, "Orca Slicer");
+        assert_eq!(GCODEVIEWER_APP_NAME, "OrcaSlicer G-code Viewer");
+        assert_eq!(GCODEVIEWER_APP_KEY, "OrcaSlicerGcodeViewer");
     }
 }
 

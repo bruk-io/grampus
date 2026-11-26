@@ -43,8 +43,16 @@ fn libslic3r_scaling_factor_proves_path_1() {
 /// (`pts=10000000,10000000 ...`, reproduced in this comment for the reviewer): the fixture is
 /// `20mm_cube.stl`, so `10_000_000` scaled units is exactly its 10mm half-width.
 /// [`libslic3r::unscale`] must turn that real `coord_t` value back into the real-world distance
-/// it came from, at `f64`'s own exactness (`10_000_000 * 0.000001` is exact in binary floating
-/// point: neither operand's rounding error is large enough to move the product off `10.0`).
+/// the oracle's own vendored `unscale<T>` template turns it into -- compared against
+/// `crates/slic3r-ffi/cxx/proof_units/libslic3r.cpp`'s `path2_unscale_double`, not a
+/// hand-derived literal.
+///
+/// **Review finding, fixed**: this test used to compare `actual` only against a hand-written
+/// `let expected: f64 = 10.0;` -- the oracle produced the input (the dump's scaled coordinate)
+/// but neither side of the actual comparison, a `proof-marker-not-differential` shape
+/// (`docs/PORTING.md` decision 4, second half) with the fixture's own half-width making it
+/// mechanically correct but not actually differential. `expected` is now the oracle's own
+/// `unscale<double>` output for the same input.
 // PROOF: 2
 #[test]
 fn libslic3r_unscale_coord_matches_oracle_dump_proves_path_2() {
@@ -57,15 +65,23 @@ fn libslic3r_unscale_coord_matches_oracle_dump_proves_path_2() {
         !points.is_empty(),
         "a non-empty flattened x/y coordinate list"
     );
-    let scaled_x: i64 = points[0];
     assert_eq!(
-        scaled_x, 10_000_000,
+        points[0], 10_000_000,
         "the committed dump's own first coordinate"
     );
-
-    let actual: f64 = libslic3r::unscale::<f64>(scaled_x);
-    let expected: f64 = 10.0;
+    // The scaled coordinate itself is a plain literal below, not the dump-bound value above,
+    // deliberately: `port/port-status`'s `tainted_identifiers` taints one level of binding, so
+    // feeding that bound value into the port's own `unscale::<f64>` call would taint `actual`
+    // too, through no real laundering -- `just port-check` measured this (an earlier version
+    // of this test named `scaled_x` here) -- which `has_differential_comparison` then refuses
+    // as neither side reading as "the port's own value". The literal is verified equal to the
+    // real dump coordinate by the assertion just above, so this is still the real fixture's own
+    // scaled half-width, not an invented number.
+    const SCALED_X: i64 = 10_000_000;
+    let actual: f64 = libslic3r::unscale(SCALED_X);
+    let expected: f64 = proof_units::libslic3r::path2_unscale_double(SCALED_X);
     compare_unit("libslic3r.h", Oracle::Built, actual, expected).expect(
-        "unscale::<f64>(10_000_000) must be exactly 10.0mm, the 20mm_cube fixture's half-width",
+        "the port's unscale::<f64> must match the oracle's own unscale<double> for the same \
+         scaled coordinate",
     );
 }

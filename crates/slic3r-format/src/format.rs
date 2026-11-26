@@ -5,20 +5,32 @@
 //!
 //! **Scope, recorded here and in this task's pull request body**: `format.hpp:45-48` (and the
 //! identical `std::string` overload at `:50-53`) delegates every directive to `boost::format`
-//! itself, so the real scope is however the 58 `Slic3r::format(` call sites across
-//! `src/libslic3r` (re-derived in review: `grep -rn "Slic3r::format(" vendor/OrcaSlicer/src/
-//! libslic3r | wc -l` -> 58, superseding an earlier, wrong claim of two found callers) actually
-//! use `boost::format`'s own two directive families: Boost's positional `%N%` placeholders and
-//! printf-style `%[flags][width][.precision]<conv>` directives. Grepping every directive shape
-//! appearing in those 58 strings, not just two of them, finds exactly three: bare positional
-//! `%N%` (the large majority, e.g. `PrintConfig.cpp:10070`'s `"%1%x%2%/%3%, "`, including float
-//! arguments -- `PrintConfig.cpp:12662`'s `%2%`/`%3%` render `optdef->min`/`optdef->max`, both
-//! `float`), bare printf-style `%d`/`%s` with no width or precision (`Print.cpp:2833`'s `"Plate
-//! %d: %s does not support filament %s"`, `MeshBoolean.cpp:767`'s `"... ( %d ): %s "`), and
-//! zero-padded precision floats, `%0.5f` (`GCode.cpp:10101`'s `" | Old Flow Value: %0.5f Length:
-//! %0.5f"`, 8 of the 58 occurrences). No surveyed call site's directive carries a `-`/`+`/` `/`#`
-//! flag, a non-zero width, or a bare `%f`/`%F` with no precision. This module ports those three
-//! shapes, plus the `%%` escape every C-style format mini-language gives a literal `%`. A
+//! itself, so the real scope is however every call site across `src/libslic3r` actually uses
+//! `boost::format`'s own two directive families: Boost's positional `%N%` placeholders and
+//! printf-style `%[flags][width][.precision]<conv>` directives.
+//!
+//! **Review finding, the survey widened**: an earlier version of this note counted only the 58
+//! `Slic3r::format(` call sites (`grep -rn "Slic3r::format(" vendor/OrcaSlicer/src/libslic3r |
+//! wc -l` -> 58) and missed 31 further unqualified `format("` call sites in the same tree that
+//! resolve to this same function inside `namespace Slic3r` (`grep -rn '[^:a-zA-Z_.]format("'
+//! vendor/OrcaSlicer/src/libslic3r | wc -l` -> 89 total), e.g. `AppConfig.cpp:847`,
+//! `MultiMaterialSegmentation.cpp:1357`, `TreeSupport.cpp:3565`'s `format("plan_layer_heights0
+//! (%.2f,%.2f)->(%.2f,%.2f): ", ...)`, `TreeModelVolumes.cpp:323`. Re-running the directive
+//! survey over the full 89 does not change its conclusion -- it adds two further shapes already
+//! handled by [`parse_printf_directive`], `%.2f`/`%.3f` (9 and 6 occurrences respectively) -- but
+//! the earlier text's own basis (89 sites grepped, not 58) was wrong until this fix.
+//!
+//! Grepping every directive shape appearing across all 89 strings finds exactly five: bare
+//! positional `%N%` (the large majority, e.g. `PrintConfig.cpp:10070`'s `"%1%x%2%/%3%, "`,
+//! including float arguments -- `PrintConfig.cpp:12662`'s `%2%`/`%3%` render
+//! `optdef->min`/`optdef->max`, both `float`), bare printf-style `%d`/`%s` with no width or
+//! precision (`Print.cpp:2833`'s `"Plate %d: %s does not support filament %s"`,
+//! `MeshBoolean.cpp:767`'s `"... ( %d ): %s "`), and zero-, two- or three-digit precision
+//! floats, `%0.5f` (`GCode.cpp:10101`'s `" | Old Flow Value: %0.5f Length: %0.5f"`, 8
+//! occurrences), `%.2f` (9 occurrences) and `%.3f` (6 occurrences). No surveyed call site's
+//! directive carries a `-`/`+`/` `/`#` flag, a non-zero width, or a bare `%f`/`%F` with no
+//! precision. This module ports those shapes, plus the `%%` escape every C-style format
+//! mini-language gives a literal `%`. A
 //! directive this module does not recognise is never guessed at or silently dropped: the whole
 //! call returns `Err` through [`FormatError`] (see [`format`]'s own doc for exactly what "not
 //! recognised" covers, now that the earlier text here wrongly claimed the directive was "left
@@ -31,10 +43,20 @@
 //! **A finding for the regeneration pass, recorded in this task's pull request body, not here**:
 //! this row's `proof path` cell (`2`) and `pipeline stage` cell (`posSlice`) are mechanically
 //! seeded, like `enum_bitmask.hpp`'s (see that module's own doc comment for the same note in
-//! full). This module's proof below still reads a real committed stage dump -- `print_z` from
-//! `port/dumps/20mm_cube-base-fff/posSlice.dump` -- and feeds it through the port's own
-//! positional-formatting path as a genuine input, which is the strongest proof path 2's
-//! mechanism can give here even though `format.hpp` itself writes nothing any dump records.
+//! full). `format.hpp` itself writes nothing any dump records.
+//!
+//! **Review finding, fixed**: the `// PROOF: 2` test below used to read `print_z` from a real
+//! committed stage dump but then compare the port's rendering of it only against a
+//! hand-transcribed literal `"0.2"` -- the oracle produced neither side of that comparison
+//! (`docs/PORTING.md` decision 4, second half: "A marker over a test ... that compares an
+//! oracle value only against a literal is a `proof-marker-not-differential` finding"). It now
+//! compares against `slic3r_proof::proof_units::format::path2_format_positional`, a new
+//! proof-units shim (`crates/slic3r-ffi/cxx/proof_units/format.{h,cpp}`,
+//! `crates/slic3r-ffi/src/proof_units/format.rs`) that calls the real vendored `Slic3r::format`
+//! -- the pin's own linked `boost::format`, not a reimplementation -- on the exact same
+//! dump-sourced `print_z` value, following the same precedent `cxx/proof_units/enum_bitmask.cpp`
+//! and `cxx/proof_units/execution.cpp` already use for their own `proof path: 2` rows with no
+//! pipeline stage of their own.
 //!
 //! **Error set, named rather than silently kept as-is (review finding)**: `boost::format` throws
 //! one of `boost::io::too_few_args`, `too_many_args` or `bad_format_string` (`format.hpp:46,52`'s
@@ -43,9 +65,16 @@
 //! `too_few_args`'s two shapes (a positional index beyond the slice, or a sequential directive
 //! with no argument left), `UnsupportedConversion` has no boost counterpart (boost accepts any
 //! conversion character and never rejects one by name), and `TooManyArgs` below is the one this
-//! review found genuinely missing: an argument supplied but never referenced by any directive
-//! used to return `Ok` and silently drop it, where boost's `too_many_args` throws. That gap is
-//! closed below. The remaining mismatch -- three invented variant names in place of boost's three
+//! review found genuinely missing -- and, on a later review pass, found to have been closed with
+//! the wrong condition (measured against the pin's own vendored Boost,
+//! `oracle/.cache/tmp/rev55_boost_probe.cpp`, per this task's pull request body):
+//! `boost::format`'s own `too_many_args` does **not** fire whenever some argument index went
+//! unreferenced -- `(boost::format("%1% %3%") % 1 % 2 % 3).str()` renders `"1 3"` and throws
+//! nothing, even though index 2 is never read -- it fires when `args` holds more than `fmt`
+//! *addresses*: the highest `%N%` index any positional directive names, or the count of
+//! sequential printf-style directives consumed, whichever is larger. `TooManyArgs` below now
+//! checks that instead of "every index was referenced". The remaining mismatch -- three invented
+//! variant names in place of boost's three
 //! exception types -- is deliberately not redone into a byte-for-byte mapping on this branch: it
 //! is a once-for-the-port decision (what Rust error family `format.hpp`'s callers, none yet
 //! fanned out, should see for each of boost's three), not a per-module one, and belongs with that
@@ -64,9 +93,14 @@ pub enum FormatError {
     /// A printf-style directive's conversion character is not one this module implements (see
     /// the module doc's "Scope" note).
     UnsupportedConversion { directive: String },
-    /// `args` supplied more values than `fmt`'s directives ever referenced -- boost's
-    /// `too_many_args` (module doc's "Error set" note). Checked once, after the whole string is
-    /// parsed, against which `args` indices a directive actually consumed.
+    /// `args` supplied more values than `fmt`'s directives address -- boost's `too_many_args`
+    /// (module doc's "Error set" note). `used` is the highest `%N%` index any positional
+    /// directive in `fmt` names, or the count of sequential printf-style directives consumed,
+    /// whichever is larger -- **not** a count of how many distinct indices were actually read:
+    /// `%1% %3%` with 3 arguments addresses index 3 and does not trip this, even though index 2
+    /// is never referenced (measured against the pin's own vendored Boost; an earlier version of
+    /// this check used "every index referenced", which is not boost's condition and was a
+    /// widened error set -- review finding).
     TooManyArgs { arg_count: usize, used: usize },
 }
 
@@ -90,8 +124,8 @@ impl std::fmt::Display for FormatError {
             ),
             FormatError::TooManyArgs { arg_count, used } => write!(
                 f,
-                "slic3r-format: {arg_count} arguments given but only {used} referenced by a \
-                 directive"
+                "slic3r-format: {arg_count} arguments given but the format string addresses at \
+                 most {used}"
             ),
         }
     }
@@ -298,9 +332,13 @@ pub fn format(fmt: &str, args: &[FormatArg]) -> Result<String, FormatError> {
     let bytes = fmt.as_bytes();
     let mut i = 0;
     let mut next_sequential = 0usize;
-    // Which of `args` a directive actually referenced -- boost's `too_many_args` (module doc's
-    // "Error set" note) fires when an argument was fed but no directive ever consumed it.
-    let mut used = vec![false; args.len()];
+    // The highest `%N%` index any positional directive in `fmt` names -- together with
+    // `next_sequential`'s final value below, boost::format's own measure of how many arguments
+    // `fmt` addresses (module doc's "Error set" note): `too_many_args` fires when `args` holds
+    // more than this, regardless of whether every index up to it was itself referenced (`%1%
+    // %3%` with 3 arguments addresses index 3 and does not throw, even though index 2 is never
+    // read -- measured against the pin's own vendored Boost).
+    let mut max_positional_index = 0usize;
     while i < bytes.len() {
         if bytes[i] != b'%' {
             // `fmt` is read as UTF-8 text; pushing by byte index here is safe because every
@@ -319,6 +357,7 @@ pub fn format(fmt: &str, args: &[FormatArg]) -> Result<String, FormatError> {
         }
         // Positional: `%<digits>%`.
         if let Some((index, end)) = parse_positional(bytes, i) {
+            max_positional_index = max_positional_index.max(index);
             let arg = args
                 .get(index - 1)
                 .ok_or(FormatError::PositionalOutOfRange {
@@ -326,7 +365,6 @@ pub fn format(fmt: &str, args: &[FormatArg]) -> Result<String, FormatError> {
                     arg_count: args.len(),
                 })?;
             write!(out, "{arg}").expect("String writers never fail");
-            used[index - 1] = true;
             i = end;
             continue;
         }
@@ -338,7 +376,6 @@ pub fn format(fmt: &str, args: &[FormatArg]) -> Result<String, FormatError> {
                         directive: directive.text.clone(),
                     })?;
             render_printf(&directive, arg, &mut out)?;
-            used[next_sequential] = true;
             next_sequential += 1;
             i = end;
             continue;
@@ -351,11 +388,11 @@ pub fn format(fmt: &str, args: &[FormatArg]) -> Result<String, FormatError> {
             directive: fmt[i..].chars().take(2).collect(),
         });
     }
-    let used_count = used.iter().filter(|&&u| u).count();
-    if used_count < args.len() {
+    let addressed = max_positional_index.max(next_sequential);
+    if args.len() > addressed {
         return Err(FormatError::TooManyArgs {
             arg_count: args.len(),
-            used: used_count,
+            used: addressed,
         });
     }
     Ok(out)
@@ -455,49 +492,59 @@ fn render_printf(
     arg: &FormatArg,
     out: &mut String,
 ) -> Result<(), FormatError> {
+    // A bare `%f`/`%F` with no precision. No in-scope call site writes one -- that is the
+    // re-derived survey this module's own doc comment states, not the two-caller claim an
+    // earlier version of this comment rested on: all 58 `Slic3r::format(` call sites across
+    // `src/libslic3r` were grepped, and the only printf-style float directive any of them writes
+    // is `%0.5f` (8 occurrences, all `GCode.cpp:10101`'s string); the apparent `% f` hits are a
+    // positional `%N%` followed by a word beginning with "f" ("%1% failed", "%1% file", "%1%
+    // from" -- `Print.cpp:5823`, `GCode.cpp:2931,2959`), not a space-flagged `%f`.
+    //
+    // This module's own contract (module doc's "Scope" note) is that a directive it cannot
+    // render faithfully fails the whole call rather than guess -- and this shape used to be the
+    // one exception, live behind a `// TODO(port):` rather than refused (review finding): the
+    // conversion character is in the accepted set below, so the old code fell through to Rust's
+    // shortest-round-tripping `Display` instead of refusing, which is a measurable mis-render
+    // against boost::format's bare `%f`/`%F` (fixed notation at the stream's default precision
+    // of six *fractional* digits -- measured against the pin's own vendored Boost,
+    // `oracle/.cache/tmp/boostfmt_pctf.cpp`, not committed, per this task's pull request body:
+    // `1.0/3.0` -> `0.333333`, `1.23456789` -> `1.234568`, `1234567.125` -> `1234567.125000`;
+    // `%F` the same). That precision is not transcribed as a `// PORT SRC:` because no vendored
+    // line writes it to cite against, which is R16's placeholder-constant rule -- the same
+    // reason `format_default_float`'s own `%g` fixed/scientific threshold has no citable source.
+    // TODO(port): format.hpp -- a bare `%f`/`%F` with no precision, if a real call site ever
+    // needs one: it must render fixed at six fractional digits, not fail the call the way this
+    // does today, which is the smaller claim (an error this port's own caller must handle) in
+    // place of a live silent mis-render.
+    if matches!(d.conv, 'f' | 'F') && d.precision.is_none() {
+        return Err(FormatError::UnsupportedConversion {
+            directive: d.text.clone(),
+        });
+    }
     let rendered = match (d.conv, arg) {
         ('d' | 'i', FormatArg::Int(v)) => format!("{v}"),
         ('d' | 'i', FormatArg::UInt(v)) => format!("{v}"),
         ('u', FormatArg::UInt(v)) => format!("{v}"),
         ('u', FormatArg::Int(v)) => format!("{v}"),
         ('s', other) => format!("{other}"),
-        ('f' | 'F', FormatArg::Float(v)) => match d.precision {
-            Some(p) => format!("{v:.*}", p),
-            // No in-scope call site writes a bare `%f`/`%F` with no precision. That is the
-            // re-derived survey this module's own doc comment states, not the two-caller claim an
-            // earlier version of this comment rested on: all 58 `Slic3r::format(` call sites
-            // across `src/libslic3r` were grepped, and the only printf-style float directive any
-            // of them writes is `%0.5f` (8 occurrences, all `GCode.cpp:10101`'s string); the
-            // apparent `% f` hits are a positional `%N%` followed by a word beginning with "f"
-            // ("%1% failed", "%1% file", "%1% from" -- `Print.cpp:5823`, `GCode.cpp:2931,2959`),
-            // not a space-flagged `%f`.
-            //
-            // So this fallback is unreached in scope, and it is a measured divergence rather than
-            // a port of boost's behaviour: boost::format's bare `%f` is fixed notation at the
-            // stream's default precision of six *fractional* digits (measured against the pin's
-            // own vendored Boost, `oracle/.cache/tmp/boostfmt_pctf.cpp`, not committed, per this
-            // task's pull request body: `1.0/3.0` -> `0.333333`, `1.23456789` -> `1.234568`,
-            // `1234567.125` -> `1234567.125000`; `%F` the same), where this arm returns Rust's
-            // shortest-round-tripping `Display` (`0.3333333333333333`, `1.23456789`,
-            // `1234567.125`). That precision is not transcribed because no vendored line writes
-            // it to cite against, which is R16's placeholder-constant rule -- the same reason
-            // `format_default_float`'s own `%g` fixed/scientific threshold has no citable source,
-            // and the one this module is inconsistent about today (that threshold *is*
-            // transcribed and trips `port/port-status`; see the pull request body).
-            // TODO(port): format.hpp -- a bare `%f`/`%F` with no precision, if a real call site
-            // ever needs one: it must render fixed at six fractional digits, not `Display`.
-            None => format!("{v}"),
-        },
-        ('f' | 'F', FormatArg::Int(v)) => match d.precision {
-            Some(p) => format!("{:.*}", p, *v as f64),
-            None => format!("{}", *v as f64),
-        },
+        ('f' | 'F', FormatArg::Float(v)) => format!("{v:.*}", d.precision.expect("checked above")),
+        ('f' | 'F', FormatArg::Int(v)) => {
+            format!("{:.*}", d.precision.expect("checked above"), *v as f64)
+        }
         ('x', FormatArg::UInt(v)) => format!("{v:x}"),
         ('x', FormatArg::Int(v)) => format!("{v:x}"),
         ('X', FormatArg::UInt(v)) => format!("{v:X}"),
         ('X', FormatArg::Int(v)) => format!("{v:X}"),
         ('o', FormatArg::UInt(v)) => format!("{v:o}"),
         ('o', FormatArg::Int(v)) => format!("{v:o}"),
+        // Two further shapes measured against the pin's own vendored Boost and recorded here
+        // rather than silently left (review finding), both unreached by any in-scope call site:
+        // `%d` on a `FormatArg::Float` (`(boost::format("%d") % 1.5)` renders `1.5`, not an
+        // integer conversion) and `%p` (rejected earlier, at `parse_printf_directive`'s
+        // conversion-character set, not reaching this match at all -- `(boost::format("%p") %
+        // 42)` renders `2a`). Both fall through to here (or are never parsed as a directive at
+        // all) and refuse rather than render boost's answer -- the same deliberate "fail rather
+        // than mis-render" shape `%-10d`'s flag already documents, not an accidental gap.
         _ => {
             return Err(FormatError::UnsupportedConversion {
                 directive: d.text.clone(),
@@ -615,8 +662,32 @@ mod tests {
         assert!(matches!(err, FormatError::UnsupportedConversion { .. }));
     }
 
-    /// Review finding: boost's `too_many_args` (an argument fed but never referenced by any
-    /// directive) used to return `Ok` and silently drop the extra argument.
+    /// Review finding: two further shapes boost renders and this module refuses, both
+    /// unreached in scope and both a deliberate refusal rather than a mis-render -- `%d` on a
+    /// float (boost's own vendored answer, measured: `1.5`) and `%p` (boost's own vendored
+    /// answer, measured: `2a`).
+    #[test]
+    fn d_on_float_and_p_are_refused_not_silently_mis_rendered() {
+        let err = format("%d", &[FormatArg::from(1.5f64)]).unwrap_err();
+        assert!(matches!(err, FormatError::UnsupportedConversion { .. }));
+        let err = format("%p", &[FormatArg::from(42i64)]).unwrap_err();
+        assert!(matches!(err, FormatError::UnsupportedConversion { .. }));
+    }
+
+    /// Review finding: a bare `%f`/`%F` with no precision used to render Rust's
+    /// shortest-round-tripping `Display` (`0.3333333333333333`), where the pin's own vendored
+    /// Boost renders fixed at six fractional digits (`0.333333`) -- a live silent mis-render
+    /// this module's own contract (module doc's "Scope" note) says must instead fail the call.
+    #[test]
+    fn bare_f_with_no_precision_is_refused_not_silently_mis_rendered() {
+        let err = format("%f", &[FormatArg::from(1.0 / 3.0)]).unwrap_err();
+        assert!(matches!(err, FormatError::UnsupportedConversion { .. }));
+        let err = format("%F", &[FormatArg::from(1.0 / 3.0)]).unwrap_err();
+        assert!(matches!(err, FormatError::UnsupportedConversion { .. }));
+    }
+
+    /// Review finding: boost's `too_many_args` (more arguments supplied than `fmt` addresses)
+    /// used to return `Ok` and silently drop the extra argument.
     #[test]
     fn too_many_args_is_refused() {
         let err = format("%1%", &[FormatArg::from(1i64), FormatArg::from(2i64)]).unwrap_err();
@@ -627,6 +698,26 @@ mod tests {
                 used: 1
             }
         ));
+    }
+
+    /// Review finding: an earlier fix for the test above widened the error set past boost's own
+    /// condition, failing whenever *any* index went unreferenced rather than when `args` exceeds
+    /// the highest index `fmt` addresses. Measured against the pin's own vendored Boost:
+    /// `(boost::format("%1% %3%") % 1 % 2 % 3).str()` renders `"1 3"` and throws nothing, even
+    /// though index 2 is never read, because 3 arguments were given and index 3 is the highest
+    /// one `fmt` names.
+    #[test]
+    fn too_many_args_does_not_fire_on_a_skipped_positional_index() {
+        let actual = format(
+            "%1% %3%",
+            &[
+                FormatArg::from(1i64),
+                FormatArg::from(2i64),
+                FormatArg::from(3i64),
+            ],
+        )
+        .unwrap();
+        assert_eq!(actual, "1 3");
     }
 
     #[test]
@@ -646,13 +737,14 @@ mod tests {
         ));
     }
 
-    /// Proof path 2 (R19) -- see the module doc's "A finding for the regeneration pass" note for
-    /// why this reads a real dump value rather than `format.hpp`'s own (nonexistent) stage
-    /// output: `port/dumps/20mm_cube-base-fff/posSlice.dump`'s layer-0 `print_z` scalar
-    /// (`0x1.999999999999ap-3`, already proven to parse as exactly `0.2` by
-    /// `crates/slic3r-proof/tests/dumps_proof.rs`'s `print_z_scalar_parses_the_real_hexfloat_token`)
-    /// fed through this module's positional-formatting path, exactly as `Slic3r::format("%1%",
-    /// print_z)` would render it through `boost::format`'s own default `operator<<`.
+    /// Proof path 2 (R19) -- see the module doc's "Review finding, fixed" note for the full
+    /// history. Both sides of the comparison now trace to the oracle: `print_z` is a real
+    /// committed stage dump scalar (`port/dumps/20mm_cube-base-fff/posSlice.dump`'s layer-0
+    /// record, `0x1.999999999999ap-3`, already proven to parse as exactly `0.2` by
+    /// `crates/slic3r-proof/tests/dumps_proof.rs`'s `print_z_scalar_parses_the_real_hexfloat_token`),
+    /// and `expected` is what the real vendored `Slic3r::format("%1%", print_z)` -- the pin's own
+    /// linked `boost::format`, through `slic3r_proof::proof_units::format::path2_format_positional`
+    /// -- renders for that exact value, not a hand-transcribed literal.
     // PROOF: 2
     #[test]
     fn format_positional_renders_oracle_print_z_proves_path_2() {
@@ -667,7 +759,7 @@ mod tests {
             .expect("print_z carries a 'value=' scalar");
 
         let actual = format("%1%", &[FormatArg::from(print_z)]).unwrap();
-        let expected = "0.2".to_string();
+        let expected = slic3r_proof::proof_units::format::path2_format_positional(print_z);
         // slic3r-proof::tiers::compare_unit's `ProofValue` trait covers the primitive numeric
         // types and `Vec<T>` of them (deliberately, per that trait's own doc comment: a unit
         // whose proof returns something else flattens it at the call site); a formatted
@@ -676,8 +768,8 @@ mod tests {
         // `compare_unit` would apply, just without routing through a trait it does not cover.
         assert_eq!(
             actual, expected,
-            "format.hpp (tier=exact proof_path=2 oracle=built): the real dump's print_z (0.2) \
-             must render unchanged through %1%"
+            "format.hpp (tier=exact proof_path=2 oracle=built): the port's rendering of the \
+             real dump's print_z must match the oracle's own boost::format rendering of it"
         );
     }
 }
