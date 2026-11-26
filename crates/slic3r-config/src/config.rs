@@ -4399,10 +4399,16 @@ impl<T: ConfigOptionEnumValue + Default + fmt::Debug> ConfigOption for ConfigOpt
 /// `None` is not available without inventing a type the row does not give (`docs/PORTING.md`:
 /// "no module invents a Rust type for a row whose cell is filled"). The vendored pointer *can*
 /// be null (`ConfigOptionEnumGeneric(const t_config_enum_values* keys_map = nullptr)`,
-/// `Config.hpp:2149`), so a real empty table standing in for "no map" is the borrowed-row
-/// counterpart of decision 6 of "Decisions recorded on 2026-11-26" (which is stated for an
-/// `owned` row): every read site below treats "empty" as "no map", matching every behaviour the
-/// vendored null check (`if (this->keys_map == nullptr)`) gates.
+/// `Config.hpp:2149`), so this is **not** decision 6 of "Decisions recorded on 2026-11-26"'s own
+/// route (that decision's rule is to report the row and stop on the field, leaving the cell for
+/// an amendment pull request to correct -- it is stated for an `owned` row, and this task does
+/// not take it as licence for a `borrowed` one). It is a plain engineering choice this task
+/// makes and names instead: a real, empty table stands in for the null pointer, so every field
+/// stays the cell's own bare `&'static BTreeMap<String, i32>` with nothing invented, and every
+/// read site below treats "the table resolves no names" as "no map" the same way the vendored
+/// null check does. Whether the cell should instead gain an `Option<_>` (decision 6's own fix for
+/// the analogous `owned`-row gap) is left to the regeneration pass to confirm, named here and in
+/// this task's pull request body rather than decided unilaterally.
 static EMPTY_ENUM_VALUES: TConfigEnumValues = BTreeMap::new();
 
 /// `ConfigOptionEnumGeneric` (`:2146-2202`). `keys_map`: `port/ownership.tsv`, `Config.hpp:2152`,
@@ -4474,6 +4480,12 @@ impl ConfigOption for ConfigOptionEnumGeneric {
             ));
         }
         self.value = other.get_int()?;
+        // PORT NOTE: Config.hpp:2176 -- the vendored check is `this->keys_map == nullptr`
+        // (pointer identity); this port's `&'static` field has no null to compare against (see
+        // EMPTY_ENUM_VALUES's own doc), so `is_empty()` substitutes "resolves no names" for "is
+        // null". A real but empty table and the sentinel are indistinguishable to this check,
+        // which is harmless here (both resolve the same, nothing), but it is a real behavioural
+        // substitution, not merely the sentinel's own instantiation choice.
         if self.keys_map.is_empty() {
             if let Some(o) = other.as_any().downcast_ref::<ConfigOptionEnumGeneric>() {
                 self.keys_map = o.keys_map;
@@ -4598,6 +4610,8 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
             )
         })?;
         self.values = o.values.clone();
+        // PORT NOTE: Config.hpp:2240-2241 -- same `== nullptr` -> `is_empty()` substitution as
+        // ConfigOptionEnumGeneric::set's identical branch; see that one's own comment.
         if self.keys_map.is_empty() {
             self.keys_map = o.keys_map;
         }
@@ -7660,6 +7674,30 @@ mod tests {
         assert_eq!(a.diff(&b), vec!["a".to_string()]);
         a.apply(&b, false).unwrap();
         assert!(a.equals(&b, None));
+    }
+
+    /// Advisor review finding: verifies `ConfigOptionDef::enum_keys_map`/
+    /// `ConfigOptionEnumGeneric::keys_map` are actually settable to a non-empty, non-sentinel
+    /// table through the ordinary `ConfigDef::add` path -- if the borrow checker rejected this,
+    /// the bare `&'static` field (no `Option<_>`, per `port/ownership.tsv`'s cell) would make the
+    /// whole `coEnum` path unreachable for any fan-out task, which this test rules out.
+    #[test]
+    fn config_option_def_enum_keys_map_is_settable_and_resolves_names() {
+        static KEYS: std::sync::OnceLock<TConfigEnumValues> = std::sync::OnceLock::new();
+        let keys: &'static TConfigEnumValues = KEYS.get_or_init(|| {
+            let mut m = BTreeMap::new();
+            m.insert("alpha".to_string(), 0);
+            m.insert("beta".to_string(), 1);
+            m
+        });
+
+        let mut def = ConfigDef::new();
+        def.add("mode", ConfigOptionType::Enum).enum_keys_map = keys;
+        assert_eq!(def.get("mode").unwrap().enum_keys_map.get("beta"), Some(&1));
+
+        let opt = ConfigOptionEnumGeneric::with_value(keys, 1);
+        assert_eq!(opt.serialize(), "beta");
+        assert!(!std::ptr::eq(opt.keys_map, &EMPTY_ENUM_VALUES));
     }
 
     #[test]
