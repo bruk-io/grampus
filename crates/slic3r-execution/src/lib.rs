@@ -4,3 +4,5 @@
 //! as docs/WORKFLOW.md states.
 
 pub mod execution;
+pub mod execution_seq;
+pub mod execution_tbb;
