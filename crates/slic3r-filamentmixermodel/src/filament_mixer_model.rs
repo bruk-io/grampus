@@ -774,8 +774,8 @@ mod detail {
 
         /// `POLY_DEGREE`/`N_FEATURES`/`N_INPUTS` and the two table shapes agree with the header
         /// comment's own claim (`FilamentMixerModel.hpp:53`, "Degree-4 polynomial, 330 features,
-        /// 7 inputs") -- a plain shape check, not this unit's `// PROOF:` (see the parent
-        /// module's own doc comment for why this unit carries none).
+        /// 7 inputs") -- a plain shape check, not this unit's `// PROOF:` marker (see
+        /// `filament_mixer_model_lerp_matches_the_oracle`, in the parent module, for that).
         #[test]
         fn filament_mixer_model_detail_table_shapes_match_the_header_comment() {
             assert_eq!(POLY_DEGREE, 4);
