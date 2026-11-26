@@ -24,10 +24,26 @@
 //! -- `CutUtils.hpp:18`'s `ModelObjectCutAttribute` pulls in `Model.hpp` and is not needed) and
 //! reconstructs the combined mask through the template's own public `has()`, and the test below
 //! compares [`EnumBitmask`]'s own combined mask against that oracle value through
-//! `compare_unit`. The `PORT STATUS` trailer's `oracle: built` is therefore an accurate
-//! description of this row's proof, not the least-false placeholder an earlier version of this
-//! module doc recorded (`just oracle-build`'s library genuinely is on the call path, through
-//! this crate's own `cxx` bridge).
+//! `compare_unit`. **What `oracle: built` means here, precisely**: unlike `libslic3r.cpp`'s
+//! `SCALING_FACTOR` (a link-time read of a symbol `just oracle-build`'s own archive defines),
+//! no symbol from that archive is reached for this row -- `enum_bitmask.hpp` is header-only, so
+//! the oracle is the vendored header's own source, compiled into this crate's `cxx` build with
+//! the same `-ffp-contract=off` flag and include set `just oracle-build` uses, not linked out of
+//! its archive. `ORACLE_VALUES = {release, built}` (`port/port-status`) has no third spelling
+//! for "a header-only oracle compiled rather than linked"; `built` is the correct value by the
+//! same precedent `crates/slic3r-ffi/cxx/proof_units/object_id.cpp`'s `path2_header_observations`
+//! and `print_config_constants.cpp` already set on `main` for header-only rows, not the
+//! least-false placeholder an earlier version of this module doc recorded for a proof that
+//! reached no oracle at all.
+//!
+//! **Stated limit (decision 4's own words), not worked around**: the shim reconstructs the
+//! combined mask through `has()` using the bit-position formula this module doc derives by hand
+//! from `mask_value(o) = 1 << underlying_type(o)` (`enum_bitmask.hpp:18`) -- `OptA`/`OptB`/`OptC`
+//! at bits `1`/`2`/`4`. The proof therefore confirms the template's `operator|`/`has()`
+//! round-trip against that known layout, not the layout itself independently; a hand-derived
+//! formula in the test's own scope is "not mechanically distinguishable from the ported module's
+//! own `pub const`" (`docs/PORTING.md`, decision 4's "stated limit"), and remains a reviewer's
+//! judgement.
 
 use std::marker::PhantomData;
 

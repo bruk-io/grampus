@@ -8,9 +8,13 @@
 // SCALING_FACTOR_INTERNAL;` (:3), sits at file scope, *before* `namespace Slic3r {` opens
 // (`libslic3r.h:123`), so the externally linked symbol is the global `::SCALING_FACTOR`, never
 // `Slic3r::SCALING_FACTOR` -- verified directly against the built archive:
-// `nm vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a` shows
-// `D _SCALING_FACTOR`, a defined data symbol with no namespace mangling (see this task's pull
-// request body for the exact command and output).
+// `nm vendor/OrcaSlicer/build/arm64/src/libslic3r/Release/liblibslic3r.a | awk '/\.o:/{f=$0}
+// /_SCALING_FACTOR/{print f": "$0}' | grep -v ' U '` prints exactly one defining line,
+// `libslic3r.cpp.o:: 0000000000001c70 D _SCALING_FACTOR` -- a defined data symbol (`D`) with no
+// namespace mangling, in the one object file that should define it; every other object file's
+// own `U _SCALING_FACTOR` (several, e.g. `LineSplit.cpp.o`, `RegionExpansion.cpp.o`) is an
+// undefined reference to that same global, consistent with it being read, never redefined,
+// elsewhere in the archive.
 //
 // The quoted include below names the vendored header as `"libslic3r/libslic3r.h"`, not the bare
 // `"libslic3r.h"` every in-directory vendored file uses for it: this shim's own declarations

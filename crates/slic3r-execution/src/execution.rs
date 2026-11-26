@@ -40,9 +40,16 @@
 //! concrete policy parameterises it -- a real one, `ExecutionSeq.hpp`/`ExecutionTBB.hpp`, is a
 //! sibling foundation task's own unit) and calls the vendored `Slic3r::execution::reduce` free
 //! function through it, and the test below compares the port's own [`reduce`] dispatch against
-//! that oracle value through `compare_unit`. The `PORT STATUS` trailer's `oracle: built` is
-//! therefore an accurate description of this row's proof, not the least-false placeholder an
-//! earlier version of this module doc recorded.
+//! that oracle value through `compare_unit`. **What `oracle: built` means here, precisely**:
+//! `Execution.hpp` is header-only, so no symbol is linked out of `just oracle-build`'s own
+//! archive for this row -- the oracle is the vendored header's own dispatch, compiled into this
+//! crate's `cxx` build with the same `-ffp-contract=off` flag and include set `just oracle-build`
+//! uses. `ORACLE_VALUES = {release, built}` (`port/port-status`) has no third spelling for "a
+//! header-only oracle compiled rather than linked"; `built` is the correct value by the same
+//! precedent `crates/slic3r-ffi/cxx/proof_units/object_id.cpp`'s `path2_header_observations` and
+//! `print_config_constants.cpp` already set on `main` for header-only rows, not the least-false
+//! placeholder an earlier version of this module doc recorded for a proof that reached no oracle
+//! at all.
 
 /// `template<class EP, class En = void> struct Traits {};` (`:27`), specialised per concrete
 /// policy (`ExecutionSeq.hpp`, `ExecutionTBB.hpp`): "each execution policy should declare two
