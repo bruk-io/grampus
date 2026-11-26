@@ -457,7 +457,9 @@ dependencies = [
  "slic3r-boundingbox",
  "slic3r-ffi",
  "slic3r-line",
+ "slic3r-multipoint",
  "slic3r-point",
+ "slic3r-polygon",
 ]
 
 [[package]]
