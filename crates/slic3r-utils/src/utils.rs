@@ -2536,7 +2536,12 @@ pub fn check_copy(origin: &Path, copy: &Path) -> CopyFileResult {
     let (Ok(size1), Ok(size2)) = (f1.seek(SeekFrom::End(0)), f2.seek(SeekFrom::End(0))) else {
         return CopyFileResult::FailFilesDifferent;
     };
-    let mut remaining = size1;
+    // `std::streampos fsize = f1.tellg();` (`:1230`) is signed, and `fsize -= origin_cnt`
+    // (`:1250`) may take it negative if the file grew between the seek and the reads -- after
+    // which `fsize == 0` (`:1254`) is false and the answer is FAIL_FILES_DIFFERENT. Signed here
+    // for the same reason: an unsigned subtraction would panic under overflow checks at a site
+    // the oracle has no check at.
+    let mut remaining = size1 as i64;
     if size1 != size2 {
         return CopyFileResult::FailFilesDifferent;
     }
@@ -2564,7 +2569,7 @@ pub fn check_copy(origin: &Path, copy: &Path) -> CopyFileResult {
         if n1 != n2 || (n1 > 0 && buffer_origin[..n1] != buffer_copy[..n2]) {
             return CopyFileResult::FailFilesDifferent;
         }
-        remaining -= n1 as u64;
+        remaining -= n1 as i64;
         if eof1 || eof2 {
             // "All data has been read and compared equal." (`:1253-1254`)
             return if remaining == 0 {
