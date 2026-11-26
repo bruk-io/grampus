@@ -806,9 +806,9 @@ does not diff them), so this pull request could have done it. It is wrong to do 
   `ported` to `drafted`, because each module's marker still reads `// PROOF: 2`.
 - Changing a *not-yet-ported* row's cell breaks whichever in-flight port branch holds that unit:
   its builder reads the cell from `main` as it stood when the task was cut, writes that marker, and
-  its row derives `drafted` once merged. `Execution/ExecutionSeq.hpp` and
-  `Execution/ExecutionTBB.hpp` are two of the seven dumpless-stage rows and are a sibling
-  foundation task's units.
+  its row derives `drafted` once merged. This is not hypothetical. `Execution/ExecutionSeq.hpp`
+  and `Execution/ExecutionTBB.hpp` are two of the seven dumpless-stage rows, and both are units
+  of `56-foundation-point`, which is being built now.
 - Correcting 4 rows of the 85 would leave the column less consistent than it is now, and deciding
   the other 81 is a per-row reading of whether a unit's output reaches a dump field, which no text
   rule derives.
