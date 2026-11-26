@@ -1267,6 +1267,16 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
     fn option_type(&self) -> ConfigOptionType {
         ConfigOptionType::Floats
     }
+    // PORT NOTE: src/libslic3r/Config.hpp:971-977 -- throws `ConfigurationError("Serializing
+    // NaN")`/`("Serializing invalid number")` for a non-nullable NaN/an infinity;
+    // `serialize_single_value` already returns `Result<String, ConfigError>` to carry that, but
+    // the `ConfigOption::serialize` trait method this overrides returns a bare `String`
+    // (matching the vendored `std::string serialize() const` signature, which the same
+    // narrowing applies to for every type in this unit, not only this one -- `serialize()`
+    // itself cannot throw in this trait's shape), so the error is swallowed to an empty string
+    // here rather than silently matched or quietly left unmentioned. Named, not fixed: fixing it
+    // for real needs `ConfigOption::serialize` to return `Result<String, ConfigError>`, a
+    // trait-wide signature change this task's remaining scope did not reach.
     fn serialize(&self) -> String {
         let mut parts = Vec::with_capacity(self.values.len());
         for v in &self.values {
@@ -1295,6 +1305,15 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
         for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
+                // PORT NOTE: Config.hpp:945-946 -- throws `ConfigurationError("Deserializing
+                // nil into a non-nullable object")`; narrowed to `false` here because
+                // `ConfigOption::deserialize` returns a bare `bool`, matching the vendored
+                // `bool deserialize(...)` signature's own ordinary (non-throwing) failure path
+                // -- every other failure in this same method (an unparseable item, a bad enum
+                // key) already returns `false` uniformly for the same structural reason, so this
+                // is not a one-off narrowing introduced only here. Named, not fixed: a caller
+                // cannot tell this case apart from any other `false`, where the oracle's
+                // exception type would let one.
                 if !NULLABLE {
                     return false;
                 }
@@ -1435,6 +1454,9 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
 }
 
 impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionFloatsTempl<NULLABLE> {
+    // PORT NOTE: Config.hpp:971-977 -- same swallow as `serialize()` just above, for the same
+    // trait-signature reason (`ConfigOptionVectorBase::vserialize` returns a bare `Vec<String>`,
+    // not `Result<Vec<String>, ConfigError>`).
     fn vserialize(&self) -> Vec<String> {
         self.values
             .iter()
@@ -1862,6 +1884,8 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
         for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
+                // PORT NOTE: Config.hpp:945-946 -- same narrowing as
+                // `ConfigOptionFloatsTempl::deserialize`'s own doc comment explains.
                 if !NULLABLE {
                     return false;
                 }
@@ -2874,6 +2898,8 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionPercentsTempl<NULLABLE> 
         for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
+                // PORT NOTE: Config.hpp:945-946 -- same narrowing as
+                // `ConfigOptionFloatsTempl::deserialize`'s own doc comment explains.
                 if !NULLABLE {
                     return false;
                 }
@@ -3335,6 +3361,8 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsOrPercentsTempl<NU
         for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
+                // PORT NOTE: Config.hpp:945-946 -- same narrowing as
+                // `ConfigOptionFloatsTempl::deserialize`'s own doc comment explains.
                 if !NULLABLE {
                     return false;
                 }
@@ -5569,6 +5597,8 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
         for item in cpp_getline_split(s, ',') {
             let item = item.trim();
             if item == "nil" {
+                // PORT NOTE: Config.hpp:945-946 -- same narrowing as
+                // `ConfigOptionFloatsTempl::deserialize`'s own doc comment explains.
                 if !NULLABLE {
                     return false;
                 }
