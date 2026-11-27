@@ -118,6 +118,18 @@ test = false
 doc = false
 bench = false
 
+# `slic3r-polyline`, added by task `63-foundation-polyline`: `Polyline.cpp`/`Polyline.hpp`'s row
+# is `fuzz target: required` on both cells. `docs/WORKFLOW.md`'s "A `required` fuzz target" rule
+# names this file as the one crate manifest a foundation task may touch; appended here, at the
+# end, so two branches conflict textually rather than reordering silently. `slic3r-point` is
+# already a dependency of this crate (added by `56-foundation-point`'s own fuzz target, above).
+[dependencies.slic3r-polyline]
+path = "../../slic3r-polyline"
+
+[[bin]]
+name = "slic3r-polyline_polyline"
+path = "fuzz_targets/slic3r-polyline_polyline.rs"
+
 # `slic3r-arachne-utils`, added by task `73-foundation-arachne-indices` for its three `ported`
 # modules with `fuzz target: required` -- `half_edge_node` (`Arachne/utils/HalfEdgeNode.hpp`),
 # `polygons_point_index` (`Arachne/utils/PolygonsPointIndex.hpp`) and `polygons_segment_index`
