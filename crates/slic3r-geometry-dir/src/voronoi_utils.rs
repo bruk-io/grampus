@@ -324,6 +324,12 @@ pub fn discretize_parabola(
     // debug-only self-check, the second a log side effect -- see this function's own doc.
     // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:174 -- BOOST_LOG_TRIVIAL(warning)
 
+    // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:176 -- `std::abs(ex - sx)` is undefined
+    // behaviour at `i64::MIN` (no positive `i64` can represent its magnitude); `.unsigned_abs()`
+    // is defined there (returns `2^63` as `u64`), so the two diverge only at that one unreachable
+    // input (`ex`/`sx` are measured parallel to a bounded input segment, never `i64::MIN`), and
+    // the port's defined `.unsigned_abs()` stands in for the vendored UB rather than reproducing
+    // it.
     let step_count: i64 =
         ((ex - sx).unsigned_abs() as f64 / approximate_step_size as f64).round() as i64;
     discretized.push(start);
