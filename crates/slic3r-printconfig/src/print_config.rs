@@ -2,17 +2,23 @@
 //! `64-foundation-print-config`, `port/foundation.tsv`'s `foundation-13`): the print
 //! configuration option set.
 //!
-//! **Status: incomplete, and deliberately not reached by a `mod` line.** This module is being
-//! built in the order
-//! `intent/libslic3r-rust-port/tasks/64-foundation-print-config/plan.md` sets out (Step 2 the
-//! enums, Step 3 `StaticCache`/`StaticPrintConfig`, Step 4 the 11 derived classes, Step 5 the
-//! option table, Step 6 `handle_legacy`). Until every step is in and the whole-key-set
-//! comparison test is green over all 881 oracle keys, `crates/slic3r-printconfig/src/lib.rs`
-//! carries **no** `mod print_config;` line, so `port/port-status` derives `drafted` for this
-//! unit rather than a `ported` status that is not true. `docs/WORKFLOW.md`'s rule is explicit:
-//! an unreached module is `drafted`, a `mod`-reached module over a live `todo!()` is
-//! `not-started`, and the first is the honest state of partial work. Which slices are in is
-//! recorded in this task's pull request body, measured rather than estimated.
+//! **Status: incomplete, and `drafted` rather than `ported`.** This module is being built in
+//! the order `intent/libslic3r-rust-port/tasks/64-foundation-print-config/plan.md` sets out
+//! (Step 2 the enums, Step 3 `StaticCache`/`StaticPrintConfig`, Step 4 the 11 derived classes,
+//! Step 5 the option table, Step 6 `handle_legacy`). Steps 2, 3 and 6 are in; Step 5 is
+//! partial -- `init_common_params` in full plus the first options of `init_fff_params`, with
+//! `init_extruder_option_keys`, `init_filament_option_keys` and `init_sla_params` still
+//! placeholders -- and Step 4 is not started.
+//!
+//! `crates/slic3r-printconfig/src/lib.rs` **does** carry `pub mod print_config;`, landed in
+//! `d6e3f55`. That is `docs/WORKFLOW.md`'s rule satisfied, not a completeness claim: the rule
+//! is never to land a `mod` line over a live `todo!()`/`unimplemented!()`, because a
+//! `mod`-reached `todo!()` derives `not-started` and hides in the burn-down, and this module
+//! holds neither. What keeps the unit's two manifest rows at `drafted` is the **absent**
+//! `// PROOF: 3` marker: `derive_row_status` reads `ported` only for a `mod`-reached row whose
+//! marker is present, so until the whole-key-set comparison test is green over all 881 oracle
+//! keys and lands with that marker, both rows stay in `in-scope rows remaining`. Which slices
+//! are in is recorded in this task's pull request body, measured rather than estimated.
 //!
 //! **`L(s)` is the identity function in this translation unit.** `PrintConfig.cpp:91` is
 //! `#define L(s) (s)`, shadowing the gettext-backed `L` every other `.cpp` in the vendored tree
@@ -4597,11 +4603,12 @@ fn obsolete_option_keys() -> &'static std::collections::BTreeSet<&'static str> {
 //
 // What these are for: every assertion below is true of the table as it stands *and* stays true
 // as the table fills, so the measurements this task's pull request reports are reproducible
-// from the tree rather than only from the session that ran them. Because `lib.rs` carries no
-// `mod print_config;` line yet, this module is not compiled by `cargo test --workspace` today;
-// it was verified by temporarily adding that line and running it, and it activates on its own
-// the moment Step 7 lands. Nothing here weakens into a check that cannot fail: each one would
-// fail on a mistranscribed enum value, option type, default, CLI spelling or legacy branch.
+// from the tree rather than only from the session that ran them. `lib.rs` carries
+// `pub mod print_config;` (landed in `d6e3f55`), so these five tests are compiled and run by
+// `cargo test --workspace` and therefore by CI -- `cargo test -p slic3r-printconfig` reports
+// `5 passed`, and CI's oracle-checks job ran them on `2c3b262`. Nothing here weakens into a
+// check that cannot fail: each one would fail on a mistranscribed enum value, option type,
+// default, CLI spelling or legacy branch.
 // --------------------------------------------------------------------------------------------
 
 #[cfg(test)]
