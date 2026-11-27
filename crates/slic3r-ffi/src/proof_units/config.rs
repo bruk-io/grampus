@@ -83,6 +83,43 @@ mod ffi {
         serialized: String,
     }
 
+    /// `option<TYPE>` vs `opt<T>` across the `coEnum` pair -- the one tag whose two classes have
+    /// no common base below `ConfigOption`. One twin is stored and the other is asked for.
+    struct ProofEnumPairResult {
+        /// `opt->type()` of what was stored, as its discriminant (always `coEnum` = 9).
+        stored_tag: i32,
+        /// `cfg.option<the other twin>("k") != nullptr`.
+        tag_checked_ok: bool,
+        /// `->value` read through that tag-checked pointer, or `-999` when it is null. This is the
+        /// integer the cross-pair `static_cast` reinterprets.
+        tag_checked_value: i32,
+        /// `cfg.opt<the other twin>("k") != nullptr`.
+        dynamic_cast_ok: bool,
+        /// `cfg.option("k")->getInt()` -- the virtual route across the pair, which both twins
+        /// implement (`Config.hpp:2088`, `:1027`).
+        get_int: i32,
+    }
+
+    /// `ConfigBase::option_throw<TYPE>` (`Config.hpp:2790-2797`): which of the two exceptions
+    /// comes out, or the size on success. The `const ConfigOptionResolver` overload at
+    /// `:2716-2723` is absent on purpose -- it does not compile at the pin (see
+    /// `cxx/proof_units/config.cpp` for the error and why nothing ever caught it), so the
+    /// `const_*` fields below are left unset.
+    struct ProofOptionThrowResult {
+        /// `ConfigBase::option_throw<TYPE>` returned a pointer.
+        ok: bool,
+        /// It threw `UnknownOptionException`.
+        unknown_option: bool,
+        /// It threw `BadOptionTypeException`.
+        bad_option_type: bool,
+        /// `values.size()` through the returned pointer, when it returned one.
+        size: usize,
+        /// The same three, for the `const ConfigOptionResolver&` overload.
+        const_ok: bool,
+        const_unknown_option: bool,
+        const_bad_option_type: bool,
+    }
+
     /// `dynamic_cast<ConfigOptionVectorBase*>` over one constructed option type.
     struct ProofVectorBaseResult {
         /// False when `type_name` is not on the shim's roster.
@@ -164,8 +201,17 @@ mod ffi {
         fn path3_apply_override_floats(
             lhs: &str,
             rhs: &str,
+            rhs_nullable: bool,
             default_index: &[i32],
         ) -> ProofApplyOverrideResult;
+        fn path3_tagged_vs_dynamic_enum(store_generic: bool, value: i32) -> ProofEnumPairResult;
+        fn path3_option_throw_floats(
+            serialized: &str,
+            nullable: bool,
+            ask_wrong_tag: bool,
+            ask_missing_key: bool,
+        ) -> ProofOptionThrowResult;
+        fn path3_create_empty_option_enum(enums: bool) -> ProofCreateDefaultResult;
         fn path3_option_vector_base(type_name: &str) -> ProofVectorBaseResult;
         fn path3_create_default_option_enum(default_value: i32) -> ProofCreateDefaultResult;
         fn path3_create_default_option_enums(
@@ -177,14 +223,16 @@ mod ffi {
 
 pub use ffi::{
     path3_apply_override_floats, path3_create_default_option_enum,
-    path3_create_default_option_enums, path3_deserialize_float, path3_deserialize_int,
-    path3_deserialize_point, path3_deserialize_point3, path3_escape_ampersand,
-    path3_escape_string_cstyle, path3_escape_strings_cstyle, path3_get_abs_value_at,
-    path3_is_end_of_gcode_line, path3_is_end_of_line, path3_is_end_of_word, path3_is_whitespace,
-    path3_istream_extract_double, path3_normalize_cli_bool_value, path3_option_vector_base,
-    path3_serialize_float, path3_tagged_vs_dynamic_floats, path3_unescape_string_cstyle,
+    path3_create_default_option_enums, path3_create_empty_option_enum, path3_deserialize_float,
+    path3_deserialize_int, path3_deserialize_point, path3_deserialize_point3,
+    path3_escape_ampersand, path3_escape_string_cstyle, path3_escape_strings_cstyle,
+    path3_get_abs_value_at, path3_is_end_of_gcode_line, path3_is_end_of_line, path3_is_end_of_word,
+    path3_is_whitespace, path3_istream_extract_double, path3_normalize_cli_bool_value,
+    path3_option_throw_floats, path3_option_vector_base, path3_serialize_float,
+    path3_tagged_vs_dynamic_enum, path3_tagged_vs_dynamic_floats, path3_unescape_string_cstyle,
     path3_unescape_strings_cstyle, ProofAbsValueAtResult, ProofCreateDefaultResult,
     ProofDeserializeFloatResult, ProofDeserializeIntResult, ProofDeserializePoint3Result,
-    ProofDeserializePointResult, ProofIstreamExtractDoubleResult, ProofTaggedAccessResult,
-    ProofUnescapeResult, ProofUnescapeStringsResult, ProofVectorBaseResult,
+    ProofDeserializePointResult, ProofEnumPairResult, ProofIstreamExtractDoubleResult,
+    ProofOptionThrowResult, ProofTaggedAccessResult, ProofUnescapeResult,
+    ProofUnescapeStringsResult, ProofVectorBaseResult,
 };

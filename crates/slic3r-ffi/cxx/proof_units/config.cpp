@@ -134,11 +134,39 @@ ProofDeserializePoint3Result path3_deserialize_point3(rust::Str value) {
 // hide which order the walk takes. Every value here has exactly one name, and the Rust side builds
 // a `BTreeMap<String, i32>` with these same pairs -- `std::map<std::string, int>` and `BTreeMap`
 // order keys identically (byte-wise ascending), which is what makes the two walks comparable.
+// This shim's own enum, so this translation unit can instantiate `ConfigOptionEnum<T>` at all:
+// `ConfigOptionEnum<T>::get_enum_values`/`get_enum_names` (`Config.hpp:2128-2130`) are declared
+// but not defined, and every specialization the vendored tree writes is in `PrintConfig.hpp`,
+// outside this unit's `#include`. The values match `kProofEnumValues` below.
+enum ProofEnum { peClassic = 0, peZigZag = 1, peArachne = 2 };
+
 static const Slic3r::t_config_enum_values kProofEnumValues{
     {"arachne", 2},
     {"classic", 0},
     {"zig-zag", 1},
 };
+
+static const Slic3r::t_config_enum_names kProofEnumNames{"classic", "zig-zag", "arachne"};
+
+} // namespace config
+} // namespace proof_units
+} // namespace slic3r_ffi
+
+// The two specializations, which must be in `Slic3r` rather than in this shim's namespace.
+namespace Slic3r {
+template <>
+const t_config_enum_values &ConfigOptionEnum<slic3r_ffi::proof_units::config::ProofEnum>::get_enum_values() {
+    return slic3r_ffi::proof_units::config::kProofEnumValues;
+}
+template <>
+const t_config_enum_names &ConfigOptionEnum<slic3r_ffi::proof_units::config::ProofEnum>::get_enum_names() {
+    return slic3r_ffi::proof_units::config::kProofEnumNames;
+}
+} // namespace Slic3r
+
+namespace slic3r_ffi {
+namespace proof_units {
+namespace config {
 
 ProofTaggedAccessResult path3_tagged_vs_dynamic_floats(rust::Str serialized, bool nullable) {
     std::string cpp_value(serialized);
@@ -195,30 +223,128 @@ ProofAbsValueAtResult path3_get_abs_value_at(rust::Str serialized, bool nullable
 }
 
 ProofApplyOverrideResult path3_apply_override_floats(rust::Str lhs, rust::Str rhs,
+                                                     bool rhs_nullable,
                                                      rust::Slice<const int32_t> default_index) {
     Slic3r::ConfigOptionFloats lhs_opt;
     lhs_opt.deserialize(std::string(lhs), false);
-    Slic3r::ConfigOptionFloatsNullable rhs_opt;
-    rhs_opt.deserialize(std::string(rhs), false);
+    // `lhs` is always the non-nullable twin: `:747-748`/`:768-769` throw outright for a nullable
+    // `this`, so that is the one combination with nothing to compare. `rhs` is either, because
+    // `:773-779` (a non-nullable `rhs`) and `:782-813` (a nullable one) are two different bodies
+    // and both need covering.
+    std::unique_ptr<Slic3r::ConfigOption> rhs_opt;
+    if (rhs_nullable) {
+        rhs_opt.reset(new Slic3r::ConfigOptionFloatsNullable());
+    } else {
+        rhs_opt.reset(new Slic3r::ConfigOptionFloats());
+    }
+    rhs_opt->deserialize(std::string(rhs), false);
 
     std::vector<int> di(default_index.begin(), default_index.end());
 
     ProofApplyOverrideResult out{};
     // `overriden_by` first, on untouched values, since `apply_override` mutates `lhs_opt`.
     try {
-        out.overridden_by = lhs_opt.overriden_by(&rhs_opt);
+        out.overridden_by = lhs_opt.overriden_by(rhs_opt.get());
         out.overridden_by_ok = true;
     } catch (const std::exception &) {
         out.overridden_by_ok = false;
     }
     try {
-        out.modified = lhs_opt.apply_override(&rhs_opt, di);
+        out.modified = lhs_opt.apply_override(rhs_opt.get(), di);
         out.ok = true;
     } catch (const std::exception &) {
         out.ok = false;
     }
     out.serialized = rust::String(lhs_opt.serialize());
     return out;
+}
+
+ProofEnumPairResult path3_tagged_vs_dynamic_enum(bool store_generic, int value) {
+    Slic3r::DynamicConfig cfg;
+    if (store_generic) {
+        cfg.set_key_value("k", new Slic3r::ConfigOptionEnumGeneric(&kProofEnumValues, value));
+    } else {
+        cfg.set_key_value("k", new Slic3r::ConfigOptionEnum<ProofEnum>(static_cast<ProofEnum>(value)));
+    }
+
+    ProofEnumPairResult out{};
+    out.stored_tag = static_cast<int>(cfg.option("k")->type());
+
+    // Ask for the OTHER twin than the one stored, through both accessors.
+    if (store_generic) {
+        Slic3r::ConfigOptionEnum<ProofEnum> *tag_checked =
+            cfg.option<Slic3r::ConfigOptionEnum<ProofEnum>>("k");
+        out.tag_checked_ok = tag_checked != nullptr;
+        out.tag_checked_value = tag_checked == nullptr ? -999 : static_cast<int>(tag_checked->value);
+        out.dynamic_cast_ok = cfg.opt<Slic3r::ConfigOptionEnum<ProofEnum>>("k") != nullptr;
+    } else {
+        Slic3r::ConfigOptionEnumGeneric *tag_checked = cfg.option<Slic3r::ConfigOptionEnumGeneric>("k");
+        out.tag_checked_ok = tag_checked != nullptr;
+        out.tag_checked_value = tag_checked == nullptr ? -999 : tag_checked->value;
+        out.dynamic_cast_ok = cfg.opt<Slic3r::ConfigOptionEnumGeneric>("k") != nullptr;
+    }
+    // The virtual route across the pair, which is what the port's own accessor offers.
+    out.get_int = cfg.option("k")->getInt();
+    return out;
+}
+
+ProofOptionThrowResult path3_option_throw_floats(rust::Str serialized, bool nullable,
+                                                 bool ask_wrong_tag, bool ask_missing_key) {
+    Slic3r::DynamicConfig cfg;
+    if (nullable) {
+        cfg.set_key_value("k", new Slic3r::ConfigOptionFloatsNullable());
+    } else {
+        cfg.set_key_value("k", new Slic3r::ConfigOptionFloats());
+    }
+    cfg.option("k")->deserialize(std::string(serialized), false);
+
+    const char *key = ask_missing_key ? "absent" : "k";
+    ProofOptionThrowResult out{};
+
+    // `ConfigBase::option_throw<TYPE>` (`:2790-2797`), non-const.
+    try {
+        if (ask_wrong_tag) {
+            out.size = cfg.option_throw<Slic3r::ConfigOptionInts>(key)->values.size();
+        } else {
+            out.size = cfg.option_throw<Slic3r::ConfigOptionFloats>(key)->values.size();
+        }
+        out.ok = true;
+    } catch (const Slic3r::UnknownOptionException &) {
+        out.unknown_option = true;
+    } catch (const Slic3r::BadOptionTypeException &) {
+        out.bad_option_type = true;
+    }
+
+    // `ConfigOptionResolver::option_throw<TYPE>`, the const overload at `:2716-2723`, is NOT
+    // measured, and cannot be: **it does not compile.** Its body is `return
+    // static_cast<TYPE*>(opt);` with `opt` a `const ConfigOption*` (`:2719`, `:2722`), which casts
+    // away `const` -- a hard error, not a warning. Nothing in the vendored tree instantiates it:
+    // the only three `option_throw<...>` uses (`:2823`, `:2827`, `:2829`) all pass `create` and so
+    // resolve to `ConfigBase::option_throw<TYPE>(key, create)` at `:2790`, the non-const one
+    // measured above. Instantiating it here is what surfaced that; the error, verbatim:
+    //   Config.hpp:2722:16: error: static_cast from 'const ConfigOption *' to
+    //   'Slic3r::ConfigOptionFloatsTempl<false> *' casts away qualifiers
+    // So the const overload has no observable behaviour at the pin to compare against, and the
+    // port's immutable `option_as_tagged_throw` is measured against the non-const template's
+    // semantics instead, which are identical but for the `const`.
+    return out;
+}
+
+ProofCreateDefaultResult path3_create_empty_option_enum(bool enums) {
+    Slic3r::ConfigOptionDef def;
+    def.type = enums ? Slic3r::coEnums : Slic3r::coEnum;
+    def.label = "proof-empty-enum";
+    def.enum_keys_map = &kProofEnumValues;
+    // No default value at all, which is what sends `create_default_option` down to
+    // `create_empty_option` (`Config.cpp:341`).
+
+    std::unique_ptr<Slic3r::ConfigOption> opt(def.create_default_option());
+    Slic3r::ConfigOptionVectorBase *as_vector =
+        dynamic_cast<Slic3r::ConfigOptionVectorBase *>(opt.get());
+    return ProofCreateDefaultResult{
+        true, static_cast<int>(opt->type()),
+        as_vector == nullptr ? opt->getInt() : static_cast<int>(as_vector->size()),
+        opt->nullable(), rust::String(opt->serialize())};
 }
 
 ProofVectorBaseResult path3_option_vector_base(rust::Str type_name) {

@@ -88,7 +88,30 @@ ProofAbsValueAtResult path3_get_abs_value_at(rust::Str serialized, bool nullable
 // combination the vendored body does anything in. `default_index` must be `rhs->size()` long:
 // `:795` asserts that, and this shim is compiled with assertions live.
 ProofApplyOverrideResult path3_apply_override_floats(rust::Str lhs, rust::Str rhs,
+                                                     bool rhs_nullable,
                                                      rust::Slice<const int32_t> default_index);
+
+// Gap 1, the `coEnum` pair, which is the one tag whose two classes have no common base below
+// `ConfigOption` (`ConfigOptionEnumGeneric : ConfigOptionInt` at `Config.hpp:2146` against
+// `ConfigOptionEnum<T> : ConfigOptionSingle<T>` at `:2075`). This stores one twin and asks for the
+// other, through `option<TYPE>` and through `opt<T>`. `ProofEnum` below is this shim's own enum
+// with its own `get_enum_values`/`get_enum_names` specializations, which is what lets this
+// translation unit instantiate `ConfigOptionEnum<T>` at all -- every `CONFIG_OPTION_ENUM` the
+// vendored tree declares is in `PrintConfig.hpp`, outside this unit's `#include`.
+// `store_generic` picks which twin goes in the store.
+ProofEnumPairResult path3_tagged_vs_dynamic_enum(bool store_generic, int value);
+
+// Gap 1's throwing overloads: `ConfigOptionResolver::option_throw<TYPE>` (`Config.hpp:2716-2722`)
+// and `ConfigBase::option_throw<TYPE>` (`:2790-2797`), which do the same tag comparison and throw
+// `BadOptionTypeException("Conversion to a wrong type")` instead of returning null -- and
+// `UnknownOptionException` first for a key that resolves to nothing. `ask_wrong_tag` asks for
+// `coInts` on the `coFloats` store; `ask_missing_key` asks for a key that is not there.
+ProofOptionThrowResult path3_option_throw_floats(rust::Str serialized, bool nullable,
+                                                 bool ask_wrong_tag, bool ask_missing_key);
+
+// Gap 3's neighbour: `ConfigOptionDef::create_empty_option`'s own `coEnum`/`coEnums` arms
+// (`Config.cpp:314`, `:316`), reached when a def has no default value at all.
+ProofCreateDefaultResult path3_create_empty_option_enum(bool enums);
 
 // Gap 2. `dynamic_cast<ConfigOptionVectorBase*>` (`Config.cpp:497`) and the `is_vector()`-guarded
 // `static_cast<ConfigOptionVectorBase*>` (`:1872`), over every option type this unit can
