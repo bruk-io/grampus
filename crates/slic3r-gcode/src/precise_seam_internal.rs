@@ -30,7 +30,7 @@ use slic3r_point::point::Point;
 /// every field at *its own* type's default (an uninitialised `size_t`/`double` for the first
 /// three, `Point`'s own default for the last two), which this module does not reproduce as a
 /// Rust `Default` impl because the vendored struct never calls that constructor either.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct ClippedEdgeInterval {
     /// `size_t edge;` (`:14`).
     pub edge: usize,
@@ -46,7 +46,7 @@ pub struct ClippedEdgeInterval {
 
 /// `struct FragmentBindingFailure` (`:21-24`): the out-parameter the header's three functions
 /// fill in on failure, carrying which pair failed and why.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct FragmentBindingFailure {
     /// `size_t pair_index = 0;` (`:22`).
     pub pair_index: usize,
