@@ -460,6 +460,7 @@ dependencies = [
  "slic3r-multipoint",
  "slic3r-point",
  "slic3r-polygon",
+ "slic3r-polyline",
 ]
 
 [[package]]
