@@ -26,10 +26,13 @@ use slic3r_point::point::Point;
 /// `struct ClippedEdgeInterval` (`:13-19`): one perimeter edge's clipped span, carrying the
 /// edge's own identity (`edge`) forward to segment assembly -- "Binding intermediates retain
 /// source edge identity until segment assembly" (`:12`). No in-class initializer on any field,
-/// so this record has no faithful `Default`: a C++ `ClippedEdgeInterval{}` default-constructs
-/// every field at *its own* type's default (an uninitialised `size_t`/`double` for the first
-/// three, `Point`'s own default for the last two), which this module does not reproduce as a
-/// Rust `Default` impl because the vendored struct never calls that constructor either.
+/// so this record has no faithful `Default`, but not because any field would come back
+/// uninitialised: the vendored tree never default- or value-initializes a `ClippedEdgeInterval`
+/// at all. Its one construction site, `GCode/PreciseSeam.cpp:109`
+/// (`ClippedEdgeInterval interval{edge, *t0, *t1, first, last};`), names all five fields. Even if
+/// it did not, an Eigen-backed `Point` member (`Point.hpp:52`'s `Vec2crd`) could not be matched
+/// by this port's `Point::default()`, which zeros to `(0, 0)` -- the two types' defaults
+/// disagree, so deriving one anyway would be a Rust-only `Default` with no vendored counterpart.
 #[derive(Debug, Clone, Copy)]
 pub struct ClippedEdgeInterval {
     /// `size_t edge;` (`:14`).
@@ -60,9 +63,11 @@ pub struct FragmentBindingFailure {
 }
 
 impl Default for FragmentBindingFailure {
-    /// `FragmentBindingFailure() = default`, with the in-class initializers `pair_index = 0`
-    /// (`:22`) and `reason = "empty fragment"` (`:23`). `0` is `docs/PORTING.md`'s exempt
-    /// structural literal, not a transcribed constant, so it carries no `// PORT SRC:`.
+    /// `GCode/PreciseSeamInternal.hpp:21-24` declares no constructor at all; this is the
+    /// implicitly-declared default constructor, applying the in-class initializers
+    /// `pair_index = 0` (`:22`) and `reason = "empty fragment"` (`:23`). `0` is
+    /// `docs/PORTING.md`'s exempt structural literal, not a transcribed constant, so it carries
+    /// no `// PORT SRC:`.
     fn default() -> Self {
         FragmentBindingFailure {
             pair_index: 0,
@@ -87,7 +92,8 @@ impl Default for FragmentBindingFailure {
 
 // TODO(port): GCode/PreciseSeam.hpp:90 -- `bool append_fragment(const Polyline &fragment, const
 // Polygon &perimeter, std::vector<ClippedEdgeInterval> &intervals, const ExtractionContext
-// &context, size_t fragment_index)` (`GCode/PreciseSeamInternal.hpp:38-41`). Its body is in
+// &context, size_t fragment_index)` (`GCode/PreciseSeamInternal.hpp:38-40`; the declaration ends
+// at `:40` -- `:41` is a blank line). Its body is in
 // `GCode/PreciseSeam.cpp`, not this header; its fourth parameter is `const ExtractionContext &`,
 // a type `GCode/PreciseSeam.hpp:90` declares -- a structural dependency on the not-yet-written
 // sibling module `crates/slic3r-gcode/src/precise_seam.rs`, which is why this declaration is not
