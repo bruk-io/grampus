@@ -107,9 +107,9 @@ mod tests {
     use super::*;
 
     /// Not a `// PROOF:` test -- there is no callable function here to compare against the
-    /// oracle, only the `FragmentBindingFailure() = default` in-class initializers
-    /// (`GCode/PreciseSeamInternal.hpp:22-23`), checked directly against the header's own
-    /// literals.
+    /// oracle, only the in-class initializers (`GCode/PreciseSeamInternal.hpp:22-23`) that the
+    /// implicitly-declared default constructor applies, checked directly against the header's
+    /// own literals.
     #[test]
     fn fragment_binding_failure_default_matches_vendored_initializers() {
         let failure = FragmentBindingFailure::default();
