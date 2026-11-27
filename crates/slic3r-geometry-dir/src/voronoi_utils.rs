@@ -266,6 +266,13 @@ fn vec2d_normalized(v: Vec2d) -> Vec2d {
 /// other module's own precedent -- `slic3r-utils`'s `utils.rs`, `slic3r-geometry-dir`'s
 /// `circle.rs` -- leaves it as a `// PORT NOTE:` beside the call site, which this function does
 /// too).
+///
+/// This body carries **one deliberate divergence from the vendored line order**, added after both
+/// adversarial review passes had traced the function as line-for-line faithful: the degenerate-
+/// segment guard at the `ab_size` divisions, required by `docs/PORTING.md`'s "Decisions recorded
+/// on 2026-11-27", decision 1. It is marked `// FIDELITY(port):` at its own site, where the
+/// condition, the pin's undefined behaviour and this port's substitute are each stated. On every
+/// input where the pin is defined this function is unchanged.
 pub fn discretize_parabola(
     source_point: Point,
     source_segment_from: Point,
@@ -293,11 +300,23 @@ pub fn discretize_parabola(
     // conversion back from the `double` `sqrt` returns); ported as `i64` `sqrt` of the squared
     // norm via `f64`, truncating toward zero exactly as a C-style `coord_t(double)` cast does.
     let ab_size: i64 = (ab_norm_sq as f64).sqrt() as i64;
-    // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:130-136 -- `sx`/`ex`/`px` divide by
-    // `ab_size`, which is zero whenever the source segment is degenerate (`a == b`); the vendored
-    // signed-integer division by zero is undefined behaviour (in practice SIGFPE), unguarded at
-    // the pin, and this port's unconditional `panic!` on the same input stands in for it rather
-    // than inventing a check the vendored code does not have.
+    // FIDELITY(port): src/libslic3r/Geometry/VoronoiUtils.cpp:131-136 -- `sx` (`:131`), `ex`
+    // (`:132`) and `px` (`:136`) each divide an `int64_t` by `ab_size`. On the input
+    // `source_segment.from() == source_segment.to()` -- a degenerate source segment, where
+    // `ab_size` (`:130`) is exactly `0` -- that signed-integer division by zero is undefined
+    // behaviour at the pin, unguarded there, so no oracle answer exists to match on that input.
+    // On exactly that condition, and only it, this port returns `discretized` as constructed,
+    // leaving the whole call unwritten: the bad read at `:131` precedes every `emplace_back` in
+    // the vendored body (the earliest is `:142`, in the `d == 0` branch; the next is `:176`),
+    // which is the substitute
+    // `docs/PORTING.md`'s "Decisions recorded on 2026-11-27", decision 1, point 3 prescribes where
+    // the vendored file has no bounds check of its own for this read in a sibling function. On
+    // every input where the pin is defined (`ab_size != 0`) the port's behaviour below is
+    // unchanged. The `d == 0` early return at `:141` is not the template for this: it guards a
+    // different read in this same function, not this read in a sibling.
+    if ab_size == 0 {
+        return discretized;
+    }
     let sx: i64 = (as_.x() * ab.x() + as_.y() * ab.y()) / ab_size;
     let ex: i64 = (ae.x() * ab.x() + ae.y() * ab.y()) / ab_size;
     let sxex: i64 = ex - sx;
@@ -351,12 +370,16 @@ pub fn discretize_parabola(
     // debug-only self-check, the second a log side effect -- see this function's own doc.
     // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:174 -- BOOST_LOG_TRIVIAL(warning)
 
-    // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:176 -- `std::abs(ex - sx)` is undefined
-    // behaviour at `i64::MIN` (no positive `i64` can represent its magnitude); `.unsigned_abs()`
-    // is defined there (returns `2^63` as `u64`), so the two diverge only at that one unreachable
-    // input (`ex`/`sx` are measured parallel to a bounded input segment, never `i64::MIN`), and
-    // the port's defined `.unsigned_abs()` stands in for the vendored UB rather than reproducing
-    // it.
+    // FIDELITY(port): src/libslic3r/Geometry/VoronoiUtils.cpp:176 -- on the input `ex - sx ==
+    // i64::MIN`, `std::abs` of it is undefined behaviour at the pin (no positive `int64_t`
+    // represents that magnitude). On exactly that input this port evaluates `.unsigned_abs()`,
+    // which is defined and yields `2^63` as `u64`, widened to the same `f64` the vendored
+    // `static_cast<double>` produces; on every other input the two agree bit for bit. No
+    // mechanism has been identified for the reachability of that one input: an earlier draft of
+    // this marker asserted it unreachable because `ex`/`sx` are measured parallel to a bounded
+    // input segment, and that justification is withdrawn -- no caller's line was opened to
+    // establish it (`docs/PORTING.md`'s "Decisions recorded on 2026-11-27", decision 2). The
+    // substitute above is defined either way, so the site needs no reachability claim to stand.
     let step_count: i64 =
         ((ex - sx).unsigned_abs() as f64 / approximate_step_size as f64).round() as i64;
     discretized.push(start);
