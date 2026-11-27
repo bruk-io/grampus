@@ -77,28 +77,30 @@ fuzz_target!(|input: ArbInput| {
         input
     );
 
-    // `Geometry::is_point_inside_polygon_corner` (`Geometry.cpp:864-908`). Skipped when `a == b`
-    // or `c == b`, the vendored precondition the un-ported `assert(ba != bc)` states (a
-    // zero-length `ba`/`bc` normalizes to NaN on both sides alike, which is not an interesting
-    // divergence to report).
-    if a != b && c != b {
-        let actual_corner = geometry::is_point_inside_polygon_corner(a, b, c, q);
-        let oracle_corner = oracle::path_is_point_inside_polygon_corner(
-            a.x(),
-            a.y(),
-            b.x(),
-            b.y(),
-            c.x(),
-            c.y(),
-            q.x(),
-            q.y(),
-        );
-        assert_eq!(
-            actual_corner, oracle_corner,
-            "Geometry::is_point_inside_polygon_corner diverged for {:?}",
-            input
-        );
-    }
+    // `Geometry::is_point_inside_polygon_corner` (`Geometry.cpp:864-908`). No `a == b`/`c == b`
+    // guard here: an earlier version of this target skipped those inputs on the theory that a
+    // zero-length `ba`/`bc` normalizes to `NaN` on both sides alike, which is false after the
+    // `vec2d_normalized` fix (`geometry.rs`'s own doc comment) -- a zero vector normalizes to
+    // itself unchanged on both sides, never `NaN`. `is_point_inside_polygon_corner` is also
+    // externally linked in `liblibslic3r.a` (unlike `is_ccw` below), so the oracle call below
+    // reaches the already-compiled `-DNDEBUG` release object, where the vendored
+    // `assert(ba != bc)` this guard would have stood in for is compiled out regardless.
+    let actual_corner = geometry::is_point_inside_polygon_corner(a, b, c, q);
+    let oracle_corner = oracle::path_is_point_inside_polygon_corner(
+        a.x(),
+        a.y(),
+        b.x(),
+        b.y(),
+        c.x(),
+        c.y(),
+        q.x(),
+        q.y(),
+    );
+    assert_eq!(
+        actual_corner, oracle_corner,
+        "Geometry::is_point_inside_polygon_corner diverged for {:?}",
+        input
+    );
 
     // `Geometry::is_ccw` (`Geometry.hpp:66-90`), over the same four points as a ring.
     //
