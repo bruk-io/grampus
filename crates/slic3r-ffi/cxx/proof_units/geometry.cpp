@@ -34,6 +34,46 @@ bool path_segments_intersect(int64_t ip1x, int64_t ip1y, int64_t ip2x, int64_t i
         Slic3r::Point(jp2x, jp2y));
 }
 
+rust::Vec<double> path_ray_ray_intersection(double p1x, double p1y, double v1x, double v1y,
+                                             double p2x, double p2y, double v2x, double v2y) {
+    Slic3r::Vec2d res;
+    bool ok = Slic3r::Geometry::ray_ray_intersection(Slic3r::Vec2d(p1x, p1y), Slic3r::Vec2d(v1x, v1y),
+                                                      Slic3r::Vec2d(p2x, p2y), Slic3r::Vec2d(v2x, v2y),
+                                                      res);
+    rust::Vec<double> out;
+    out.push_back(ok ? 1.0 : 0.0);
+    if (ok) {
+        out.push_back(res.x());
+        out.push_back(res.y());
+    }
+    return out;
+}
+
+rust::Vec<double> path_segment_segment_intersection(double p1x, double p1y, double v1x,
+                                                     double v1y, double p2x, double p2y,
+                                                     double v2x, double v2y) {
+    Slic3r::Vec2d res;
+    bool ok = Slic3r::Geometry::segment_segment_intersection(
+        Slic3r::Vec2d(p1x, p1y), Slic3r::Vec2d(v1x, v1y), Slic3r::Vec2d(p2x, p2y),
+        Slic3r::Vec2d(v2x, v2y), res);
+    rust::Vec<double> out;
+    out.push_back(ok ? 1.0 : 0.0);
+    if (ok) {
+        out.push_back(res.x());
+        out.push_back(res.y());
+    }
+    return out;
+}
+
+double path_deg2rad(double angle) { return Slic3r::Geometry::deg2rad<double>(angle); }
+
+double path_angle_to_0_2pi(double angle) { return Slic3r::Geometry::angle_to_0_2PI<double>(angle); }
+
+double path_to_range_pi_pi(double angle) {
+    Slic3r::Geometry::to_range_pi_pi<double>(angle);
+    return angle;
+}
+
 bool path_directions_parallel(double angle1, double angle2, double max_diff) {
     return Slic3r::Geometry::directions_parallel(angle1, angle2, max_diff);
 }
@@ -51,11 +91,15 @@ double path_linint(double value, double oldmin, double oldmax, double newmin, do
 rust::Vec<double> path_arrange(size_t total_parts, double part_w, double part_h, double dist,
                                 bool bb_defined, double bb_min_x, double bb_min_y,
                                 double bb_max_x, double bb_max_y) {
-    Slic3r::BoundingBoxf bb;
-    if (bb_defined) {
-        bb.min = Slic3r::Vec2d(bb_min_x, bb_min_y);
-        bb.max = Slic3r::Vec2d(bb_max_x, bb_max_y);
-        bb.defined = true;
+    // Built through the real `BoundingBoxf(pmin, pmax)` constructor (`BoundingBox.hpp:260`),
+    // which derives `defined` from `pmin.x() < pmax.x() && pmin.y() < pmax.y()` -- the same rule
+    // `crates/slic3r-boundingbox/src/bounding_box.rs`'s `BoundingBoxf::from_min_max` uses -- so a
+    // degenerate box takes the same `defined` branch on both sides of the comparison this proof
+    // makes. Setting `min`/`max`/`defined` by hand (an earlier version of this shim) could
+    // disagree with that rule and would be the shim's own bug, not the port's.
+    Slic3r::BoundingBoxf bb(Slic3r::Vec2d(bb_min_x, bb_min_y), Slic3r::Vec2d(bb_max_x, bb_max_y));
+    if (!bb_defined) {
+        bb.reset();
     }
     Slic3r::Pointfs positions;
     bool ok = Slic3r::Geometry::arrange(total_parts, Slic3r::Vec2d(part_w, part_h), dist,

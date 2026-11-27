@@ -72,11 +72,11 @@
 //! and [`is_point_inside_polygon_corner`] (`Geometry.cpp:864-908`).
 //!
 //! **`is_ccw` takes `&[Point]`, not `&Polygon`.** The vendored signature is `is_ccw(const
-//! Polygon&)`, but the function body reads only `poly.points`; `slic3r-polygon`'s `Polygon` is
-//! available (a dependency of this crate) but reaching its `points` requires importing the
-//! `MultiPoint` trait for one field read. Taking the slice this unit actually operates on avoids
-//! that coupling for a `Geometry.hpp`-level utility while porting the identical body; a caller
-//! holding a `Polygon` passes `polygon.points()`.
+//! Polygon&)`; the body reads only `poly.points`, so this port takes that slice directly rather
+//! than importing `slic3r-polygon`'s `MultiPoint` trait for one field read. No in-scope caller
+//! of `Geometry::is_ccw` exists anywhere in the vendored tree to match a signature against, and
+//! the proof shim still drives the real `Slic3r::Polygon` overload, so the signature choice is
+//! not load-bearing for fidelity. A caller holding a `Polygon` passes `polygon.points()`.
 //!
 //! **`is_point_inside_polygon_corner`'s normalize/dot/perp are local, not `slic3r-point`'s.**
 //! `point.rs` defers the generic `perp`/cross-product family itself (`Point.hpp:112-134`, its
@@ -87,15 +87,51 @@
 //! private, un-exported arithmetic this unit's own body needs, not a second port of `perp`.
 //!
 //! **A documented arithmetic divergence, not worked around.** [`orient`]'s 64-bit cross terms
-//! and [`segments_intersect`]'s cross-product helper can overflow `i64` for coordinates outside
-//! the roughly 2^31 magnitude `Geometry.hpp:40-43`'s own comment assumes; C++ signed overflow is
-//! undefined behaviour there (practically wrapping on this pin's compiler), while Rust's debug
-//! profile (`cargo test`'s own profile) panics on overflow instead of wrapping. This port takes
-//! the plain, non-wrapping translation -- the faithful one for every magnitude the comment's own
-//! invariant covers -- and does not add defensive wrapping arithmetic the vendored code itself
-//! does not have; this unit's own proof and fuzz target keep their inputs inside that same
-//! magnitude, as `crates/slic3r-ffi/fuzz/fuzz_targets/slic3r-multipoint_multi_point.rs` already
-//! does for the same reason. Named here rather than silently relied upon.
+//! and [`segments_intersect`]'s cross-product helper can overflow `i64` for large-magnitude
+//! coordinates; C++ signed overflow is undefined behaviour there (practically wrapping on this
+//! pin's compiler), while Rust's debug profile (`cargo test`'s own profile) panics on overflow
+//! instead of wrapping. This port takes the plain, non-wrapping translation -- the faithful one
+//! -- and does not add defensive wrapping arithmetic the vendored code itself does not have.
+//! **The bound is not symmetric and is wider than it looks.** `orient`'s own guard
+//! (`ORIENT_COORD_LIMIT`, `Geometry.hpp:47-48`) is one-sided: it rejects a coordinate above
+//! `0xffffffff` but admits any negative coordinate, down to `i64::MIN`, into the exact-integer
+//! path below -- not "roughly 2^31" as an earlier draft of this comment stated. `Geometry.hpp:
+//! 40-43`'s own comment states the *assumed* invariant as "coordinates are expected to be
+//! defined in a close vicinity of origin, usually bound to 30 bits + signum", which is both
+//! narrower than the guard's `0xffffffff` (32 bits) on the positive side and silent on the
+//! negative side the guard does not bound at all. This unit's own proof and fuzz target do not
+//! exercise the gap between the 30-bit-plus-signum invariant the comment assumes and the
+//! `0xffffffff`/unbounded-negative range the guard actually admits, nor the `orient`/
+//! `segments_intersect` `double`-fallback branch above that guard -- named as a measured
+//! coverage limit in this task's pull request, not claimed as proven. `crates/slic3r-ffi/fuzz/
+//! fuzz_targets/slic3r-geometry_geometry.rs` keeps its generated magnitude far inside even the
+//! narrower invariant, as `slic3r-multipoint_multi_point.rs`'s fuzz target already does for the
+//! same reason.
+//!
+//! **Deferred surface, marked at the module level rather than scattered one `// TODO(port):`
+//! per function** (the reasons above are what recur; the markers below are what the convention
+//! every sibling foundation module follows -- `crates/slic3r-point/src/point.rs`'s own grouped
+//! `// TODO(port):` block is the precedent -- names at the site):
+// TODO(port): src/libslic3r/Geometry.hpp:186-217 -- `foot_pt<T>`/`ray_point_distance_squared<T>`/
+// `ray_point_distance<T>` and their `Line`-typed overloads; this crate has no `slic3r-line`
+// dependency (reason 1 above).
+// TODO(port): src/libslic3r/Geometry.hpp:220-305 -- `liang_barsky_line_clipping_interval`/
+// `liang_barsky_line_clipping` (3 overloads), generic over a `BoundingBoxBase<T>` this port has
+// no concrete Rust type for (reason 5 above).
+// TODO(port): src/libslic3r/Geometry.hpp:355-542,559-560 and src/libslic3r/Geometry.cpp:319-862
+// -- the whole `Transform3d`/`Matrix3d`/`Quaterniond` surface: `assemble_transform`,
+// `translation_transform`/`rotation_transform`/`scale_transform`, `extract_euler_angles`,
+// `rotation_from_two_vectors`, `Transformation`, `TransformationSVD`,
+// `transform3d_from_string`/`rotation_xyz_diff`/`rotation_diff_z`,
+// `mat_around_a_point_rotate`/`generate_transform`, and every one of their `.cpp` definitions;
+// no `Eigen::Transform`/`Matrix3d`/`Quaterniond` type family exists in this port yet (reason 2
+// above).
+// TODO(port): src/libslic3r/Geometry.hpp:309 and src/libslic3r/Geometry.cpp:55-82 -- `contains<T>`
+// (`T = ExPolygon`) and `simplify_polygons`; need `slic3r-expolygon`/`slic3r-clipperutils`,
+// neither a dependency of this crate (reason 3 above).
+// TODO(port): src/libslic3r/Geometry.cpp:298-317 -- `dist<T>`/`project_point_to_segment`, generic
+// over `boost::polygon`'s own types, an out-of-scope library per the Don't-translate list
+// (reason 4 above).
 
 use slic3r_boundingbox::bounding_box::BoundingBoxf;
 use slic3r_libslic3r::libslic3r::{EPSILON, PI};
@@ -377,6 +413,13 @@ pub fn angle_to_0_2pi(mut angle: f64) -> f64 {
 /// `template<typename T> void to_range_pi_pi(T &angle)` (`Geometry.hpp:331-337`), narrowed to
 /// `T = f64`; the C++ in/out reference parameter becomes a return value (idiom map, "a non-const
 /// reference out-parameter"). The vendored `assert` after the subtraction is not ported.
+///
+/// PORT NOTE: the vendored `count` is truncated through `int` (`int count = static_cast<int>(
+/// std::round(angle / (2 * PI))); angle -= static_cast<T>(count * 2 * PI);`); this port keeps
+/// the rounded quotient as `f64` throughout rather than porting that cast. The two agree
+/// bit-for-bit while `|count * 2| <= INT_MAX`; beyond that the vendored `int` arithmetic
+/// overflows (and `static_cast<int>` of an out-of-range `double` is itself undefined behaviour)
+/// while this port does not. Not proven or fuzzed at that magnitude.
 pub fn to_range_pi_pi(mut angle: f64) -> f64 {
     if angle > PI || angle <= -PI {
         let count = (angle / (2f64 * PI)).round();
@@ -414,6 +457,12 @@ pub fn linint(value: f64, oldmin: f64, oldmax: f64, newmin: f64, newmax: f64) ->
 /// out"). `pos` is set (`:224-225`) but never read again in the vendored function either --
 /// `cellsorder[...].item.index_x`/`index_y` are what every later read uses -- so this port keeps
 /// the same unread field for the same struct shape rather than dropping it.
+/// `pos` is kept for the same shape-fidelity reason the vendored field is kept even though
+/// neither this port nor the vendored function reads it again after it is set (`:224-225`);
+/// `dist` (`Geometry.cpp:162`), by contrast, IS dropped -- unlike `pos`, nothing in this port
+/// needs a stored copy of it, since the sort key that would have used it is computed as the
+/// local `dist_key` at its one use site instead. Named here so the asymmetry (one unread field
+/// kept, one dropped) reads as a decision rather than an oversight.
 #[derive(Debug, Clone, Copy)]
 struct ArrangeItem {
     #[allow(dead_code)]
@@ -444,6 +493,21 @@ struct ArrangeItemIndex {
 /// that does not hang this unit's own proof and fuzz target. `// FIDELITY(port):` is not used
 /// here because this is not an order choice; it is named in this task's pull request as a
 /// finding instead.
+///
+/// **An added early return with no vendored counterpart.** The vendored code converts the
+/// `double` cell-count quotient straight to `size_t` with no finiteness or sign check
+/// (`Geometry.cpp:192-193`); this port refuses a non-finite or negative `cellw`/`cellh` instead
+/// (reachable when `part_size + dist == 0` on an axis, which makes the quotient `NaN`), because
+/// that conversion is undefined behaviour in C++ for a negative or non-finite `double` and this
+/// port has no UB to reproduce faithfully -- a guard against an input the vendored function
+/// never returns `false` for by design, only by UB. Named here and in this task's pull request
+/// rather than left as a silent addition.
+///
+/// **An unguarded `usize` multiplication.** `cellw * cellh` (just below) is a plain `usize`
+/// product; at a large finite quotient it can overflow where the vendored `size_t` product
+/// (`Geometry.cpp:194`) wraps instead, panicking under `cargo test`'s debug profile and under
+/// cargo-fuzz's overflow checks. Not proven or fuzzed at that magnitude; named rather than
+/// silently relied upon.
 pub fn arrange(
     total_parts: usize,
     part_size: Vec2d,
@@ -517,11 +581,15 @@ pub fn arrange(
             // separate step. On a tie (`midval == index`), the vendored `goto ENDSORT` inserts
             // at that exact midpoint rather than continuing to narrow toward `low` or `high` --
             // an insertion-position choice among equal keys that reaches this function's output
-            // order, hence the `// FIDELITY(port):` below.
+            // order, hence the `// FIDELITY(port):` below even though the port reproduces it
+            // exactly rather than diverging from it: the marker records that the ORDER choice
+            // itself (not this port's translation of it) is load-bearing for `arrange`'s output,
+            // which is what belongs in `port/reports/divergences.md` for an order-sensitive site.
             // FIDELITY(port): src/libslic3r/Geometry.cpp:236-249 -- a tied distance key inserts
-            // at the binary search's midpoint, not at `low`; this changes the relative order of
-            // cells that tie exactly, which changes which cell index each of `arrange`'s callers
-            // sees for a given output position.
+            // at the binary search's midpoint, not at `low`; this port matches the vendored
+            // choice exactly (no port-introduced divergence here), but the choice is load-bearing:
+            // it changes the relative order of cells that tie exactly, which changes which cell
+            // index each of `arrange`'s callers sees for a given output position.
             let mut low = 0usize;
             let mut high = cellsorder.len();
             let mut inserted = false;
@@ -792,18 +860,27 @@ mod tests {
     // `proof_present` requires; the *mechanism* this test actually reaches the oracle through is
     // named here and in this task's pull request body (`docs/PORTING.md`'s "Decisions recorded
     // on 2026-11-25", decision 5, is what licenses a task's own body to state where its proof
-    // diverges from the manifest cell's literal description): none of the functions ported above
-    // are internal-linkage (this file declares no anonymous namespace and no `static` free
-    // function that any of them needs -- the four `static` helpers `Geometry.cpp` does declare,
-    // `extract_rotation_scale`/`extract_rotation_matrix`/`extract_scale`/`contains_skew`, are all
-    // `Transform3d`-based and belong to the deferred surface this module's doc names), so
-    // `#include`ing the whole `.cpp` to reach an internal-linkage helper is both unnecessary and
-    // the one thing `cxx/proof_units/clipper_z_utils.cpp`'s header comment warns never to do
-    // lightly (`Geometry.cpp` externally links dozens of `Slic3r::Geometry::` symbols this
-    // crate's shared `Build` would then risk duplicating). Every function proven below is called
-    // the same way proof path 1 calls one: through `cxx/proof_units/geometry.h`'s `#include` of
-    // `Geometry.hpp` and a direct call to the already-externally-linked symbol in
-    // `liblibslic3r.a`.
+    // diverges from the manifest cell's literal description), measured with `nm -g` on the
+    // oracle's own `Geometry.cpp.o` rather than assumed: `orient`/`is_ccw` are `static inline` in
+    // the header -- true internal linkage, so `cxx/proof_units/geometry.cpp`'s own `#include
+    // "Geometry.hpp"` compiling them fresh for this crate's shim IS proof path 3's mechanism for
+    // these two, with no `#include` of `Geometry.cpp` itself needed (`Geometry.cpp`'s own four
+    // `static` helpers -- `extract_rotation_scale`/`extract_rotation_matrix`/`extract_scale`/
+    // `contains_skew` -- are all `Transform3d`-based and belong to this module's deferred
+    // surface, so none of this unit's ported functions needs them). `ray_ray_intersection`/
+    // `segment_segment_intersection`/`segments_intersect`/`is_rotation_ninety_degrees`/
+    // `deg2rad`/`angle_to_0_2PI`/`to_range_pi_pi` are plain `inline`/template header functions
+    // with no symbol in `liblibslic3r.a` either (confirmed absent from the same `nm -g` output),
+    // so they too are reached only by the shim recompiling the header -- proof path 3's mechanism
+    // in substance even though C++ linkage rules call them externally-linked. The remaining six
+    // -- `directions_parallel`/`directions_perpendicular`/`rad2deg_dir`/`linint`/`arrange`/
+    // `is_point_inside_polygon_corner` -- do resolve to a real symbol in `liblibslic3r.a`, and
+    // are called the same way proof path 1 calls one: through `cxx/proof_units/geometry.h`'s
+    // `#include` of `Geometry.hpp` and a direct call to the already-externally-linked symbol.
+    // `rad2deg`, `directions_parallel_default`, `directions_perpendicular_default` and
+    // `is_rotation_ninety_degrees_vec3` are not separately proven: each is a trivial forwarding
+    // wrapper (a default argument or a per-component fan-out) over a function proven above, with
+    // no logic of its own an oracle comparison would exercise differently.
     // PROOF: 3
     #[test]
     fn geometry_free_functions_match_the_oracle() {
@@ -832,6 +909,50 @@ mod tests {
         let oracle_ccw = slic3r_proof::proof_units::geometry::path_is_ccw(&xs, &ys) as i32;
         compare_unit("Geometry.hpp", Oracle::Built, actual_ccw, oracle_ccw)
             .expect("is_ccw must match the oracle exactly");
+
+        // Chosen so both the ray *and* the bounded-segment intersection land inside each
+        // segment's own `[0, 1]` parameter range (`p1 + 0.5*v1 == p2 + 0.5*v2 == (5, 5)`), so
+        // this proof exercises the `Some(..)` branch of both functions, not only the collinear
+        // or outside-the-segment `None` branch.
+        let p1 = Vec2::new(0.0, 0.0);
+        let v1 = Vec2::new(10.0, 10.0);
+        let p2 = Vec2::new(0.0, 10.0);
+        let v2 = Vec2::new(10.0, -10.0);
+        let actual_rri = ray_ray_intersection(p1, v1, p2, v2);
+        let oracle_rri = slic3r_proof::proof_units::geometry::path_ray_ray_intersection(
+            p1.x(),
+            p1.y(),
+            v1.x(),
+            v1.y(),
+            p2.x(),
+            p2.y(),
+            v2.x(),
+            v2.y(),
+        );
+        let actual_rri_flat: Vec<f64> = match actual_rri {
+            Some(res) => vec![1.0, res.x(), res.y()],
+            None => vec![0.0],
+        };
+        compare_unit("Geometry.hpp", Oracle::Built, actual_rri_flat, oracle_rri)
+            .expect("ray_ray_intersection must match the oracle exactly");
+
+        let actual_ssi = segment_segment_intersection(p1, v1, p2, v2);
+        let oracle_ssi = slic3r_proof::proof_units::geometry::path_segment_segment_intersection(
+            p1.x(),
+            p1.y(),
+            v1.x(),
+            v1.y(),
+            p2.x(),
+            p2.y(),
+            v2.x(),
+            v2.y(),
+        );
+        let actual_ssi_flat: Vec<f64> = match actual_ssi {
+            Some(res) => vec![1.0, res.x(), res.y()],
+            None => vec![0.0],
+        };
+        compare_unit("Geometry.hpp", Oracle::Built, actual_ssi_flat, oracle_ssi)
+            .expect("segment_segment_intersection must match the oracle exactly");
 
         let ip1 = Point::new(0, 0);
         let ip2 = Point::new(100, 100);
@@ -879,6 +1000,21 @@ mod tests {
         compare_unit("Geometry.cpp", Oracle::Built, actual_r2d, oracle_r2d)
             .expect("rad2deg_dir must match the oracle exactly");
 
+        let actual_d2r = deg2rad(123.0_f64);
+        let oracle_d2r = slic3r_proof::proof_units::geometry::path_deg2rad(123.0_f64);
+        compare_unit("Geometry.hpp", Oracle::Built, actual_d2r, oracle_d2r)
+            .expect("deg2rad must match the oracle exactly");
+
+        let actual_a02pi = angle_to_0_2pi(-1.0_f64);
+        let oracle_a02pi = slic3r_proof::proof_units::geometry::path_angle_to_0_2pi(-1.0_f64);
+        compare_unit("Geometry.hpp", Oracle::Built, actual_a02pi, oracle_a02pi)
+            .expect("angle_to_0_2pi must match the oracle exactly");
+
+        let actual_trpp = to_range_pi_pi(4.0_f64);
+        let oracle_trpp = slic3r_proof::proof_units::geometry::path_to_range_pi_pi(4.0_f64);
+        compare_unit("Geometry.hpp", Oracle::Built, actual_trpp, oracle_trpp)
+            .expect("to_range_pi_pi must match the oracle exactly");
+
         let actual_linint = linint(5.0, 0.0, 10.0, -1.0, 1.0);
         let oracle_linint =
             slic3r_proof::proof_units::geometry::path_linint(5.0, 0.0, 10.0, -1.0, 1.0);
@@ -896,6 +1032,35 @@ mod tests {
         }
         compare_unit("Geometry.cpp", Oracle::Built, actual_flat, oracle_arrange)
             .expect("arrange must match the oracle exactly");
+
+        // A second `arrange` input with `bb` defined, so this proof also reaches the
+        // `bb->min`/`bb->size()` branches (`Geometry.cpp:183-188`, `:285-290`) the single
+        // `bb: None` input above never does.
+        let bb = BoundingBoxf::from_min_max(Vec2::new(-20.0, -20.0), Vec2::new(40.0, 40.0));
+        let (actual_bb_ok, actual_bb_positions) = arrange(5, Vec2::new(10.0, 10.0), 2.0, Some(&bb));
+        let oracle_bb_arrange = slic3r_proof::proof_units::geometry::path_arrange(
+            5,
+            10.0,
+            10.0,
+            2.0,
+            true,
+            bb.min.x(),
+            bb.min.y(),
+            bb.max.x(),
+            bb.max.y(),
+        );
+        let mut actual_bb_flat: Vec<f64> = vec![if actual_bb_ok { 1.0 } else { 0.0 }];
+        for p in &actual_bb_positions {
+            actual_bb_flat.push(p.x());
+            actual_bb_flat.push(p.y());
+        }
+        compare_unit(
+            "Geometry.cpp",
+            Oracle::Built,
+            actual_bb_flat,
+            oracle_bb_arrange,
+        )
+        .expect("arrange with a defined bed bounding box must match the oracle exactly");
 
         let actual_ninety = is_rotation_ninety_degrees(PI / 2.0 + 0.0001) as i32;
         let oracle_ninety =
