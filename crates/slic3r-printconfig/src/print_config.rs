@@ -13488,26 +13488,45 @@ impl PrintConfigDef {
     /// ConfigOptionStrings"); the lists themselves are plain string vectors, so this is the
     /// whole of the translation.
     fn init_extruder_option_keys(&mut self) {
-        // FIDELITY(port): both lists keep the vendored braced-initialiser order rather than
-        // being sorted here, because the order reaches output. **Corrected: an earlier revision
-        // of this justification said `GCode.cpp`'s per-extruder expansion reads the list
-        // positionally. `GCode.cpp` does not read either list at all** -- a `grep` over
-        // `vendor/OrcaSlicer/src/` finds no reference to `extruder_option_keys()` or
-        // `extruder_retract_keys()` in it. review-76-fidelity caught this. The conclusion holds
-        // on the readers that do exist:
+        // FIDELITY(port): both lists keep the vendored braced-initialiser order, but **for two
+        // different reasons, and an earlier revision of this justification gave one reason that
+        // was false for both.** That revision said `GCode.cpp`'s per-extruder expansion reads
+        // the list positionally; `GCode.cpp` reads neither list at all. Its replacement then
+        // said `extruder_option_keys()`' order is observable through
+        // `Preset::nozzle_options()` -> `Preset::printer_options()`; that is a real chain and a
+        // dead output path. Both wrong versions were mine. The split below is what is true, and
+        // each half was verified at the pin rather than taken:
         //
-        // - `extruder_option_keys()` is handed out whole by `Preset::nozzle_options()`
-        //   (`Preset.cpp:1741`), which `Preset::printer_options()` (`:1746-1754`) then
-        //   `append`s into a static vector. **That concatenation's element order is observable**,
-        //   and it is where this list's order reaches output. Its other reader,
-        //   `PrintConfig.cpp:10641`, resizes each key independently and is order-insensitive.
-        // - `extruder_retract_keys()` is iterated by `PrintApply.cpp:295` and `:1608` and by
-        //   `Print.cpp:4784` and `:4911`. The `Print.cpp:4788-4796` loop appends to `print_diff`
-        //   and `filament_overrides` in iteration order, so that order is observable too -- it
-        //   is the `diff_keys` order this unit's own `compute_filament_override_value`
-        //   comparison holds to exact equality.
+        // - **`extruder_retract_keys()`: the order is a correctness precondition, not merely
+        //   observable.** `PrintApply.cpp:306` does
+        //   `std::binary_search(extruder_retract_keys.begin(), extruder_retract_keys.end(),
+        //   opt_key)` to decide whether a key has a filament override, and a binary search is
+        //   only correct on a sorted range. The vendored source asserts exactly that
+        //   precondition at `PrintConfig.cpp:9052`
+        //   (`assert(std::is_sorted(m_extruder_retract_keys.begin(), ...))`), and the 20 keys as
+        //   written are already in sorted order -- extracted and `sort`ed, the result reproduces
+        //   the vendored sequence exactly. Reorder this list and `PrintApply`'s override lookup
+        //   silently stops finding keys. (A second, weaker path exists and is subsumed by that
+        //   one: `Print.cpp:4784` iterates the list at `:4788` into
+        //   `compute_filament_override_value`, which appends with `diff_keys.emplace_back`
+        //   (`PrintConfig.cpp:12385`), so `print_diff`'s element order is this list's -- the
+        //   order this unit's own `compute_filament_override_value` comparison holds exact.)
         //
-        // Transcribed as written and held to it by
+        // - **`extruder_option_keys()`: no order dependency is established**, so none is
+        //   claimed, exactly as the sibling marker in `init_filament_option_keys` does for its
+        //   list. Every reader traced discards the order: `PrintConfig.cpp:10641` resizes each
+        //   key independently, so permuting the list gives an identical config; and the
+        //   `Preset::nozzle_options()` chain ends in consumers that test membership or build a
+        //   `std::set`, or in `ConfigBase::apply_only`, which iterates the keys and writes
+        //   through `option(opt_key, true)` into `DynamicConfig::options` -- a
+        //   `std::map<t_config_option_key, std::unique_ptr<ConfigOption>>` (`Config.hpp:3119`),
+        //   which normalises any order away. The order is kept because it is what the vendored
+        //   source says, not because an order choice here is observable.
+        //
+        // review-76-conformance traced the six consumers that settled the second half, after
+        // review-76-fidelity had endorsed the wrong version and then withdrawn it; the
+        // `binary_search` precondition is theirs too, and neither reviewer's first position
+        // found it. Both lists are transcribed as written and held to it by
         // `extruder_and_filament_key_lists_match_the_oracle`.
         self.m_extruder_option_keys = [
             "default_filament_profile",
@@ -20762,6 +20781,17 @@ impl DynamicPrintConfig {
                 names.extend(variants_list);
             }
         }
+        // PORT NOTE: the vendored lines these two replace are
+        // `assert(printer_extruder_id_opt != nullptr); printer_extruder_id_opt->values.clear();`
+        // (`PrintConfig.cpp:10610-10611`) and the same pair for
+        // `printer_extruder_variant` (`:10613-10614`). **Both asserts are `<cassert>`'s and
+        // compiled out of the oracle's Release build, so at the pin a config missing either key
+        // is an unconditional dereference of a null pointer -- undefined, not a diagnostic.**
+        // `docs/PORTING.md`'s don't-translate list says an assert is not ported as a live check
+        // of any kind, so these skip instead, which is the same choice this module makes at
+        // every other unguarded vendored dereference (`normalize_fdm`'s `ps_opt->value`,
+        // `get_real_skirt_dist`'s two `opt_` reads, `get_extruder_ams_count`'s `stoi`). It was
+        // the only one of the three without a note; review-76-fidelity asked for it.
         if let Some(opt) = self
             .base
             .opt::<ConfigOptionInts>("printer_extruder_id", false)
@@ -20946,6 +20976,24 @@ pub fn normalize_filament_values_to_variants(config: &mut DynamicPrintConfig) {
             continue;
         };
         // "-1 and a single-value source both resolve to the first value through get_at()"
+        //
+        // PORT NOTE: that vendored comment (`PrintConfig.cpp:11426`) is true, but the `.max(0)`
+        // below reaches its answer by a **different route** than the pin does, and a reader
+        // checking this line against `:11428` finds no `max` there to match. The vendored chain:
+        // `map_variant_indices` returns `-1` by design for a variant past the end of a shorter
+        // id list (`PrintConfig.hpp:555`); `set_at`'s third parameter is a **`size_t`**
+        // (`Config.hpp:374`, `:451`), so `-1` converts to `SIZE_MAX`; `set_at` does
+        // `this->values[i] = other->get_at(j)` (`:467`); and `get_at` is
+        // `(i < this->values.size()) ? this->values[i] : this->values.front()` (`:679`), so
+        // `SIZE_MAX` falls through to `values.front()`. The clamp gives index 0, which is that
+        // same first value.
+        //
+        // Equivalent for every input -- negative resolves to the front either way, non-negative
+        // is identical, out-of-range resolves to the front either way -- so this is a route
+        // difference and not a behavioural one. Written down because the pin relies on unsigned
+        // wraparound plus a fallback where this relies on an explicit clamp, and re-deriving
+        // that chain from scratch is the only way to see they agree. review-76-fidelity traced
+        // it and asked for the note.
         for variant in 0..self_index_len {
             let _ = vec.set_at(
                 source.as_ref(),
@@ -24790,6 +24838,24 @@ mod tests {
                     "printer_extruder_id=1",
                 ]),
             ),
+            // **Both sides two matching variants**, so `variant_index` has two entries and the
+            // stride-2 `expected_size` is 4. With a `key_set2` machine limit carrying only one
+            // `(normal, silent)` pair, that is the shape where `normalize_stride2_floats`
+            // actually changes a value: `have_variants` 1 against `want_variants` 2, so its
+            // loop at `PrintConfig.cpp:12122-12125` replicates the pair into the second slot.
+            // Every other layout here leaves `expected_size` at 2, where the loop does not run
+            // and the function is a no-op -- which is why three mutations in it survived
+            // review-76-conformance's probe.
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1,2",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1,2",
+                ]),
+            ),
             (
                 probe(&[
                     "printer_extruder_variant=\"Direct Drive Standard\"",
@@ -24828,6 +24894,11 @@ mod tests {
             probe(&["layer_height=0.3"]),
             probe(&["nozzle_diameter=0.6,0.6"]),
             probe(&["machine_max_speed_x=400,150"]),
+            // An **odd** number of values for a stride-2 machine limit, which is the only shape
+            // reaching `normalize_stride2_floats`'s pair-realignment push
+            // (`PrintConfig.cpp:12111-12112`): "Keep pair alignment if some legacy preset
+            // produced odd length." Without it a mutation of that push survives.
+            probe(&["machine_max_speed_x=400,150,300"]),
             probe(&[
                 "layer_height=0.3",
                 "nozzle_diameter=0.6,0.6",
@@ -25312,13 +25383,31 @@ mod tests {
     /// against the oracle. Both are externally linked and called directly.
     ///
     /// `ensure_process_variant_columns` (`:11604-11632`) and `normalize_stride2_floats`
-    /// (`:12089-12127`) are ported but **not** compared here, and the reason is positional
-    /// rather than a gap in this test: both are file-scope `static` in the vendored translation
-    /// unit, so neither has a symbol a shim can call. They are the kind of internal-linkage
-    /// helper this unit's `proof path: 3` cell exists for, and the only route to them is through
-    /// a caller -- `update_values_to_printer_extruders` and
-    /// `update_non_diff_values_to_base_config` -- neither of which this unit ports yet. Their
-    /// comparison lands with those callers.
+    /// (`:12089-12127`) have no comparison of their own: both are file-scope `static` in the
+    /// vendored translation unit, so neither has a symbol a shim can call, and a literal proof
+    /// path 3 is not viable for this unit (see [`enum_names_from_keys_map`]). They are reached
+    /// only through a caller, and **their status differs, where an earlier revision of this note
+    /// said both were simply waiting on unported callers. That was stale for one of them.**
+    ///
+    /// - **`normalize_stride2_floats` is now covered**, through
+    ///   `update_non_diff_values_to_base_config`, which *is* ported and compared. It was not
+    ///   covered at `fa1d970` despite that: review-76-conformance's probe survived three
+    ///   mutations in it, because every layout left the stride-2 `expected_size` at 2, where the
+    ///   function is a no-op. Two fixtures fix that -- a layout with two matching variants on
+    ///   both sides, so `expected_size` is 4 and the replication loop
+    ///   (`PrintConfig.cpp:12122-12125`) runs, and a machine limit with an **odd** number of
+    ///   values, which is the only shape reaching the pair-realignment push (`:12111-12112`).
+    ///   Both mutations are confirmed failing with those fixtures and passing without them.
+    ///
+    ///   Its `expected_size == 0` branch (`:12092-12095`) is still uncovered and **cannot** be
+    ///   reached through this caller: `update_non_diff_values_to_base_config` returns early on
+    ///   an empty `variant_index`, so `restore_n >= 1` and `expected_size = restore_n * 2 >= 2`
+    ///   always. That is a fact about the caller, not a missing fixture.
+    ///
+    /// - **`ensure_process_variant_columns` is genuinely uncovered**, and for the reason the old
+    ///   note gave: its only caller is `update_values_to_printer_extruders`
+    ///   (`PrintConfig.cpp:11676`), which this unit does not port. The probe found no call site
+    ///   for it anywhere in the port, which is correct. Its comparison lands with that caller.
     #[test]
     fn print_config_variant_override_matches_the_oracle() {
         let mut checked = 0_usize;
