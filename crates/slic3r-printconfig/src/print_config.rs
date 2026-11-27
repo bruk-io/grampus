@@ -20691,6 +20691,186 @@ pub fn is_xl_printer(cfg: &PrintConfig) -> bool {
     is_xl_printer_notes(&cfg.printer_notes.value)
 }
 
+/// `class DynamicPrintAndCLIConfig : public DynamicPrintConfig` (`PrintConfig.hpp:2512-2543`):
+/// a `DynamicPrintConfig` whose definition is the union of the registry and the three command
+/// line tables, so a CLI argument and a print setting can be deserialized into one config.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicPrintAndCLIConfig {
+    /// The `DynamicPrintConfig` base.
+    pub base: DynamicPrintConfig,
+}
+
+impl Default for DynamicPrintAndCLIConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DynamicPrintAndCLIConfig {
+    /// `DynamicPrintAndCLIConfig()` (`PrintConfig.hpp:2515`).
+    ///
+    /// The base is built with `Self::def()` rather than the registry, for the reason
+    /// [`DynamicPrintConfig::new`] records: `slic3r-config`'s `DynamicConfig` reads a `def`
+    /// **field** where the vendored class makes a virtual call, so the field has to carry what
+    /// the override would return -- here the union table, not `print_config_def`.
+    pub fn new() -> Self {
+        DynamicPrintAndCLIConfig {
+            base: DynamicPrintConfig {
+                base: slic3r_config::config::DynamicConfig::with_def(Self::def_static()),
+            },
+        }
+    }
+
+    /// `static PrintAndCLIConfigDef s_def` (`PrintConfig.hpp:2542`, defined at
+    /// `PrintConfig.cpp:13265`) and its constructor (`:2531-2538`): the registry's options plus
+    /// the three command line tables'.
+    ///
+    /// FIDELITY(port): `std::map::insert` **keeps the existing entry** for a duplicate key, so
+    /// the four tables are inserted in the vendored order -- registry, then CLI actions, then
+    /// CLI transforms, then CLI misc -- and the first table to name a key wins. `BTreeMap`'s
+    /// own `insert` replaces instead, so `or_insert` is used; the order reaches output wherever
+    /// two tables name the same key.
+    ///
+    /// One cache per thread rather than one per process, for the reason [`print_config_def`]
+    /// records: `ConfigOptionDef::default_value` is a `Box<dyn ConfigOption>` and
+    /// `ConfigOption` carries no `Send`/`Sync` bound.
+    pub fn def_static() -> &'static ConfigDef<'static> {
+        thread_local! {
+            static DEF: &'static ConfigDef<'static> = {
+                let mut def = ConfigDef::new();
+                for source in [
+                    &print_config_def().def,
+                    &cli_actions_config_def().def,
+                    &cli_transform_config_def().def,
+                    &cli_misc_config_def().def,
+                ] {
+                    for (key, opt) in source.options.iter() {
+                        def.options.entry(key.clone()).or_insert_with(|| opt.clone());
+                    }
+                }
+                // TODO(port): src/libslic3r/PrintConfig.hpp:2537 -- the vendored constructor
+                // then fills `by_serialization_key_ordinal` with a pointer to each entry of its
+                // own `options` map. That is the same self-referential borrow
+                // `slic3r-config`'s own `ConfigDef::add` leaves unfilled and records at
+                // `crates/slic3r-config/src/config.rs`'s `add`; the field is `pub` and of the
+                // type `port/ownership.tsv` gives it, and nothing in this unit reads it.
+                Box::leak(Box::new(def))
+            };
+        }
+        DEF.with(|d| *d)
+    }
+}
+
+impl slic3r_config::config::ConfigOptionResolver for DynamicPrintAndCLIConfig {
+    fn optptr(&self, opt_key: &str) -> Option<&dyn slic3r_config::config::ConfigOption> {
+        slic3r_config::config::ConfigOptionResolver::optptr(&self.base, opt_key)
+    }
+}
+
+impl slic3r_config::config::ConfigBase for DynamicPrintAndCLIConfig {
+    /// `def()` (`PrintConfig.hpp:2519`): `&s_def`, not `&print_config_def`.
+    fn def(&self) -> Option<&ConfigDef<'_>> {
+        Some(Self::def_static())
+    }
+
+    fn optptr_mut(
+        &mut self,
+        opt_key: &str,
+        create: bool,
+    ) -> Result<
+        Option<&mut (dyn slic3r_config::config::ConfigOption + '_)>,
+        slic3r_config::config::ConfigError,
+    > {
+        slic3r_config::config::ConfigBase::optptr_mut(&mut self.base, opt_key, create)
+    }
+
+    fn keys(&self) -> Vec<String> {
+        slic3r_config::config::ConfigBase::keys(&self.base)
+    }
+
+    /// `handle_legacy()` (`PrintConfig.hpp:2525`, defined at `PrintConfig.cpp:13267-13274`):
+    /// the registry's legacy handling runs **only** for a key none of the three command line
+    /// tables names, so a CLI option is never renamed or cleared by it.
+    fn handle_legacy(&self, opt_key: &mut String, value: &mut String) {
+        if !cli_actions_config_def()
+            .def
+            .options
+            .contains_key(opt_key.as_str())
+            && !cli_transform_config_def()
+                .def
+                .options
+                .contains_key(opt_key.as_str())
+            && !cli_misc_config_def()
+                .def
+                .options
+                .contains_key(opt_key.as_str())
+        {
+            PrintConfigDef::handle_legacy(opt_key, value);
+        }
+    }
+
+    /// `handle_legacy_composite()` is **not** overridden by this class, so it inherits
+    /// `DynamicPrintConfig`'s -- which carries its own `// TODO(port):` for
+    /// `PrintConfigDef::handle_legacy_composite`.
+    fn handle_legacy_composite(&mut self) {
+        slic3r_config::config::ConfigBase::handle_legacy_composite(&mut self.base);
+    }
+}
+
+// --------------------------------------------------------------------------------------------
+// What this unit does not port, each marked at the site it would occupy rather than only in the
+// pull request body -- the body does not survive the merge, and a marker here is what a later
+// reader and `./port/port-status --per-commit`'s own tally both see.
+//
+// A note on where these markers do *not* go: `port/reports/divergences.md` is built from four
+// sources -- `order-audit`, `fidelity-marker`, `oracle-parity` and `determinism`
+// (`port/audit-order`'s `build_divergences`) -- and `fidelity-marker` collects
+// `// FIDELITY(port):` only (`port/audit-order`'s `FIDELITY_MARKER_RE`). A `// TODO(port):`
+// reaches none of them. These are therefore recorded here and counted by `port-status`, and the
+// one place an unported-dependency gap is reported is the code, not that report.
+// --------------------------------------------------------------------------------------------
+
+// TODO(port): src/libslic3r/PrintConfig.cpp:13805 -- `get_shared_poly` (`:13793-13815`,
+// declared `PrintConfig.hpp:2550`), `placement_bed_shape` (`:13820-13824`) and the two
+// `get_bed_shape` overloads that can share (`:13826-13852`) are not ported. `get_shared_poly`
+// intersects the extruder-reachable polygons with `Slic3r::intersection(Polygon, Polygon)` from
+// `ClipperUtils`, and `port/cut.tsv`'s `dep` rows give `slic3r-printconfig` twelve dependencies
+// -- `slic3r-commondefs`, `slic3r-config`, `slic3r-enum-bitmask`, `slic3r-filamentmixer`,
+// `slic3r-format`, `slic3r-i18n`, `slic3r-libslic3r`, `slic3r-localesutils`,
+// `slic3r-materialtype`, `slic3r-point`, `slic3r-polygon`, `slic3r-printconfigconstants` --
+// **none of them `slic3r-clipperutils`**, because the feedback-arc cut cut that edge.
+// `crates/slic3r-printconfig/Cargo.toml` is on `task.md`'s must-not-write list, so this task
+// cannot add it: it needs a `dep` row, or a ruling that `get_shared_poly` belongs to another
+// unit. The one overload with no sharing path, `get_bed_shape(const SLAPrinterConfig&)`, is
+// ported above.
+
+// TODO(port): src/libslic3r/PrintConfig.cpp:13866 -- the bed-exclusion group
+// (`:13858-14374`, declared `PrintConfig.hpp:2569-2592`) is not ported. Its parser bottoms out
+// in `parse_double_token` (`:13863-13873`), which calls
+// `Slic3r::string_to_double_decimal_point` from `LocalesUtils`; `port/manifest.tsv` has
+// `LocalesUtils.cpp`/`.hpp` as `template-heavy: no` and `not-started`, i.e. a Phase A/B fan-out
+// module this task may not write, and `crates/slic3r-localesutils/src/` holds only its
+// crate-level `lib.rs`. `get_bed_excluded_area` (`:14347-14363`) and
+// `get_bed_shape_with_excluded_area` (`:14365-14374`) are additionally blocked by the same
+// absent `slic3r-clipperutils` dependency as `get_shared_poly` above.
+
+// TODO(port): src/libslic3r/PrintConfig.cpp:10891 -- the remaining `DynamicPrintConfig`
+// transformation methods (`:10891-11393`, `:11448-11551`, `:11604-12088`, `:12141-12416`) are
+// not ported: `update_values_from_single_to_multi`, `update_values_from_multi_to_multi`,
+// `update_values_from_multi_to_multi_2`, `resize_mixed_filament_metadata`,
+// `ensure_process_variant_columns`, `update_values_to_printer_extruders` and its
+// multiple-filament sibling, `update_filament_config_values_for_multiple_extruders`,
+// `gather_option_values`, `normalize_stride2_floats`, `log_normalize_legacy_vector_size`,
+// `update_non_diff_values_to_base_config`, `update_diff_values_to_child_config`,
+// `compute_filament_override_value`, `update_static_print_config_from_dynamic` and
+// `set_variant_override`. **These are reachable with this crate's dependencies** -- the
+// `ConfigOptionVectorBase` cast they need is [`as_vector_mut`], and an earlier pass wrongly
+// recorded that as a blocker -- so this marker records work owed, not a dependency gap. They
+// are left out because each needs its own oracle comparison through this unit's
+// config-serialization shim before it can be trusted, and about 1,400 lines of transcription
+// with nothing checking it would weaken a module whose standing is that every figure is
+// asserted by a test.
+
 // --------------------------------------------------------------------------------------------
 // `ModelConfig` (`PrintConfig.hpp:2615-2690`): a `DynamicPrintConfig` plus a timestamp the
 // Undo/Redo stack compares instead of serializing.
@@ -23086,6 +23266,92 @@ mod tests {
         }
 
         println!("bed shape supported: {checked} case(s) held to exact equality");
+    }
+
+    /// `DynamicPrintAndCLIConfig` (`PrintConfig.hpp:2512-2543`), held to exact equality against
+    /// the oracle on both things it contributes: the key set its `def()` reports -- the union of
+    /// the registry and the three command line tables -- and its `handle_legacy`, which must
+    /// delegate to the registry's for a non-CLI key and leave a CLI key untouched.
+    #[test]
+    fn print_config_and_cli_config_matches_the_oracle() {
+        let theirs: Vec<String> = ora::oracle_print_and_cli_def_keys()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(!theirs.is_empty(), "the oracle's union table is empty");
+        let mine: Vec<String> = DynamicPrintAndCLIConfig::def_static()
+            .options
+            .keys()
+            .cloned()
+            .collect();
+        assert_eq!(
+            mine, theirs,
+            "DynamicPrintAndCLIConfig::def()'s key set or its order differs"
+        );
+        // The union really is wider than the registry alone, so the comparison above is not
+        // passing on a table that happens to equal `print_config_def`.
+        assert!(
+            theirs.len() > print_config_def().def.options.len(),
+            "the union table should be wider than the registry: {} vs {}",
+            theirs.len(),
+            print_config_def().def.options.len()
+        );
+
+        // `handle_legacy`, over: a CLI key from each of the three tables (which must be left
+        // alone), a registry key the vendored body renames, an obsolete key it clears, and a
+        // key nothing knows.
+        let config = DynamicPrintAndCLIConfig::new();
+        let mut checked = 0_usize;
+        let mut saw_cli_untouched = false;
+        let mut saw_registry_rename = false;
+        for (key, value) in [
+            ("export_3mf", "out.3mf"),
+            ("rotate", "90"),
+            ("help", "1"),
+            ("curr_bed_type", "0"),
+            ("support_material_angle", "30"),
+            ("enable_wipe_tower", "1"),
+            ("tpms_adaptive", "1"),
+            ("not_a_real_key", "1"),
+            ("layer_height", "0.2"),
+        ] {
+            let theirs = ora::oracle_print_and_cli_handle_legacy(key, value);
+            let mut mk = key.to_string();
+            let mut mv = value.to_string();
+            slic3r_config::config::ConfigBase::handle_legacy(&config, &mut mk, &mut mv);
+            assert_eq!(
+                (mk.as_str(), mv.as_str()),
+                (theirs.opt_key.as_str(), theirs.value.as_str()),
+                "DynamicPrintAndCLIConfig::handle_legacy({key:?}, {value:?})"
+            );
+            // A CLI key must come back untouched, where the registry's own `handle_legacy`
+            // would have cleared it (it is not a registry key).
+            if ["export_3mf", "rotate", "help"].contains(&key) {
+                assert_eq!(mk, key, "{key} is a CLI key and must not be rewritten");
+                let mut rk = key.to_string();
+                let mut rv = value.to_string();
+                PrintConfigDef::handle_legacy(&mut rk, &mut rv);
+                assert!(
+                    rk.is_empty(),
+                    "{key} should be cleared by the registry's own handle_legacy, which is \
+                     what the CLI guard exists to prevent"
+                );
+                saw_cli_untouched = true;
+            }
+            if key == "support_material_angle" {
+                assert_ne!(mk, key, "a registry rename should still happen");
+                saw_registry_rename = true;
+            }
+            checked += 1;
+        }
+        assert!(
+            saw_cli_untouched && saw_registry_rename,
+            "both halves of the guard must be exercised"
+        );
+        println!(
+            "DynamicPrintAndCLIConfig: {} union keys and {checked} handle_legacy case(s) exact",
+            theirs.len()
+        );
     }
 
     /// `ModelConfig` (`PrintConfig.hpp:2615-2690`): the timestamp discipline its own comment

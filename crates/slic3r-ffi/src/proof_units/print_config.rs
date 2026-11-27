@@ -327,6 +327,15 @@ mod ffi {
         /// `PrintConfig::defaults()`, the only instance a shim can build without a preset.
         fn oracle_is_xl_printer_of_print_defaults() -> i32;
 
+        /// `DynamicPrintAndCLIConfig::def()`'s key set (`PrintConfig.hpp:2519`, `:2531-2538`):
+        /// the union of the registry and the three command line tables, in the map's own order.
+        fn oracle_print_and_cli_def_keys() -> Vec<String>;
+
+        /// `DynamicPrintAndCLIConfig::handle_legacy` (`PrintConfig.cpp:13267-13274`), which
+        /// delegates to `PrintConfigDef::handle_legacy` only for a key none of the three
+        /// command line tables names.
+        fn oracle_print_and_cli_handle_legacy(opt_key: &str, value: &str) -> OracleLegacyResult;
+
         /// `get_bed_shape(const SLAPrinterConfig&)` (`:13854`) against
         /// `SLAPrinterConfig::defaults()`, as flattened `x, y` scaled coordinates.
         fn oracle_bed_shape_of_sla_defaults() -> Vec<i64>;
@@ -398,8 +407,8 @@ pub use ffi::{
     oracle_normalize_filament_values_to_variants, oracle_nozzle_diameter_for_filament_of_defaults,
     oracle_nozzle_volume_type_string, oracle_option_info, oracle_option_keys, oracle_option_set,
     oracle_other_def_keys, oracle_other_def_option_info, oracle_parameter_size_of_full,
-    oracle_real_skirt_dist, oracle_set_filament_dev_options, oracle_set_num_extruders,
-    oracle_set_num_filaments, oracle_shaper_type_values_for_flavor, oracle_static_class_defaults,
-    oracle_static_class_keys, oracle_support_different_extruders, OracleEnumKeyValue,
-    OracleLegacyResult, OracleOptionInfo,
+    oracle_print_and_cli_def_keys, oracle_print_and_cli_handle_legacy, oracle_real_skirt_dist,
+    oracle_set_filament_dev_options, oracle_set_num_extruders, oracle_set_num_filaments,
+    oracle_shaper_type_values_for_flavor, oracle_static_class_defaults, oracle_static_class_keys,
+    oracle_support_different_extruders, OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
 };

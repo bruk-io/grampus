@@ -221,6 +221,12 @@ int32_t oracle_is_xl_printer_dynamic(rust::Str base,
 // reached through a class instance, and `defaults()` is the only one a shim can build without a
 // preset -- the same instance the port's own side reads.
 int32_t oracle_is_xl_printer_of_print_defaults();
+
+// `DynamicPrintAndCLIConfig` (`PrintConfig.hpp:2512-2543`): its `def()`'s key set, which is the
+// union of the registry and the three command line tables, and its `handle_legacy`, which
+// delegates to the registry's only for a key none of those three tables names.
+rust::Vec<rust::String> oracle_print_and_cli_def_keys();
+OracleLegacyResult oracle_print_and_cli_handle_legacy(rust::Str opt_key, rust::Str value);
 rust::Vec<int64_t> oracle_bed_shape_of_sla_defaults();
 
 // `get_extruder_supported_nozzle_volume_types(const DynamicPrintConfig&, int)`

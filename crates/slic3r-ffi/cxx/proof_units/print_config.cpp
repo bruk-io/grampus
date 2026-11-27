@@ -911,6 +911,35 @@ int32_t oracle_is_xl_printer_dynamic(rust::Str base,
     return Slic3r::is_XL_printer(config) ? 1 : 0;
 }
 
+rust::Vec<rust::String> oracle_print_and_cli_def_keys() {
+    rust::Vec<rust::String> out;
+    const Slic3r::DynamicPrintAndCLIConfig config;
+    const Slic3r::ConfigDef *def = config.def();
+    if (def == nullptr) {
+        return out;
+    }
+    for (const auto &kvp : def->options) {
+        out.push_back(rust::String(kvp.first));
+    }
+    return out;
+}
+
+OracleLegacyResult oracle_print_and_cli_handle_legacy(rust::Str opt_key, rust::Str value) {
+    const Slic3r::DynamicPrintAndCLIConfig config;
+    std::string k(opt_key);
+    std::string v(value);
+    // `handle_legacy` is a protected `ConfigBase` override, so it is reached through the public
+    // `set_deserialize_nothrow` path the comment above its declaration names... except that
+    // would also write the option. `DynamicPrintAndCLIConfig::handle_legacy` is declared
+    // `public` in the vendored class (`PrintConfig.hpp:2525`, under the `public:` section), so
+    // it is called directly.
+    config.handle_legacy(k, v);
+    OracleLegacyResult out;
+    out.opt_key = rust::String(k);
+    out.value = rust::String(v);
+    return out;
+}
+
 int32_t oracle_is_xl_printer_of_print_defaults() {
     return Slic3r::is_XL_printer(Slic3r::PrintConfig::defaults()) ? 1 : 0;
 }
