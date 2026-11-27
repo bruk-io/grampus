@@ -736,7 +736,8 @@ list. Decisions 1 to 4 close those findings; decision 5 closes a gap found while
 decision 6 closes one `57-foundation-utils` (#60) carried forward for the same reason; and
 decision 7 reconciles the section decision 6 corrected, whose older text contradicted it; and
 decision 8 is task `35-trial-run`'s own trial-run finding, recorded here by that task; and
-decision 9 accepts `60-foundation-trees-grids` with one unit left drafted.
+decision 9 accepts `60-foundation-trees-grids` with one unit left drafted; and decision 10 accepts
+`76-foundation-voronoi-curves` with two `ported` rows' live surface outstanding.
 Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
 2026-11-26; the owner was away and had handed over this intent's decisions. Like the section
 above, this is a record: where a decision changes a rule above, the rule's own text says so and
@@ -1016,3 +1017,66 @@ dead code that cannot be instantiated has no behaviour to preserve. The `build.r
 accepted; an include path a vendored header needs unconditionally is part of reaching the oracle,
 not a change to the harness. Made by Claude acting for Bruk Habtu under the delegation for this
 intent, on 2026-11-26.
+
+### 10. `76-foundation-voronoi-curves` is accepted with two `ported` rows' live surface outstanding
+
+**The gap.** #78 ports `Geometry/Bicubic.hpp`, `Geometry/Circle.cpp`/`Circle.hpp` and
+`Geometry/Curves.hpp`, each proven against the oracle through its own proof unit, and leaves
+`Geometry/Voronoi.cpp`/`Voronoi.hpp` the `drafted` module its own task text mandates. Two of the
+`ported` rows are `ported` with a **live** function of theirs absent, which is not the disposition
+decision 9 settled, and the task could settle neither itself:
+
+- `Geometry/Curves.hpp`'s `fit_curve` (`:102-182`) and `fit_cubic_bspline` (`:197-207`) are not
+  ported. They are the unit's only live in-scope entry point: `GCode/SeamPlacer.cpp:2044` calls
+  `fit_cubic_bspline` and reaches the ported `PiecewiseFittedCurve::get_fitted_value` only through
+  its return value at `:2056`. `GCode/SeamPlacer.cpp`'s manifest row is `in`, crate `slic3r-gcode`,
+  and derives `not-started` today. The reason for the omission is that `fit_curve`'s solve is
+  Eigen's `fullPivHouseholderQr`, whose pivoting and accumulation order a bit-exact port needs a
+  dense-linear-algebra dependency to reproduce, and no foundation task may add one: the crates'
+  dependencies are generated from `port/cut.tsv`, and the row's `equality tier` is `exact` with an
+  empty `tolerance` cell, which a task may not fill on its branch.
+- `Geometry/Circle.cpp`'s `circle_ransac` (`:119-146`) is not ported. It is live with two in-scope
+  callers, `BuildVolume.cpp:50` and `:142`, whose manifest row is `in`, crate `slic3r-buildvolume`,
+  and which derives `not-started` today. The reason for the omission is that the function draws its
+  three-point samples with `std::sample` over a default-seeded `std::mt19937`: the generator is
+  specified bit-for-bit but the sampling algorithm `std::sample` applies over it is not, so the
+  sequence of triples is a property of the standard library the oracle was built against, and the
+  row's `exact` tier with an empty `tolerance` cell cannot be honoured by any port of it.
+
+Both omissions are disclosed in the modules' own doc comments
+(`crates/slic3r-geometry-dir/src/curves.rs:24-41`, `crates/slic3r-geometry-dir/src/circle.rs:40-51`)
+and `circle_ransac` additionally carries a `// TODO(port): src/libslic3r/Geometry/Circle.cpp:119-146`
+at `circle.rs:564`. What is missing is the record, not the disclosure: re-deriving with
+`port/port-status`'s own `derive_row_status` against #78's branch gives `Geometry/Curves.hpp`
+`ported` and `Geometry/Circle.cpp` `ported`, so the burn-down counts both rows finished while the
+porter of each unit's caller will find the entry point absent. Neither remedy was available on the
+branch: everything under `docs/` is on that task's "Files this task must not write" list, and its
+"Done when" lines require `crates/slic3r-geometry-dir/src/lib.rs` to *gain* `mod circle;` and
+`mod curves;`, so dropping a `mod` line to force the rows to `drafted` is forbidden too.
+
+This is not decision 9's `intersect_triangle_epsilon` case. That function was accepted unported
+because it is dead code with no caller anywhere in the vendored tree, so it has no behaviour to
+preserve; these two are live, so each needs a named owner the way `MeshSplitImpl.hpp` and
+`BoundingBoxWrapper` got one.
+
+**The decision.** #78 is accepted as it stands, with both rows' derived `ported` status, and the
+two functions are finished later:
+
+- `fit_curve`/`fit_cubic_bspline` are finished by the Phase A/Phase B fan-out task that ports
+  `GCode/SeamPlacer.cpp` into `slic3r-gcode` — that unit cannot reach its own entry point
+  otherwise — or by the regeneration pass, whichever first has a dense full-pivoting QR solve in
+  reach. Reaching it means either giving `slic3r-geometry-dir` the dependency in `port/cut.tsv` or
+  transcribing the decomposition by hand; both are outside a port task's file list and so are that
+  pass's call, not a porter's.
+- `circle_ransac` is finished by the fan-out task that ports `BuildVolume.cpp` into
+  `slic3r-buildvolume`, or by the regeneration pass. If the `std::sample` sequence proves
+  unreachable bit-for-bit, as it appears to be, that task does **not** invent a tolerance on its
+  branch: it raises an amendment setting the `Geometry/Circle.cpp` row's `equality tier`,
+  `tolerance` and `comparison function` cells, which only a regeneration or amendment pull request
+  may write.
+
+Until then both rows stay `ported` in `port-status`'s counts with their live surface absent, which
+is a known overcount of two rows and is recorded here so the gate's number can be read honestly;
+`Geometry/Voronoi.cpp`/`Voronoi.hpp` stay `drafted` and in the remaining count, as
+`76-foundation-voronoi-curves`'s own task text states and `77-foundation-voronoi-offset` finishes.
+Made by Claude acting for Bruk Habtu under the delegation for this intent, on 2026-11-26.

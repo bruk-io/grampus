@@ -456,6 +456,7 @@ dependencies = [
  "slic3r-arachne-utils",
  "slic3r-boundingbox",
  "slic3r-ffi",
+ "slic3r-geometry",
  "slic3r-line",
  "slic3r-multipoint",
  "slic3r-point",
@@ -492,6 +493,18 @@ dependencies = [
 [[package]]
 name = "slic3r-format"
 version = "0.1.0"
+
+[[package]]
+name = "slic3r-geometry"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+]
 
 [[package]]
 name = "slic3r-i18n"
