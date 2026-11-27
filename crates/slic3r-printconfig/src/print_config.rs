@@ -21636,6 +21636,27 @@ impl DynamicPrintConfig {
             // "An override's nil means 'disabled' and is the child's value; every other nil
             // column inherits."
             if let Some(target_vec) = as_vector(target_copy.as_ref()) {
+                // FIDELITY(port): the vendored `set_only_diff` validates only its **own**
+                // length -- `if (this->values.size() != (diff_index.size()*stride)) throw`
+                // (`Config.hpp:593-594`), which is the guard above -- and then indexes the rhs
+                // unchecked at `:600`:
+                // `other->values[diff_index[i] * stride + j]`. So a target shorter than
+                // `diff_index.size() * stride` reads **past the end of a `std::vector`** at the
+                // pin, with no diagnostic. `slic3r-config`'s transcription of that line indexes
+                // a `Vec` instead, which **panics**.
+                //
+                // Neither is acceptable from a library, and the vendored answer is undefined, so
+                // there is nothing to compare against: this skips, the same choice this module
+                // makes at every other unguarded vendored dereference. Found by trying to build
+                // a fixture for `normalize_stride2_floats`'s short-vector branches -- a
+                // `machine_max_speed_x` of one value reaches this line and the port panicked
+                // (`index out of bounds: the len is 1 but the index is 1`) where the oracle read
+                // out of bounds and returned a meaningless value. That is also why those two
+                // branches stay uncompared; see
+                // `print_config_variant_override_matches_the_oracle`.
+                if target_vec.len_values() < variant_index.len() * stride as usize {
+                    continue;
+                }
                 let _ = src_vec.set_only_diff(
                     target_vec,
                     &variant_index,
@@ -25389,20 +25410,36 @@ mod tests {
     /// only through a caller, and **their status differs, where an earlier revision of this note
     /// said both were simply waiting on unported callers. That was stale for one of them.**
     ///
-    /// - **`normalize_stride2_floats` is now covered**, through
-    ///   `update_non_diff_values_to_base_config`, which *is* ported and compared. It was not
-    ///   covered at `fa1d970` despite that: review-76-conformance's probe survived three
-    ///   mutations in it, because every layout left the stride-2 `expected_size` at 2, where the
-    ///   function is a no-op. Two fixtures fix that -- a layout with two matching variants on
-    ///   both sides, so `expected_size` is 4 and the replication loop
-    ///   (`PrintConfig.cpp:12122-12125`) runs, and a machine limit with an **odd** number of
-    ///   values, which is the only shape reaching the pair-realignment push (`:12111-12112`).
-    ///   Both mutations are confirmed failing with those fixtures and passing without them.
+    /// - **`normalize_stride2_floats` is covered on four of its seven branches, and the claim
+    ///   is written branch by branch because a blanket one would be wrong.** It is reached
+    ///   through `update_non_diff_values_to_base_config`, which *is* ported and compared -- so
+    ///   the old reason for disclosing it (no ported caller) was stale. But at `fa1d970` nothing
+    ///   reached it in a way that changed compared output, because every layout left the
+    ///   stride-2 `expected_size` at 2, where the function is a no-op. Two fixtures fix that: a
+    ///   layout with two matching variants on both sides, and a machine limit with an **odd**
+    ///   number of values.
     ///
-    ///   Its `expected_size == 0` branch (`:12092-12095`) is still uncovered and **cannot** be
-    ///   reached through this caller: `update_non_diff_values_to_base_config` returns early on
-    ///   an empty `variant_index`, so `restore_n >= 1` and `expected_size = restore_n * 2 >= 2`
-    ///   always. That is a fact about the caller, not a missing fixture.
+    ///   Each of these four was confirmed by planting a mutation, watching the test fail, and
+    ///   reverting: the replication loop (`PrintConfig.cpp:12122-12125`), the pair-realignment
+    ///   push (`:12111-12112`), the truncate boundary (`:12114-12116`), and the
+    ///   `second = first` fallback (`:12103`).
+    ///
+    ///   **Three branches remain unproven, for two different reasons, and neither is a fixture
+    ///   this unit simply has not got round to writing.** The `expected_size == 0` clear
+    ///   (`:12092-12095`) is unreachable through this caller, which returns early on an empty
+    ///   `variant_index`, so `expected_size = restore_n * 2 >= 2` always. The empty-vector
+    ///   fallback (`:12096-12099`) and the `v.size() < 2` pair build (`:12106-12109`) need a
+    ///   machine limit shorter than one `(normal, silent)` pair -- and **that input is
+    ///   undefined at the pin before it ever reaches this function.** The sibling
+    ///   `update_diff_values_to_child_config` hands such a vector to `set_only_diff`, which
+    ///   validates only its own length (`Config.hpp:593-594`) and then indexes the rhs
+    ///   unchecked at `:600`, reading past the end of a `std::vector`. Measured rather than
+    ///   argued: with that fixture present and the port's guard removed, the port panics
+    ///   (`index out of bounds: the len is 1 but the index is 1`); with the guard in place the
+    ///   comparison *diverges*, because the oracle returns whatever the out-of-bounds read
+    ///   produced. A comparison against undefined behaviour establishes nothing, so those two
+    ///   branches are left uncompared deliberately, on the same grounds as
+    ///   `get_extruder_ams_count`'s no-`#` token.
     ///
     /// - **`ensure_process_variant_columns` is genuinely uncovered**, and for the reason the old
     ///   note gave: its only caller is `update_values_to_printer_extruders`
