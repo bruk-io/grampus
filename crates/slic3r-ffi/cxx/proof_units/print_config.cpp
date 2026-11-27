@@ -1097,6 +1097,35 @@ oracle_update_non_diff_values_to_base_config(rust::Str base,
     return serialize_config(self);
 }
 
+rust::Vec<rust::String>
+oracle_update_values_from_single_to_multi(rust::Str base, const rust::Vec<rust::String> &self_kv,
+                                          const rust::Vec<rust::String> &multi_kv,
+                                          const rust::Vec<rust::String> &key_set,
+                                          rust::Str id_name, rust::Str variant_name) {
+    bool ok_a = false, ok_b = false;
+    Slic3r::DynamicPrintConfig self = config_from_base(base, self_kv, ok_a);
+    Slic3r::DynamicPrintConfig multi = config_from(multi_kv, ok_b);
+    rust::Vec<rust::String> out;
+    if (!ok_a || !ok_b) {
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    std::set<std::string> keys = to_set(key_set);
+    int result = 0;
+    try {
+        result = self.update_values_from_single_to_multi(multi, keys, std::string(id_name),
+                                                        std::string(variant_name));
+    } catch (const std::exception &) {
+        out.push_back(rust::String("<threw>"));
+        return out;
+    }
+    out.push_back(rust::String(std::to_string(result)));
+    for (rust::String &entry : serialize_config(self)) {
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

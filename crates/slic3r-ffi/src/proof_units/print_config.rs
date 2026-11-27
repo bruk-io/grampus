@@ -367,6 +367,17 @@ mod ffi {
             key_set2: &Vec<String>,
         ) -> Vec<String>;
 
+        /// `update_values_from_single_to_multi` (`PrintConfig.cpp:10891-10993`): the
+        /// method's `int` return as the first entry, then the receiver serialized whole.
+        fn oracle_update_values_from_single_to_multi(
+            base: &str,
+            self_kv: &Vec<String>,
+            multi_kv: &Vec<String>,
+            key_set: &Vec<String>,
+            id_name: &str,
+            variant_name: &str,
+        ) -> Vec<String>;
+
         /// `set_variant_override` (`:11394-11402`) over one `coFloats` pair, as the target's
         /// serialized value after the override.
         fn oracle_set_variant_override(
@@ -457,6 +468,6 @@ pub use ffi::{
     oracle_set_variant_override, oracle_shaper_type_values_for_flavor,
     oracle_static_class_defaults, oracle_static_class_keys, oracle_support_different_extruders,
     oracle_update_diff_values_to_child_config, oracle_update_non_diff_values_to_base_config,
-    oracle_update_static_print_config_from_dynamic, OracleEnumKeyValue, OracleLegacyResult,
-    OracleOptionInfo,
+    oracle_update_static_print_config_from_dynamic, oracle_update_values_from_single_to_multi,
+    OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
 };

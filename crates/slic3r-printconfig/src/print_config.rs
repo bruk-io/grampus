@@ -19257,10 +19257,12 @@ impl DynamicPrintConfig {
         let mut process_variant_length = DEFAULT_PARAM_LENGTH;
         let mut machine_variant_length = DEFAULT_PARAM_LENGTH;
 
+        // The vendored reads are `this->option<ConfigOptionStrings>(key)->size()`, which is
+        // the **tag**-checked accessor -- see [`tagged`].
         let strings_len = |key: &str| -> Option<usize> {
             slic3r_config::config::ConfigOptionResolver::option(self, key)
-                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
-                .map(|o| o.values.len())
+                .and_then(tagged::strings)
+                .map(|o| o.len())
         };
         if slic3r_config::config::ConfigOptionResolver::has(self, "filament_extruder_variant") {
             if let Some(n) = strings_len("filament_extruder_variant") {
@@ -19979,6 +19981,167 @@ pub fn handle_legacy_sla(config: &mut DynamicPrintConfig) {
 // this task's pull request body keeps that as a finding against `slic3r-config` -- as an
 // ergonomics finding, not a blocker.
 
+/// `ConfigBase::option<TYPE>(opt_key, create)` (`Config.hpp:2772-2780`), for the vector options
+/// whose `NULLABLE` instantiations share one `ConfigOptionType`.
+///
+/// **PORT NOTE: the vendored accessor is tag-checked and then `static_cast`, not a
+/// `dynamic_cast`, and the difference is load-bearing.** Its body is
+/// `if (opt->type() != TYPE::static_type()) return nullptr; return static_cast<TYPE*>(opt);` --
+/// it compares the `ConfigOptionType` **tag**, and `ConfigOptionFloats` and
+/// `ConfigOptionFloatsNullable` are `ConfigOptionFloatsTempl<false>` and `<true>`, which share
+/// the tag `coFloats`. So `option<ConfigOptionFloats>(key)` **succeeds** on a stored
+/// `ConfigOptionFloatsNullable` and reinterprets it, the two having the same layout
+/// (`std::vector<double> values`).
+///
+/// Rust's `as_any_mut().downcast_mut::<T>()` is type-exact and returns `None` for the other
+/// instantiation, so `DynamicConfig::opt::<ConfigOptionFloats>` is **stricter than the vendored
+/// accessor**. That is not academic: `outer_wall_speed`'s registry type is `coFloats`
+/// (`PrintConfig.cpp:5286` in this module's own transcription) while `PrintRegionConfig`'s field
+/// is a `ConfigOptionFloatsNullable`, so a `full_print_config()` stores the nullable one and the
+/// vendored `option<ConfigOptionFloats>` reaches it where a `downcast` does not. Measured, not
+/// reasoned: `update_values_from_single_to_multi` left `outer_wall_speed` at 60 where the oracle
+/// narrowed it to 10, until these accessors replaced the downcasts.
+///
+/// `slic3r-config` is where this belongs -- its own `ConfigOptionVectorBase::set` already
+/// records the shared-tag problem in an error message -- and this task's pull request body names
+/// it as a finding. These accessors reach the underlying vector for either instantiation of each
+/// pair, which is what the `static_cast` achieves.
+mod tagged {
+    use super::*;
+
+    /// Either instantiation of `ConfigOptionFloatsTempl`, as its value vector.
+    pub fn floats_mut(opt: &mut dyn slic3r_config::config::ConfigOption) -> Option<&mut Vec<f64>> {
+        if opt.option_type() != ConfigOptionType::Floats {
+            return None;
+        }
+        // The concrete type is decided by an immutable `is::<T>()` first, so only one
+        // `downcast_mut` borrow is ever taken -- two sequential `if let Some(..) = ..` on the
+        // same `&mut dyn Any` do not pass the borrow checker.
+        let any = opt.as_any_mut();
+        if any.is::<ConfigOptionFloats>() {
+            return any
+                .downcast_mut::<ConfigOptionFloats>()
+                .map(|o| &mut o.values);
+        }
+        any.downcast_mut::<ConfigOptionFloatsNullable>()
+            .map(|o| &mut o.values)
+    }
+
+    pub fn floats(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<f64>> {
+        if opt.option_type() != ConfigOptionType::Floats {
+            return None;
+        }
+        let any = opt.as_any();
+        if let Some(o) = any.downcast_ref::<ConfigOptionFloats>() {
+            return Some(&o.values);
+        }
+        any.downcast_ref::<ConfigOptionFloatsNullable>()
+            .map(|o| &o.values)
+    }
+
+    pub fn ints(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<i32>> {
+        if opt.option_type() != ConfigOptionType::Ints {
+            return None;
+        }
+        let any = opt.as_any();
+        if let Some(o) = any.downcast_ref::<ConfigOptionInts>() {
+            return Some(&o.values);
+        }
+        any.downcast_ref::<ConfigOptionIntsNullable>()
+            .map(|o| &o.values)
+    }
+
+    pub fn ints_mut(opt: &mut dyn slic3r_config::config::ConfigOption) -> Option<&mut Vec<i32>> {
+        if opt.option_type() != ConfigOptionType::Ints {
+            return None;
+        }
+        let any = opt.as_any_mut();
+        if any.is::<ConfigOptionInts>() {
+            return any
+                .downcast_mut::<ConfigOptionInts>()
+                .map(|o| &mut o.values);
+        }
+        any.downcast_mut::<ConfigOptionIntsNullable>()
+            .map(|o| &mut o.values)
+    }
+
+    pub fn bools(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<u8>> {
+        if opt.option_type() != ConfigOptionType::Bools {
+            return None;
+        }
+        let any = opt.as_any();
+        if let Some(o) = any.downcast_ref::<ConfigOptionBools>() {
+            return Some(&o.values);
+        }
+        any.downcast_ref::<ConfigOptionBoolsNullable>()
+            .map(|o| &o.values)
+    }
+
+    pub fn enums(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<i32>> {
+        if opt.option_type() != ConfigOptionType::Enums {
+            return None;
+        }
+        let any = opt.as_any();
+        if let Some(o) = any.downcast_ref::<ConfigOptionEnumsGeneric>() {
+            return Some(&o.values);
+        }
+        any.downcast_ref::<ConfigOptionEnumsGenericNullable>()
+            .map(|o| &o.values)
+    }
+
+    /// `ConfigOptionStrings` has no nullable instantiation, so this is the plain downcast; it
+    /// is here so every arm of the caller reads the same way.
+    pub fn strings(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<String>> {
+        if opt.option_type() != ConfigOptionType::Strings {
+            return None;
+        }
+        opt.as_any()
+            .downcast_ref::<ConfigOptionStrings>()
+            .map(|o| &o.values)
+    }
+
+    pub fn strings_mut(
+        opt: &mut dyn slic3r_config::config::ConfigOption,
+    ) -> Option<&mut Vec<String>> {
+        if opt.option_type() != ConfigOptionType::Strings {
+            return None;
+        }
+        opt.as_any_mut()
+            .downcast_mut::<ConfigOptionStrings>()
+            .map(|o| &mut o.values)
+    }
+
+    pub fn floats_or_percents(
+        opt: &dyn slic3r_config::config::ConfigOption,
+    ) -> Option<&Vec<slic3r_config::config::FloatOrPercent>> {
+        if opt.option_type() != ConfigOptionType::FloatsOrPercents {
+            return None;
+        }
+        let any = opt.as_any();
+        if let Some(o) = any.downcast_ref::<ConfigOptionFloatsOrPercents>() {
+            return Some(&o.values);
+        }
+        any.downcast_ref::<ConfigOptionFloatsOrPercentsNullable>()
+            .map(|o| &o.values)
+    }
+
+    pub fn floats_or_percents_mut(
+        opt: &mut dyn slic3r_config::config::ConfigOption,
+    ) -> Option<&mut Vec<slic3r_config::config::FloatOrPercent>> {
+        if opt.option_type() != ConfigOptionType::FloatsOrPercents {
+            return None;
+        }
+        let any = opt.as_any_mut();
+        if any.is::<ConfigOptionFloatsOrPercents>() {
+            return any
+                .downcast_mut::<ConfigOptionFloatsOrPercents>()
+                .map(|o| &mut o.values);
+        }
+        any.downcast_mut::<ConfigOptionFloatsOrPercentsNullable>()
+            .map(|o| &mut o.values)
+    }
+}
+
 /// The immutable half of [`as_vector_mut`], for the vendored
 /// `static_cast<const ConfigOptionVectorBase*>` (`PrintConfig.cpp:11441`) and
 /// `dynamic_cast<const ConfigOptionVectorBase*>` sites.
@@ -20133,16 +20296,16 @@ pub fn get_extruder_supported_nozzle_volume_types(
     let mut supported_types: std::collections::BTreeSet<NozzleVolumeType> =
         std::collections::BTreeSet::new();
 
-    let variant_list = Resolver::option(printer_config, "extruder_variant_list")
-        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>());
-    let extruder_types = Resolver::option(printer_config, "extruder_type")
-        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnumsGeneric>());
+    // Both vendored reads are `option<TYPE>`, the **tag**-checked accessor -- see [`tagged`].
+    let variant_list =
+        Resolver::option(printer_config, "extruder_variant_list").and_then(tagged::strings);
+    let extruder_types = Resolver::option(printer_config, "extruder_type").and_then(tagged::enums);
     let (Some(variant_list), Some(extruder_types)) = (variant_list, extruder_types) else {
         return supported_types;
     };
     if extruder_id < 0
-        || extruder_id >= variant_list.values.len() as i32
-        || extruder_id >= extruder_types.values.len() as i32
+        || extruder_id >= variant_list.len() as i32
+        || extruder_id >= extruder_types.len() as i32
     {
         return supported_types;
     }
@@ -20150,12 +20313,12 @@ pub fn get_extruder_supported_nozzle_volume_types(
     // The vendored `ExtruderType(extruder_types->values[extruder_id])` is a bare cast; the
     // declared variants are what the registry stores, so `from_i32` gives the same answer.
     let extruder_type = <ExtruderType as slic3r_config::config::ConfigOptionEnumValue>::from_i32(
-        extruder_types.values[extruder_id as usize],
+        extruder_types[extruder_id as usize],
     );
     for volume_type in get_valid_nozzle_volume_type() {
         // "An unsupported extruder type yields an empty name, which would match any list."
         let variant = get_extruder_variant_string(extruder_type, volume_type);
-        if !variant.is_empty() && variant_list.values[extruder_id as usize].contains(&variant) {
+        if !variant.is_empty() && variant_list[extruder_id as usize].contains(&variant) {
             supported_types.insert(volume_type);
         }
     }
@@ -21299,6 +21462,175 @@ impl DynamicPrintConfig {
         Ok(())
     }
 }
+
+impl DynamicPrintConfig {
+    /// `int update_values_from_single_to_multi(DynamicPrintConfig &multi_config,
+    /// std::set<std::string> &key_set, std::string id_name, std::string variant_name)`
+    /// (`PrintConfig.cpp:10891-10993`): "only used for cli -- update values in single extruder
+    /// process config to values in multi-extruder process, limit the new values".
+    ///
+    /// Returns -1 where the vendored body does and 0 otherwise. `id_name` is accepted and
+    /// unused, exactly as in the vendored signature.
+    pub fn update_values_from_single_to_multi(
+        &mut self,
+        multi_config: &DynamicPrintConfig,
+        key_set: &std::collections::BTreeSet<String>,
+        _id_name: &str,
+        variant_name: &str,
+    ) -> i32 {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let Some(print_variant_opt) = Resolver::option(multi_config, variant_name)
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+        else {
+            // PORT NOTE: src/libslic3r/PrintConfig.cpp:10895 (BOOST_LOG_TRIVIAL(error)).
+            return -1;
+        };
+        let variant_count = print_variant_opt.values.len();
+
+        // `this->def()` is `&print_config_def` and never null for this class, so the vendored
+        // null check at `:10901` cannot fire; the registry is read directly.
+        // PORT NOTE: src/libslic3r/PrintConfig.cpp:10902 (BOOST_LOG_TRIVIAL(error) on a
+        // condition this class cannot reach).
+
+        // FIDELITY(port): `key_set` is a `std::set<std::string>` and this loop walks it in that
+        // container's own bytewise-ascending order; it reaches output wherever two keys resolve
+        // to the same field. A `BTreeSet` iterates the same way.
+        for key in key_set {
+            let Some(option_type) = print_config_def().def.get(key).map(|d| d.option_type) else {
+                // PORT NOTE: src/libslic3r/PrintConfig.cpp:10909 (BOOST_LOG_TRIVIAL(warning)).
+                continue;
+            };
+            // Each arm mirrors `this->option<TYPE>(key, true)`, which is **tag**-checked and
+            // then `static_cast` -- see [`tagged`] for why a `downcast` is not the same thing
+            // and what it cost here.
+            let resize_to = |cfg: &mut DynamicPrintConfig, key: &str, n: usize| {
+                let Ok(Some(opt)) = slic3r_config::config::ConfigBase::optptr_mut(cfg, key, true)
+                else {
+                    return;
+                };
+                // `opt->resize(variant_count, opt)` passes the option as its own default, i.e.
+                // pads with its first value.
+                let padded = opt.clone_box();
+                if let Some(vec) = as_vector_mut(opt) {
+                    let _ = vec.resize(n, Some(padded.as_ref()));
+                }
+            };
+            match option_type {
+                ConfigOptionType::Strings => {
+                    let Some(values) = Resolver::option(multi_config, key)
+                        .and_then(tagged::strings)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    if let Ok(Some(opt)) =
+                        slic3r_config::config::ConfigBase::optptr_mut(self, key, true)
+                    {
+                        if let Some(dst) = tagged::strings_mut(opt) {
+                            *dst = values;
+                        }
+                    }
+                }
+                ConfigOptionType::Ints => {
+                    let Some(values) = Resolver::option(multi_config, key)
+                        .and_then(tagged::ints)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    if let Ok(Some(opt)) =
+                        slic3r_config::config::ConfigBase::optptr_mut(self, key, true)
+                    {
+                        if let Some(dst) = tagged::ints_mut(opt) {
+                            *dst = values;
+                        }
+                    }
+                }
+                ConfigOptionType::Floats => {
+                    let Some(src) = Resolver::option(multi_config, key)
+                        .and_then(tagged::floats)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    // The vendored `assert(variant_count == src_opt->size())` (`:10939`) is
+                    // `<cassert>`'s and compiled out of the oracle's Release build; the loop
+                    // below carries its own `index >= src_opt->values.size()` break for exactly
+                    // the case it would have caught, so nothing stands in its place.
+                    resize_to(self, key, variant_count);
+                    let Ok(Some(opt)) =
+                        slic3r_config::config::ConfigBase::optptr_mut(self, key, true)
+                    else {
+                        continue;
+                    };
+                    let Some(values) = tagged::floats_mut(opt) else {
+                        continue;
+                    };
+                    for index in 0..variant_count {
+                        // "variant_count is the variant column width, src_opt the value array;
+                        // they disagree when the source was authored at a different width"
+                        if index >= src.len() || index >= values.len() {
+                            break;
+                        }
+                        if values[index] > src[index] {
+                            values[index] = src[index];
+                        }
+                    }
+                }
+                ConfigOptionType::FloatsOrPercents => {
+                    let Some(src) = Resolver::option(multi_config, key)
+                        .and_then(tagged::floats_or_percents)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    resize_to(self, key, variant_count);
+                    let Ok(Some(opt)) =
+                        slic3r_config::config::ConfigBase::optptr_mut(self, key, true)
+                    else {
+                        continue;
+                    };
+                    let Some(values) = tagged::floats_or_percents_mut(opt) else {
+                        continue;
+                    };
+                    for index in 0..variant_count {
+                        if index >= src.len() || index >= values.len() {
+                            break;
+                        }
+                        // The comparison is on `.value` alone -- the `percent` flag is not
+                        // compared, only carried with the value that wins.
+                        if values[index].value > src[index].value {
+                            values[index] = src[index];
+                        }
+                    }
+                }
+                ConfigOptionType::Bools => {
+                    // The vendored arm resizes and copies nothing: a bool's value is not
+                    // narrowed the way the two numeric arms narrow theirs.
+                    if Resolver::option(multi_config, key)
+                        .and_then(tagged::bools)
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    resize_to(self, key, variant_count);
+                }
+                _ => {
+                    // PORT NOTE: src/libslic3r/PrintConfig.cpp:10987
+                    // (BOOST_LOG_TRIVIAL(warning), unsupported option type).
+                }
+            }
+        }
+
+        0
+    }
+}
+
+// PORT NOTE: src/libslic3r/PrintConfig.cpp:10997 --
+// `update_values_from_single_to_multi_2` (`:10997-11052`) is commented out at the pin, as is
+// `update_values_from_multi_to_single_2` (declared and commented out at
+// `PrintConfig.hpp:1004-1005`). `docs/PORTING.md`'s don't-translate list names upstream code
+// that is commented out, so neither is ported and neither is revived.
 
 /// `class DynamicPrintAndCLIConfig : public DynamicPrintConfig` (`PrintConfig.hpp:2512-2543`):
 /// a `DynamicPrintConfig` whose definition is the union of the registry and the three command
@@ -24090,6 +24422,129 @@ mod tests {
             "every case was skipped; the comparison measured nothing"
         );
         println!("base and child merges: {checked} case(s) held to exact equality");
+    }
+
+    /// `update_values_from_single_to_multi` (`PrintConfig.cpp:10891-10993`), held to exact
+    /// equality against the oracle on both its `int` return and the whole config it leaves.
+    ///
+    /// The probes cover each of the five `switch` arms (`coStrings`, `coInts`, `coFloats`,
+    /// `coFloatsOrPercents`, `coBools`) plus a key whose type reaches `default:`, the missing
+    /// `variant_name` early return, a source narrower than the variant column (the loop's own
+    /// `break`), and values on both sides of the `>` that decides whether the source narrows
+    /// the receiver.
+    #[test]
+    fn print_config_single_to_multi_matches_the_oracle() {
+        let mut checked = 0_usize;
+
+        let variant_lists: Vec<Vec<String>> = vec![
+            // No `print_extruder_variant` at all: the -1 early return.
+            probe(&[]),
+            probe(&["print_extruder_variant=\"Direct Drive Standard\""]),
+            probe(&[
+                "print_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+            ]),
+            probe(&[
+                "print_extruder_variant=\"Direct Drive Standard\";\"Direct Drive High Flow\";\"Bowden Standard\"",
+            ]),
+        ];
+        // One key per arm the switch distinguishes, plus `layer_height` (a `coFloat`, which
+        // reaches `default:`).
+        let value_sets: Vec<Vec<String>> = vec![
+            probe(&["print_extruder_variant=\"X\""]),
+            probe(&["sparse_infill_rotate_template=a;b"]),
+            probe(&["print_extruder_id=3,4"]),
+            probe(&["outer_wall_speed=10,20"]),
+            probe(&["outer_wall_speed=900,900"]),
+            probe(&["small_perimeter_speed=10%,20%"]),
+            probe(&["enable_overhang_speed=1,0"]),
+            probe(&["layer_height=0.3"]),
+            probe(&[
+                "print_extruder_id=3,4",
+                "outer_wall_speed=10,20",
+                "small_perimeter_speed=10%,20%",
+                "enable_overhang_speed=1,0",
+            ]),
+        ];
+        let key_sets: Vec<Vec<String>> = vec![
+            vec![],
+            probe(&["outer_wall_speed"]),
+            probe(&["print_extruder_id", "print_extruder_variant"]),
+            probe(&[
+                "print_extruder_id",
+                "print_extruder_variant",
+                "outer_wall_speed",
+                "small_perimeter_speed",
+                "enable_overhang_speed",
+                "sparse_infill_rotate_template",
+                "layer_height",
+                "not_a_real_key",
+            ]),
+        ];
+
+        for variants in &variant_lists {
+            for values in &value_sets {
+                let mut multi_kv = variants.clone();
+                multi_kv.extend(values.iter().cloned());
+                for keys in &key_sets {
+                    let theirs: Vec<String> = ora::oracle_update_values_from_single_to_multi(
+                        "full",
+                        &Vec::new(),
+                        &multi_kv,
+                        keys,
+                        "print_extruder_id",
+                        "print_extruder_variant",
+                    )
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                    if theirs == vec!["<threw>".to_string()] {
+                        continue;
+                    }
+                    assert_ne!(
+                        theirs,
+                        vec!["<refused>".to_string()],
+                        "refused: single_to_multi {multi_kv:?}"
+                    );
+                    let mut mine = config_on("full", &[]);
+                    fixtures_agree("full", &Vec::new(), &mine);
+                    let multi = config_on("empty", &multi_kv);
+                    let key_set: std::collections::BTreeSet<String> =
+                        keys.iter().cloned().collect();
+                    let result = mine.update_values_from_single_to_multi(
+                        &multi,
+                        &key_set,
+                        "print_extruder_id",
+                        "print_extruder_variant",
+                    );
+                    let mut mine_flat = vec![result.to_string()];
+                    mine_flat.extend(serialize(&mine));
+                    assert_eq!(
+                        mine_flat, theirs,
+                        "update_values_from_single_to_multi({multi_kv:?}, keys={keys:?})"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+
+        // The -1 path really is reached, so the comparison is not passing only on the 0 path.
+        let no_variants = probe(&["outer_wall_speed=10,20"]);
+        let theirs = ora::oracle_update_values_from_single_to_multi(
+            "empty",
+            &Vec::new(),
+            &no_variants,
+            &probe(&["outer_wall_speed"]),
+            "print_extruder_id",
+            "print_extruder_variant",
+        );
+        assert_eq!(
+            theirs.first().map(|s| s.to_string()),
+            Some("-1".to_string()),
+            "a config with no print_extruder_variant should take the -1 early return"
+        );
+
+        assert!(checked > 0, "every case was skipped");
+        println!("single to multi: {checked} case(s) held to exact equality");
     }
 
     /// `set_variant_override` (`PrintConfig.cpp:11394-11402`) and

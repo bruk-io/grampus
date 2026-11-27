@@ -266,6 +266,14 @@ oracle_update_non_diff_values_to_base_config(rust::Str base,
                                              const rust::Vec<rust::String> &key_set1,
                                              const rust::Vec<rust::String> &key_set2);
 
+// `update_values_from_single_to_multi` (`PrintConfig.cpp:10891-10993`): the receiver handed
+// back whole, with the method's own `int` return prefixed as the first entry.
+rust::Vec<rust::String>
+oracle_update_values_from_single_to_multi(rust::Str base, const rust::Vec<rust::String> &self_kv,
+                                          const rust::Vec<rust::String> &multi_kv,
+                                          const rust::Vec<rust::String> &key_set,
+                                          rust::Str id_name, rust::Str variant_name);
+
 // `set_variant_override` (`:11394-11402`) over one `coFloats` pair: the target's serialized
 // value after the override.
 rust::String oracle_set_variant_override(rust::Str target_value, rust::Str source_value,
