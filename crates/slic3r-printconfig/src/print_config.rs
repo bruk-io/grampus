@@ -15600,6 +15600,283 @@ mod tests {
             );
         }
     }
+
+    /// One oracle or ported `ConfigOptionDef` rendered as the lines this unit's proof compares:
+    /// `<field>=<value>` for every field of `ConfigOptionDef` (`Config.hpp:2315-2637`) that the
+    /// registry's `init_*` bodies can set, in one fixed order. Less `opt_key`, which is the key
+    /// this row is filed under, and less `serialization_key_ordinal`, which `slic3r-config`
+    /// draws from a process-wide atomic counter rather than from the registry's own
+    /// construction order and which is therefore not a property of the transcription (named as
+    /// a finding in this task's pull request body).
+    ///
+    /// Rendering to text rather than comparing field by field is what lets one `compare_unit`
+    /// call cover the whole table: `slic3r_proof::ProofValue` is implemented for the numeric
+    /// primitives and for `Vec<T>`, and its own doc directs a caller with a structured value to
+    /// "flatten it to a `Vec<i64>` (or another primitive) at the call site". The flattening is
+    /// this text's bytes, so the comparison is bytewise equality of the two registries.
+    fn render_def(fields: &[(&str, String)]) -> Vec<String> {
+        fields
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect()
+    }
+
+    /// The ported side of one row.
+    fn ported_row(d: &slic3r_config::config::ConfigOptionDef) -> Vec<String> {
+        render_def(&[
+            ("type", (d.option_type as i32).to_string()),
+            ("nullable", d.nullable.to_string()),
+            (
+                "default",
+                match d.default_value.as_ref() {
+                    Some(v) => format!("some:{}", v.serialize()),
+                    None => "none".to_string(),
+                },
+            ),
+            ("gui_type", (d.gui_type as i32).to_string()),
+            ("gui_flags", d.gui_flags.clone()),
+            ("plugin_type", d.plugin_type.clone()),
+            ("label", d.label.clone()),
+            ("full_label", d.full_label.clone()),
+            (
+                "printer_technology",
+                (d.printer_technology as i32).to_string(),
+            ),
+            ("category", d.category.clone()),
+            ("tooltip", d.tooltip.clone()),
+            ("sidetext", d.sidetext.clone()),
+            ("cli", d.cli.clone()),
+            ("cli_params", d.cli_params.clone()),
+            ("ratio_over", d.ratio_over.clone()),
+            ("multiline", d.multiline.to_string()),
+            ("full_width", d.full_width.to_string()),
+            ("is_code", d.is_code.to_string()),
+            ("readonly", d.readonly.to_string()),
+            ("height", d.height.to_string()),
+            ("width", d.width.to_string()),
+            ("min", format!("{:?}", d.min)),
+            ("max", format!("{:?}", d.max)),
+            ("max_literal", format!("{:?}", d.max_literal)),
+            ("mode", (d.mode as i32).to_string()),
+            ("aliases", d.aliases.join("\u{1}")),
+            ("shortcut", d.shortcut.join("\u{1}")),
+            ("enum_values", d.enum_values.join("\u{1}")),
+            ("enum_labels", d.enum_labels.join("\u{1}")),
+            (
+                "enum_keys_map",
+                d.enum_keys_map
+                    .iter()
+                    .map(|(k, v)| format!("{k}:{v}"))
+                    .collect::<Vec<_>>()
+                    .join("\u{1}"),
+            ),
+        ])
+    }
+
+    /// The oracle side of the same row, from the same fields in the same order.
+    fn oracle_row(info: &ora::OracleOptionInfo) -> Vec<String> {
+        render_def(&[
+            ("type", info.option_type.to_string()),
+            ("nullable", info.nullable.to_string()),
+            (
+                "default",
+                if info.has_default {
+                    format!("some:{}", info.default_serialized)
+                } else {
+                    "none".to_string()
+                },
+            ),
+            ("gui_type", info.gui_type.to_string()),
+            ("gui_flags", info.gui_flags.to_string()),
+            ("plugin_type", info.plugin_type.to_string()),
+            ("label", info.label.to_string()),
+            ("full_label", info.full_label.to_string()),
+            ("printer_technology", info.printer_technology.to_string()),
+            ("category", info.category.to_string()),
+            ("tooltip", info.tooltip.to_string()),
+            ("sidetext", info.sidetext.to_string()),
+            ("cli", info.cli.to_string()),
+            ("cli_params", info.cli_params.to_string()),
+            ("ratio_over", info.ratio_over.to_string()),
+            ("multiline", info.multiline.to_string()),
+            ("full_width", info.full_width.to_string()),
+            ("is_code", info.is_code.to_string()),
+            ("readonly", info.readonly.to_string()),
+            ("height", info.height.to_string()),
+            ("width", info.width.to_string()),
+            ("min", format!("{:?}", info.min)),
+            ("max", format!("{:?}", info.max)),
+            ("max_literal", format!("{:?}", info.max_literal)),
+            ("mode", info.mode.to_string()),
+            (
+                "aliases",
+                info.aliases
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\u{1}"),
+            ),
+            (
+                "shortcut",
+                info.shortcut
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\u{1}"),
+            ),
+            (
+                "enum_values",
+                info.enum_values
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\u{1}"),
+            ),
+            (
+                "enum_labels",
+                info.enum_labels
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\u{1}"),
+            ),
+            (
+                "enum_keys_map",
+                info.enum_keys_map
+                    .iter()
+                    .map(|e| format!("{}:{}", e.name, e.value))
+                    .collect::<Vec<_>>()
+                    .join("\u{1}"),
+            ),
+        ])
+    }
+
+    /// **This unit's R19 proof.** `PrintConfig.cpp` and `PrintConfig.hpp` are the two manifest
+    /// rows (442 and 443) that share `crates/slic3r-printconfig/src/print_config.rs`, and both
+    /// declare `proof path: 3` and `equality tier: exact` with the `tolerance` and
+    /// `comparison function` cells empty. One test carrying one `// PROOF: 3` marker therefore
+    /// satisfies `port/port-status`'s `proof_present` for each row independently -- it matches
+    /// the marker's text against each row's own cell, and both cells hold the same text. Both
+    /// `compare_unit` calls are made, one per row, so each row's own tier is exercised rather
+    /// than assumed from the other's.
+    ///
+    /// **What is held to exact equality, and why it is the whole unit's output.** This unit
+    /// produces no integer coordinates, so `task.md`'s equality rule applies in its second
+    /// form: "of the unit's own output where it produces none". The unit's own output is the
+    /// registry `print_config_def` -- 881 rows, each a full `ConfigOptionDef` -- plus the four
+    /// key lists beside it and `handle_legacy`'s rewriting. All three are compared bytewise
+    /// against the library built from the pin: the registry here, the key lists in
+    /// `extruder_and_filament_key_lists_match_the_oracle`, `handle_legacy` in
+    /// `handle_legacy_matches_the_oracle`, and the enum key maps in
+    /// `transcribed_enum_key_maps_match_the_oracles`. No tolerance is chosen and none is
+    /// representable: `compare_unit` reads the row's `exact` tier and its empty `tolerance`
+    /// cell out of `port/manifest.tsv` itself and refuses anything else.
+    ///
+    /// The assertions run in a deliberate order, so a failure says what went wrong rather than
+    /// printing a 881-row byte diff: the key sets first (a row absent from either side), then
+    /// the per-row field comparison (a mistranscribed field, named with the key and both
+    /// values), then the whole-table `compare_unit` that is the proof of record. The first two
+    /// cannot pass while the third fails -- they compare the same text -- so they are
+    /// diagnostics on the same equality, not a weaker check standing in for it.
+    // PROOF: 3
+    #[test]
+    fn print_config_def_matches_the_oracle_exactly() {
+        let oracle_keys: Vec<String> = ora::oracle_option_keys()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let ported = &print_config_def().def.options;
+        let ported_keys: Vec<String> = ported.keys().cloned().collect();
+
+        // Direction 1: a key the oracle has and this registry does not.
+        let missing: Vec<&String> = oracle_keys
+            .iter()
+            .filter(|k| !ported.contains_key(*k))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "{} oracle keys are absent from the ported registry: {missing:#?}",
+            missing.len()
+        );
+
+        // Direction 2: a key this registry has and the oracle does not -- a key invented here.
+        let extra: Vec<&String> = ported_keys
+            .iter()
+            .filter(|k| !oracle_keys.contains(k))
+            .collect();
+        assert!(
+            extra.is_empty(),
+            "{} ported keys are absent from the oracle's registry: {extra:#?}",
+            extra.len()
+        );
+
+        // FIDELITY(port): both sides are walked in the key order of the vendored
+        // `ConfigDef::options`, a `std::map<std::string, ConfigOptionDef>`
+        // (`Config.hpp:2658`), which is bytewise-ascending by key; `TOptiondefMap` is a
+        // `BTreeMap<String, _>`, whose iteration order is the same. The order reaches the
+        // compared output, because the two flattened tables are zipped positionally as well as
+        // matched by key.
+        assert_eq!(
+            ported_keys, oracle_keys,
+            "the two registries' key orders differ"
+        );
+
+        // Direction 3: every field of every row.
+        let mut ported_table: Vec<String> = Vec::new();
+        let mut oracle_table: Vec<String> = Vec::new();
+        let mut differences: Vec<String> = Vec::new();
+        for key in &oracle_keys {
+            let info = ora::oracle_option_info(key);
+            assert!(info.found, "{key} vanished from the oracle between calls");
+            let mine = ported_row(&ported[key]);
+            let theirs = oracle_row(&info);
+            for (m, t) in mine.iter().zip(theirs.iter()) {
+                if m != t {
+                    differences.push(format!("{key}: ported {m:?} != oracle {t:?}"));
+                }
+            }
+            ported_table.push(format!("{key}\u{2}{}", mine.join("\u{3}")));
+            oracle_table.push(format!("{key}\u{2}{}", theirs.join("\u{3}")));
+        }
+        assert!(
+            differences.is_empty(),
+            "{} field(s) disagree with the oracle: {differences:#?}",
+            differences.len()
+        );
+
+        // The proof of record: the whole table, bytewise, through the harness, once per
+        // manifest row so each row's own `exact` tier is read and enforced.
+        let ported_bytes: Vec<i64> = ported_table
+            .join("\u{4}")
+            .bytes()
+            .map(|b| i64::from(b))
+            .collect();
+        let oracle_bytes: Vec<i64> = oracle_table
+            .join("\u{4}")
+            .bytes()
+            .map(|b| i64::from(b))
+            .collect();
+        slic3r_proof::tiers::compare_unit(
+            "PrintConfig.cpp",
+            slic3r_proof::tiers::Oracle::Built,
+            ported_bytes.clone(),
+            oracle_bytes.clone(),
+        )
+        .expect("PrintConfig.cpp: print_config_def differs from the oracle's");
+        slic3r_proof::tiers::compare_unit(
+            "PrintConfig.hpp",
+            slic3r_proof::tiers::Oracle::Built,
+            ported_bytes,
+            oracle_bytes,
+        )
+        .expect("PrintConfig.hpp: print_config_def differs from the oracle's");
+
+        println!(
+            "registry proof: {} of {} oracle keys transcribed, every field of every row exact",
+            ported_keys.len(),
+            oracle_keys.len()
+        );
+    }
 }
 
 // PORT STATUS
