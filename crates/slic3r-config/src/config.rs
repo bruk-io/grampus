@@ -8544,9 +8544,20 @@ pub trait ConfigBase: ConfigOptionResolver {
             // checks (the `assert` compiled out of the release build) and `static_cast`s, so
             // both read a stored nullable twin. Audit finding of decision 11, as above: both
             // used to be type-exact downcasts. The `assert` becomes `debug_assert!`
-            // (`docs/PORTING.md`, `### Error sets`); the release `Err` is kept rather than
-            // reproducing the vendored `static_cast` of a wrong-tagged option, which is
-            // undefined behaviour the port has no faithful counterpart for.
+            // (`docs/PORTING.md`, `### Error sets`).
+            // FIDELITY(port): src/libslic3r/Config.cpp:731-734 -- the `Err` on a `ratio_over`
+            // whose tag is not `coFloats` is an error-set widening, carried over from this
+            // module's first version and **not** sanctioned by `### Error sets`: the vendored
+            // lines throw nothing there, they `static_cast` a wrong-tagged option and read
+            // through it, which is undefined. The port has no faithful counterpart for undefined
+            // behaviour, so the choice is this `Err` or a panic; neither is the vendored
+            // behaviour, and this one at least keeps the caller's own error path. Raised by a
+            // reviewer of the amendment decision 11 records, who was right that the earlier
+            // comment here presented it as sanctioned. Unreachable in practice: `ratio_over`
+            // names a `coFloats` key in every `ConfigOptionDef` the port builds.
+            // `debug_assert!` below also fires where the vendored `assert` at `:732`
+            // null-dereferences first, for a `ratio_over` naming no stored option at all -- a
+            // different debug failure mode for the same bad input.
             let ratio_values = {
                 let ratio_opt = self.option(&ratio_over);
                 debug_assert!(
