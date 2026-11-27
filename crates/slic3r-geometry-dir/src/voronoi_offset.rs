@@ -14,12 +14,23 @@
 //! walks its vertices, edges and cells by `vd.vertices()`/`.edges()`/`.cells()` and
 //! `cell.incident_edge()`/`edge->next()`/`edge->twin()`/`vertex0()`/`vertex1()`, reading and
 //! writing each node's "color" (`.color()`/`set_*_category`) along the way. `crates/slic3r-ffi`'s
-//! `voronoi` bridge exposes none of that (counts only), extending it is outside this task's file
-//! list (see `crate::voronoi_utils`'s module doc for the full chain of reasoning: the task's own
-//! enumerated files, `docs/WORKFLOW.md`'s file-list-override scope, and `docs/PORTING.md`
-//! decision 1's shim contract, "never a libslic3r type"), and the `slic3r-proof` route is a
-//! dev-dependency a running module may not call. Per `docs/WORKFLOW.md`'s own rule, this module
-//! stays an honest Phase A draft, unreached by any `mod` line, and does not use
+//! `voronoi` bridge exposes none of that (counts only), and extending it is outside this task's
+//! own enumerated file list -- the one block that stands, stated in full in
+//! [`crate::voronoi_utils`]'s module doc.
+//!
+//! Two claims an earlier draft of this doc made alongside it are **withdrawn**, for the reasons
+//! that doc now gives in full: `docs/PORTING.md` decision 1's "never a libslic3r type" sentence
+//! scopes the per-unit **proof shim** (`docs/PORTING.md:562-577`), not the R17 library bridges, so
+//! reading it over them is this port's own inference and the escalation needed is a file-list
+//! amendment alone; and the proof route itself is **open** (decision 1's `proof_units/` files are
+//! new files, and its proof lives in exactly the `#[cfg(test)]`/`tests/` dev-dependency call this
+//! crate can make). What this unit declines, measured rather than asserted, is deriving `ported`
+//! from that route: a `#[cfg(test)]` proof needs a `mod` line, and
+//! `port/port-status:863-881`'s `derive_row_status` then returns `ported` -- which for a
+//! 1,646-line `.cpp` with 27 `// TODO(port):` markers still standing here, including all seven
+//! public entry points, would be a false manifest status cell. That disposition is
+//! `docs/PORTING.md` decisions 9 and 10's call, not a porter's. Per `docs/WORKFLOW.md`'s own
+//! rule, this module stays an honest Phase A draft, unreached by any `mod` line, and does not use
 //! `todo!()`/`unimplemented!()`.
 //!
 //! **What is genuinely ported below, with no topology dependency at all:** the three "color"
