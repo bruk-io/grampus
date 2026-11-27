@@ -142,8 +142,13 @@ impl VoronoiDiagram {
 
         if try_to_repair_if_needed {
             // `if (m_issue_type = detect_known_issues(*this, segment_begin, segment_end); ...)`
-            // (`:37`).
+            // (`:37`): the assignment into the member happens before the branch is taken, and
+            // `:252` (inside `try_to_repair_degenerated_voronoi_diagram`, called from the branch
+            // below) reads it back through `m_issue_type`, not through a parameter -- so the
+            // write below is not optional even though `issue` already holds the same value
+            // locally.
             let issue = Self::detect_known_issues_segments(self, segments);
+            self.m_issue_type = Some(issue);
             if issue != IssueType::NoIssueDetected {
                 // `if (m_issue_type = try_to_repair_degenerated_voronoi_diagram(...))` (`:52`).
                 let repaired = self.try_to_repair_degenerated_voronoi_diagram(segments);
