@@ -1026,6 +1026,77 @@ rust::String oracle_set_variant_override(rust::Str target_value, rust::Str sourc
     return rust::String(target.serialize());
 }
 
+static std::set<std::string> to_set(const rust::Vec<rust::String> &values) {
+    std::set<std::string> out;
+    for (const rust::String &v : values) {
+        out.insert(std::string(v));
+    }
+    return out;
+}
+
+rust::Vec<rust::String>
+oracle_update_diff_values_to_child_config(rust::Str base, const rust::Vec<rust::String> &self_kv,
+                                          const rust::Vec<rust::String> &new_kv,
+                                          rust::Str extruder_id_name,
+                                          rust::Str extruder_variant_name,
+                                          const rust::Vec<rust::String> &key_set1,
+                                          const rust::Vec<rust::String> &key_set2) {
+    bool ok_a = false, ok_b = false;
+    Slic3r::DynamicPrintConfig self = config_from_base(base, self_kv, ok_a);
+    Slic3r::DynamicPrintConfig other = config_from(new_kv, ok_b);
+    if (!ok_a || !ok_b) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    std::set<std::string> set1 = to_set(key_set1), set2 = to_set(key_set2);
+    try {
+        self.update_diff_values_to_child_config(other, std::string(extruder_id_name),
+                                                std::string(extruder_variant_name), set1, set2);
+    } catch (const std::exception &) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<threw>"));
+        return out;
+    }
+    return serialize_config(self);
+}
+
+rust::Vec<rust::String>
+oracle_update_non_diff_values_to_base_config(rust::Str base,
+                                             const rust::Vec<rust::String> &self_kv,
+                                             const rust::Vec<rust::String> &new_kv,
+                                             const rust::Vec<rust::String> &keys,
+                                             const rust::Vec<rust::String> &different_keys,
+                                             rust::Str extruder_id_name,
+                                             rust::Str extruder_variant_name,
+                                             const rust::Vec<rust::String> &key_set1,
+                                             const rust::Vec<rust::String> &key_set2) {
+    bool ok_a = false, ok_b = false;
+    Slic3r::DynamicPrintConfig self = config_from_base(base, self_kv, ok_a);
+    Slic3r::DynamicPrintConfig other = config_from(new_kv, ok_b);
+    if (!ok_a || !ok_b) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    std::vector<std::string> key_vec;
+    for (const rust::String &k : keys) {
+        key_vec.push_back(std::string(k));
+    }
+    std::set<std::string> diff = to_set(different_keys), set1 = to_set(key_set1),
+                          set2 = to_set(key_set2);
+    try {
+        self.update_non_diff_values_to_base_config(other, key_vec, diff,
+                                                   std::string(extruder_id_name),
+                                                   std::string(extruder_variant_name), set1, set2);
+    } catch (const std::exception &) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<threw>"));
+        return out;
+    }
+    return serialize_config(self);
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

@@ -20954,6 +20954,352 @@ pub fn update_static_print_config_from_dynamic(
     }
 }
 
+impl DynamicPrintConfig {
+    /// The variant-index computation `update_diff_values_to_child_config` and
+    /// `update_non_diff_values_to_base_config` share (`PrintConfig.cpp:12144-12186`,
+    /// `:12273-12316`): read both sides' extruder id and variant lists, then map one onto the
+    /// other.
+    ///
+    /// The two vendored bodies differ in which side is mapped onto which and in the shape of
+    /// the `cur_variant_count == 0` fallback, so the direction is a parameter rather than
+    /// folded away. Both `BOOST_LOG_TRIVIAL(error)` arms ("should not happen") produce no
+    /// `variant_index` of their own -- they log and leave it at the `resize` above -- which is
+    /// why skipping the log leaves the computation unchanged.
+    fn variant_lists(
+        &self,
+        new_config: &DynamicPrintConfig,
+        extruder_id_name: &str,
+        extruder_variant_name: &str,
+    ) -> (Vec<i32>, Vec<i32>, Vec<String>, Vec<String>) {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let ints = |cfg: &DynamicPrintConfig, key: &str| -> Vec<i32> {
+            Resolver::option(cfg, key)
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionInts>())
+                .map(|o| o.values.clone())
+                .unwrap_or_default()
+        };
+        let strings = |cfg: &DynamicPrintConfig, key: &str| -> Vec<String> {
+            Resolver::option(cfg, key)
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+                .map(|o| o.values.clone())
+                .unwrap_or_default()
+        };
+        let (mut cur_ids, mut target_ids) = (Vec::new(), Vec::new());
+        if !extruder_id_name.is_empty() {
+            cur_ids = ints(self, extruder_id_name);
+            target_ids = ints(new_config, extruder_id_name);
+        }
+        // PORT NOTE: the vendored reads pass `true` for `create`
+        // (`PrintConfig.cpp:12153-12156`, `:12282-12285`) -- `option<ConfigOptionStrings>(name,
+        // true)` -- but each is guarded by `if (this->option(name))`, so the option already
+        // exists and nothing is ever created. Read without creating here, which is the same
+        // result and leaves both configs unmodified by a function that returns them unchanged.
+        (
+            cur_ids,
+            target_ids,
+            strings(self, extruder_variant_name),
+            strings(new_config, extruder_variant_name),
+        )
+    }
+
+    /// `void update_diff_values_to_child_config(DynamicPrintConfig &new_config, std::string
+    /// extruder_id_name, std::string extruder_variant_name, std::set<std::string> &key_set1,
+    /// std::set<std::string> &key_set2)` (`PrintConfig.cpp:12271-12356`): carries a child
+    /// preset's own values onto this (the parent's) config, variant by variant.
+    pub fn update_diff_values_to_child_config(
+        &mut self,
+        new_config: &DynamicPrintConfig,
+        extruder_id_name: &str,
+        extruder_variant_name: &str,
+        key_set1: &std::collections::BTreeSet<String>,
+        key_set2: &std::collections::BTreeSet<String>,
+    ) {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let (
+            cur_extruder_ids,
+            target_extruder_ids,
+            cur_extruder_variants,
+            target_extruder_variants,
+        ) = self.variant_lists(new_config, extruder_id_name, extruder_variant_name);
+        let cur_variant_count = cur_extruder_variants.len();
+        let target_variant_count = target_extruder_variants.len();
+
+        let mut variant_index: Vec<i32> = if cur_variant_count > 0 {
+            vec![-1; cur_variant_count]
+        } else {
+            vec![0; 1]
+        };
+
+        // "A parent variant the child does not list (the parent gained it after the child was
+        // saved, or the child lists none) takes the child's first variant of the same extruder,
+        // as slicing does. Left unmatched, the parent's value would silently replace the
+        // user's."
+        if target_variant_count == 0 {
+            // "The child's one value belongs to the extruder of the parent's first variant."
+            if cur_variant_count > 0 {
+                let first: Vec<i32> = if cur_extruder_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![cur_extruder_ids[0]]
+                };
+                variant_index =
+                    map_variant_indices(&cur_extruder_variants, &cur_extruder_ids, &[], &first);
+            }
+        } else if !cur_extruder_ids.is_empty() && cur_variant_count != cur_extruder_ids.len() {
+            // PORT NOTE: src/libslic3r/PrintConfig.cpp:12306 (BOOST_LOG_TRIVIAL(error), "should
+            // not happen"). The arm produces no `variant_index`, so the `resize` above stands.
+        } else if !target_extruder_ids.is_empty()
+            && target_variant_count != target_extruder_ids.len()
+        {
+            // PORT NOTE: src/libslic3r/PrintConfig.cpp:12311 (BOOST_LOG_TRIVIAL(error)).
+        } else if cur_variant_count > 0 {
+            variant_index = map_variant_indices(
+                &cur_extruder_variants,
+                &cur_extruder_ids,
+                &target_extruder_variants,
+                &target_extruder_ids,
+            );
+        }
+
+        // FIDELITY(port): `new_config.keys()` is the `std::map`'s own bytewise-ascending order
+        // and this loop writes into `self` in it; it reaches output wherever two keys resolve
+        // to the same field.
+        for opt in slic3r_config::config::ConfigBase::keys(new_config) {
+            if opt == extruder_id_name || opt == extruder_variant_name {
+                continue;
+            }
+            let Some(target) = Resolver::option(new_config, &opt) else {
+                continue;
+            };
+            let target_is_scalar = target.is_scalar();
+            let in_set1 = key_set1.contains(&opt);
+            let in_set2 = key_set2.contains(&opt);
+            // Cloned out before `self` is borrowed mutably; `new_config` is not written by this
+            // loop, so the clone is the value the vendored comparison sees.
+            let target_copy = target.clone_box();
+
+            let Ok(Some(src)) = slic3r_config::config::ConfigBase::optptr_mut(self, &opt, false)
+            else {
+                continue;
+            };
+            if matches!(src.eq_dyn(target_copy.as_ref()), Ok(true)) {
+                continue;
+            }
+            // PORT NOTE: src/libslic3r/PrintConfig.cpp:12325 (BOOST_LOG_TRIVIAL(debug)).
+            if target_is_scalar || (!in_set1 && (key_set2.is_empty() || !in_set2)) {
+                // "nothing to do, keep the original one" -- the vendored comment, though the
+                // statement under it does assign.
+                let _ = src.set(target_copy.as_ref());
+                continue;
+            }
+            let stride = if in_set2 { 2 } else { 1 };
+            let Some(src_vec) = as_vector_mut(src) else {
+                continue;
+            };
+            // "set_only_diff() requires the base vector length to equal
+            // variant_index.size()*stride ... Rather than throw (which is caught upstream and
+            // DELETES the user preset file), fall back to the child's explicit value, which is
+            // authoritative for its own extruder/variant layout."
+            if src_vec.len_values() != variant_index.len() * stride as usize {
+                let _ = src_vec.set(target_copy.as_ref());
+                continue;
+            }
+            // "An override's nil means 'disabled' and is the child's value; every other nil
+            // column inherits."
+            if let Some(target_vec) = as_vector(target_copy.as_ref()) {
+                let _ = src_vec.set_only_diff(
+                    target_vec,
+                    &variant_index,
+                    stride,
+                    is_filament_extruder_override_key(&opt),
+                );
+            }
+        }
+    }
+
+    /// `void update_non_diff_values_to_base_config(DynamicPrintConfig &new_config, const
+    /// t_config_option_keys &keys, const std::set<std::string> &different_keys, std::string
+    /// extruder_id_name, std::string extruder_variant_name, std::set<std::string> &key_set1,
+    /// std::set<std::string> &key_set2)` (`PrintConfig.cpp:12141-12269`): carries the base's
+    /// values onto this config for every key the user has not changed, and merges the rest
+    /// variant by variant.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_non_diff_values_to_base_config(
+        &mut self,
+        new_config: &DynamicPrintConfig,
+        keys: &[String],
+        different_keys: &std::collections::BTreeSet<String>,
+        extruder_id_name: &str,
+        extruder_variant_name: &str,
+        key_set1: &std::collections::BTreeSet<String>,
+        key_set2: &std::collections::BTreeSet<String>,
+    ) -> Result<(), slic3r_config::config::ConfigError> {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let (
+            cur_extruder_ids,
+            target_extruder_ids,
+            cur_extruder_variants,
+            target_extruder_variants,
+        ) = self.variant_lists(new_config, extruder_id_name, extruder_variant_name);
+        let cur_variant_count = cur_extruder_variants.len();
+        let target_variant_count = target_extruder_variants.len();
+
+        // "A base variant this config does not list ... takes this config's first variant of
+        // the same extruder, as a user preset's values do in
+        // update_diff_values_to_child_config. Left unmatched, the base's value would silently
+        // replace the user's."
+        let mut variant_index: Vec<i32> = vec![-1; target_variant_count];
+        if cur_variant_count == 0 {
+            // "Defensive: target_variant_count may be 0 if the preset doesn't carry
+            // extruder_variant_name. In that case keep variant_index empty and let the
+            // downstream size checks produce a useful error."
+            if !variant_index.is_empty() {
+                // "This config's one value belongs to the extruder of the base's first variant."
+                let first: Vec<i32> = if target_extruder_ids.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![target_extruder_ids[0]]
+                };
+                variant_index = map_variant_indices(
+                    &target_extruder_variants,
+                    &target_extruder_ids,
+                    &[],
+                    &first,
+                );
+            }
+        } else if !cur_extruder_ids.is_empty() && cur_variant_count != cur_extruder_ids.len() {
+            // PORT NOTE: src/libslic3r/PrintConfig.cpp:12176 (BOOST_LOG_TRIVIAL(error)).
+        } else if !target_extruder_ids.is_empty()
+            && target_variant_count != target_extruder_ids.len()
+        {
+            // PORT NOTE: src/libslic3r/PrintConfig.cpp:12181 (BOOST_LOG_TRIVIAL(error)).
+        } else {
+            variant_index = map_variant_indices(
+                &target_extruder_variants,
+                &target_extruder_ids,
+                &cur_extruder_variants,
+                &cur_extruder_ids,
+            );
+        }
+
+        // FIDELITY(port): the caller's `keys` order, which this loop writes in.
+        for opt in keys {
+            let Some(target) = Resolver::option(new_config, opt) else {
+                continue;
+            };
+            let target_is_scalar = target.is_scalar();
+            let target_type = target.option_type();
+            let target_copy = target.clone_box();
+            let in_different = different_keys.contains(opt);
+            let in_set1 = key_set1.contains(opt);
+            let in_set2 = key_set2.contains(opt);
+
+            {
+                let Ok(Some(src)) = slic3r_config::config::ConfigBase::optptr_mut(self, opt, false)
+                else {
+                    continue;
+                };
+                if matches!(src.eq_dyn(target_copy.as_ref()), Ok(true)) {
+                    continue;
+                }
+                // PORT NOTE: src/libslic3r/PrintConfig.cpp:12192 (BOOST_LOG_TRIVIAL(debug)).
+                if !in_different {
+                    let _ = src.set(target_copy.as_ref());
+                    continue;
+                }
+                if target_is_scalar || (!in_set1 && (key_set2.is_empty() || !in_set2)) {
+                    // "nothing to do, keep the original one" -- and here the vendored arm really
+                    // is empty.
+                    continue;
+                }
+                // "Guard: set_with_restore is parent-shaped and would truncate the child's
+                // vector when the child has more extruders than the parent ... The child's
+                // saved value is authoritative for its own extruder count, so skip the merge
+                // for this key."
+                if cur_variant_count > target_variant_count {
+                    continue;
+                }
+                // "The variant lists are the base's layout itself, which every other value is
+                // carried onto: a variant this config lacks keeps its own name and id."
+                if opt == extruder_id_name || opt == extruder_variant_name {
+                    let _ = src.set(target_copy.as_ref());
+                    continue;
+                }
+            }
+
+            let stride: i32 = if in_set2 { 2 } else { 1 };
+            let restore_n = variant_index.len();
+            let expected_size = restore_n * stride as usize;
+
+            if stride == 2 {
+                // "Options in key_set2 are machine limits stored as (normal,silent) pairs per
+                // printer variant."
+                let src_is_floats = Resolver::option(self, opt)
+                    .is_some_and(|o| o.option_type() == ConfigOptionType::Floats);
+                if !src_is_floats || target_type != ConfigOptionType::Floats {
+                    return Err(slic3r_config::config::ConfigError::Configuration(format!(
+                        "update_non_diff_values_to_base_config: key '{opt}' is expected to be ConfigOptionFloats for stride=2."
+                    )));
+                }
+                let Some(target_floats) = target_copy.as_any().downcast_ref::<ConfigOptionFloats>()
+                else {
+                    continue;
+                };
+                let mut rhs_tmp = target_floats.clone();
+                // PORT NOTE: src/libslic3r/PrintConfig.cpp:12235
+                // (log_normalize_legacy_vector_size, itself a BOOST_LOG_TRIVIAL(debug); see its
+                // own note at the function this module does not port).
+                //
+                // "Normalize src in-place so backup_values indexing is safe, normalize rhs via
+                // a temporary copy."
+                normalize_stride2_floats(&mut rhs_tmp, expected_size);
+                let Ok(Some(src)) = slic3r_config::config::ConfigBase::optptr_mut(self, opt, false)
+                else {
+                    continue;
+                };
+                let Some(src_floats) = src.as_any_mut().downcast_mut::<ConfigOptionFloats>() else {
+                    continue;
+                };
+                normalize_stride2_floats(src_floats, expected_size);
+                let _ = slic3r_config::config::ConfigOptionVectorBase::set_with_restore(
+                    src_floats,
+                    &rhs_tmp,
+                    &variant_index,
+                    stride,
+                );
+            } else {
+                // "Normalize rhs via a cloned temporary (rhs itself is const)."
+                let mut rhs_owner = target_copy.clone_box();
+                {
+                    let Some(rhs_vec) = as_vector_mut(rhs_owner.as_mut()) else {
+                        return Err(slic3r_config::config::ConfigError::Configuration(format!(
+                            "update_non_diff_values_to_base_config: key '{opt}' is expected to \
+                             be a vector option."
+                        )));
+                    };
+                    if rhs_vec.len_values() != expected_size {
+                        let _ = rhs_vec.resize(expected_size, Some(target_copy.as_ref()));
+                    }
+                }
+                let Ok(Some(src)) = slic3r_config::config::ConfigBase::optptr_mut(self, opt, false)
+                else {
+                    continue;
+                };
+                let Some(src_vec) = as_vector_mut(src) else {
+                    continue;
+                };
+                if src_vec.len_values() != expected_size {
+                    let _ = src_vec.resize(expected_size, Some(target_copy.as_ref()));
+                }
+                if let Some(rhs_vec) = as_vector(rhs_owner.as_ref()) {
+                    let _ = src_vec.set_with_restore(rhs_vec, &variant_index, stride);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// `class DynamicPrintAndCLIConfig : public DynamicPrintConfig` (`PrintConfig.hpp:2512-2543`):
 /// a `DynamicPrintConfig` whose definition is the union of the registry and the three command
 /// line tables, so a CLI argument and a print setting can be deserialized into one config.
@@ -23529,6 +23875,214 @@ mod tests {
         }
 
         println!("bed shape supported: {checked} case(s) held to exact equality");
+    }
+
+    /// `update_diff_values_to_child_config` (`PrintConfig.cpp:12271-12356`) and
+    /// `update_non_diff_values_to_base_config` (`:12141-12269`), held to exact equality against
+    /// the oracle by the whole config each leaves behind.
+    ///
+    /// Both compute a `variant_index` from the two sides' extruder id and variant lists and
+    /// then merge key by key, so the probes vary both lists on both sides -- absent, length 1,
+    /// length 2, mismatched against the id list (the two "should not happen" arms), and the
+    /// child longer than the parent (the truncation guard) -- and vary each key's membership of
+    /// `key_set1`, `key_set2` (stride 2) and `different_keys`.
+    #[test]
+    fn print_config_base_and_child_merges_match_the_oracle() {
+        let mut checked = 0_usize;
+
+        let layouts: Vec<(Vec<String>, Vec<String>)> = vec![
+            // (receiver assignments, other-side assignments)
+            (vec![], vec![]),
+            (
+                probe(&["printer_extruder_variant=\"Direct Drive Standard\""]),
+                probe(&[]),
+            ),
+            (
+                probe(&[]),
+                probe(&["printer_extruder_variant=\"Direct Drive Standard\""]),
+            ),
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+            ),
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1,2",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+            ),
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1,2",
+                ]),
+            ),
+            // The id list a different length from the variant list: the two "should not
+            // happen" arms, which log and leave `variant_index` at its `resize`.
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+            ),
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+            ),
+        ];
+        // A scalar key, a plain vector key, and a stride-2 `coFloats` machine-limit key.
+        let value_sets: Vec<Vec<String>> = vec![
+            probe(&["layer_height=0.3"]),
+            probe(&["nozzle_diameter=0.6,0.6"]),
+            probe(&["machine_max_speed_x=400,150"]),
+            probe(&[
+                "layer_height=0.3",
+                "nozzle_diameter=0.6,0.6",
+                "machine_max_speed_x=400,150",
+            ]),
+        ];
+        let key_sets: Vec<(Vec<String>, Vec<String>)> = vec![
+            (vec![], vec![]),
+            (probe(&["nozzle_diameter"]), vec![]),
+            (probe(&["nozzle_diameter"]), probe(&["machine_max_speed_x"])),
+            (vec![], probe(&["machine_max_speed_x"])),
+        ];
+
+        for (self_layout, other_layout) in &layouts {
+            for values in &value_sets {
+                let mut other_kv = other_layout.clone();
+                other_kv.extend(values.iter().cloned());
+                for (set1, set2) in &key_sets {
+                    // `update_diff_values_to_child_config`.
+                    let theirs: Vec<String> = ora::oracle_update_diff_values_to_child_config(
+                        "full",
+                        self_layout,
+                        &other_kv,
+                        "printer_extruder_id",
+                        "printer_extruder_variant",
+                        set1,
+                        set2,
+                    )
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                    if theirs == vec!["<threw>".to_string()] {
+                        // The vendored body threw. The port returns a defined result on every
+                        // path, so there is nothing to compare; such a case is skipped and the
+                        // skip is counted so it cannot pass unnoticed.
+                        continue;
+                    }
+                    assert_ne!(
+                        theirs,
+                        vec!["<refused>".to_string()],
+                        "refused: diff_to_child {self_layout:?} {other_kv:?}"
+                    );
+                    let mut mine = config_on("full", self_layout);
+                    fixtures_agree("full", self_layout, &mine);
+                    let other = config_on("empty", &other_kv);
+                    let s1: std::collections::BTreeSet<String> = set1.iter().cloned().collect();
+                    let s2: std::collections::BTreeSet<String> = set2.iter().cloned().collect();
+                    mine.update_diff_values_to_child_config(
+                        &other,
+                        "printer_extruder_id",
+                        "printer_extruder_variant",
+                        &s1,
+                        &s2,
+                    );
+                    assert_eq!(
+                        serialize(&mine),
+                        theirs,
+                        "update_diff_values_to_child_config({self_layout:?}, {other_kv:?}, \
+                         set1={set1:?}, set2={set2:?})"
+                    );
+                    checked += 1;
+
+                    // `update_non_diff_values_to_base_config`, over the same shapes, with the
+                    // key list being the values' own keys and `different_keys` empty then full
+                    // -- the two sides of its first branch.
+                    let keys: Vec<String> = values
+                        .iter()
+                        .map(|e| e.split_once('=').expect("key=value").0.to_string())
+                        .collect();
+                    for different in [Vec::new(), keys.clone()] {
+                        let theirs: Vec<String> =
+                            ora::oracle_update_non_diff_values_to_base_config(
+                                "full",
+                                self_layout,
+                                &other_kv,
+                                &keys,
+                                &different,
+                                "printer_extruder_id",
+                                "printer_extruder_variant",
+                                set1,
+                                set2,
+                            )
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect();
+                        if theirs == vec!["<threw>".to_string()] {
+                            continue;
+                        }
+                        assert_ne!(
+                            theirs,
+                            vec!["<refused>".to_string()],
+                            "refused: non_diff_to_base"
+                        );
+                        let mut mine = config_on("full", self_layout);
+                        let other = config_on("empty", &other_kv);
+                        let diff: std::collections::BTreeSet<String> =
+                            different.iter().cloned().collect();
+                        let _ = mine.update_non_diff_values_to_base_config(
+                            &other,
+                            &keys,
+                            &diff,
+                            "printer_extruder_id",
+                            "printer_extruder_variant",
+                            &s1,
+                            &s2,
+                        );
+                        assert_eq!(
+                            serialize(&mine),
+                            theirs,
+                            "update_non_diff_values_to_base_config({self_layout:?}, \
+                             {other_kv:?}, keys={keys:?}, different={different:?}, \
+                             set1={set1:?}, set2={set2:?})"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            checked > 0,
+            "every case was skipped; the comparison measured nothing"
+        );
+        println!("base and child merges: {checked} case(s) held to exact equality");
     }
 
     /// `set_variant_override` (`PrintConfig.cpp:11394-11402`) and

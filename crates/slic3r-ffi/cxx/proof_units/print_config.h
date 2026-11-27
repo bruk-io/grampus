@@ -245,6 +245,27 @@ oracle_update_static_print_config_from_dynamic(rust::Str base,
                                                const rust::Vec<int32_t> &variant_index,
                                                const rust::Vec<rust::String> &key_set1,
                                                int32_t stride);
+// `update_diff_values_to_child_config` (`PrintConfig.cpp:12271-12356`) and
+// `update_non_diff_values_to_base_config` (`:12141-12269`), each against two configs built from
+// `"<key>=<value>"` assignments, with the receiver handed back whole.
+rust::Vec<rust::String>
+oracle_update_diff_values_to_child_config(rust::Str base, const rust::Vec<rust::String> &self_kv,
+                                          const rust::Vec<rust::String> &new_kv,
+                                          rust::Str extruder_id_name,
+                                          rust::Str extruder_variant_name,
+                                          const rust::Vec<rust::String> &key_set1,
+                                          const rust::Vec<rust::String> &key_set2);
+rust::Vec<rust::String>
+oracle_update_non_diff_values_to_base_config(rust::Str base,
+                                             const rust::Vec<rust::String> &self_kv,
+                                             const rust::Vec<rust::String> &new_kv,
+                                             const rust::Vec<rust::String> &keys,
+                                             const rust::Vec<rust::String> &different_keys,
+                                             rust::Str extruder_id_name,
+                                             rust::Str extruder_variant_name,
+                                             const rust::Vec<rust::String> &key_set1,
+                                             const rust::Vec<rust::String> &key_set2);
+
 // `set_variant_override` (`:11394-11402`) over one `coFloats` pair: the target's serialized
 // value after the override.
 rust::String oracle_set_variant_override(rust::Str target_value, rust::Str source_value,

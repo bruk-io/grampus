@@ -342,6 +342,31 @@ mod ffi {
             stride: i32,
         ) -> Vec<String>;
 
+        /// `update_diff_values_to_child_config` (`PrintConfig.cpp:12271-12356`), with the
+        /// receiver handed back whole. `["<threw>"]` when the vendored body threw.
+        fn oracle_update_diff_values_to_child_config(
+            base: &str,
+            self_kv: &Vec<String>,
+            new_kv: &Vec<String>,
+            extruder_id_name: &str,
+            extruder_variant_name: &str,
+            key_set1: &Vec<String>,
+            key_set2: &Vec<String>,
+        ) -> Vec<String>;
+
+        /// `update_non_diff_values_to_base_config` (`:12141-12269`), the same shape.
+        fn oracle_update_non_diff_values_to_base_config(
+            base: &str,
+            self_kv: &Vec<String>,
+            new_kv: &Vec<String>,
+            keys: &Vec<String>,
+            different_keys: &Vec<String>,
+            extruder_id_name: &str,
+            extruder_variant_name: &str,
+            key_set1: &Vec<String>,
+            key_set2: &Vec<String>,
+        ) -> Vec<String>;
+
         /// `set_variant_override` (`:11394-11402`) over one `coFloats` pair, as the target's
         /// serialized value after the override.
         fn oracle_set_variant_override(
@@ -431,6 +456,7 @@ pub use ffi::{
     oracle_set_filament_dev_options, oracle_set_num_extruders, oracle_set_num_filaments,
     oracle_set_variant_override, oracle_shaper_type_values_for_flavor,
     oracle_static_class_defaults, oracle_static_class_keys, oracle_support_different_extruders,
+    oracle_update_diff_values_to_child_config, oracle_update_non_diff_values_to_base_config,
     oracle_update_static_print_config_from_dynamic, OracleEnumKeyValue, OracleLegacyResult,
     OracleOptionInfo,
 };
