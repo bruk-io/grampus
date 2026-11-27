@@ -62,8 +62,32 @@ use slic3r_config::config::TConfigEnumValues;
 // --------------------------------------------------------------------------------------------
 
 /// `enum_names_from_keys_map` (`PrintConfig.cpp:176-187`), a file-scope `static` free function
-/// with internal linkage -- the one item of this unit a literal proof path 3 would have to
-/// `#include` the vendored `.cpp` to reach.
+/// with internal linkage -- one of three items in this unit that a literal proof path 3 would
+/// have to `#include` the vendored `.cpp` to reach, the others being
+/// [`normalize_stride2_floats`] and `ensure_process_variant_columns`.
+///
+/// **A literal proof path 3 was tried for this unit and is not viable, and the reason is worth
+/// recording because it is not the one anybody expected.** `#include <PrintConfig.cpp>` in this
+/// unit's shim links cleanly -- the archive member is simply never pulled in, since the shim's
+/// own translation unit already defines every symbol it would have provided. The problem is
+/// what the include changes about the oracle: the vendored translation unit is then compiled by
+/// **this crate**, in the test profile, where `NDEBUG` is not defined and every `assert` in it
+/// is **live**. The pinned oracle is a Release build with all of them compiled out. So the
+/// comparison would no longer be against the oracle this unit's manifest row names
+/// (`oracle=built`), but against a differently-behaving build of the same source.
+///
+/// It fails immediately and instructively: `Assertion failed: (opt != nullptr), function
+/// set_num_extruders, file PrintConfig.cpp, line 10647`. That is independent confirmation, from
+/// the vendored source compiled with its own asserts enabled, of something this unit had only
+/// reasoned about before -- `set_num_extruders`'s `assert(opt != nullptr)` is **false** for
+/// `default_nozzle_volume_type`, a registry key and an extruder option key that no
+/// `StaticPrintConfig` class carries as a field. The oracle's Release build compiles the assert
+/// out and its `if (opt != nullptr && ...)` skips the key; a build with the assert live aborts.
+///
+/// Making path 3 work here would mean defining `NDEBUG` for that one compilation so the oracle
+/// keeps its Release semantics, which is a change to `crates/slic3r-ffi/build.rs` and outside
+/// what this task's branch may touch. Named as a finding for whoever needs those two functions
+/// compared rather than attempted here.
 ///
 /// Builds the name-by-value vector `ConfigOptionEnum<T>::get_enum_names()` returns: sized to
 /// `max(value) + 1`, filled with the empty string, then each name written at its own value's
