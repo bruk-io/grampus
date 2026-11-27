@@ -128,7 +128,7 @@ mod tests {
     /// widening, never a change of the computed value (see `crate::bicubic`'s identical note).
     // PROOF: 1
     #[test]
-    fn piecewise_fitted_curve_get_fitted_value_matches_the_oracle() {
+    fn curves_piecewise_fitted_curve_get_fitted_value_matches_the_oracle() {
         let coefficients = vec![
             Vec2::new(0.0f32, 0.0f32),
             Vec2::new(1.0, -1.0),
