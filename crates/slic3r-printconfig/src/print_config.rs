@@ -21701,6 +21701,17 @@ impl DynamicPrintConfig {
                 // available evidence that `set_only_diff`'s omission is an oversight in the
                 // vendored code rather than a contract.
                 //
+                // **That is also why the substitution is per entry rather than per key**, and
+                // the reason is forward compatibility rather than fidelity: both forms agree
+                // with the oracle on every input where all reads are in range, so neither is
+                // more faithful there, and on the remaining inputs there is no oracle answer to
+                // be faithful to. What decides it is that per-entry is already the shape
+                // `:620-628` takes, which is the shape the eventual `slic3r-config` fix will
+                // take -- so behaviour does not shift a second time when this call-site
+                // compensation is dropped. Deliberately **not** justified by what the pin
+                // writes before its first out-of-range read: that is what the compiled binary
+                // happens to do, not something the standard promises.
+                //
                 // **It also means this guard is one slot coarser than the pin's own idiom**,
                 // and they differ on exactly one shape: a `target_len` of `d * stride + 1` with
                 // `stride == 2`, where slot `d * 2` exists and `d * 2 + 1` does not. `:626`
@@ -21722,8 +21733,26 @@ impl DynamicPrintConfig {
                 // range. The lead found that by reading the condition, and both reviewers then
                 // derived this predicate independently.
                 //
-                // **One of those shapes is reachable through the public entry point and is now
-                // compared.** `variant_index` here is sized from the *receiver's* variant count
+                // **The mixed shape -- a used index beside a `-1` -- is provably not producible
+                // through this entry point**, which is a stronger statement than the earlier "I
+                // tried and could not". review-76-conformance derived a route:
+                // `map_variant_indices` sets any index past the end of the **ids** list to `-1`
+                // unconditionally (`:823-825`), so a variants list longer than its ids list
+                // ought to give the mix. It cannot here, because two arms above the call reject
+                // exactly that mismatch first: `:12304` and `:12309` are "should not happen"
+                // branches that only log, so a `cur_variant_count != cur_extruder_ids.size()`
+                // never reaches `map_variant_indices` at `:12315` -- and when it does reach it,
+                // those same arms guarantee the two lengths are equal, so `:823` can never
+                // fire. With `cur_extruder_ids` empty instead, `:823` is gated on
+                // `!ids.empty()` and still cannot fire, while `find_variant_index` called with
+                // `variant_id_1based = -1` makes `same_id` true for every index (`:804`) and so
+                // returns a non-negative one. Either way no `-1` originates in
+                // `map_variant_indices` at this site; the `-1`s that do appear are the
+                // `resize(cur_variant_count, -1)` default at `:12291`, which fills **every**
+                // entry. Confirmed by instrumenting the site: the only shapes observed are
+                // all-`-1` or all-used, never mixed.
+                //
+                // **The over-skip shape, by contrast, is reachable and is now compared.** `variant_index` here is sized from the *receiver's* variant count
                 // and filled with indices into the *other* side's list -- the opposite
                 // direction from the obvious guess -- so a receiver with three identical
                 // variants against a single-variant other side gives exactly
@@ -21735,15 +21764,18 @@ impl DynamicPrintConfig {
                 // `print_config_unguarded_vendored_dereference_compensations_hold`, with no
                 // oracle comparison because the pin is undefined on them.
                 let max_ok = target_vec.len_values() / stride as usize;
+                // The escape test is written to mirror `:597`'s own `diff_index[i] != -1`
+                // rather than as `d >= 0`, so a hypothetical `d < -1` is treated as escaping
+                // (which it is -- the pin would compute `d * stride` in `int` and index a
+                // `size_t` with it) instead of being quietly lumped in with the skip case. In
+                // the sanitiser the two spellings happen to coincide, because everything that
+                // is not a safe non-negative index maps to `-1` either way; the difference
+                // mattered in the whole-key predicate this replaced, and the faithful spelling
+                // is kept so the next reader can check it against `:597` directly.
+                let escapes = |d: i32| d != -1 && (d < 0 || (d as usize) >= max_ok);
                 let sanitised: Vec<i32> = variant_index
                     .iter()
-                    .map(|&d| {
-                        if d >= 0 && (d as usize) < max_ok {
-                            d
-                        } else {
-                            -1
-                        }
-                    })
+                    .map(|&d| if escapes(d) { -1 } else { d })
                     .collect();
                 let _ = src_vec.set_only_diff(
                     target_vec,
@@ -24947,6 +24979,24 @@ mod tests {
                     "printer_extruder_id=1",
                 ]),
             ),
+            // A variants list longer than its ids list. This was an attempt at the mixed
+            // `[0, -1]` shape and it **does not produce it**: it reaches the vendored "should
+            // not happen" arm at `PrintConfig.cpp:12304`, which only logs, so the
+            // `resize(cur_variant_count, -1)` at `:12291` stands and every entry is `-1`. Kept
+            // because that is a real shape with its own coverage -- `[-1, -1]`, where no entry
+            // drives a read at all -- and because the attempt is what established the
+            // unreachability argument recorded at the `set_only_diff` guard.
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1",
+                    "machine_max_speed_x=500,200,400,150",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+            ),
             // **The `[0, 0, 0]` shape**, which is what separates the old length-based guard in
             // `update_diff_values_to_child_config` from the per-entry one: three entries all
             // indexing the other side's single variant, so every read is in range while
@@ -25674,22 +25724,35 @@ mod tests {
     ///   | `second = (v.size() >= 2) ? v[1] : first` (`:12103`) | pinned, both mutations caught |
     ///   | `v.size() % 2 != 0` (`:12111`) | pinned, both caught |
     ///   | the replication loop (`:12122`) | pinned |
-    ///   | `expected_size == 0` (`:12092`) | body pinned; **condition unpinnable** |
-    ///   | `v.size() > expected_size` (`:12114`) | body pinned; **condition unpinnable** |
-    ///   | `vi * 2 + 1 < v.size()` (`:12124`) | **condition unpinnable** |
+    ///   | `expected_size == 0` (`:12092`) | body pinned; condition **equivalent via another path** |
+    ///   | `v.size() > expected_size` (`:12114`) | body pinned; condition **live, boundary unpinnable** |
+    ///   | `vi * 2 + 1 < v.size()` (`:12124`) | condition **dead: never false** |
     ///   | `v.empty()` (`:12096`) | uncovered |
     ///   | `v.size() < 2` (`:12106`) | uncovered |
     ///
-    ///   **"Unpinnable" is a claim about the code, not about the fixtures**, and it is why
-    ///   three mutations survive that no fixture can catch. Dropping the `expected_size == 0`
-    ///   guard leaves the same result by a longer path: with a non-empty `v` the fall-through
-    ///   reaches `v.size() > 0` and truncates to zero, and with an empty `v` the
-    ///   `v.empty()` arm resizes to zero -- so the guard is a fast path, not a behaviour. The
-    ///   same holds at `:12114`, where `v.size() == expected_size` truncates to its own length
-    ///   or enters a loop with `have_variants == want_variants`; and at `:12124`, where
-    ///   `vi * 2 + 1` is at most `expected_size - 1` and `v.size()` is exactly
-    ///   `expected_size`, so the bound can never be the thing that stops the write. A reviewer
-    ///   finding those three alive should not read it as a gap.
+    ///   **Those three rows are claims about the code rather than about the fixtures, and they
+    ///   are three *different* claims** -- an earlier version of this table called all three
+    ///   "condition unpinnable", which reads as one blanket exemption and is wider than the
+    ///   code earns. review-76-fidelity separated them; each is checkable by reading:
+    ///
+    ///   - `:12092` is **equivalent via another path**. Drop the guard and a non-empty `v`
+    ///     falls through to `v.size() > 0` and is truncated to zero, while an empty `v` takes
+    ///     the `v.empty()` arm and is resized to zero. Either way the result equals
+    ///     `v.clear()`, so the guard is a fast path and not a behaviour.
+    ///   - `:12114`'s condition is **live; only its boundary is unpinnable**. At
+    ///     `v.size() == expected_size` the arms coincide -- `>=` truncates to the same length,
+    ///     `>` falls through to `have_variants == want_variants` and an empty loop -- so
+    ///     `>` versus `>=` cannot be told apart. But `>` versus `<` **is** caught, measured:
+    ///     it returns early for every input with `v.size() < expected_size` and skips
+    ///     replication. Saying the whole condition is unpinnable would overstate it.
+    ///   - `:12124`'s condition is **dead**: after the resize `v.size() == expected_size`, and
+    ///     the loop runs `vi < expected_size / 2`, so `vi * 2 + 1 <= expected_size - 1` always.
+    ///     It can never be false, for either parity. The vendored code carries a bound that
+    ///     never fires and this port reproduces it, which is correct -- but a reader told "no
+    ///     test can pin this" would go hunting for the input that exercises it, and there is
+    ///     none.
+    ///
+    ///   A reviewer finding these three alive should not read any of them as a gap.
     ///
     ///   **The two genuinely uncovered branches need a machine limit shorter than one
     ///   `(normal, silent)` pair, and that input has no defined oracle answer.** The sibling
