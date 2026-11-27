@@ -54,6 +54,60 @@ ProofIstreamExtractDoubleResult path3_istream_extract_double(rust::Str value);
 ProofDeserializePointResult path3_deserialize_point(rust::Str value);
 ProofDeserializePoint3Result path3_deserialize_point3(rust::Str value);
 
+// -------------------------------------------------------------------------------------------------
+// Added by the amendment `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 11
+// records: the three option-accessor gaps task `64-foundation-print-config` found in
+// `crates/slic3r-config` and could not fix from its own branch.
+// -------------------------------------------------------------------------------------------------
+
+// Gap 1. `ConfigBase::option<TYPE>` (`Config.hpp:2771-2780`) and
+// `ConfigOptionResolver::option<TYPE>` (`:2701-2706`) compare the stored option's
+// `ConfigOptionType` tag against `TYPE::static_type()` and then `static_cast`;
+// `DynamicConfig::opt<T>` (`:3007-3010`) is a real `dynamic_cast`. On a stored
+// `ConfigOptionFloatsNullable` the two therefore DISAGREE -- both are `coFloats`, so the tag check
+// passes and the `static_cast` to `ConfigOptionFloats*` succeeds, while the `dynamic_cast` fails.
+// This shim measures that disagreement in the oracle's own translation unit rather than asserting
+// it from reading the header, and also measures the tag-MISMATCH path (asking for
+// `ConfigOptionInts` on a `coFloats` store), where both accessors agree on null.
+ProofTaggedAccessResult path3_tagged_vs_dynamic_floats(rust::Str serialized, bool nullable);
+
+// Gap 1, at the call site that measurably diverged. `ConfigBase::get_abs_value_at`
+// (`Config.cpp:715-739`) is one of the places whose body is a tag check and a `static_cast`
+// (`:719-720`), so it reads a nullable store; the port's own translation used a type-exact
+// downcast with `.expect("coFloats")` behind it, which PANICS there. Only the `coFloats` branch
+// is reachable from this shim: the `coFloatsOrPercents` branch needs `this->def()`, and
+// `DynamicConfig::def()` returns `nullptr` by definition (`Config.hpp:3006`).
+ProofAbsValueAtResult path3_get_abs_value_at(rust::Str serialized, bool nullable, size_t index);
+
+// Gap 1, at the call site whose whole nullable branch the port had made unreachable.
+// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`) and `::overriden_by`
+// (`:746-764`) are a tag check and then `static_cast<const ConfigOptionVector<T>*>(rhs)`
+// (`:751`, `:772`) -- and both exist to read a NULLABLE `rhs` into a non-nullable `this`
+// (`:752-762`, `:773-813`), which is exactly the pair a type-exact downcast rejects. `lhs` is
+// always the non-nullable twin here, `rhs` always the nullable one, which is the only
+// combination the vendored body does anything in. `default_index` must be `rhs->size()` long:
+// `:795` asserts that, and this shim is compiled with assertions live.
+ProofApplyOverrideResult path3_apply_override_floats(rust::Str lhs, rust::Str rhs,
+                                                     rust::Slice<const int32_t> default_index);
+
+// Gap 2. `dynamic_cast<ConfigOptionVectorBase*>` (`Config.cpp:497`) and the `is_vector()`-guarded
+// `static_cast<ConfigOptionVectorBase*>` (`:1872`), over every option type this unit can
+// construct. `ConfigOptionEnum<T>` is absent from the roster on purpose: it needs a `T` with a
+// `CONFIG_OPTION_ENUM` specialization, and every one of those lives in `PrintConfig.hpp`, outside
+// this unit's `#include`. `type_name` is the vendored class name; `ok` is false when it is not on
+// the roster.
+ProofVectorBaseResult path3_option_vector_base(rust::Str type_name);
+
+// Gap 3. `ConfigOptionDef::create_default_option` (`Config.cpp:322-342`), on a def whose
+// `default_value` carries NO keys map and whose `enum_keys_map` does -- the exact shape the
+// vendored comment at `:330` describes, and the only shape in which the `coEnum`/`coEnums` arms
+// are observable at all: a plain `clone()` of such a default has a null `keys_map`, so its
+// `serialize()` (`Config.hpp:2181-2187`) would dereference null rather than emit a name.
+// `kProofEnumValues` below is the keys map both sides use.
+ProofCreateDefaultResult path3_create_default_option_enum(int default_value);
+ProofCreateDefaultResult path3_create_default_option_enums(rust::Str serialized_values,
+                                                           bool nullable);
+
 } // namespace config
 } // namespace proof_units
 } // namespace slic3r_ffi

@@ -278,6 +278,7 @@ differently changes every call site.
 | A non-const reference out-parameter | A return value, or a tuple of return values, from the Rust function — never a `&mut` parameter adopted just to mirror the C++ signature. |
 | A destructor | `Drop`, implemented only where the destructor does more than drop its fields (an RAII release, a log, a cache invalidation); a destructor that only frees owned sub-objects needs no explicit `Drop` impl, because Rust already drops them. |
 | Virtual dispatch over a class hierarchy (e.g. `ExtrusionEntity`) | A Rust trait with one implementing type per concrete C++ subclass, dispatched through `&dyn Trait` or an enum, whichever the foundation design for that hierarchy (`slic3r-extrusionentity`, hand-designed by plan step 20) chooses; a port task does not introduce a second dispatch mechanism for the same hierarchy. |
+| `dynamic_cast<Derived*>` over such a hierarchy | `Any` downcasting through the trait's own `as_any`/`as_any_mut`, which is **leaf-exact**: it succeeds only for the one Rust type, where a C++ `dynamic_cast` also succeeds for every subclass of its target. Where the vendored cast's target is a *base* class, or where the cast is a `static_cast` guarded by a type-tag test rather than RTTI, the leaf-exact downcast is the **wrong** translation and a tag-checked accessor is the right one — see `## Decisions recorded on 2026-11-26`, decision 11, which states the rule per vendored accessor for `Config.hpp`'s option hierarchy, the one place in the port where both kinds occur side by side. |
 | A template | A generic function or type with the same bound, monomorphised the same way the C++ template's instantiations are used in in-scope code; a template is not force-collapsed to one concrete type unless the manifest row's unit only ever instantiates one. |
 | A `#define` numeric constant | A `const` item, carrying a `// PORT SRC: <vendored path>:<line>` marker beside it naming the macro's definition. Where the value's origin is outside the vendored tree — a C standard clause, or a linked library — the marker takes the `// PORT SRC: external: <what defines it>` form instead; see `## Decisions recorded on 2026-11-25`, decision 2, which also states what "beside" means. |
 | `std::sort` | `slice::sort_unstable` (no ordering guarantee between equal elements, matching `std::sort`'s own lack of a stability guarantee). |
@@ -737,7 +738,9 @@ decision 6 closes one `57-foundation-utils` (#60) carried forward for the same r
 decision 7 reconciles the section decision 6 corrected, whose older text contradicted it; and
 decision 8 is task `35-trial-run`'s own trial-run finding, recorded here by that task; and
 decision 9 accepts `60-foundation-trees-grids` with one unit left drafted; and decision 10 accepts
-`76-foundation-voronoi-curves` with two `ported` rows' live surface outstanding.
+`76-foundation-voronoi-curves` with two `ported` rows' live surface outstanding; and decision 11
+states which Rust accessor translates which of `Config.hpp`'s two option accessors, closing three
+gaps `64-foundation-print-config` carried forward for the same reason as the four above.
 Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
 2026-11-26; the owner was away and had handed over this intent's decisions. Like the section
 above, this is a record: where a decision changes a rule above, the rule's own text says so and
@@ -1079,4 +1082,128 @@ Until then both rows stay `ported` in `port-status`'s counts with their live sur
 is a known overcount of two rows and is recorded here so the gate's number can be read honestly;
 `Geometry/Voronoi.cpp`/`Voronoi.hpp` stay `drafted` and in the remaining count, as
 `76-foundation-voronoi-curves`'s own task text states and `77-foundation-voronoi-offset` finishes.
+Made by Claude acting for Bruk Habtu under the delegation for this intent, on 2026-11-26.
+
+### 11. Which Rust accessor translates which C++ option accessor
+
+**The gap.** `src/libslic3r/Config.hpp` has two different ways of getting a typed option out of a
+configuration store, and they are not the same operation:
+
+- `ConfigOptionResolver::option<TYPE>(opt_key)` (`:2701-2706`), `ConfigBase::option<TYPE>(opt_key,
+  create)` (`:2771-2780`) and both `option_throw<TYPE>` overloads (`:2716-2722`, `:2789-2796`)
+  **compare the stored option's `ConfigOptionType` tag against `TYPE::static_type()` and then
+  `static_cast`.** No RTTI is consulted. On a tag mismatch they return null (`ConfigBase`'s also
+  logs a warning) or, for the `_throw` pair, throw `BadOptionTypeException`.
+- `DynamicConfig::opt<T>(opt_key, create)` (`:3007-3010`) is **a real `dynamic_cast`**.
+
+They differ wherever one tag has more than one class, which `ConfigOptionDef::create_empty_option`
+(`Config.cpp:288-295`) says is every nullable vector type plus `coEnums`: `coFloats` is both
+`ConfigOptionFloatsTempl<false>` and `<true>`. Those two differ only in a `bool` template argument,
+share one layout and one `ConfigOptionVector<double>` base, and the `static_cast` between them is
+well-formed — so `option<ConfigOptionFloats>(key)` **succeeds** on a stored
+`ConfigOptionFloatsNullable` while `opt<ConfigOptionFloats>(key)` returns null. What the cast then
+touches is the shared base's data; a *virtual* call through the cast pointer still dispatches to
+the stored twin's own override, so it never reinterprets behaviour, only data.
+
+`crates/slic3r-config`'s `option_as` is a type-exact `Any` downcast, which is the right
+translation of the second and the wrong translation of the first — and its doc comment cited
+`:2701-2706`, the first. Task `64-foundation-print-config` (#76) measured the consequence rather
+than reasoning about it: `outer_wall_speed` read as `60` where the oracle gives `10`, because
+every per-extruder `coFloats` key whose `ConfigOptionDef` marks `nullable` is stored as the
+nullable twin. It compensated inside its own module (a `tagged` module, an `as_vector` helper and
+a `StaticCache::finalize` workaround), because a port task may not edit another crate.
+
+**The decision, as the rule a future porter reads.**
+
+| the vendored line says | translate it with | because |
+|---|---|---|
+| `option<TYPE>(key)`, `option_throw<TYPE>(key)` (`Config.hpp:2701-2706`, `:2716-2722`, `:2771-2780`, `:2789-2796`) | `option_as_tagged::<TYPE>` / `_mut` / `_throw` / `_throw_mut` | tag compare, then `static_cast`; crosses the nullable boundary |
+| `opt<T>(key)` (`:3007-3010`) | `option_as::<T>` / `option_as_mut::<T>` | a real `dynamic_cast` to a leaf type |
+| `static_cast<TYPE*>(opt)` after an `opt->type() == coX` test or `assert` | `option_as_tagged::<TYPE>` | the same tag-then-cast shape, written out at the call site |
+| `dynamic_cast<ConfigOptionVectorBase*>(opt)`, or `static_cast<ConfigOptionVectorBase*>` under an `is_vector()` guard (`Config.cpp:497`, `:1872`) | `ConfigOption::as_vector` / `as_vector_mut` | the cast to the vector base, which the trait had no counterpart of at all |
+| a cast to `ConfigOptionVector<T>`, by either kind (`Config.hpp:438` `static_cast` after a tag check, `:462` `dynamic_cast`; `Config.cpp:675`) | `option_as_tagged::<Self>` where only the `Vec<T>` is needed; otherwise try both twins by hand and say so | this port has **no** shared element-typed base to cast to, so `Tagged = Vec<T>` stands in for it where that is enough; see "What is not fixed" below |
+
+**A tag is not a type in this port, and that is what the new family's shape follows from.**
+`option_as_tagged::<TYPE>` returns `&TYPE::Tagged`, not `&TYPE`: for a tag with one Rust spelling
+`Tagged` **is** `Self` and the two accessors coincide, and for a twinned tag it is the shared data
+the `static_cast` makes well-defined (`Vec<f64>` for `coFloats`, `Vec<u8>` for `coBools`, …). Rust
+cannot hand out a `&ConfigOptionFloats` borrowing a `ConfigOptionFloatsNullable`, because this port
+gives each `NULLABLE` instantiation its own type and `Any` downcasting is leaf-exact by
+construction. That divergence is carried by a `// FIDELITY(port):` marker on the trait, not
+absorbed: a caller needing a twinned type's *virtual* surface uses the `&dyn ConfigOption` it
+already has, and one needing the vector surface uses `as_vector()`. **A porter does not write a
+tag check in front of a type-exact downcast** — on a nullable store the tag matches and the
+downcast still fails, so that shape is the type-exact accessor wearing the other one's name.
+
+`coEnum` is the one tag whose two Rust spellings are not two instantiations of one struct:
+`ConfigOptionEnumGeneric` holds an `i32` and `ConfigOptionEnum<T>` holds a `T`, mirroring the
+vendored pair (`ConfigOptionEnumGeneric : ConfigOptionInt` against `ConfigOptionEnum<T> :
+ConfigOptionSingle<T>`, with no common base below `ConfigOption`). The vendored code that spans
+that pair reads the value through the virtual `getInt()` (`Config.hpp:2173`), not through a cast,
+so a porter spanning it uses `get_int()`/`set_int()` too.
+
+**Two more gaps the same task found, closed with it.** (PR #76 lists eight findings against
+`main`; this amendment closes findings 1, 8 and 9 and the `apply_override` defect recorded inside
+finding 9. Findings 2 to 7 — `ConfigOption: Send + Sync`, an ordering on `ConfigOption`,
+`as_any`/`as_any_mut` on `ConfigBase`, `DynamicConfig`'s typed accessors, its iterator, and
+`port/cut.tsv`'s missing `slic3r-clipperutils` dependency — are untouched and still owed.) `ConfigOption` had no counterpart of the
+cast to `ConfigOptionVectorBase` — now `as_vector`/`as_vector_mut`, `None` for exactly the scalar
+types, with `is_vector() == as_vector().is_some()` pinned against the oracle for all 25 option
+types the proof shim can construct. And `ConfigOptionDef::create_default_option` was the bare
+`default_value->clone()` of `Config.cpp:339` for every type, missing the `coEnum` arm (`:326-327`)
+and the `coEnums` arm (`:329-337`); both exist because an enum default is built *without* a keys
+map, so without them a default enum option resolves no name. They need no borrow the type cannot
+carry — `enum_keys_map` and `ConfigOptionEnumGeneric::keys_map` are both already `&'static` — which
+is why `create_empty_option`'s own `coEnum`/`coEnums` arms stay a `TODO(port)` and these do not.
+
+**The audit this came with**, stated as counts a reader can re-derive. `option_as` itself had
+**zero** callers anywhere in the tree, so the real surface is the inlined downcasts: **215**
+type-exact downcast sites in `crates/slic3r-config/src/config.rs` on `main`, of which 158 target
+`Self` from inside a trait impl and 2 are the two generic accessors, leaving **55**
+named-concrete-type sites.
+
+Of the 55: **29** target a tag with one Rust spelling, where tag-checked and type-exact cannot
+disagree, and **26** target a twinned tag and were each read against the vendored line they
+translate. **4** were wrong and are fixed — `get_abs_value_at`'s three (`Config.cpp:720`, `:733`,
+`:734`, whose `.expect("coFloats")` *panicked* on a nullable store where the oracle returns a
+value) and `read_cli`'s one (`:1880`, which silently pushed nothing). **16** (12 of them twinned)
+were a hand-rolled per-type `match` compensating for the missing `as_vector`, and are replaced by
+it. **9** were already correct, because the vendored line they translate is itself a
+`dynamic_cast` or a both-twins `if/else`: `ConfigOptionEnumGeneric::set` (`Config.hpp:2177`),
+`opt_float`/`opt_bool` (`Config.cpp:2099-2104`, `:2121-2127`) and `set_deserialize_raw`
+(`:674-675`, `:680-681`).
+
+Of the 158 `Self` sites, **12** are fixed too, and they are the costliest defect this amendment
+closes: every twinned vector type's `overriden_by` (`Config.hpp:746-764`) and `apply_override`
+(`:767-815`). Both are a tag check and then `static_cast<const ConfigOptionVector<T>*>(rhs)`
+(`:751`, `:772`), and **both exist to read a nullable `rhs` into a non-nullable `this`** — the
+vendored comment at `:765` says "possibly a nullable one", and `:752-762`/`:773-813` are those
+branches. Under a type-exact downcast every call either method exists for returned `Err`, so the
+nullable branch was unreachable through the crate's own dispatch; `64-foundation-print-config`
+measured the port reporting no change for `long_retractions_when_cut` where the oracle reported
+`long_retractions_when_cut=1`. Four of the six twinned types were also missing the vendored tag
+check (`:749-750`, `:770-771`) entirely, relying on the downcast to fail; all six now have it.
+
+One further divergence was found in that reading and fixed: `set_deserialize_raw` read
+`optdef->nullable` where `:670` reads the *stored option's* `nullable()`. And no other merged
+crate reaches a `ConfigOption` by cast at all — measured over the 34 crates whose `Cargo.toml`
+names `slic3r-config`; `slic3r-slicing` is the only one that touches a typed option, through
+`opt_float_at`, which is already both-twins.
+
+**What is not fixed, and why it is a separate pass.** The other ~130 `Self` sites have the same
+shape and are **not** closed here: `set`, `set_from_vec`, `set_at`, `append`, `set_range`,
+`set_with_restore`, `set_with_restore_2`, `set_only_diff`, `set_to_index`, `set_with_nil`,
+`resize` and `eq_dyn`, on each of the ten vector types, all read their right-hand side with
+`downcast_ref::<Self>()` where the vendored `ConfigOptionVector<T>` casts to its own element-typed
+base — `set` with a tag check and a `static_cast` (`Config.hpp:437-438`), `set_at` with a tag
+check and a `dynamic_cast` of the same (`:460-462`), `set(const ConfigOption*)` likewise
+(`:420-425`). So `ConfigOptionFloats::set(&a ConfigOptionFloatsNullable)` still fails here and
+succeeds in the oracle. Task 59 already named this limitation in those methods' own error
+messages. The two fixed above were fixed because they are a **measured** defect with a named
+symptom and because each is a single dispatch in front of one shared generic body; the rest are a
+uniform ~130-site sweep whose per-method proof does not exist yet, and sweeping them late in an
+amendment is how a subtle regression gets in. Closing them properly means deciding how this port
+spells `ConfigOptionVector<T>` as a reachable surface at all, and proving each method family
+against the oracle — its own pull request, not a tail added to this one.
+
 Made by Claude acting for Bruk Habtu under the delegation for this intent, on 2026-11-26.
