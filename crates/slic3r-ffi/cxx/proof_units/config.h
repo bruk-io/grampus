@@ -84,8 +84,11 @@ ProofAbsValueAtResult path3_get_abs_value_at(rust::Str serialized, bool nullable
 // (`:746-764`) are a tag check and then `static_cast<const ConfigOptionVector<T>*>(rhs)`
 // (`:751`, `:772`) -- and both exist to read a NULLABLE `rhs` into a non-nullable `this`
 // (`:752-762`, `:773-813`), which is exactly the pair a type-exact downcast rejects. `lhs` is
-// always the non-nullable twin here, `rhs` always the nullable one, which is the only
-// combination the vendored body does anything in. `default_index` must be `rhs->size()` long:
+// always the non-nullable twin here, because `:747-748`/`:768-769` throw outright for a nullable
+// `this`, so that is the one combination with nothing to compare. `rhs` is EITHER twin, selected
+// by `rhs_nullable`: `:773-779` (a non-nullable `rhs`, assigned wholesale) and `:782-813` (a
+// nullable one, merged slot by slot) are two different bodies and both need covering.
+// `default_index` must be `rhs->size()` long:
 // `:795` asserts that, and this shim is compiled with assertions live.
 ProofApplyOverrideResult path3_apply_override_floats(rust::Str lhs, rust::Str rhs,
                                                      bool rhs_nullable,
@@ -101,8 +104,8 @@ ProofApplyOverrideResult path3_apply_override_floats(rust::Str lhs, rust::Str rh
 // `store_generic` picks which twin goes in the store.
 ProofEnumPairResult path3_tagged_vs_dynamic_enum(bool store_generic, int value);
 
-// Gap 1's throwing overloads: `ConfigOptionResolver::option_throw<TYPE>` (`Config.hpp:2716-2722`)
-// and `ConfigBase::option_throw<TYPE>` (`:2790-2797`), which do the same tag comparison and throw
+// Gap 1's throwing overload: `ConfigBase::option_throw<TYPE>` (`Config.hpp:2790-2797`), which
+// does the same tag comparison as `option<TYPE>` and throws
 // `BadOptionTypeException("Conversion to a wrong type")` instead of returning null -- and
 // `UnknownOptionException` first for a key that resolves to nothing. `ask_wrong_tag` asks for
 // `coInts` on the `coFloats` store; `ask_missing_key` asks for a key that is not there.

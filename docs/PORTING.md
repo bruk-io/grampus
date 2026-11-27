@@ -739,7 +739,7 @@ decision 7 reconciles the section decision 6 corrected, whose older text contrad
 decision 8 is task `35-trial-run`'s own trial-run finding, recorded here by that task; and
 decision 9 accepts `60-foundation-trees-grids` with one unit left drafted; and decision 10 accepts
 `76-foundation-voronoi-curves` with two `ported` rows' live surface outstanding; and decision 11
-states which Rust accessor translates which of `Config.hpp`'s two option accessors, closing three
+states which Rust accessor translates which of `Config.hpp`'s two option accessors, closing four
 gaps `64-foundation-print-config` carried forward for the same reason as the four above.
 Every one was made by Claude acting for Bruk Habtu, under the delegation for this intent, on
 2026-11-26; the owner was away and had handed over this intent's decisions. Like the section
@@ -1164,10 +1164,16 @@ its `nlohmann::json` call, so nothing in the port reaches it today; `PrintConfig
 `:10406`, `:10487` and `:10489` are the same shape in another crate, and `:10408` dereferences the
 result with no null check. A porter meeting one of those uses `option_as_tagged_enum`.
 
-**Three more gaps the same task found, closed with it.** (PR #76's "Findings that need a change on
+**Gaps 2 and 3, the same task's, closed with it** (gap 4 has its own heading below, so this
+decision closes **four**). (PR #76's "Findings that need a change on
 `main`" section numbers **1 to 8**, and its item **9** — the tag-vs-downcast finding, with the
 `apply_override` defect recorded inside it — is numbered in the module-by-module list above that
-section, not in it. This amendment closes that item 9, finding 1 and finding 8. Findings **2 to
+section, not in it. **#76's own body counts three gaps, not four, because it does not count
+`as_vector` among them** — it calls that one "an ergonomics finding, not a blocker" (finding 8) and
+counts `apply_override`'s dispatch as its third. This decision counts `as_vector` too, because the
+missing cast had four real callers inside `slic3r-config` itself, so the two counts describe the
+same set of defects from different sides. This amendment closes that item 9, finding 1 and
+finding 8. Findings **2 to
 7** — `ConfigOption: Send + Sync`, an ordering on `ConfigOption`, `as_any`/`as_any_mut` on
 `ConfigBase`, `DynamicConfig`'s typed accessors, its `cbegin`/`cend`, and `port/cut.tsv`'s missing
 `slic3r-clipperutils` dependency for `slic3r-printconfig` — are untouched and still owed.) `ConfigOption` had no counterpart of the
@@ -1199,8 +1205,9 @@ $ git show origin/main:crates/slic3r-config/src/config.rs \
 **218** sites over the whole file, `#[cfg(test)]` module included: **158** target `Self` from
 inside a trait impl, **3** are a macro's `$t` parameter (the three macro-based dispatch helpers),
 **2** are the two generic accessors' own `T`, and the remaining **55** name a concrete type. (The
-earlier text said 218 and then 158 + 2 + 55, which does not add up: it had dropped the three `$t`
-sites. 55 of the 218 is the figure the audit is about.)
+first version of this decision said **215** and then 158 + 2 + 55, which is neither the file's
+total nor a partition of it: it had dropped the three `$t` sites from the total while leaving them
+out of the buckets too. 55 of the 218 is the figure the audit is about.)
 
 Of the 55: **29** target a tag with one Rust spelling, where tag-checked and type-exact cannot
 disagree, and **26** target a twinned tag. Twenty-five of those 26 are live code and **one** is in
@@ -1272,6 +1279,22 @@ template no instantiation reaches changes no compared output. And no other merge
 crate reaches a `ConfigOption` by cast at all — measured over the 34 crates whose `Cargo.toml`
 names `slic3r-config`; `slic3r-slicing` is the only one that touches a typed option, through
 `opt_float_at`, which is already both-twins.
+
+**What this amendment leaves owed under "Decisions recorded on 2026-11-27", decision 1.** Two of
+this crate's sites are undefined at the pin, and this amendment marks both rather than fixing
+either, because decision 1's own "Owners" paragraph assigns the substitutes to the amendment that
+follows #82:
+
+- `ConfigBase::get_abs_value_at`'s `ratio_over` branch (`Config.cpp:733`) **already conforms**: it
+  returns `ConfigError::Configuration`, a defined result and an error variant the function can
+  already return, which is decision 1 point 3's third preference.
+- `vector_get_at` (`Config.hpp:679`) **does not**: on an empty `values` it indexes `values[0]` and
+  panics, which decision 1 point 2 forbids as a panic reachable from data — and it is reachable,
+  since `get_abs_value_at` is a `ConfigBase` trait default method and
+  `ConfigOptionDef::create_empty_option` builds the empty `coFloats` option that reaches it. The
+  same read is in **all eleven** per-type `get_at` bodies, none of which carries even a
+  `debug_assert!`, so the follow-up fixes twelve sites in the per-slot shape of
+  `Config.hpp:620-628` rather than one here and eleven later.
 
 **What is not fixed, and why it is a separate pass.** The other 146 `Self` sites have the same
 shape and are **not** closed here: `set`, `set_from_vec`, `set_at`, `append`, `set_range`,

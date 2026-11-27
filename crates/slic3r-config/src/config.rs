@@ -18,14 +18,15 @@
 //! polymorphic base, per `docs/PORTING.md`'s idiom map, not a workaround.
 //!
 //! **But `Config.hpp` has two different typed accessors, and only one of them is a
-//! `dynamic_cast`.** `option<TYPE>`/`option_throw<TYPE>` (`:2701-2706`, `:2716-2722`,
+//! `dynamic_cast`.** `option<TYPE>`/`option_throw<TYPE>` (`:2701-2706`, `:2716-2723`,
 //! `:2771-2780`, `:2790-2797`) compare the stored option's `ConfigOptionType` tag against
 //! `TYPE::static_type()` and then `static_cast`, which crosses the `NULLABLE` twin boundary;
 //! `DynamicConfig::opt<T>` (`:3007-3010`) is the real `dynamic_cast`. The first is
 //! [`option_as_tagged`] and its family, the second is [`option_as`]; a cast to the vector base is
 //! [`ConfigOption::as_vector`]. `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision
-//! 11 states the rule per vendored accessor, and the three accessors it adds were added by the
-//! amendment that records it -- task `64-foundation-print-config` (#76) found all three missing,
+//! 11 states the rule per vendored accessor. The accessors named above, and
+//! [`option_as_tagged_enum`] for the one pair they cannot cross, were all added by the amendment
+//! that records it: task `64-foundation-print-config` (#76) found **four** gaps in this module,
 //! measured a wrong value because of the first, and could not edit this crate from its own
 //! branch.
 //!
@@ -1368,10 +1369,10 @@ fn vector_overridden_by<T: PartialEq>(
 }
 
 /// Shared by every `ConfigOptionVector<T>`-based concrete type's `apply_override`
-/// (`Config.hpp:767-814`) -- see [`vector_overridden_by`]'s doc comment. `default_index` is
+/// (`Config.hpp:767-815`) -- see [`vector_overridden_by`]'s doc comment. `default_index` is
 /// 0-based, exactly as the vendored parameter is documented. The vendored `this->values.empty()`
-/// branch (`:787-788`) is not reachable here or there: `cnt = min(size, rhs.size())` returning
-/// `< 1` whenever either side is empty already returns early (`:784-785`), so a genuinely empty
+/// branch (`:788-789`) is not reachable here or there: `cnt = min(size, rhs.size())` returning
+/// `< 1` whenever either side is empty already returns early (`:783-784`), so a genuinely empty
 /// `self_values` never reaches the resize below -- transcribed as the single branch that *can*
 /// run, not the dead one, rather than adding a `T: Default` bound this module's other vector
 /// types do not all satisfy for a branch that cannot execute.
@@ -1408,6 +1409,15 @@ fn vector_apply_override<T: PartialEq + Clone>(
     // both sides have at least one element (see this function's own doc comment).
     let front = self_values[0].clone();
     self_values.resize(rhs_values.len(), front);
+
+    // PORT SRC: src/libslic3r/Config.hpp:795 -- `assert(default_index.size() ==
+    // rhs_vec->size());`, compiled out of the oracle's release build, so `debug_assert!`
+    // (`docs/PORTING.md`, `### Error sets`). Its position is the vendored one: after the
+    // `!rhs_nullable` return (`:773-779`), after the `cnt < 1` return (`:783-784`) and after the
+    // resize (`:788-793`). At the top of this function it would fire on the non-nullable-`rhs`
+    // path, where the pin asserts nothing. The loop's own `default_index.get(i)` is what guards
+    // the indexing in release, so nothing else stands in the assert's place.
+    debug_assert_eq!(default_index.len(), rhs_values.len());
 
     let mut modified = false;
     for (i, rv) in rhs_values.iter().enumerate() {
@@ -1880,7 +1890,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
             |i| rhs_vec.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`) -- see
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`) -- see
     /// [`vector_apply_override`]'s doc comment.
     fn apply_override(
         &mut self,
@@ -2509,7 +2519,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
             |i| rhs_vec.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -3053,7 +3063,7 @@ impl ConfigOption for ConfigOptionStrings {
             |i| o.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -3574,7 +3584,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionPercentsTempl<NULLABLE> 
             |i| rhs_vec.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -4125,7 +4135,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsOrPercentsTempl<NU
             |i| rhs_vec.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -4610,7 +4620,7 @@ impl ConfigOption for ConfigOptionPoints {
             |i| o.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -5033,7 +5043,7 @@ impl ConfigOption for ConfigOptionPointsGroups {
             |i| o.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -5377,7 +5387,7 @@ impl ConfigOption for ConfigOptionIntsGroups {
             |i| o.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -5867,7 +5877,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionBoolsTempl<NULLABLE> {
             |i| rhs_vec.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`).
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`).
     fn apply_override(
         &mut self,
         rhs: &dyn ConfigOption,
@@ -6543,7 +6553,7 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
             |i| rhs_vec.is_nil_at(i),
         )
     }
-    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-814`) -- see `overridden_by`
+    /// `ConfigOptionVector<T>::apply_override` (`Config.hpp:767-815`) -- see `overridden_by`
     /// just above.
     fn apply_override(
         &mut self,
@@ -6867,14 +6877,23 @@ impl<const NULLABLE: bool> ConfigOptionVectorBase for ConfigOptionEnumsGenericTe
 /// against it changes their own public surface, which this amendment does not do.
 ///
 /// The vendored `assert(! this->values.empty())` (`:678`) is compiled out of the oracle's release
-/// build, so `debug_assert!` (`docs/PORTING.md`, `### Error sets`).
-// FIDELITY(port): src/libslic3r/Config.hpp:679 -- past the compiled-out assert, the release path
-// indexes `values[0]` where the vendored line is `this->values.front()` on an empty vector, which
-// is undefined rather than a panic. `### Error sets` says a live panic at a site the oracle has
-// compiled its check out of is itself a divergence, so this is marked rather than argued away: the
-// alternatives are widening the return to an `Option` (a case the source has no behaviour for) or
-// reading out of bounds, and neither is more faithful than panicking. No caller reaches it -- both
-// `get_abs_value_at` branches are preceded by a `deserialize` that fills the vector.
+/// build, so `debug_assert!`.
+// FIDELITY(port): src/libslic3r/Config.hpp:679 -- on an EMPTY `values` with any `i`, the vendored
+// line is `return this->values.front();` past the compiled-out assert, which is undefined: the pin
+// promises nothing on that input. This port indexes `values[0]`, which panics -- **a panic
+// reachable from data**, so this site does not yet satisfy `docs/PORTING.md`, "Decisions recorded
+// on 2026-11-27", decision 1, point 2. It is listed in decision 11 as owed, and decision 1's own
+// "Owners" paragraph assigns the substitute to the amendment that follows #82, in the per-slot
+// shape of `Config.hpp:620-628`; the same read is in all eleven per-type `get_at` bodies on
+// `main`, none of which even carries the `debug_assert!` below, so fixing it here alone would
+// leave ten.
+//
+// Reachability, read rather than asserted: the two in-crate callers are
+// `ConfigBase::get_abs_value_at`'s two branches, which call this on an option the key's own
+// `deserialize` has filled, so neither reaches the empty case. `get_abs_value_at` is a
+// `ConfigBase` trait default method, so a caller outside this crate reaches it with an empty
+// `coFloats` option -- `ConfigOptionDef::create_empty_option` builds exactly one
+// (`ConfigOptionFloats::new()`, no values) -- and that is the reachable path.
 // PORT SRC: src/libslic3r/Config.hpp:676-680 -- `(i < this->values.size()) ? this->values[i] :
 // this->values.front()`.
 fn vector_get_at<T: Clone>(values: &[T], i: usize) -> T {
@@ -7839,7 +7858,7 @@ pub fn option_as_mut<'r, T: 'static>(opt: Option<&'r mut dyn ConfigOption>) -> O
 // =================================================================================================
 // The tag-checked accessor family: `ConfigOptionResolver::option<TYPE>` (`Config.hpp:2701-2706`),
 // `ConfigBase::option<TYPE>` (`:2771-2780`) and both `option_throw<TYPE>` overloads
-// (`:2716-2722`, `:2790-2797`).
+// (`:2716-2723`, `:2790-2797`).
 // =================================================================================================
 
 /// `TYPE::static_type()` -- the `static ConfigOptionType static_type()` member every concrete
@@ -8046,12 +8065,19 @@ pub fn option_as_tagged_mut<'r, T: TaggedOptionType>(
     T::tagged_mut(o)
 }
 
-/// `ConfigOptionResolver::option_throw<TYPE>(opt_key) const` (`Config.hpp:2716-2722`) and
-/// `ConfigBase::option_throw<TYPE>(opt_key, create)` (`:2790-2797`): the same tag comparison, but
-/// throwing `BadOptionTypeException("Conversion to a wrong type")` on a mismatch instead of
-/// returning null -- and `UnknownOptionException` first when the key resolves to nothing, which
-/// the `None` this is given already stands for.
-// PORT SRC: src/libslic3r/Config.hpp:2716-2722 -- `if (opt->type() != TYPE::static_type()) throw
+/// `ConfigBase::option_throw<TYPE>(opt_key, create)` (`Config.hpp:2790-2797`): the same tag
+/// comparison as `option<TYPE>`, but throwing `BadOptionTypeException("Conversion to a wrong
+/// type")` on a mismatch instead of returning null -- and `UnknownOptionException` first when the
+/// key resolves to nothing, which the `None` this is given already stands for.
+///
+/// **The `const ConfigOptionResolver` sibling at `:2716-2723` is deliberately not what this
+/// cites.** That template does not compile: its body is `return static_cast<TYPE*>(opt);` with
+/// `opt` a `const ConfigOption*`, which casts away `const`. Nothing in the vendored tree
+/// instantiates it -- the only three `option_throw<...>` uses (`:2823`, `:2827`, `:2829`) all pass
+/// `create` and resolve to the non-const template above -- so it has no behaviour at the pin to
+/// translate. The proof shim surfaced that by instantiating it; see
+/// `crates/slic3r-ffi/cxx/proof_units/config.cpp` for clang's error.
+// PORT SRC: src/libslic3r/Config.hpp:2795-2796 -- `if (opt->type() != TYPE::static_type()) throw
 // BadOptionTypeException("Conversion to a wrong type");`.
 pub fn option_as_tagged_throw<'r, T: TaggedOptionType>(
     opt_key: &str,
@@ -8573,21 +8599,23 @@ pub trait ConfigBase: ConfigOptionResolver {
             // and `static_cast<const ConfigOptionFloatsOrPercents*>(raw_opt)`. Both are tag
             // checks (the `assert` compiled out of the release build) and `static_cast`s, so
             // both read a stored nullable twin. Audit finding of decision 11, as above: both
-            // used to be type-exact downcasts. The `assert` becomes `debug_assert!`
-            // (`docs/PORTING.md`, `### Error sets`).
-            // FIDELITY(port): src/libslic3r/Config.cpp:731-734 -- the `Err` on a `ratio_over`
-            // whose tag is not `coFloats` is an error-set widening, carried over from this
-            // module's first version and **not** sanctioned by `### Error sets`: the vendored
-            // lines throw nothing there, they `static_cast` a wrong-tagged option and read
-            // through it, which is undefined. The port has no faithful counterpart for undefined
-            // behaviour, so the choice is this `Err` or a panic; neither is the vendored
-            // behaviour, and this one at least keeps the caller's own error path. Raised by a
-            // reviewer of the amendment decision 11 records, who was right that the earlier
-            // comment here presented it as sanctioned. Unreachable in practice: `ratio_over`
-            // names a `coFloats` key in every `ConfigOptionDef` the port builds.
-            // `debug_assert!` below also fires where the vendored `assert` at `:732`
-            // null-dereferences first, for a `ratio_over` naming no stored option at all -- a
-            // different debug failure mode for the same bad input.
+            // used to be type-exact downcasts. The `assert` becomes `debug_assert!`.
+            // FIDELITY(port): src/libslic3r/Config.cpp:733 -- where the option `ratio_over` names
+            // has a tag other than `coFloats`, the vendored line `static_cast`s it to
+            // `const ConfigOptionFloats*` anyway, past the `assert` at `:732` that the release
+            // build compiles out, and reads `get_at` through the cast: the pin is undefined on
+            // that input and promises nothing. This port returns
+            // `ConfigError::Configuration("ratio_over is not coFloats")` -- a defined result and
+            // not a panic, which is `docs/PORTING.md`, "Decisions recorded on 2026-11-27",
+            // decision 1, point 3's third preference (an error variant the function can already
+            // return; `get_abs_value_at` throws `ConfigurationError` at `Config.cpp:738`, so no
+            // variant is added and no `Result` is introduced). Carried over from this module's
+            // first version, and conforming to decision 1 as it stands.
+            //
+            // The `debug_assert!` below is `:732`'s assert, and it differs from it on one input:
+            // for a `ratio_over` naming no stored option at all, the vendored `assert` evaluates
+            // `ratio_opt->type()` on a null pointer and the `debug_assert!` compares `None`
+            // instead. Stated, not equated.
             let ratio_values = {
                 let ratio_opt = self.option(&ratio_over);
                 debug_assert!(
@@ -8990,9 +9018,12 @@ pub fn resize_dyn(
 
 /// `ConfigOptionVectorBase::set_at(rhs, i, j)` (`Config.hpp:374`) through a `&mut dyn
 /// ConfigOption`; see [`is_vector_empty`]'s doc for the rewrite.
-// PORT SRC: src/libslic3r/Config.cpp:511 -- `my_opt2->set_at(other_opt, 0, index);`, inside the
-// `apply_only` branch this helper serves. `PresetBundle.cpp` has the same shape and is marked
-// `out:` in `port/manifest.tsv`, so it is not what this cites.
+// PORT SRC: src/libslic3r/Config.cpp:511 -- `my_opt2->set_at(other_opt, index, index);`, inside
+// the `apply_only` branch this helper serves, and that is what the one caller passes
+// (`set_at_dyn(my, other_opt, index, index)` below). An earlier version of this comment quoted
+// `set_at(other_opt, 0, index)`: that is `PresetBundle.cpp:6387`'s argument list, carried over
+// when the citation was moved off that out-of-scope file and not re-read. The quote was wrong;
+// the code was not.
 pub fn set_at_dyn(
     opt: &mut dyn ConfigOption,
     rhs: &dyn ConfigOption,
@@ -11178,12 +11209,12 @@ mod tests {
         );
     }
 
-    /// The audit that came with the three gaps. `// PROOF: 3` -- `ConfigBase::get_abs_value_at`
+    /// The audit that came with the four gaps. `// PROOF: 3` -- `ConfigBase::get_abs_value_at`
     /// (`Config.cpp:715-739`) is a *call site* of the tag-checked accessor, and the one whose
     /// divergence task `64-foundation-print-config` measured. Its `coFloats` branch was a
     /// type-exact downcast with `.expect("coFloats")` behind it, so it panicked on every
     /// `nullable` per-extruder `coFloats` key where the oracle returns a value. The index past
-    /// the end is `get_at`'s own `values.front()` fallback (`Config.hpp:676-681`), kept in the
+    /// the end is `get_at`'s own `values.front()` fallback (`Config.hpp:676-680`), kept in the
     /// cases so the fallback is compared too and not only the in-range read.
     // PROOF: 3
     #[test]
@@ -11540,6 +11571,30 @@ mod tests {
                     matches!(ported, Err(ConfigError::BadOptionType(_))),
                     "{label}: the wrong-tag case is BadOptionType on both sides"
                 );
+
+                // `option_as_tagged_throw_mut` against the same oracle call. The vendored
+                // template this family translates (`Config.hpp:2790-2797`) is **non-const** and
+                // returns a writable `TYPE*`, so the mutable form is the closer counterpart of
+                // the two and the shim measures exactly it. A reviewer found it unexecuted.
+                let ported_mut = if wrong_tag {
+                    option_as_tagged_throw_mut::<ConfigOptionInts>(
+                        key,
+                        cfg.optptr_mut(key, false).expect("optptr_mut"),
+                    )
+                    .map(|v| v.len())
+                } else {
+                    option_as_tagged_throw_mut::<ConfigOptionFloats>(
+                        key,
+                        cfg.optptr_mut(key, false).expect("optptr_mut"),
+                    )
+                    .map(|v| v.len())
+                };
+                match (&ported, &ported_mut) {
+                    (Ok(a), Ok(b)) => assert_eq!(a, b, "{label}: both forms reach the same vector"),
+                    (Err(ConfigError::UnknownOption(_)), Err(ConfigError::UnknownOption(_)))
+                    | (Err(ConfigError::BadOptionType(_)), Err(ConfigError::BadOptionType(_))) => {}
+                    (a, b) => panic!("{label}: the two forms disagree: {a:?} vs {b:?}"),
+                }
             }
         }
     }
