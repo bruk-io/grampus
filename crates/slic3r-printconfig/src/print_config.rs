@@ -2854,9 +2854,11 @@ use slic3r_config::config::ConfigOptionFloat;
 use slic3r_config::config::ConfigOptionFloatOrPercent;
 use slic3r_config::config::ConfigOptionFloats;
 use slic3r_config::config::ConfigOptionFloatsNullable;
+use slic3r_config::config::ConfigOptionFloatsOrPercents;
 use slic3r_config::config::ConfigOptionFloatsOrPercentsNullable;
 use slic3r_config::config::ConfigOptionInt;
 use slic3r_config::config::ConfigOptionInts;
+use slic3r_config::config::ConfigOptionIntsGroups;
 use slic3r_config::config::ConfigOptionIntsNullable;
 use slic3r_config::config::ConfigOptionPercent;
 use slic3r_config::config::ConfigOptionPercents;
@@ -19496,6 +19498,71 @@ pub fn min_object_distance(cfg: &dyn slic3r_config::config::ConfigBase) -> f64 {
     ret
 }
 
+/// `static_cast<ConfigOptionVectorBase*>(opt)` (`PrintConfig.cpp:10648`, `:10676`, `:11398`,
+/// `:12163` and the rest), which in C++ is a no-op upcast because every vector-valued
+/// `ConfigOption` derives from `ConfigOptionVectorBase`.
+///
+/// **PORT NOTE, and a correction to a finding this task's pull request body published.** An
+/// earlier pass recorded this as an outright blocker -- "`slic3r-config` gives no way to obtain
+/// a `&mut dyn ConfigOptionVectorBase` from a `&mut dyn ConfigOption`" -- and left
+/// `set_num_extruders`, `set_num_filaments`, `extend_extruder_variant` and seven of the
+/// transformation methods unported because of it. That was wrong. Rust cannot cast one trait
+/// object to another, but `ConfigOption` carries `option_type()` and `as_any_mut()`, which
+/// together recover the concrete type: the tag selects the one `downcast_mut` to attempt, and
+/// the concrete type coerces to `&mut dyn ConfigOptionVectorBase` for free. Every vector-valued
+/// `ConfigOptionType` is covered below, so this returns `None` only for a scalar -- exactly
+/// where the vendored `static_cast` would be a programming error and where each caller's
+/// `assert(opt->is_vector())` already stands.
+///
+/// Widening `ConfigOption` with its own `as_vector_mut` is still the better home for this, and
+/// the pull request body keeps it as a finding against `slic3r-config` -- but as an
+/// ergonomics finding, not a blocker.
+fn as_vector_mut(
+    opt: &mut dyn slic3r_config::config::ConfigOption,
+) -> Option<&mut dyn slic3r_config::config::ConfigOptionVectorBase> {
+    use slic3r_config::config::ConfigOptionType as T;
+    let ty = opt.option_type();
+    let nullable = opt.nullable();
+    let any = opt.as_any_mut();
+    match (ty, nullable) {
+        (T::Floats, false) => any.downcast_mut::<ConfigOptionFloats>().map(|o| o as _),
+        (T::Floats, true) => any
+            .downcast_mut::<ConfigOptionFloatsNullable>()
+            .map(|o| o as _),
+        (T::Ints, false) => any.downcast_mut::<ConfigOptionInts>().map(|o| o as _),
+        (T::Ints, true) => any
+            .downcast_mut::<ConfigOptionIntsNullable>()
+            .map(|o| o as _),
+        (T::Strings, _) => any.downcast_mut::<ConfigOptionStrings>().map(|o| o as _),
+        (T::Percents, false) => any.downcast_mut::<ConfigOptionPercents>().map(|o| o as _),
+        (T::Percents, true) => any
+            .downcast_mut::<ConfigOptionPercentsNullable>()
+            .map(|o| o as _),
+        (T::FloatsOrPercents, false) => any
+            .downcast_mut::<ConfigOptionFloatsOrPercents>()
+            .map(|o| o as _),
+        (T::FloatsOrPercents, true) => any
+            .downcast_mut::<ConfigOptionFloatsOrPercentsNullable>()
+            .map(|o| o as _),
+        (T::Points, _) => any.downcast_mut::<ConfigOptionPoints>().map(|o| o as _),
+        (T::Bools, false) => any.downcast_mut::<ConfigOptionBools>().map(|o| o as _),
+        (T::Bools, true) => any
+            .downcast_mut::<ConfigOptionBoolsNullable>()
+            .map(|o| o as _),
+        (T::Enums, false) => any
+            .downcast_mut::<ConfigOptionEnumsGeneric>()
+            .map(|o| o as _),
+        (T::Enums, true) => any
+            .downcast_mut::<ConfigOptionEnumsGenericNullable>()
+            .map(|o| o as _),
+        (T::PointsGroups, _) => any
+            .downcast_mut::<ConfigOptionPointsGroups>()
+            .map(|o| o as _),
+        (T::IntsGroups, _) => any.downcast_mut::<ConfigOptionIntsGroups>().map(|o| o as _),
+        _ => None,
+    }
+}
+
 /// `boost::split(out, s, boost::is_any_of(seps), boost::token_compress_on)`, which
 /// `PrintConfig.cpp` uses on the comma-separated variant lists.
 ///
@@ -19881,13 +19948,19 @@ pub fn handle_legacy_sla(config: &mut DynamicPrintConfig) {
     }
 }
 
-// TODO(port): src/libslic3r/PrintConfig.cpp:10439 -- `normalize_fdm_2` (`:10480-10541`) and
-// therefore `normalize_fdm` (`:10350-10427`), which calls both halves, are not ported:
-// `normalize_fdm_2` reads `has_any_mixed_filament(mixed_opt->values)`
-// (`FilamentMixer.hpp:117`), whose unit `FilamentMixer.cpp`/`FilamentMixer.hpp` is
-// `template-heavy: no` and `not-started` in `port/manifest.tsv` -- a Phase A/B fan-out module
-// this task may not write. Its result decides whether the prime tower is switched off, so
-// guessing it would change the function's answer. Named in this task's pull request body.
+// TODO(port): src/libslic3r/PrintConfig.cpp:10508 -- `normalize_fdm_2` (`:10480-10541`) is not
+// ported: it reads `has_any_mixed_filament(mixed_opt->values)` (`FilamentMixer.hpp:117`), whose
+// unit `FilamentMixer.cpp`/`FilamentMixer.hpp` is `template-heavy: no` and `not-started` in
+// `port/manifest.tsv` -- a Phase A/B fan-out module this task may not write. Its result decides
+// whether the prime tower is switched off, so guessing it would change the function's answer.
+//
+// **Corrected here from an earlier version of this marker, which also claimed `normalize_fdm`
+// (`:10350-10425`) was blocked "which calls both halves".** It calls neither half and reads
+// nothing outside this unit: its first three blocks are byte-identical to `normalize_fdm_1`'s
+// (checked, not read -- `diff` of `:10352-10397` against `:10430-10475` is empty) and its
+// prime-tower block is a simpler predecessor of `normalize_fdm_2`'s with no
+// `has_any_mixed_filament`, no `enable_wrapping_detection`, no `num_objects` and no
+// `changed_keys`. It is ported above, with a live caller at `PrintObject.cpp:4294`.
 
 // TODO(port): src/libslic3r/PrintConfig.cpp:10693 -- `DynamicPrintConfig::validate(bool)`
 // (`:10679-10697`) is not ported: its `ptFFF` arm returns `Slic3r::validate(fpc, under_cli)`
@@ -19895,17 +19968,729 @@ pub fn handle_legacy_sla(config: &mut DynamicPrintConfig) {
 // `FilamentMixer` unit and `is_valid_bed_exclude_volumes_string`/`has_bed_exclude_volumes`
 // from the bed-exclusion group this module does not port either.
 
-// TODO(port): src/libslic3r/PrintConfig.cpp:10648 -- `set_num_extruders` (`:10636-10654`),
-// `set_num_filaments` (`:10656-10678`) and `extend_extruder_variant` (`:10597-10634`) are not
-// ported, and the blocker is a gap in `slic3r-config` rather than an unported module. All three
-// do `static_cast<ConfigOptionVectorBase*>(opt)->resize(n, defaults.option(key))` on an option
-// reached as a `ConfigOption*`. `slic3r-config` declares `ConfigOptionVectorBase` as an
-// object-safe trait and its own doc comment says that is so a
-// `dynamic_cast<ConfigOptionVectorBase*>` becomes a `&dyn ConfigOptionVectorBase`
-// (`crates/slic3r-config/src/config.rs:1418-1420`) -- but it provides no way to obtain one from
-// a `&mut dyn ConfigOption`: `ConfigOption` carries `as_any`/`as_any_mut` for a concrete
-// downcast and nothing for a trait-to-trait one, which Rust cannot do unaided. What is needed
-// is an `as_vector`/`as_vector_mut` on `ConfigOption`. Named in this task's pull request body.
+// PORT NOTE: an earlier version of this site carried a `// TODO(port):` calling
+// `set_num_extruders` (`:10636-10654`), `set_num_filaments` (`:10656-10678`) and
+// `extend_extruder_variant` (`:10597-10634`) blocked, on the grounds that `slic3r-config`
+// offers no way to turn a `&mut dyn ConfigOption` into the `&mut dyn ConfigOptionVectorBase`
+// their `static_cast<ConfigOptionVectorBase*>(opt)->resize(...)` needs. **That was wrong, and
+// all three are ported above.** Rust cannot cast between trait objects, but `ConfigOption`
+// carries `option_type()` and `as_any_mut()`, which together recover the concrete type --
+// see [`as_vector_mut`], which does exactly that for every vector-valued `ConfigOptionType`.
+// `as_vector`/`as_vector_mut` on `ConfigOption` itself is still the better home for it, and
+// this task's pull request body keeps that as a finding against `slic3r-config` -- as an
+// ergonomics finding, not a blocker.
+
+/// The immutable half of [`as_vector_mut`], for the vendored
+/// `static_cast<const ConfigOptionVectorBase*>` (`PrintConfig.cpp:11441`) and
+/// `dynamic_cast<const ConfigOptionVectorBase*>` sites.
+fn as_vector(
+    opt: &dyn slic3r_config::config::ConfigOption,
+) -> Option<&dyn slic3r_config::config::ConfigOptionVectorBase> {
+    use slic3r_config::config::ConfigOptionType as T;
+    let ty = opt.option_type();
+    let nullable = opt.nullable();
+    let any = opt.as_any();
+    match (ty, nullable) {
+        (T::Floats, false) => any.downcast_ref::<ConfigOptionFloats>().map(|o| o as _),
+        (T::Floats, true) => any
+            .downcast_ref::<ConfigOptionFloatsNullable>()
+            .map(|o| o as _),
+        (T::Ints, false) => any.downcast_ref::<ConfigOptionInts>().map(|o| o as _),
+        (T::Ints, true) => any
+            .downcast_ref::<ConfigOptionIntsNullable>()
+            .map(|o| o as _),
+        (T::Strings, _) => any.downcast_ref::<ConfigOptionStrings>().map(|o| o as _),
+        (T::Percents, false) => any.downcast_ref::<ConfigOptionPercents>().map(|o| o as _),
+        (T::Percents, true) => any
+            .downcast_ref::<ConfigOptionPercentsNullable>()
+            .map(|o| o as _),
+        (T::FloatsOrPercents, false) => any
+            .downcast_ref::<ConfigOptionFloatsOrPercents>()
+            .map(|o| o as _),
+        (T::FloatsOrPercents, true) => any
+            .downcast_ref::<ConfigOptionFloatsOrPercentsNullable>()
+            .map(|o| o as _),
+        (T::Points, _) => any.downcast_ref::<ConfigOptionPoints>().map(|o| o as _),
+        (T::Bools, false) => any.downcast_ref::<ConfigOptionBools>().map(|o| o as _),
+        (T::Bools, true) => any
+            .downcast_ref::<ConfigOptionBoolsNullable>()
+            .map(|o| o as _),
+        (T::Enums, false) => any
+            .downcast_ref::<ConfigOptionEnumsGeneric>()
+            .map(|o| o as _),
+        (T::Enums, true) => any
+            .downcast_ref::<ConfigOptionEnumsGenericNullable>()
+            .map(|o| o as _),
+        (T::PointsGroups, _) => any
+            .downcast_ref::<ConfigOptionPointsGroups>()
+            .map(|o| o as _),
+        (T::IntsGroups, _) => any.downcast_ref::<ConfigOptionIntsGroups>().map(|o| o as _),
+        _ => None,
+    }
+}
+
+/// `struct FilamentVariantUse` (`PrintConfig.hpp:896-908`): one (extruder type, nozzle volume
+/// type) a filament prints through, with the first extruder seen using it.
+///
+/// FIDELITY(port): `Ord` is **not** derived. The vendored `operator<` (`:902-907`) compares
+/// `extruder_type` then `nozzle_volume_type` and **ignores `extruder_id` entirely**, so two
+/// uses differing only in `extruder_id` compare equal under it -- which is what makes a
+/// `std::set<FilamentVariantUse>` deduplicate across extruders. A derived `Ord` would order by
+/// `extruder_id` as a third key and stop deduplicating, so the comparison is written out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FilamentVariantUse {
+    /// `extruder_type{etDirectDrive}` (`PrintConfig.hpp:898`).
+    pub extruder_type: ExtruderType,
+    /// `nozzle_volume_type{nvtStandard}` (`:899`).
+    pub nozzle_volume_type: NozzleVolumeType,
+    /// `extruder_id{0}` (`:900`): "0-based, first extruder seen using this variant".
+    pub extruder_id: i32,
+}
+
+impl Default for FilamentVariantUse {
+    fn default() -> Self {
+        FilamentVariantUse {
+            extruder_type: ExtruderType::etDirectDrive,
+            nozzle_volume_type: NozzleVolumeType::nvtStandard,
+            extruder_id: 0,
+        }
+    }
+}
+
+impl PartialOrd for FilamentVariantUse {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FilamentVariantUse {
+    /// `operator<` (`PrintConfig.hpp:902-907`), which ignores `extruder_id`.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        if self.extruder_type != other.extruder_type {
+            return self.extruder_type.cmp(&other.extruder_type);
+        }
+        self.nozzle_volume_type.cmp(&other.nozzle_volume_type)
+    }
+}
+
+/// `struct BedExcludeRegion` (`PrintConfig.hpp:2555-2568`): one excluded region of the bed,
+/// with its optional Z range and what it excludes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BedExcludeRegion {
+    /// `Polygon polygon` (`PrintConfig.hpp:2560`).
+    pub polygon: slic3r_polygon::polygon::Polygon,
+    /// `double z_min { 0.0 }` (`:2561`).
+    pub z_min: f64,
+    /// `double z_max { 0.0 }` (`:2562`).
+    pub z_max: f64,
+    /// `Purpose purpose { Purpose::MaterialKeepout }` (`:2563`).
+    pub purpose: BedExcludeRegionPurpose,
+    /// `bool has_z_range { false }` (`:2564`).
+    pub has_z_range: bool,
+}
+
+/// `BedExcludeRegion::Purpose` (`PrintConfig.hpp:2556-2559`). A nested `enum class` in the
+/// vendored source; Rust has no nested type in a struct, so it is a sibling named after its
+/// owner, which is the idiom map's own answer for a nested enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BedExcludeRegionPurpose {
+    MaterialKeepout,
+    CollisionVolume,
+}
+
+impl Default for BedExcludeRegion {
+    fn default() -> Self {
+        BedExcludeRegion {
+            polygon: slic3r_polygon::polygon::Polygon::default(),
+            // PORT SRC: src/libslic3r/PrintConfig.hpp:2562
+            z_min: 0.0,
+            // PORT SRC: src/libslic3r/PrintConfig.hpp:2563
+            z_max: 0.0,
+            purpose: BedExcludeRegionPurpose::MaterialKeepout,
+            has_z_range: false,
+        }
+    }
+}
+
+impl BedExcludeRegion {
+    /// `bool is_collision_volume() const` (`PrintConfig.hpp:2566`).
+    pub fn is_collision_volume(&self) -> bool {
+        self.purpose == BedExcludeRegionPurpose::CollisionVolume
+    }
+}
+
+/// `std::set<NozzleVolumeType> get_extruder_supported_nozzle_volume_types(
+/// const DynamicPrintConfig &printer_config, int extruder_id)`
+/// (`PrintConfig.cpp:840-858`): which nozzle volume types one extruder's variant list names.
+pub fn get_extruder_supported_nozzle_volume_types(
+    printer_config: &DynamicPrintConfig,
+    extruder_id: i32,
+) -> std::collections::BTreeSet<NozzleVolumeType> {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+    // FIDELITY(port): a `BTreeSet`, matching the vendored `std::set<NozzleVolumeType>` --
+    // ascending by the enum's underlying value, which is what `std::less` compares and what
+    // `NozzleVolumeType`'s derived `Ord` gives. It reaches output: callers walk the set in
+    // order.
+    let mut supported_types: std::collections::BTreeSet<NozzleVolumeType> =
+        std::collections::BTreeSet::new();
+
+    let variant_list = Resolver::option(printer_config, "extruder_variant_list")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>());
+    let extruder_types = Resolver::option(printer_config, "extruder_type")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnumsGeneric>());
+    let (Some(variant_list), Some(extruder_types)) = (variant_list, extruder_types) else {
+        return supported_types;
+    };
+    if extruder_id < 0
+        || extruder_id >= variant_list.values.len() as i32
+        || extruder_id >= extruder_types.values.len() as i32
+    {
+        return supported_types;
+    }
+
+    // The vendored `ExtruderType(extruder_types->values[extruder_id])` is a bare cast; the
+    // declared variants are what the registry stores, so `from_i32` gives the same answer.
+    let extruder_type = <ExtruderType as slic3r_config::config::ConfigOptionEnumValue>::from_i32(
+        extruder_types.values[extruder_id as usize],
+    );
+    for volume_type in get_valid_nozzle_volume_type() {
+        // "An unsupported extruder type yields an empty name, which would match any list."
+        let variant = get_extruder_variant_string(extruder_type, volume_type);
+        if !variant.is_empty() && variant_list.values[extruder_id as usize].contains(&variant) {
+            supported_types.insert(volume_type);
+        }
+    }
+    supported_types
+}
+
+impl DynamicPrintConfig {
+    /// `void normalize_fdm(int used_filaments)` (`PrintConfig.cpp:10350-10425`).
+    ///
+    /// **PORT NOTE, and a correction to a `// TODO(port):` an earlier pass left here.** That
+    /// marker said this function "calls both halves" of the `normalize_fdm_1`/`normalize_fdm_2`
+    /// split and was therefore blocked on `normalize_fdm_2`'s `has_any_mixed_filament`. Both
+    /// claims are wrong, and reading the body is what settles it: `normalize_fdm` is a
+    /// standalone function that calls neither half. Its first three blocks duplicate
+    /// `normalize_fdm_1`'s (`:10352-10397`), and its prime-tower block (`:10400-10424`) is a
+    /// *simpler* predecessor of `normalize_fdm_2`'s -- no `has_mixed_filament`, no
+    /// `enable_wrapping_detection`, no `num_objects`, and no `changed_keys` return. It calls
+    /// nothing outside this unit, and it has a live caller at
+    /// `src/libslic3r/PrintObject.cpp:4294`.
+    pub fn normalize_fdm(&mut self, used_filaments: i32) {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+
+        // `:10352-10397` -- the same three blocks `normalize_fdm_1` holds. The vendored source
+        // duplicates them rather than calling the split half, and they are reached here through
+        // that half rather than transcribed twice: the two bodies are identical statement for
+        // statement, which the oracle comparison over both functions confirms.
+        self.normalize_fdm_1();
+
+        // `:10399-10424` -- "BBS". This block is this function's own, and is not
+        // `normalize_fdm_2`'s.
+        let has_ept = Resolver::option(self, "enable_prime_tower")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionBool>())
+            .is_some();
+        if used_filaments > 0 && has_ept {
+            // `option<ConfigOptionBool>("independent_support_layer_height", true)` creates the
+            // option when absent, so this read happens before the `enable_prime_tower` borrow.
+            let islh_exists = self
+                .base
+                .opt::<ConfigOptionBool>("independent_support_layer_height", true)
+                .is_some();
+            let ps_value = Resolver::option(self, "print_sequence")
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnum<PrintSequence>>())
+                .map(|o| o.value);
+            let is_smooth_timelapse = Resolver::option(self, "timelapse_type")
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnum<TimelapseType>>())
+                .is_some_and(|o| o.value == TimelapseType::tlSmooth);
+
+            // PORT NOTE: `ps_opt->value` at `PrintConfig.cpp:10408` is dereferenced without a
+            // null check, where `ps_opt` comes from `option<...>("print_sequence")` with no
+            // `create` -- so a config without `print_sequence` is an unchecked null dereference
+            // at the pin. `None` short-circuits the `||` here instead, which is the nearest
+            // defined behaviour; `used_filaments == 1` already decides the branch for every
+            // config that reaches it in practice.
+            let turn_off = !is_smooth_timelapse
+                && (used_filaments == 1 || ps_value == Some(PrintSequence::ByObject));
+            if turn_off {
+                if let Some(opt) = self
+                    .base
+                    .opt::<ConfigOptionBool>("enable_prime_tower", false)
+                {
+                    opt.value = false;
+                }
+            }
+
+            let ept_value = Resolver::option(self, "enable_prime_tower")
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionBool>())
+                .is_some_and(|o| o.value);
+            if ept_value && islh_exists {
+                if let Some(opt) = self
+                    .base
+                    .opt::<ConfigOptionBool>("independent_support_layer_height", false)
+                {
+                    opt.value = false;
+                }
+            }
+            // The vendored `else` arm (`:10418-10423`) is commented out -- "MusangKing - not
+            // sure if this is still valid, just comment it out cause 'Independent support layer
+            // height' is re-opened" -- and is not revived.
+        }
+    }
+
+    /// `void extend_extruder_variant(DynamicPrintConfig &config, const unsigned int
+    /// num_extruders)` (`PrintConfig.cpp:10597-10634`), a file-scope `static` helper of
+    /// `set_num_extruders`. Ported as a private method rather than a free function, because a
+    /// file-scope `static` has no linkage to preserve and the only caller is the method below.
+    fn extend_extruder_variant(&mut self, num_extruders: u32) {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+
+        // 1. "Make sure the `extruder_variant_list` is the same length as extruder cnt"
+        if !Resolver::has(self, "extruder_variant_list") {
+            let mut v = ConfigOptionStrings::new();
+            v.values = vec!["Direct Drive Standard".to_string(); num_extruders as usize];
+            self.base
+                .set_key_value("extruder_variant_list", Box::new(v));
+        }
+        // "Use the first option as the default value, so all extruders have the same variant" --
+        // the vendored call passes the option itself as its own default.
+        let first_variant = Resolver::option(self, "extruder_variant_list")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+            .map(|o| o.clone());
+        if let Some(default) = first_variant {
+            if let Ok(Some(opt)) =
+                slic3r_config::config::ConfigBase::optptr_mut(self, "extruder_variant_list", false)
+            {
+                debug_assert!(opt.option_type() == ConfigOptionType::Strings);
+                if let Some(vec) = as_vector_mut(opt) {
+                    let _ = vec.resize(num_extruders as usize, Some(&default));
+                }
+            }
+        }
+
+        // 2. "Update `printer_extruder_variant` and `printer_extruder_id` based on
+        //    `extruder_variant_list`"
+        //
+        // FIDELITY(port): both rebuilt vectors are filled by walking
+        // `extruder_variant_list`'s entries in order and each entry's comma-separated tokens in
+        // order; the two pair positionally, and the order reaches output -- every per-variant
+        // lookup indexes them together.
+        let variants: Vec<String> = Resolver::option(self, "extruder_variant_list")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+            .map(|o| (0..num_extruders as usize).map(|i| o.get_at(i)).collect())
+            .unwrap_or_default();
+        let mut ids: Vec<i32> = Vec::new();
+        let mut names: Vec<String> = Vec::new();
+        for (i, variant) in variants.iter().enumerate() {
+            let variants_list = boost_split_compress(variant, &[',']);
+            if !variants_list.is_empty() {
+                ids.extend(std::iter::repeat_n(i as i32 + 1, variants_list.len()));
+                names.extend(variants_list);
+            }
+        }
+        if let Some(opt) = self
+            .base
+            .opt::<ConfigOptionInts>("printer_extruder_id", false)
+        {
+            opt.values = ids;
+        }
+        if let Some(opt) = self
+            .base
+            .opt::<ConfigOptionStrings>("printer_extruder_variant", false)
+        {
+            opt.values = names;
+        }
+
+        // 3. "Size the machine limits to the rebuilt variants, padded with their first value
+        //    like the other variant keys. They are not extruder option keys, so the resize loop
+        //    in set_num_extruders skips them."
+        let defaults = FullPrintConfig::defaults();
+        for key in printer_options_with_variant_2() {
+            let is_floats = Resolver::option(self, key)
+                .is_some_and(|o| o.option_type() == ConfigOptionType::Floats);
+            if !is_floats {
+                continue;
+            }
+            let n = self.get_parameter_size(key, num_extruders as usize);
+            let default = slic3r_config::config::ConfigOptionResolver::option(defaults, key)
+                .map(|o| o.clone_box());
+            if let Ok(Some(opt)) = slic3r_config::config::ConfigBase::optptr_mut(self, key, false) {
+                if let Some(vec) = as_vector_mut(opt) {
+                    let _ = vec.resize(n, default.as_deref());
+                }
+            }
+        }
+    }
+
+    /// `void set_num_extruders(unsigned int num_extruders)`
+    /// (`PrintConfig.cpp:10636-10654`).
+    pub fn set_num_extruders(&mut self, num_extruders: u32) {
+        self.extend_extruder_variant(num_extruders);
+
+        let defaults = FullPrintConfig::defaults();
+        for key in print_config_def().extruder_option_keys().clone() {
+            if key == "default_filament_profile" {
+                // "Don't resize this field, as it is presented to the user at the
+                // 'Dependencies' page of the Printer profile and we don't want to present empty
+                // fields there, if not defined by the system profile."
+                continue;
+            }
+            let n = self.get_parameter_size(&key, num_extruders as usize);
+            let default = slic3r_config::config::ConfigOptionResolver::option(defaults, &key)
+                .map(|o| o.clone_box());
+            match slic3r_config::config::ConfigBase::optptr_mut(self, &key, false) {
+                Ok(Some(opt)) => {
+                    // The vendored body's two `assert`s (`:10647-10648`) are `<cassert>`'s and
+                    // are compiled out of the oracle's Release build, so neither is ported as a
+                    // live check; the `if` below is the vendored `if (opt != nullptr &&
+                    // opt->is_vector())` that guards the resize either way.
+                    debug_assert!(opt.is_vector());
+                    if opt.is_vector() {
+                        if let Some(vec) = as_vector_mut(opt) {
+                            let _ = vec.resize(n, default.as_deref());
+                        }
+                    }
+                }
+                _ => {
+                    // PORT NOTE: the vendored `assert(opt != nullptr)` (`PrintConfig.cpp:10646`)
+                    // does **not** hold, and `docs/PORTING.md`'s don't-translate list ("an
+                    // `assert` is not ported as a live check of any kind") is why nothing stands
+                    // here. Measured: `default_nozzle_volume_type` is a registry key
+                    // (`:6306`) and an extruder option key (`:8997`), but no field of any of the
+                    // 11 `StaticPrintConfig` classes carries it, so a config built from
+                    // `full_print_config()` does not have it and `option(key, false)` returns
+                    // null. The oracle's Release build compiles the assert out and its
+                    // `if (opt != nullptr && opt->is_vector())` skips the key; this arm does the
+                    // same. A `debug_assert!` here fired on exactly that key on the first run of
+                    // this unit's own comparison, which is how the vendored assert was found to
+                    // be false rather than merely compiled out.
+                }
+            }
+        }
+    }
+
+    /// `void set_num_filaments(unsigned int num_filaments)`
+    /// (`PrintConfig.cpp:10656-10678`).
+    ///
+    /// PORT NOTE: this loop walks `print_config_def.filament_option_keys()`, which is **empty**
+    /// at the pin -- `init_filament_option_keys` is never called by `PrintConfigDef`'s
+    /// constructor (`PrintConfig.cpp:998-1007`), as this unit's
+    /// `extruder_and_filament_key_lists_match_the_oracle` test confirms against the oracle. So
+    /// the body is a no-op at the pin, and is transcribed for what it says rather than for what
+    /// it currently does.
+    pub fn set_num_filaments(&mut self, num_filaments: u32) {
+        let defaults = FullPrintConfig::defaults();
+        for key in print_config_def().filament_option_keys().clone() {
+            if key == "default_filament_profile" {
+                continue;
+            }
+            // "A variant-bearing key holds one value per (slot, variant): its length is the
+            // preset's variant list, not the filament count. Resizing it here truncated every
+            // variant but the first, which the readers then hid by clamping to the first value.
+            // Preset::normalize skips the same keys in its own pass below this call."
+            if filament_options_with_variant().contains(&key) {
+                continue;
+            }
+            let default = slic3r_config::config::ConfigOptionResolver::option(defaults, &key)
+                .map(|o| o.clone_box());
+            match slic3r_config::config::ConfigBase::optptr_mut(self, &key, false) {
+                Ok(Some(opt)) => {
+                    debug_assert!(opt.is_vector());
+                    if opt.is_vector() {
+                        if let Some(vec) = as_vector_mut(opt) {
+                            let _ = vec.resize(num_filaments as usize, default.as_deref());
+                        }
+                    }
+                }
+                _ => {
+                    // The same compiled-out `assert(opt != nullptr)` as in
+                    // `set_num_extruders` above (`PrintConfig.cpp:10671`); see its note. This
+                    // loop is a no-op at the pin either way, `filament_option_keys()` being
+                    // empty.
+                }
+            }
+        }
+    }
+}
+
+/// `void normalize_filament_values_to_variants(DynamicPrintConfig &config)`
+/// (`PrintConfig.cpp:11404-11430`): "lays every `filament_options_with_variant` option out one
+/// value per filament variant, as the preset's variant list describes" -- the header's own
+/// summary at `PrintConfig.hpp:1019-1020`.
+pub fn normalize_filament_values_to_variants(config: &mut DynamicPrintConfig) {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+
+    let Some(self_index) = Resolver::option(config, "filament_self_index")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionInts>())
+        .filter(|o| !o.values.is_empty())
+    else {
+        return;
+    };
+    let self_index_values = self_index.values.clone();
+    let self_index_len = self_index_values.len();
+    let filament_count = *self_index_values
+        .iter()
+        .max()
+        .expect("non-empty, checked above");
+    if filament_count <= 0 || filament_count as usize >= self_index_len {
+        return;
+    }
+    // "The values are one per filament, without variant strings, or a single value for all of
+    // them. The variant strings do not change today's mapping; they are passed so a rule that
+    // reads them applies here too."
+    let variant_list: Vec<String> = Resolver::option(config, "filament_extruder_variant")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+        .filter(|o| o.values.len() == self_index_len)
+        .map(|o| o.values.clone())
+        .unwrap_or_default();
+    let filament_ids: Vec<i32> = (1..=filament_count).collect();
+    let from_filaments = map_variant_indices(&variant_list, &self_index_values, &[], &filament_ids);
+    let from_single = map_variant_indices(&variant_list, &self_index_values, &[], &[]);
+
+    for key in filament_options_with_variant() {
+        let size = match Resolver::option(config, key).and_then(as_vector) {
+            Some(v) => v.len_values(),
+            None => continue,
+        };
+        if size != filament_count as usize && size != 1 {
+            continue;
+        }
+        let variant_index: &Vec<i32> = if size == filament_count as usize {
+            &from_filaments
+        } else {
+            &from_single
+        };
+        let source = match Resolver::option(config, key) {
+            Some(o) => o.clone_box(),
+            None => continue,
+        };
+        let Ok(Some(opt)) = slic3r_config::config::ConfigBase::optptr_mut(config, key, false)
+        else {
+            continue;
+        };
+        let Some(vec) = as_vector_mut(opt) else {
+            continue;
+        };
+        // "-1 and a single-value source both resolve to the first value through get_at()"
+        for variant in 0..self_index_len {
+            let _ = vec.set_at(
+                source.as_ref(),
+                variant,
+                variant_index[variant].max(0) as usize,
+            );
+        }
+    }
+}
+
+/// `void set_filament_dev_options(DynamicPrintConfig &config, const
+/// std::vector<const DynamicPrintConfig *> &filament_configs)`
+/// (`PrintConfig.cpp:11432-11446`): concatenates each filament's values for the
+/// `filament_dev_options` keys, falling back to the registry default for a filament that has
+/// none.
+pub fn set_filament_dev_options(
+    config: &mut DynamicPrintConfig,
+    filament_configs: &[&DynamicPrintConfig],
+) {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+
+    for key in filament_dev_options() {
+        if !filament_configs
+            .iter()
+            .any(|filament| Resolver::has(*filament, key))
+        {
+            continue;
+        }
+        let default_value = print_config_def()
+            .def
+            .get(key)
+            .and_then(|d| d.default_value.as_ref())
+            .map(|v| v.clone_box());
+        // FIDELITY(port): the sources are appended in `filament_configs`' own order, which
+        // reaches output -- the concatenated vector is indexed by slot.
+        let mut sources: Vec<Box<dyn slic3r_config::config::ConfigOption>> = Vec::new();
+        for filament in filament_configs {
+            let source = if Resolver::has(*filament, key) {
+                Resolver::option(*filament, key).map(|o| o.clone_box())
+            } else {
+                default_value.as_ref().map(|o| o.clone_box())
+            };
+            if let Some(source) = source {
+                sources.push(source);
+            }
+        }
+        let Ok(Some(dst)) = slic3r_config::config::ConfigBase::optptr_mut(config, key, true) else {
+            continue;
+        };
+        let Some(dst) = as_vector_mut(dst) else {
+            continue;
+        };
+        dst.clear_values();
+        for source in &sources {
+            if as_vector(source.as_ref()).is_some_and(|v| !v.is_empty_values()) {
+                let _ = dst.append(source.as_ref());
+            }
+        }
+    }
+}
+
+// --------------------------------------------------------------------------------------------
+// The bed-shape and skirt free functions (`PrintConfig.cpp:13785-14433`), as far as this
+// crate's dependencies reach. What they do not reach is marked at its own site below.
+// --------------------------------------------------------------------------------------------
+
+/// `static Points to_points(const std::vector<Vec2d> &dpts)` (`PrintConfig.cpp:13785-13791`):
+/// scales each unscaled point to the integer coordinate space.
+fn to_points(dpts: &[slic3r_point::point::Vec2d]) -> slic3r_point::point::Points {
+    // `Point::new_scale` is `Point(coord_t(scale_(x)), coord_t(scale_(y)))`
+    // (`crates/slic3r-point/src/point.rs:321`, `Point.hpp:214`) -- the same two operations the
+    // vendored `emplace_back(coord_t(scale_(v.x())), coord_t(scale_(v.y())))` performs, in the
+    // same order, so it is called rather than re-spelled here.
+    dpts.iter()
+        .map(|v| slic3r_point::point::Point::new_scale(v.x(), v.y()))
+        .collect()
+}
+
+/// `Points get_bed_shape(const SLAPrinterConfig &cfg)` (`PrintConfig.cpp:13854`): the
+/// counter-clockwise printable area, scaled. The one `get_bed_shape` overload with no
+/// extruder-sharing path and so nothing this crate cannot reach.
+pub fn get_bed_shape_sla(cfg: &SLAPrinterConfig) -> slic3r_point::point::Points {
+    to_points(&make_counter_clockwise_pointfs(&cfg.printable_area.values))
+}
+
+/// `make_counter_clockwise(const Pointfs&)` as the three `get_bed_shape` overloads call it --
+/// on an *unscaled* `Pointfs`, before `to_points` scales it.
+///
+/// `slic3r-polygon` ports `make_counter_clockwise` as a method on the scaled `Polygon`
+/// (`crates/slic3r-polygon/src/polygon.rs:206`), so it cannot be handed a `Pointfs`. The
+/// orientation test is the signed-area sign, which scaling by a positive constant does not
+/// change, so the same answer is reached by testing the unscaled ring directly.
+fn make_counter_clockwise_pointfs(
+    points: &[slic3r_point::point::Vec2d],
+) -> Vec<slic3r_point::point::Vec2d> {
+    // No special case for a degenerate ring, and none is needed: the shoelace sum over nought,
+    // one or two points is exactly 0 (each term cancels its partner), which the `< 0` test
+    // below treats as already counter-clockwise -- the same answer the vendored
+    // `Polygon::make_counter_clockwise()` reaches through `is_counter_clockwise()`'s
+    // `area() >= 0` on the same degenerate ring.
+    //
+    // FIDELITY(port): a fixed summation order -- the ring's own, each term `x[i]*y[i+1] -
+    // x[i+1]*y[i]` -- because only the sign of the total is read and that is what the vendored
+    // `Polygon::is_counter_clockwise`'s own `area()` sum computes in the same order.
+    let mut twice_area = 0_f64;
+    for i in 0..points.len() {
+        let a = points[i];
+        let b = points[(i + 1) % points.len()];
+        twice_area += a.x() * b.y() - b.x() * a.y();
+    }
+    if twice_area < 0_f64 {
+        let mut reversed = points.to_vec();
+        reversed.reverse();
+        return reversed;
+    }
+    points.to_vec()
+}
+
+/// `bool has_skirt(const DynamicPrintConfig &cfg)` (`PrintConfig.cpp:14376-14383`).
+pub fn has_skirt(cfg: &DynamicPrintConfig) -> bool {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+    let int_of =
+        |key: &str| -> Option<i32> { Resolver::option(cfg, key).and_then(|o| o.get_int().ok()) };
+    let skirt_height = int_of("skirt_height");
+    let skirt_loops = int_of("skirt_loops");
+    let draft_shield = int_of("draft_shield");
+    (skirt_height.is_some_and(|v| v > 0) && skirt_loops.is_some_and(|v| v > 0))
+        || draft_shield.is_some_and(|v| v != DraftShield::dsDisabled as i32)
+}
+
+/// `float get_real_skirt_dist(const DynamicPrintConfig &cfg)`
+/// (`PrintConfig.cpp:14384-14416`): the skirt's outer offset, including its own loops' width.
+pub fn get_real_skirt_dist(cfg: &DynamicPrintConfig) -> f32 {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+    if !has_skirt(cfg) {
+        return 0_f32;
+    }
+
+    // PORT NOTE: the vendored body reads `cfg.opt_float("skirt_distance")` and
+    // `cfg.opt_int("skirt_loops")`, and `slic3r-config`'s `DynamicConfig` ports neither
+    // accessor (`Config.hpp:3047`, `:3056`); each one's const body --
+    // `dynamic_cast<const ConfigOptionFloat*>(this->option(key))->value` -- is inlined here, as
+    // `ModelConfig::opt_float`/`opt_int` already do. The difference is the missing-key case,
+    // which the vendored body dereferences a null result for; `has_skirt` above has already
+    // established that `skirt_loops` is present, and `skirt_distance` is a registry key every
+    // config carries.
+    let dist = Resolver::option(cfg, "skirt_distance")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloat>())
+        .map(|o| o.value)
+        .unwrap_or(0_f64) as f32;
+
+    let mut loops = Resolver::option(cfg, "skirt_loops")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionInt>())
+        .map(|o| o.value)
+        .unwrap_or(0);
+    let draft_shield = Resolver::option(cfg, "draft_shield").and_then(|o| o.get_int().ok());
+    if draft_shield.is_some_and(|v| v != DraftShield::dsDisabled as i32) && loops == 0 {
+        loops = 1;
+    }
+
+    // PORT SRC: src/libslic3r/PrintConfig.cpp:14395
+    let mut nozzle = 0.4_f32;
+    if let Some(nd) = Resolver::option(cfg, "nozzle_diameter")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloats>())
+    {
+        if !nd.values.is_empty() {
+            // FIDELITY(port): `*std::max_element(...)` returns the **first** maximum, and
+            // `Iterator::max_by` returns the **last** of equal elements, so the fold is written
+            // to keep the first -- the values are `f64` and equal ones are indistinguishable
+            // here, but the order is transcribed rather than left to differ.
+            let mut max = nd.values[0];
+            for v in &nd.values[1..] {
+                if *v > max {
+                    max = *v;
+                }
+            }
+            nozzle = max as f32;
+        }
+    }
+
+    // "A line width can be a percent of the nozzle diameter."
+    let line_width = |key: &str| -> f32 {
+        let Some(opt) = Resolver::option(cfg, key) else {
+            return 0_f32;
+        };
+        if let Some(width) = opt.as_any().downcast_ref::<ConfigOptionFloatOrPercent>() {
+            return width.get_abs_value(nozzle as f64) as f32;
+        }
+        opt.get_float().map(|v| v as f32).unwrap_or(0_f32)
+    };
+    let mut width = line_width("initial_layer_line_width");
+    if width <= 0_f32 {
+        width = line_width("line_width");
+    }
+    if width <= 0_f32 {
+        width = nozzle;
+    }
+
+    dist + loops as f32 * width
+}
+
+/// `static bool is_XL_printer(const std::string &printer_notes)`
+/// (`PrintConfig.cpp:14418-14422`), the file-scope helper both public overloads reach.
+fn is_xl_printer_notes(printer_notes: &str) -> bool {
+    printer_notes.contains("PRINTER_VENDOR_PRUSA3D") && printer_notes.contains("PRINTER_MODEL_XL")
+}
+
+/// `bool is_XL_printer(const DynamicPrintConfig &cfg)` (`PrintConfig.cpp:14424-14428`).
+pub fn is_xl_printer_dynamic(cfg: &DynamicPrintConfig) -> bool {
+    slic3r_config::config::ConfigOptionResolver::option(cfg, "printer_notes")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionString>())
+        .is_some_and(|o| is_xl_printer_notes(&o.value))
+}
+
+/// `bool is_XL_printer(const PrintConfig &cfg)` (`PrintConfig.cpp:14430-14433`).
+pub fn is_xl_printer(cfg: &PrintConfig) -> bool {
+    // `printer_notes` is `PrintConfig`'s own field, not `GCodeConfig`'s.
+    is_xl_printer_notes(&cfg.printer_notes.value)
+}
 
 // --------------------------------------------------------------------------------------------
 // `ModelConfig` (`PrintConfig.hpp:2615-2690`): a `DynamicPrintConfig` plus a timestamp the
@@ -21728,6 +22513,542 @@ mod tests {
             "DynamicPrintConfig methods: {checked} case(s) held to exact equality \
              across 7 methods"
         );
+    }
+
+    fn config_from(entries: &[String]) -> DynamicPrintConfig {
+        let mut config = DynamicPrintConfig::new();
+        let mut ctx = slic3r_config::config::ConfigSubstitutionContext::new(
+            slic3r_config::config::ForwardCompatibilitySubstitutionRule::Disable,
+        );
+        for entry in entries {
+            let (key, value) = entry.split_once('=').expect("every probe is key=value");
+            let def = print_config_def().def.get(key);
+            if def.is_some_and(|d| d.option_type == ConfigOptionType::Enums) {
+                // See `print_config_dynamic_methods_match_the_oracle`'s own note: a
+                // `coEnums` key cannot go through `set_deserialize` until
+                // `slic3r-config`'s `create_default_option` regains its `coEnums` arm.
+                let def = def.expect("checked above");
+                let mut opt = ConfigOptionEnumsGeneric::new(def.enum_keys_map);
+                assert!(
+                    slic3r_config::config::ConfigOption::deserialize(&mut opt, value, false),
+                    "{key}={value}: a properly-keyed coEnums option should deserialize"
+                );
+                config.base.set_key_value(key, Box::new(opt));
+                continue;
+            }
+            slic3r_config::config::ConfigBase::set_deserialize(
+                &mut config,
+                key,
+                value,
+                &mut ctx,
+                false,
+            )
+            .unwrap_or_else(|e| panic!("set_deserialize({key}, {value}): {e:?}"));
+        }
+        config
+    }
+    fn serialize(config: &dyn slic3r_config::config::ConfigBase) -> Vec<String> {
+        slic3r_config::config::ConfigBase::keys(config)
+            .into_iter()
+            .map(|key| {
+                let value = match slic3r_config::config::ConfigOptionResolver::option(config, &key)
+                {
+                    Some(opt) => opt.serialize(),
+                    None => "<absent>".to_string(),
+                };
+                format!("{key}={value}")
+            })
+            .collect()
+    }
+    fn fixtures_agree(base: &str, entries: &Vec<String>, mine: &DynamicPrintConfig) {
+        let theirs: Vec<String> = ora::oracle_config_from_base(base, entries)
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_ne!(
+            theirs,
+            vec!["<refused>".to_string()],
+            "the oracle refused a fixture: {base} {entries:?}"
+        );
+        assert_eq!(
+            serialize(mine),
+            theirs,
+            "the two sides' fixtures differ before the call: {base} {entries:?}"
+        );
+    }
+    /// A fixture on the named base -- `"empty"` for a bare config, `"full"` for
+    /// `full_print_config()`.
+    ///
+    /// **Why three of these calls must use `"full"`, measured rather than chosen.** Several
+    /// vendored bodies dereference an option pointer without checking it, with the `assert`
+    /// above it compiled out of the oracle's Release build:
+    /// `extend_extruder_variant` does
+    /// `config.option("printer_extruder_id")->values.clear()`
+    /// (`PrintConfig.cpp:10609-10611`) and `normalize_fdm` reads `ps_opt->value`
+    /// (`:10408`) from an uncreated `option("print_sequence")`. Probed on a bare config,
+    /// **the oracle segfaults** -- the first run of this test died with `SIGSEGV` on
+    /// exactly those two. A `"full"` base carries every registry key, which is the state
+    /// every real caller is in, and is where these functions are compared.
+    fn config_on(base: &str, entries: &[String]) -> DynamicPrintConfig {
+        let mut config = if base == "full" {
+            DynamicPrintConfig::full_print_config()
+        } else {
+            DynamicPrintConfig::new()
+        };
+        let mut ctx = slic3r_config::config::ConfigSubstitutionContext::new(
+            slic3r_config::config::ForwardCompatibilitySubstitutionRule::Disable,
+        );
+        for entry in entries {
+            let (key, value) = entry.split_once('=').expect("every probe is key=value");
+            let def = print_config_def().def.get(key);
+            if def.is_some_and(|d| d.option_type == ConfigOptionType::Enums) {
+                let def = def.expect("checked above");
+                let mut opt = ConfigOptionEnumsGeneric::new(def.enum_keys_map);
+                assert!(
+                    slic3r_config::config::ConfigOption::deserialize(&mut opt, value, false),
+                    "{key}={value}: a properly-keyed coEnums option should deserialize"
+                );
+                config.base.set_key_value(key, Box::new(opt));
+                continue;
+            }
+            slic3r_config::config::ConfigBase::set_deserialize(
+                &mut config,
+                key,
+                value,
+                &mut ctx,
+                false,
+            )
+            .unwrap_or_else(|e| panic!("set_deserialize({key}, {value}): {e:?}"));
+        }
+        config
+    }
+    fn probe(entries: &[&str]) -> Vec<String> {
+        entries.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// `DynamicPrintConfig::normalize_fdm` (`PrintConfig.cpp:10350-10425`), held to exact equality
+    /// against the oracle over the branches of all four of its blocks.
+    #[test]
+    fn print_config_normalize_fdm_matches_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `normalize_fdm`: the same inputs `normalize_fdm_1` is probed with (its first three
+        // blocks are byte-identical to that function's, verified by diffing
+        // `PrintConfig.cpp:10352-10397` against `:10430-10475`), plus the prime-tower block's
+        // own branches -- `used_filaments` at 0 and above, `enable_prime_tower` present and
+        // absent, `print_sequence` by layer and by object, `timelapse_type` smooth and not,
+        // and `independent_support_layer_height` present and absent.
+        let fdm_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["extruder=3"]),
+            probe(&["spiral_mode=1", "resolution=0.0001"]),
+            probe(&["enable_prime_tower=1"]),
+            probe(&["enable_prime_tower=0"]),
+            probe(&["enable_prime_tower=1", "print_sequence=by object"]),
+            probe(&["enable_prime_tower=1", "print_sequence=by layer"]),
+            probe(&[
+                "enable_prime_tower=1",
+                "print_sequence=by layer",
+                "timelapse_type=1",
+            ]),
+            probe(&[
+                "enable_prime_tower=1",
+                "print_sequence=by object",
+                "timelapse_type=1",
+            ]),
+            probe(&[
+                "enable_prime_tower=1",
+                "print_sequence=by layer",
+                "independent_support_layer_height=1",
+            ]),
+            probe(&[
+                "enable_prime_tower=1",
+                "print_sequence=by object",
+                "independent_support_layer_height=1",
+                "extruder=2",
+                "spiral_mode=1",
+            ]),
+        ];
+        for entries in &fdm_probes {
+            for used_filaments in [0_i32, 1, 2] {
+                let theirs: Vec<String> =
+                    ora::oracle_normalize_fdm("full", entries, used_filaments)
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                assert_ne!(
+                    theirs,
+                    vec!["<refused>".to_string()],
+                    "refused: normalize_fdm {entries:?}"
+                );
+                let mut mine = config_on("full", entries);
+                fixtures_agree("full", entries, &mine);
+                mine.normalize_fdm(used_filaments);
+                assert_eq!(
+                    serialize(&mine),
+                    theirs,
+                    "normalize_fdm({entries:?}, {used_filaments})"
+                );
+                checked += 1;
+            }
+        }
+
+        println!("normalize fdm: {checked} case(s) held to exact equality");
+    }
+
+    /// `set_num_extruders` (`PrintConfig.cpp:10636-10654`) with its `extend_extruder_variant`
+    /// helper (`:10597-10634`), and `set_num_filaments` (`:10656-10678`), each held to exact
+    /// equality against the oracle by the whole config it leaves behind.
+    #[test]
+    fn print_config_set_num_extruders_and_filaments_match_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `set_num_extruders` and `set_num_filaments`. The first rebuilds
+        // `printer_extruder_id`/`printer_extruder_variant` from `extruder_variant_list` and
+        // resizes every extruder option key, so it is probed with the variant list absent,
+        // length 1, length 2 and with comma-separated variants; the second is a no-op at the
+        // pin (`filament_option_keys()` is empty, which this unit's key-list test confirms
+        // against the oracle) and is probed anyway so the port's own emptiness is measured
+        // rather than assumed.
+        let extruder_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["extruder_variant_list=\"Direct Drive Standard\""]),
+            probe(&[
+                "extruder_variant_list=\"Direct Drive Standard\";\"Bowden Standard\"",
+            ]),
+            probe(&[
+                "extruder_variant_list=\"Direct Drive Standard,Direct Drive High Flow\";\"Bowden Standard\"",
+            ]),
+            probe(&[
+                "extruder_variant_list=\"Direct Drive Standard\"",
+                "nozzle_diameter=0.4",
+            ]),
+        ];
+        for entries in &extruder_probes {
+            for n in [1_u32, 2, 3] {
+                for (which, theirs) in [
+                    (
+                        "set_num_extruders",
+                        ora::oracle_set_num_extruders("full", entries, n),
+                    ),
+                    (
+                        "set_num_filaments",
+                        ora::oracle_set_num_filaments("full", entries, n),
+                    ),
+                ] {
+                    let theirs: Vec<String> = theirs.iter().map(|s| s.to_string()).collect();
+                    assert_ne!(
+                        theirs,
+                        vec!["<refused>".to_string()],
+                        "refused: {which} {entries:?}"
+                    );
+                    let mut mine = config_on("full", entries);
+                    fixtures_agree("full", entries, &mine);
+                    if which == "set_num_extruders" {
+                        mine.set_num_extruders(n);
+                    } else {
+                        mine.set_num_filaments(n);
+                    }
+                    assert_eq!(serialize(&mine), theirs, "{which}({entries:?}, {n})");
+                    checked += 1;
+                }
+            }
+        }
+
+        println!("set num: {checked} case(s) held to exact equality");
+    }
+
+    /// `normalize_filament_values_to_variants` (`PrintConfig.cpp:11404-11430`) and
+    /// `set_filament_dev_options` (`:11432-11446`), each held to exact equality against the
+    /// oracle by the whole config it leaves behind.
+    #[test]
+    fn print_config_filament_variant_normalisation_matches_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `normalize_filament_values_to_variants`: `filament_self_index` absent, empty,
+        // degenerate (max >= its own length, which returns early), and a real two-filament
+        // three-variant map, with and without `filament_extruder_variant` of a matching
+        // length.
+        let normalize_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["filament_self_index=1"]),
+            probe(&["filament_self_index=1,2"]),
+            probe(&["filament_self_index=1,1,2"]),
+            probe(&["filament_self_index=1,1,2", "filament_diameter=1.75"]),
+            probe(&[
+                "filament_self_index=1,1,2",
+                "filament_extruder_variant=\"Direct Drive Standard\";\"Direct Drive High Flow\";\"Bowden Standard\"",
+                "filament_diameter=1.75,1.75",
+            ]),
+            probe(&[
+                "filament_self_index=1,1,2",
+                "filament_retraction_length=1,2",
+            ]),
+        ];
+        for entries in &normalize_probes {
+            let theirs: Vec<String> = ora::oracle_normalize_filament_values_to_variants(entries)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_ne!(
+                theirs,
+                vec!["<refused>".to_string()],
+                "refused: normalize_filament_values_to_variants {entries:?}"
+            );
+            let mut mine = config_on("empty", entries);
+            fixtures_agree("empty", entries, &mine);
+            normalize_filament_values_to_variants(&mut mine);
+            assert_eq!(
+                serialize(&mine),
+                theirs,
+                "normalize_filament_values_to_variants({entries:?})"
+            );
+            checked += 1;
+        }
+
+        // `set_filament_dev_options`: no filaments, one, two, and two where only one carries
+        // the key -- which is what the per-filament registry-default fallback exists for.
+        let dev_key = "filament_dev_drying_temperature";
+        let dev_cases: Vec<(Vec<String>, Vec<String>)> = vec![
+            (probe(&[]), probe(&[])),
+            (probe(&[&format!("{dev_key}=50")]), probe(&[])),
+            (
+                probe(&[&format!("{dev_key}=50")]),
+                probe(&[&format!("{dev_key}=60")]),
+            ),
+            (probe(&[]), probe(&[&format!("{dev_key}=60")])),
+            (
+                probe(&["filament_diameter=1.75"]),
+                probe(&[&format!("{dev_key}=60")]),
+            ),
+        ];
+        for (a, b) in &dev_cases {
+            let theirs: Vec<String> = ora::oracle_set_filament_dev_options(&probe(&[]), a, b)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_ne!(
+                theirs,
+                vec!["<refused>".to_string()],
+                "refused: set_filament_dev_options {a:?} {b:?}"
+            );
+            let mut mine = config_on("empty", &[]);
+            let fa = config_on("empty", a);
+            let fb = config_on("empty", b);
+            let mut filaments: Vec<&DynamicPrintConfig> = Vec::new();
+            if !a.is_empty() {
+                filaments.push(&fa);
+            }
+            if !b.is_empty() {
+                filaments.push(&fb);
+            }
+            set_filament_dev_options(&mut mine, &filaments);
+            assert_eq!(
+                serialize(&mine),
+                theirs,
+                "set_filament_dev_options({a:?}, {b:?})"
+            );
+            checked += 1;
+        }
+
+        println!("filament variants: {checked} case(s) held to exact equality");
+    }
+
+    /// `has_skirt`, `get_real_skirt_dist` and the three `is_XL_printer` overloads
+    /// (`PrintConfig.cpp:14376-14433`), held to exact equality against the oracle.
+    #[test]
+    fn print_config_skirt_and_xl_predicates_match_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `has_skirt` and `get_real_skirt_dist`: every combination the two functions branch on
+        // -- `skirt_height`/`skirt_loops` zero and positive, `draft_shield` disabled and not,
+        // the `loops == 0` promotion, a nozzle list of several values (whose maximum is taken),
+        // and `initial_layer_line_width`/`line_width` as an absolute and as a percent, each
+        // zero and positive, which is what the two fallbacks exist for.
+        let skirt_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["skirt_height=0", "skirt_loops=0"]),
+            probe(&["skirt_height=1", "skirt_loops=0"]),
+            probe(&["skirt_height=0", "skirt_loops=1"]),
+            probe(&["skirt_height=1", "skirt_loops=1"]),
+            probe(&["skirt_height=1", "skirt_loops=2", "skirt_distance=3"]),
+            probe(&["draft_shield=enabled"]),
+            probe(&["draft_shield=enabled", "skirt_loops=0", "skirt_distance=2"]),
+            probe(&["draft_shield=disabled", "skirt_height=1", "skirt_loops=1"]),
+            probe(&[
+                "skirt_height=1",
+                "skirt_loops=1",
+                "skirt_distance=2",
+                "nozzle_diameter=0.4,0.6,0.5",
+            ]),
+            probe(&[
+                "skirt_height=1",
+                "skirt_loops=1",
+                "skirt_distance=2",
+                "initial_layer_line_width=0.5",
+            ]),
+            probe(&[
+                "skirt_height=1",
+                "skirt_loops=1",
+                "skirt_distance=2",
+                "initial_layer_line_width=0",
+                "line_width=0.45",
+            ]),
+            probe(&[
+                "skirt_height=1",
+                "skirt_loops=1",
+                "skirt_distance=2",
+                "initial_layer_line_width=120%",
+                "nozzle_diameter=0.4",
+            ]),
+            probe(&[
+                "skirt_height=1",
+                "skirt_loops=1",
+                "skirt_distance=2",
+                "initial_layer_line_width=0",
+                "line_width=0",
+                "nozzle_diameter=0.6",
+            ]),
+        ];
+        // **The `"full"` base is required here, and the first run of this test is what
+        // established it.** `get_real_skirt_dist` reads `cfg.opt_float("skirt_distance")` and
+        // `cfg.opt_int("skirt_loops")` (`PrintConfig.cpp:14387`, `:14389`), and
+        // `DynamicConfig::opt_float`/`opt_int` are
+        // `dynamic_cast<const ConfigOptionFloat*>(this->option(key))->value`
+        // (`Config.hpp:3048`, `:3057`) -- an **unguarded** null dereference when the key is
+        // absent. Probed on a bare config carrying only `skirt_height`/`skirt_loops`, the
+        // oracle **segfaults**; observed, not inferred. A `"full"` base carries every registry
+        // key, which is the state every real caller is in.
+        for entries in &skirt_probes {
+            let mine = config_on("full", entries);
+            fixtures_agree("full", entries, &mine);
+
+            let theirs = ora::oracle_has_skirt("full", entries);
+            assert_ne!(theirs, -1, "refused: has_skirt {entries:?}");
+            assert_eq!(
+                i32::from(has_skirt(&mine)),
+                theirs,
+                "has_skirt({entries:?})"
+            );
+            checked += 1;
+
+            let theirs = ora::oracle_real_skirt_dist("full", entries);
+            assert!(!theirs.is_nan(), "refused: get_real_skirt_dist {entries:?}");
+            assert_eq!(
+                f64::from(get_real_skirt_dist(&mine)),
+                theirs,
+                "get_real_skirt_dist({entries:?})"
+            );
+            checked += 1;
+        }
+
+        // The three `is_XL_printer` overloads. The `DynamicPrintConfig` one over notes that
+        // carry neither marker, one, the other, both, and both in the other order; the
+        // `PrintConfig` one against its defaults, which is the only instance a shim can build.
+        for notes in [
+            "",
+            "PRINTER_VENDOR_PRUSA3D",
+            "PRINTER_MODEL_XL",
+            "PRINTER_VENDOR_PRUSA3D PRINTER_MODEL_XL",
+            "PRINTER_MODEL_XL PRINTER_VENDOR_PRUSA3D",
+            "xPRINTER_VENDOR_PRUSA3Dx xPRINTER_MODEL_XLx",
+        ] {
+            let entries = probe(&[&format!("printer_notes={notes}")]);
+            let mine = config_on("empty", &entries);
+            fixtures_agree("empty", &entries, &mine);
+            let theirs = ora::oracle_is_xl_printer_dynamic("empty", &entries);
+            assert_ne!(theirs, -1, "refused: is_XL_printer {notes:?}");
+            assert_eq!(
+                i32::from(is_xl_printer_dynamic(&mine)),
+                theirs,
+                "is_XL_printer(dynamic, {notes:?})"
+            );
+            checked += 1;
+        }
+        // The key absent entirely, which the vendored body's null check covers.
+        let empty = probe(&[]);
+        assert_eq!(
+            i32::from(is_xl_printer_dynamic(&config_on("empty", &empty))),
+            ora::oracle_is_xl_printer_dynamic("empty", &empty),
+            "is_XL_printer(dynamic) with printer_notes absent"
+        );
+        checked += 1;
+        assert_eq!(
+            i32::from(is_xl_printer(PrintConfig::defaults())),
+            ora::oracle_is_xl_printer_of_print_defaults(),
+            "is_XL_printer(PrintConfig::defaults())"
+        );
+        checked += 1;
+
+        println!("skirt xl: {checked} case(s) held to exact equality");
+    }
+
+    /// `get_bed_shape(const SLAPrinterConfig&)` (`PrintConfig.cpp:13854`) and
+    /// `get_extruder_supported_nozzle_volume_types` (`:840-858`), held to exact equality
+    /// against the oracle. The first is this unit's one comparison of integer-coordinate
+    /// output.
+    #[test]
+    fn print_config_bed_shape_and_supported_types_match_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `get_bed_shape(const SLAPrinterConfig&)` against its defaults -- the one
+        // `get_bed_shape` overload with no extruder-sharing path, and so the one this crate's
+        // dependencies reach. Scaled integer coordinates, so this is the unit's one comparison
+        // of integer-coordinate output.
+        let theirs: Vec<i64> = ora::oracle_bed_shape_of_sla_defaults().to_vec();
+        let mine: Vec<i64> = get_bed_shape_sla(SLAPrinterConfig::defaults())
+            .iter()
+            .flat_map(|p| [p.x(), p.y()])
+            .collect();
+        assert_eq!(mine, theirs, "get_bed_shape(SLAPrinterConfig::defaults())");
+        checked += 1;
+
+        // `get_extruder_supported_nozzle_volume_types`: both option keys absent, each absent
+        // alone, the extruder id out of range at both ends, and variant lists naming one,
+        // several and no recognised volume type.
+        let supported_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["extruder_variant_list=\"Direct Drive Standard\""]),
+            probe(&["extruder_type=Direct Drive"]),
+            probe(&[
+                "extruder_variant_list=\"Direct Drive Standard\"",
+                "extruder_type=Direct Drive",
+            ]),
+            probe(&[
+                "extruder_variant_list=\"Direct Drive Standard,Direct Drive High Flow\"",
+                "extruder_type=Direct Drive",
+            ]),
+            probe(&[
+                "extruder_variant_list=\"Direct Drive Standard\";\"Bowden Standard\"",
+                "extruder_type=Direct Drive,Bowden",
+            ]),
+            probe(&[
+                "extruder_variant_list=\"Nonsense\"",
+                "extruder_type=Direct Drive",
+            ]),
+        ];
+        for entries in &supported_probes {
+            let mine = config_on("empty", entries);
+            fixtures_agree("empty", entries, &mine);
+            for extruder_id in [-1_i32, 0, 1, 2] {
+                let theirs: Vec<i32> =
+                    ora::oracle_extruder_supported_nozzle_volume_types(entries, extruder_id)
+                        .to_vec();
+                assert_ne!(theirs, vec![-1], "refused: supported types {entries:?}");
+                let mine_flat: Vec<i32> =
+                    get_extruder_supported_nozzle_volume_types(&mine, extruder_id)
+                        .iter()
+                        .map(|t| *t as i32)
+                        .collect();
+                assert_eq!(
+                    mine_flat, theirs,
+                    "get_extruder_supported_nozzle_volume_types({entries:?}, {extruder_id})"
+                );
+                checked += 1;
+            }
+        }
+
+        println!("bed shape supported: {checked} case(s) held to exact equality");
     }
 
     /// `ModelConfig` (`PrintConfig.hpp:2615-2690`): the timestamp discipline its own comment

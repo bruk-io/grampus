@@ -272,6 +272,72 @@ mod ffi {
         /// comparison rather than assuming two construction routes agree.
         fn oracle_config_from(keys_and_values: &Vec<String>) -> Vec<String>;
 
+        /// The config `config_from_base` builds, serialized, with no method called. `base` is
+        /// `"empty"` for a bare config or `"full"` for `full_print_config()`; the latter exists
+        /// because several vendored bodies dereference an option pointer without checking it
+        /// and **segfault** on a config missing the key -- see the C++ shim's own note.
+        fn oracle_config_from_base(base: &str, keys_and_values: &Vec<String>) -> Vec<String>;
+
+        /// `DynamicPrintConfig::normalize_fdm(used_filaments)`
+        /// (`PrintConfig.cpp:10350-10425`), with the whole config handed back.
+        fn oracle_normalize_fdm(
+            base: &str,
+            keys_and_values: &Vec<String>,
+            used_filaments: i32,
+        ) -> Vec<String>;
+
+        /// `DynamicPrintConfig::set_num_extruders(n)` (`:10636-10654`).
+        fn oracle_set_num_extruders(
+            base: &str,
+            keys_and_values: &Vec<String>,
+            num_extruders: u32,
+        ) -> Vec<String>;
+
+        /// `DynamicPrintConfig::set_num_filaments(n)` (`:10656-10678`).
+        fn oracle_set_num_filaments(
+            base: &str,
+            keys_and_values: &Vec<String>,
+            num_filaments: u32,
+        ) -> Vec<String>;
+
+        /// `normalize_filament_values_to_variants(DynamicPrintConfig&)` (`:11404-11430`).
+        fn oracle_normalize_filament_values_to_variants(
+            keys_and_values: &Vec<String>,
+        ) -> Vec<String>;
+
+        /// `set_filament_dev_options(DynamicPrintConfig&, filaments)` (`:11432-11446`), with
+        /// two filament configs; an empty list leaves that filament out of the vector.
+        fn oracle_set_filament_dev_options(
+            keys_and_values: &Vec<String>,
+            filament_a: &Vec<String>,
+            filament_b: &Vec<String>,
+        ) -> Vec<String>;
+
+        /// `has_skirt(const DynamicPrintConfig&)` (`:14376-14383`) as 0/1, -1 on a refusal.
+        fn oracle_has_skirt(base: &str, keys_and_values: &Vec<String>) -> i32;
+
+        /// `get_real_skirt_dist(const DynamicPrintConfig&)` (`:14384-14416`), widened to
+        /// `double` so the bridge carries the `float` exactly; NaN on a refusal.
+        fn oracle_real_skirt_dist(base: &str, keys_and_values: &Vec<String>) -> f64;
+
+        /// `is_XL_printer(const DynamicPrintConfig&)` (`:14424-14428`) as 0/1.
+        fn oracle_is_xl_printer_dynamic(base: &str, keys_and_values: &Vec<String>) -> i32;
+
+        /// `is_XL_printer(const PrintConfig&)` (`:14430-14433`) against
+        /// `PrintConfig::defaults()`, the only instance a shim can build without a preset.
+        fn oracle_is_xl_printer_of_print_defaults() -> i32;
+
+        /// `get_bed_shape(const SLAPrinterConfig&)` (`:13854`) against
+        /// `SLAPrinterConfig::defaults()`, as flattened `x, y` scaled coordinates.
+        fn oracle_bed_shape_of_sla_defaults() -> Vec<i64>;
+
+        /// `get_extruder_supported_nozzle_volume_types(const DynamicPrintConfig&, int)`
+        /// (`:840-858`), in the `std::set`'s own ascending order; `[-1]` on a refusal.
+        fn oracle_extruder_supported_nozzle_volume_types(
+            keys_and_values: &Vec<String>,
+            extruder_id: i32,
+        ) -> Vec<i32>;
+
         /// `DynamicPrintConfig::normalize_fdm_1()` (`PrintConfig.cpp:10428-10478`) against a
         /// config carrying exactly the given `"<key>=<value>"` assignments, with the whole
         /// serialized config handed back. `["<refused>"]` when an assignment was rejected.
@@ -316,19 +382,24 @@ mod ffi {
 }
 
 pub use ffi::{
-    oracle_config_from, oracle_config_index_base, oracle_convert_to_nvt_type,
-    oracle_custom_gcode_placeholder_keys, oracle_custom_gcode_placeholders,
-    oracle_dynamic_from_static_serialized, oracle_extruder_ams_count_roundtrip,
-    oracle_extruder_index_of_defaults, oracle_extruder_nozzle_stats_roundtrip,
-    oracle_extruder_nozzle_volume_count, oracle_extruder_option_keys, oracle_extruder_retract_keys,
-    oracle_extruder_variant_string, oracle_filament_option_keys, oracle_filament_retract_keys,
-    oracle_filament_type_probe, oracle_find_variant_index, oracle_full_print_config_serialized,
-    oracle_handle_legacy, oracle_handle_legacy_sla, oracle_has_multi_variant_filament,
-    oracle_index_for_extruder, oracle_is_using_different_extruders, oracle_map_variant_indices,
-    oracle_min_object_distance, oracle_new_from_defaults_keys_serialized, oracle_normalize_fdm_1,
-    oracle_nozzle_diameter_for_filament_of_defaults, oracle_nozzle_volume_type_string,
-    oracle_option_info, oracle_option_keys, oracle_option_set, oracle_other_def_keys,
-    oracle_other_def_option_info, oracle_parameter_size_of_full,
-    oracle_shaper_type_values_for_flavor, oracle_static_class_defaults, oracle_static_class_keys,
-    oracle_support_different_extruders, OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
+    oracle_bed_shape_of_sla_defaults, oracle_config_from, oracle_config_from_base,
+    oracle_config_index_base, oracle_convert_to_nvt_type, oracle_custom_gcode_placeholder_keys,
+    oracle_custom_gcode_placeholders, oracle_dynamic_from_static_serialized,
+    oracle_extruder_ams_count_roundtrip, oracle_extruder_index_of_defaults,
+    oracle_extruder_nozzle_stats_roundtrip, oracle_extruder_nozzle_volume_count,
+    oracle_extruder_option_keys, oracle_extruder_retract_keys,
+    oracle_extruder_supported_nozzle_volume_types, oracle_extruder_variant_string,
+    oracle_filament_option_keys, oracle_filament_retract_keys, oracle_filament_type_probe,
+    oracle_find_variant_index, oracle_full_print_config_serialized, oracle_handle_legacy,
+    oracle_handle_legacy_sla, oracle_has_multi_variant_filament, oracle_has_skirt,
+    oracle_index_for_extruder, oracle_is_using_different_extruders, oracle_is_xl_printer_dynamic,
+    oracle_is_xl_printer_of_print_defaults, oracle_map_variant_indices, oracle_min_object_distance,
+    oracle_new_from_defaults_keys_serialized, oracle_normalize_fdm, oracle_normalize_fdm_1,
+    oracle_normalize_filament_values_to_variants, oracle_nozzle_diameter_for_filament_of_defaults,
+    oracle_nozzle_volume_type_string, oracle_option_info, oracle_option_keys, oracle_option_set,
+    oracle_other_def_keys, oracle_other_def_option_info, oracle_parameter_size_of_full,
+    oracle_real_skirt_dist, oracle_set_filament_dev_options, oracle_set_num_extruders,
+    oracle_set_num_filaments, oracle_shaper_type_values_for_flavor, oracle_static_class_defaults,
+    oracle_static_class_keys, oracle_support_different_extruders, OracleEnumKeyValue,
+    OracleLegacyResult, OracleOptionInfo,
 };

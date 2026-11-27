@@ -760,6 +760,189 @@ int32_t oracle_index_for_extruder(const rust::Vec<rust::String> &keys_and_values
         std::string(variant_name), static_cast<unsigned int>(stride)));
 }
 
+// As `config_from`, but starting from the named base. See the header for why "full" exists.
+static Slic3r::DynamicPrintConfig config_from_base(rust::Str base,
+                                                   const rust::Vec<rust::String> &keys_and_values,
+                                                   bool &ok) {
+    ok = true;
+    Slic3r::DynamicPrintConfig config;
+    if (std::string(base) == "full") {
+        config = Slic3r::DynamicPrintConfig::full_print_config();
+    } else if (std::string(base) != "empty") {
+        ok = false;
+        return config;
+    }
+    Slic3r::ConfigSubstitutionContext ctx(Slic3r::ForwardCompatibilitySubstitutionRule::Disable);
+    for (const rust::String &entry : keys_and_values) {
+        const std::string text(entry);
+        const size_t eq = text.find('=');
+        if (eq == std::string::npos) {
+            ok = false;
+            continue;
+        }
+        try {
+            config.set_deserialize(text.substr(0, eq), text.substr(eq + 1), ctx);
+        } catch (const std::exception &) {
+            ok = false;
+        }
+    }
+    return config;
+}
+
+rust::Vec<rust::String> oracle_config_from_base(rust::Str base,
+                                                const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from_base(base, keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String> oracle_normalize_fdm(rust::Str base,
+                                             const rust::Vec<rust::String> &keys_and_values,
+                                             int32_t used_filaments) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from_base(base, keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    config.normalize_fdm(static_cast<int>(used_filaments));
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String> oracle_set_num_extruders(rust::Str base,
+                                                 const rust::Vec<rust::String> &keys_and_values,
+                                                 uint32_t num_extruders) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from_base(base, keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    config.set_num_extruders(static_cast<unsigned int>(num_extruders));
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String> oracle_set_num_filaments(rust::Str base,
+                                                 const rust::Vec<rust::String> &keys_and_values,
+                                                 uint32_t num_filaments) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from_base(base, keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    config.set_num_filaments(static_cast<unsigned int>(num_filaments));
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String>
+oracle_normalize_filament_values_to_variants(const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    Slic3r::normalize_filament_values_to_variants(config);
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String>
+oracle_set_filament_dev_options(const rust::Vec<rust::String> &keys_and_values,
+                                const rust::Vec<rust::String> &filament_a,
+                                const rust::Vec<rust::String> &filament_b) {
+    bool ok = false, ok_a = false, ok_b = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    Slic3r::DynamicPrintConfig a = config_from(filament_a, ok_a);
+    Slic3r::DynamicPrintConfig b = config_from(filament_b, ok_b);
+    if (!ok || !ok_a || !ok_b) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    std::vector<const Slic3r::DynamicPrintConfig *> filaments;
+    if (!filament_a.empty()) {
+        filaments.push_back(&a);
+    }
+    if (!filament_b.empty()) {
+        filaments.push_back(&b);
+    }
+    Slic3r::set_filament_dev_options(config, filaments);
+    return serialize_config(config);
+}
+
+int32_t oracle_has_skirt(rust::Str base, const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from_base(base, keys_and_values, ok);
+    if (!ok) {
+        return -1;
+    }
+    return Slic3r::has_skirt(config) ? 1 : 0;
+}
+
+double oracle_real_skirt_dist(rust::Str base,
+                              const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from_base(base, keys_and_values, ok);
+    if (!ok) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    // Returned as a double so the bridge carries the float exactly; the port compares the same
+    // widening of its own `f32`.
+    return static_cast<double>(Slic3r::get_real_skirt_dist(config));
+}
+
+int32_t oracle_is_xl_printer_dynamic(rust::Str base,
+                                     const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from_base(base, keys_and_values, ok);
+    if (!ok) {
+        return -1;
+    }
+    return Slic3r::is_XL_printer(config) ? 1 : 0;
+}
+
+int32_t oracle_is_xl_printer_of_print_defaults() {
+    return Slic3r::is_XL_printer(Slic3r::PrintConfig::defaults()) ? 1 : 0;
+}
+
+rust::Vec<int64_t> oracle_bed_shape_of_sla_defaults() {
+    rust::Vec<int64_t> out;
+    for (const Slic3r::Point &p : Slic3r::get_bed_shape(Slic3r::SLAPrinterConfig::defaults())) {
+        out.push_back(static_cast<int64_t>(p.x()));
+        out.push_back(static_cast<int64_t>(p.y()));
+    }
+    return out;
+}
+
+rust::Vec<int32_t>
+oracle_extruder_supported_nozzle_volume_types(const rust::Vec<rust::String> &keys_and_values,
+                                              int32_t extruder_id) {
+    rust::Vec<int32_t> out;
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        out.push_back(-1);
+        return out;
+    }
+    // A `std::set`, so this is its own ascending order.
+    for (const Slic3r::NozzleVolumeType type :
+         Slic3r::get_extruder_supported_nozzle_volume_types(config,
+                                                            static_cast<int>(extruder_id))) {
+        out.push_back(static_cast<int32_t>(type));
+    }
+    return out;
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

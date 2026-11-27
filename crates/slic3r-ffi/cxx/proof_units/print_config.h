@@ -174,6 +174,61 @@ rust::Vec<rust::String> oracle_filament_type_probe(rust::Str filament_type, rust
 // call, rather than assuming two different construction routes agree.
 rust::Vec<rust::String> oracle_config_from(const rust::Vec<rust::String> &keys_and_values);
 
+// The config-mutating calls of this batch, each against a config built by `config_from` and
+// handed back whole as `serialize_config` produces it. `["<refused>"]` on a rejected assignment.
+//
+// `base` selects the config the assignments are applied to: "empty" for a bare
+// `DynamicPrintConfig`, "full" for `DynamicPrintConfig::full_print_config()`. The "full" base
+// exists because several vendored bodies dereference an option pointer **without** checking it:
+// `extend_extruder_variant` does `config.option("printer_extruder_id")->values.clear()`
+// (`PrintConfig.cpp:10609-10611`, the `assert` above it compiled out of the oracle's Release
+// build) and `normalize_fdm` reads `ps_opt->value` (`:10408`) from an uncreated
+// `option("print_sequence")`. Called on a config missing those keys, the oracle **segfaults** --
+// observed, not inferred. A "full" base carries every registry key, which is the state every
+// real caller is in.
+rust::Vec<rust::String> oracle_config_from_base(rust::Str base,
+                                                const rust::Vec<rust::String> &keys_and_values);
+rust::Vec<rust::String> oracle_normalize_fdm(rust::Str base,
+                                             const rust::Vec<rust::String> &keys_and_values,
+                                             int32_t used_filaments);
+rust::Vec<rust::String> oracle_set_num_extruders(rust::Str base,
+                                                 const rust::Vec<rust::String> &keys_and_values,
+                                                 uint32_t num_extruders);
+rust::Vec<rust::String> oracle_set_num_filaments(rust::Str base,
+                                                 const rust::Vec<rust::String> &keys_and_values,
+                                                 uint32_t num_filaments);
+rust::Vec<rust::String>
+oracle_normalize_filament_values_to_variants(const rust::Vec<rust::String> &keys_and_values);
+// `set_filament_dev_options` takes a vector of filament configs; two are enough to exercise the
+// concatenation and the per-filament default fallback, and an empty list for either leaves that
+// filament out of the vector entirely.
+rust::Vec<rust::String>
+oracle_set_filament_dev_options(const rust::Vec<rust::String> &keys_and_values,
+                                const rust::Vec<rust::String> &filament_a,
+                                const rust::Vec<rust::String> &filament_b);
+
+// The skirt and XL-printer predicates (`PrintConfig.cpp:14376-14433`).
+// These take a `base` for the same reason the three above do: `get_real_skirt_dist` reads
+// `cfg.opt_float("skirt_distance")` and `cfg.opt_int("skirt_loops")`
+// (`PrintConfig.cpp:14387`, `:14389`), and `DynamicConfig::opt_float`/`opt_int` are an
+// **unguarded** `dynamic_cast<...>(this->option(key))->value` (`Config.hpp:3048`, `:3057`), so a
+// config missing the key segfaults the oracle -- observed.
+int32_t oracle_has_skirt(rust::Str base, const rust::Vec<rust::String> &keys_and_values);
+double oracle_real_skirt_dist(rust::Str base, const rust::Vec<rust::String> &keys_and_values);
+int32_t oracle_is_xl_printer_dynamic(rust::Str base,
+                                     const rust::Vec<rust::String> &keys_and_values);
+// `is_XL_printer(const PrintConfig&)` and `get_bed_shape(const SLAPrinterConfig&)` can only be
+// reached through a class instance, and `defaults()` is the only one a shim can build without a
+// preset -- the same instance the port's own side reads.
+int32_t oracle_is_xl_printer_of_print_defaults();
+rust::Vec<int64_t> oracle_bed_shape_of_sla_defaults();
+
+// `get_extruder_supported_nozzle_volume_types(const DynamicPrintConfig&, int)`
+// (`PrintConfig.cpp:840-858`), as the set's own ascending order.
+rust::Vec<int32_t>
+oracle_extruder_supported_nozzle_volume_types(const rust::Vec<rust::String> &keys_and_values,
+                                              int32_t extruder_id);
+
 rust::Vec<rust::String> oracle_normalize_fdm_1(const rust::Vec<rust::String> &keys_and_values);
 rust::Vec<rust::String> oracle_handle_legacy_sla(const rust::Vec<rust::String> &keys_and_values);
 
