@@ -21463,22 +21463,29 @@ impl slic3r_config::config::ConfigBase for DynamicPrintAndCLIConfig {
 // `get_bed_shape_with_excluded_area` (`:14365-14374`) are additionally blocked by the same
 // absent `slic3r-clipperutils` dependency as `get_shared_poly` above.
 
-// TODO(port): src/libslic3r/PrintConfig.cpp:10891 -- the remaining `DynamicPrintConfig`
-// transformation methods (`:10891-11393`, `:11448-11551`, `:11604-12088`, `:12141-12416`) are
-// not ported: `update_values_from_single_to_multi`, `update_values_from_multi_to_multi`,
-// `update_values_from_multi_to_multi_2`, `resize_mixed_filament_metadata`,
-// `ensure_process_variant_columns`, `update_values_to_printer_extruders` and its
-// multiple-filament sibling, `update_filament_config_values_for_multiple_extruders`,
-// `gather_option_values`, `normalize_stride2_floats`, `log_normalize_legacy_vector_size`,
-// `update_non_diff_values_to_base_config`, `update_diff_values_to_child_config`,
-// `compute_filament_override_value`, `update_static_print_config_from_dynamic` and
-// `set_variant_override`. **These are reachable with this crate's dependencies** -- the
-// `ConfigOptionVectorBase` cast they need is [`as_vector_mut`], and an earlier pass wrongly
-// recorded that as a blocker -- so this marker records work owed, not a dependency gap. They
-// are left out because each needs its own oracle comparison through this unit's
-// config-serialization shim before it can be trusted, and about 1,400 lines of transcription
-// with nothing checking it would weaken a module whose standing is that every figure is
-// asserted by a test.
+// TODO(port): src/libslic3r/PrintConfig.cpp:10891 -- eight of the `DynamicPrintConfig`
+// transformation methods are still not ported: `update_values_from_single_to_multi`
+// (`:10891-11056`), `update_values_from_multi_to_multi` (`:11057-11247`),
+// `update_values_from_multi_to_multi_2` (`:11248-11393`), `resize_mixed_filament_metadata`
+// (`:11448-11551`), `update_values_to_printer_extruders` (`:11634-11837`),
+// `gather_option_values` (`:11838-11856`),
+// `update_values_to_printer_extruders_for_multiple_filaments` (`:11857-11968`) and
+// `update_filament_config_values_for_multiple_extruders` (`:11969-12088`) -- about 1,060 lines.
+//
+// **These are reachable with this crate's dependencies**, so this marker records work owed and
+// not a dependency gap. The `ConfigOptionVectorBase` cast they need is [`as_vector_mut`]; an
+// earlier pass recorded that as a blocker and was wrong. They are left out because each needs
+// its own oracle comparison through this unit's config-serialization shim before it can be
+// trusted, and transcription with nothing checking it would weaken a module whose standing is
+// that every figure is asserted by a test.
+//
+// The rest of the family **is** ported, each with its own comparison: `set_variant_override`,
+// `normalize_filament_values_to_variants`, `set_filament_dev_options`,
+// `ensure_process_variant_columns`, `normalize_stride2_floats`,
+// `compute_filament_override_value`, `update_static_print_config_from_dynamic`,
+// `update_non_diff_values_to_base_config` and `update_diff_values_to_child_config`.
+// `log_normalize_legacy_vector_size` (`:12129-12138`) is a log statement and nothing else; see
+// its own `// PORT NOTE:`.
 
 // --------------------------------------------------------------------------------------------
 // `ModelConfig` (`PrintConfig.hpp:2615-2690`): a `DynamicPrintConfig` plus a timestamp the
