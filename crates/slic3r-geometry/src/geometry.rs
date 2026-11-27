@@ -641,12 +641,29 @@ fn vec2d_dot(v: Vec2d, w: Vec2d) -> f64 {
     v.x() * w.x() + v.y() * w.y()
 }
 
-/// `v.normalized()` for a plain `Vec2d` -- divides by `v.norm()`, matching Eigen's own behaviour
-/// (including producing a non-finite result for a zero vector, exactly as the vendored call
-/// does) rather than special-casing it.
+/// `v.normalized()` for a plain `Vec2d`.
+///
+/// PORT NOTE: a fuzz-found divergence, fixed rather than merely logged. `Eigen::MatrixBase::
+/// normalized()` (`Eigen/src/Core/Dot.h:92-102` under this pin's dependency superbuild, not
+/// `vendor/OrcaSlicer/` itself -- a linked library's own source, not a numeric constant, so this
+/// is a `// PORT NOTE:` rather than a `// PORT SRC: external:` marker) is not a plain `v /
+/// v.norm()`: `if (z > RealScalar(0)) return n / sqrt(z); else return n;`, where `z` is the
+/// squared norm. A zero vector's squared norm is `0`, so Eigen returns the zero vector
+/// unchanged -- never a `0.0 / 0.0` `NaN`. The first version of this function divided
+/// unconditionally and diverged from the oracle exactly here:
+/// `crates/slic3r-ffi/fuzz/fuzz_targets/slic3r-geometry_geometry.rs` found a query point equal
+/// to the corner vertex `b` (`bq` a zero vector) where `is_point_inside_polygon_corner` returned
+/// `true` through the oracle and `false` through the unconditional-division translation: not a
+/// NaN-propagates-the-same-way case, because the zero-vector branch means no `NaN` is ever
+/// produced on either side for this input.
 fn vec2d_normalized(v: Vec2d) -> Vec2d {
-    let norm = (v.x() * v.x() + v.y() * v.y()).sqrt();
-    Vec2::new(v.x() / norm, v.y() / norm)
+    let squared_norm = v.x() * v.x() + v.y() * v.y();
+    if squared_norm > 0f64 {
+        let norm = squared_norm.sqrt();
+        Vec2::new(v.x() / norm, v.y() / norm)
+    } else {
+        v
+    }
 }
 
 /// `perp(v)` (`Point.hpp:130-134`, `return { -v.y(), v.x() };`) at the one instantiation this
