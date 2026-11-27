@@ -22591,12 +22591,18 @@ mod tests {
     }
 
     /// Every option key this module has transcribed, against the real oracle, on the
-    /// behaviourally load-bearing fields. This is the same comparison the Step 7 proof makes;
-    /// the difference is that the proof additionally requires the registry to be **complete**,
-    /// which it is not yet. So this asserts the two directions that are true today and stay
-    /// true as rows are added -- every transcribed key exists in the oracle, and every
-    /// transcribed key agrees with it exactly -- and reports the shortfall instead of
-    /// asserting it away.
+    /// behaviourally load-bearing fields.
+    ///
+    /// This is the same comparison the Step 7 proof makes, minus the completeness requirement:
+    /// it asserts the two directions that hold however many rows are transcribed -- every
+    /// transcribed key exists in the oracle, and every transcribed key agrees with it exactly
+    /// -- and reports the shortfall rather than asserting it away.
+    ///
+    /// **The registry is complete, so the shortfall it reports is zero.** This test keeps the
+    /// weaker shape because its two directions localise a failure to one side, while
+    /// `print_config_def_matches_the_oracle_exactly` is what asserts completeness. An earlier
+    /// revision of this comment said the registry was "not yet" complete, which was true when
+    /// written and stale by the time review-76-fidelity read it (their finding 8).
     #[test]
     fn every_transcribed_option_agrees_exactly_with_the_oracle() {
         let oracle_keys: Vec<String> = ora::oracle_option_keys()
@@ -22738,18 +22744,17 @@ mod tests {
     /// the oracle's surviving key is one this registry *does* know, which is exactly the set
     /// where the two sides must agree, and which grows to everything as rows are added.
     ///
-    /// **What that deferral excludes today, stated so the case count is not read as more than it
-    /// is.** A branch whose key the oracle keeps and this registry has not transcribed is
-    /// deferred whatever this module does with it, so the value-rewriting branches of
-    /// `filament_type` (the `"ASA-Aero"` rebuild), `support_type`, `extruder_type`,
-    /// `enable_power_loss_recovery`, `ensure_vertical_shell_thickness` and `timelapse_type` are
-    /// **not** covered here yet, and neither is a rename whose target is untranscribed
-    /// (`support_material_angle` -> `support_angle`, for one). What the case count does cover is
-    /// the obsolete-key clearing, the `has()`-miss clearing, and every branch whose surviving key
-    /// is among the transcribed rows -- `curr_bed_type` -> `"Supertack Plate"` and
-    /// `overhang_fan_threshold` -> `"10%"` among them. The wider throwaway probe in
-    /// `oracle/.cache/tmp/` is what reaches the rest today, by attributing each difference instead
-    /// of deferring it; this test takes over from it as rows land.
+    /// **The deferral now excludes nothing**, and the test asserts that rather than printing
+    /// it: the registry holds all 881 keys, so no branch's surviving key is untranscribed and
+    /// the shortfall is zero. That includes the value-rewriting branches an earlier revision of
+    /// this comment listed as uncovered -- `filament_type`'s `"ASA-Aero"` rebuild,
+    /// `support_type`, `extruder_type`, `enable_power_loss_recovery`,
+    /// `ensure_vertical_shell_thickness`, `timelapse_type` -- and renames such as
+    /// `support_material_angle` -> `support_angle`, alongside the obsolete-key clearing, the
+    /// `has()`-miss clearing, `curr_bed_type` -> `"Supertack Plate"` and
+    /// `overhang_fan_threshold` -> `"10%"`. The throwaway probe that reached those before the
+    /// registry was complete is gone; this test covers them. review-76-fidelity caught the
+    /// stale list as part of their finding 8.
     #[test]
     fn handle_legacy_matches_the_oracle() {
         let mut keys: Vec<String> = ora::oracle_option_keys()
