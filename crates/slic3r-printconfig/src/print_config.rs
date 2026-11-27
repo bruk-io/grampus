@@ -24,8 +24,9 @@
 //! committed test in this file.
 //!
 //! **`L(s)` is the identity function, and `L_CONTEXT(s, context)` returns its first argument.**
-//! `PrintConfig.cpp:90` is `#define L(s) (s)` (`:91` is
-//! `#define _(s) Slic3r::I18N::translate(s)`, which this unit never uses), and it shadows
+//! `PrintConfig.cpp:91` is `#define L(s) (s)` (`:92` is
+//! `#define _(s) Slic3r::I18N::translate(s)`, which this unit never uses; `:90` is the second
+//! line of the comment above them), and it shadows
 //! nothing: `I18N.hpp:31` already defines `L` as `const char* L(const char* s) { return s; }`
 //! for the whole of libslic3r, and only `_u8L` (`I18N.hpp:33`) translates. So every
 //! `def->label = L("...")` and `->tooltip = L("...")` in this unit is the literal string with
@@ -20100,6 +20101,62 @@ mod tagged {
             .map(|o| &o.values)
     }
 
+    pub fn bools_mut(opt: &mut dyn slic3r_config::config::ConfigOption) -> Option<&mut Vec<u8>> {
+        if opt.option_type() != ConfigOptionType::Bools {
+            return None;
+        }
+        let any = opt.as_any_mut();
+        if any.is::<ConfigOptionBools>() {
+            return any
+                .downcast_mut::<ConfigOptionBools>()
+                .map(|o| &mut o.values);
+        }
+        any.downcast_mut::<ConfigOptionBoolsNullable>()
+            .map(|o| &mut o.values)
+    }
+
+    pub fn enums_mut(opt: &mut dyn slic3r_config::config::ConfigOption) -> Option<&mut Vec<i32>> {
+        if opt.option_type() != ConfigOptionType::Enums {
+            return None;
+        }
+        let any = opt.as_any_mut();
+        if any.is::<ConfigOptionEnumsGeneric>() {
+            return any
+                .downcast_mut::<ConfigOptionEnumsGeneric>()
+                .map(|o| &mut o.values);
+        }
+        any.downcast_mut::<ConfigOptionEnumsGenericNullable>()
+            .map(|o| &mut o.values)
+    }
+
+    pub fn percents(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<f64>> {
+        if opt.option_type() != ConfigOptionType::Percents {
+            return None;
+        }
+        let any = opt.as_any();
+        if let Some(o) = any.downcast_ref::<ConfigOptionPercents>() {
+            return Some(&o.values);
+        }
+        any.downcast_ref::<ConfigOptionPercentsNullable>()
+            .map(|o| &o.values)
+    }
+
+    pub fn percents_mut(
+        opt: &mut dyn slic3r_config::config::ConfigOption,
+    ) -> Option<&mut Vec<f64>> {
+        if opt.option_type() != ConfigOptionType::Percents {
+            return None;
+        }
+        let any = opt.as_any_mut();
+        if any.is::<ConfigOptionPercents>() {
+            return any
+                .downcast_mut::<ConfigOptionPercents>()
+                .map(|o| &mut o.values);
+        }
+        any.downcast_mut::<ConfigOptionPercentsNullable>()
+            .map(|o| &mut o.values)
+    }
+
     /// `ConfigOptionStrings` has no nullable instantiation, so this is the plain downcast; it
     /// is here so every arm of the caller reads the same way.
     pub fn strings(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<String>> {
@@ -20150,6 +20207,150 @@ mod tagged {
         }
         any.downcast_mut::<ConfigOptionFloatsOrPercentsNullable>()
             .map(|o| &mut o.values)
+    }
+}
+
+/// `ConfigOptionVector<T>::apply_override(const ConfigOption *rhs, std::vector<int>
+/// &default_index)` (`Config.hpp:767-815`).
+///
+/// **This exists because `slic3r-config`'s own `apply_override` cannot do the one thing the
+/// function is for.** The vendored dispatch is tag-checked and then `static_cast`:
+/// `if (rhs->type() != this->type()) throw; auto rhs_vec = static_cast<const
+/// ConfigOptionVector<T>*>(rhs);` (`:770-772`). `slic3r-config`'s implementation instead does
+/// `rhs.as_any().downcast_ref::<Self>()` and returns `Err` on anything else, which is
+/// type-exact -- the same slip [`tagged`] documents, one layer down.
+///
+/// The consequence is not cosmetic: `apply_override`'s entire purpose is to override a
+/// **non-nullable** machine option from a **nullable** filament option, which is exactly the
+/// pair a type-exact downcast rejects. So `slic3r-config`'s whole nullable-rhs branch
+/// (`Config.hpp:773-814`, and `vector_apply_override`'s transcription of it) is unreachable
+/// through its own `apply_override`, and every call returns `Err` instead of overriding.
+/// Measured, not reasoned: `compute_filament_override_value` reported no change for
+/// `long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+///
+/// **What is needed** is the tag check in `slic3r-config`'s `apply_override`, and that crate's
+/// private `vector_apply_override` already holds the correct body -- the fix there is the
+/// dispatch, not the logic. This branch may not edit `slic3r-config` (`just guard` scopes it),
+/// so the body is transcribed here and the oracle comparison over
+/// `compute_filament_override_value` is what proves the transcription right. This is the third
+/// gap in that crate this one unit compensates for internally; the pull request body names all
+/// three together, because three is a pattern and not three coincidences.
+fn apply_override_tagged(
+    target: &mut dyn slic3r_config::config::ConfigOption,
+    rhs: &dyn slic3r_config::config::ConfigOption,
+    default_index: &[i32],
+) -> Result<bool, slic3r_config::config::ConfigError> {
+    use slic3r_config::config::ConfigError;
+    if target.nullable() {
+        // `:768-769`.
+        return Err(ConfigError::Configuration(
+            "Cannot override a nullable ConfigOption.".to_string(),
+        ));
+    }
+    if rhs.option_type() != target.option_type() {
+        // `:770-771` -- the **tag** comparison, which is the whole point of this function.
+        return Err(ConfigError::Configuration(
+            "ConfigOptionVector.apply_override() applied to different types.".to_string(),
+        ));
+    }
+    let rhs_nullable = rhs.nullable();
+    // `rhs_vec->is_nil(i)` (`:800`). `ConfigOptionVectorBase::is_nil_at` is the port of it and
+    // is reachable for either instantiation through [`as_vector`], which matches on
+    // `(type, nullable)`.
+    let rhs_is_nil: Box<dyn Fn(usize) -> bool + '_> = match as_vector(rhs) {
+        Some(v) => Box::new(move |i| v.is_nil_at(i)),
+        None => Box::new(|_| false),
+    };
+
+    /// `:773-814`, transcribed once and instantiated per value type by the caller below.
+    fn run<T: PartialEq + Clone>(
+        self_values: &mut Vec<T>,
+        rhs_values: &[T],
+        rhs_nullable: bool,
+        rhs_is_nil: &dyn Fn(usize) -> bool,
+        default_index: &[i32],
+    ) -> bool {
+        if !rhs_nullable {
+            // "Overridding a non-nullable object with another non-nullable object."
+            if self_values != rhs_values {
+                self_values.clear();
+                self_values.extend_from_slice(rhs_values);
+                return true;
+            }
+            return false;
+        }
+
+        let cnt = self_values.len().min(rhs_values.len());
+        if cnt < 1 {
+            return false;
+        }
+
+        let default_value = self_values.clone();
+
+        // The `this->values.empty()` arm (`:788-789`) cannot run: `cnt < 1` above already
+        // returned for an empty `self_values`. Only the live arm is transcribed, which is also
+        // how `slic3r-config` reads it.
+        let v = self_values[0].clone();
+        self_values.resize(rhs_values.len(), v);
+
+        // The vendored `assert(default_index.size() == rhs_vec->size())` (`:795`) is
+        // `<cassert>`'s and compiled out of the oracle's Release build; the bounds test inside
+        // the loop is what actually guards the indexing, so nothing stands in its place.
+        let mut modified = false;
+        for i in 0..rhs_values.len() {
+            if !rhs_is_nil(i) {
+                self_values[i] = rhs_values[i].clone();
+                modified = true;
+            } else {
+                // "Orca: a negative slot (failed variant lookup) must not silently collapse
+                // the whole array to the first slot's value -- the int-vs-size_t comparison
+                // used to promote -1 past the bounds check. Keep the slot's own value
+                // (get_at-style clamp) when no valid index is available."
+                //
+                // The `else` arm deliberately does **not** set `modified`.
+                let idx = default_index.get(i).copied().unwrap_or(-1);
+                if idx >= 0 && (idx as usize) < default_value.len() {
+                    self_values[i] = default_value[idx as usize].clone();
+                } else {
+                    self_values[i] = default_value[i.min(default_value.len() - 1)].clone();
+                }
+            }
+        }
+        modified
+    }
+
+    use slic3r_config::config::ConfigOptionType as T;
+    // Each arm reads both sides through [`tagged`], so either instantiation of the pair is
+    // reached -- which is what the vendored `static_cast` achieves.
+    macro_rules! arm {
+        ($get:ident, $get_mut:ident) => {{
+            let Some(rhs_values) = tagged::$get(rhs).cloned() else {
+                return Ok(false);
+            };
+            let Some(self_values) = tagged::$get_mut(target) else {
+                return Ok(false);
+            };
+            Ok(run(
+                self_values,
+                &rhs_values,
+                rhs_nullable,
+                rhs_is_nil.as_ref(),
+                default_index,
+            ))
+        }};
+    }
+    match target.option_type() {
+        T::Floats => arm!(floats, floats_mut),
+        T::Ints => arm!(ints, ints_mut),
+        T::Bools => arm!(bools, bools_mut),
+        T::Percents => arm!(percents, percents_mut),
+        T::FloatsOrPercents => arm!(floats_or_percents, floats_or_percents_mut),
+        T::Enums => arm!(enums, enums_mut),
+        T::Strings => arm!(strings, strings_mut),
+        // `ConfigOptionVector<T>::apply_override` is only instantiated for the vector types
+        // above; a scalar reaches `ConfigOption::apply_override`'s base at `Config.hpp:314`
+        // instead, which this unit never calls.
+        _ => Ok(false),
     }
 }
 
@@ -21068,7 +21269,10 @@ pub fn compute_filament_override_value(
     let opt_new_filament = substitute.unwrap_or(opt_new_filament);
 
     let mut opt_copy = opt_new_machine.clone_box();
-    let _ = opt_copy.apply_override(opt_new_filament, f_map_indices);
+    // `opt_copy->apply_override(opt_new_filament, f_map_indices)` (`:12381`) goes through
+    // [`apply_override_tagged`], not `slic3r-config`'s own `apply_override`, which rejects the
+    // nullable rhs this call always has. The reason is recorded in full at that function.
+    let _ = apply_override_tagged(opt_copy.as_mut(), opt_new_filament, f_map_indices);
     // `*opt_old_machine != *opt_copy` is `ConfigOption::operator==`'s negation, which
     // `eq_dyn` is. An incompatible pair is `!=` at the pin (the vendored `operator==` returns
     // false for a type mismatch), which is what the `Err` arm reads as.
@@ -23786,14 +23990,31 @@ mod tests {
         for entry in entries {
             let (key, value) = entry.split_once('=').expect("every probe is key=value");
             let def = print_config_def().def.get(key);
+            // A `coEnums` key is attached by hand, because `slic3r-config`'s
+            // `create_default_option` has no `coEnum`/`coEnums` arm and so hands back an
+            // option with no key map -- the gap `StaticCache::finalize` compensates for and
+            // the pull request body names. **The instantiation is taken from the registry
+            // default**, which is what the oracle's own `set_deserialize` does
+            // (`optptr(key, true)` -> `create_default_option()` -> clone of the default), so a
+            // key whose default is `ConfigOptionEnumsGenericNullable` accepts `"nil"` here
+            // exactly as it does there.
             if def.is_some_and(|d| d.option_type == ConfigOptionType::Enums) {
                 let def = def.expect("checked above");
-                let mut opt = ConfigOptionEnumsGeneric::new(def.enum_keys_map);
+                let nullable = def
+                    .default_value
+                    .as_ref()
+                    .is_some_and(|d| d.as_any().is::<ConfigOptionEnumsGenericNullable>());
+                let mut opt: Box<dyn slic3r_config::config::ConfigOption> = if nullable {
+                    Box::new(ConfigOptionEnumsGenericNullable::new(def.enum_keys_map))
+                } else {
+                    Box::new(ConfigOptionEnumsGeneric::new(def.enum_keys_map))
+                };
                 assert!(
-                    slic3r_config::config::ConfigOption::deserialize(&mut opt, value, false),
-                    "{key}={value}: a properly-keyed coEnums option should deserialize"
+                    opt.deserialize(value, false),
+                    "{key}={value}: a properly-keyed coEnums option should deserialize \
+                     (nullable={nullable})"
                 );
-                config.base.set_key_value(key, Box::new(opt));
+                config.base.set_key_value(key, opt);
                 continue;
             }
             slic3r_config::config::ConfigBase::set_deserialize(
@@ -24442,6 +24663,236 @@ mod tests {
             "every case was skipped; the comparison measured nothing"
         );
         println!("base and child merges: {checked} case(s) held to exact equality");
+    }
+
+    /// `compute_filament_override_value` (`PrintConfig.cpp:12358-12390`), held to exact equality
+    /// against the oracle on the `diff_keys` it appends and the `filament_overrides` config it
+    /// writes.
+    ///
+    /// The function has external linkage, so the shim calls it directly, and it is driven the
+    /// way `Print.cpp:4788-4796` drives it: all three options are read off two configs rather
+    /// than synthesized, so the `dynamic_cast<const ConfigOptionBoolsNullable*>` at `:12366`
+    /// and its `ConfigOptionFloatsNullable` twin at `:12374` see the instantiations the real
+    /// caller hands them.
+    ///
+    /// The probes walk all 20 `extruder_retract_keys()` keys and cross them with: machine
+    /// values equal and unequal (the `changed` branch both ways), a nil and a non-nil filament
+    /// override, the two special keys with `enable_long_retraction_when_cut` on and off (the
+    /// two early blocks at `:12364-12378`), and `f_map_indices` empty, short and matching.
+    ///
+    /// **One of these cases pins a vendored bug this port transcribes rather than fixes.** The
+    /// `retraction_distances_when_cut` block at `:12372-12378` pushes its nil values into
+    /// `opt_long_retraction_default` -- the *other* local, declared at `:12364` for the
+    /// `coBools` key -- and then points `opt_new_filament` at `opt_retraction_distance_default`,
+    /// which is therefore still empty. So that key's override is applied from an empty vector
+    /// whenever the gate is off. The comparison is what makes this a measured fact rather than
+    /// a reading of the source.
+    #[test]
+    fn print_config_compute_filament_override_value_matches_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `PrintConfigDef::init_extruder_option_keys`'s `m_extruder_retract_keys`
+        // (`PrintConfig.cpp:9030-9051`), in the vendored order.
+        let keys = [
+            "deretraction_speed",
+            "long_retractions_when_cut",
+            "retract_after_wipe",
+            "retract_before_wipe",
+            "retract_length_toolchange",
+            "retract_lift_above",
+            "retract_lift_below",
+            "retract_lift_enforce",
+            "retract_restart_extra",
+            "retract_restart_extra_toolchange",
+            "retract_when_changing_layer",
+            "retraction_distances_when_cut",
+            "retraction_length",
+            "retraction_minimum_travel",
+            "retraction_speed",
+            "travel_slope",
+            "wipe",
+            "wipe_distance",
+            "z_hop",
+            "z_hop_types",
+        ];
+
+        // A bare `full_print_config()` has no `filament_*` key: those are registry keys the
+        // override loop at `PrintConfig.cpp:8780-8812` defines, and none is a field of any
+        // `StaticPrintConfig` class, so `DynamicPrintConfig::option` returns null for them
+        // without `create`. The real caller's `m_full_print_config` has them because a filament
+        // preset has been applied, so each probe supplies the one it needs -- which is also
+        // what makes the `dynamic_cast`s at `:12366`/`:12374` see a nullable instantiation.
+        let filament_value = |key: &str| -> Vec<String> {
+            let Some(def) = print_config_def().def.get(&format!("filament_{key}")) else {
+                return Vec::new();
+            };
+            let non_nil = match def.option_type {
+                ConfigOptionType::Bools => "1".to_string(),
+                ConfigOptionType::Ints => "2".to_string(),
+                ConfigOptionType::Enums => def
+                    .enum_values
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "0".to_string()),
+                _ => "1.5".to_string(),
+            };
+            // Both a nil and a non-nil override, since they take the two arms of the loop at
+            // `Config.hpp:799-813`.
+            vec!["nil".to_string(), non_nil]
+        };
+
+        // The `enable_long_retraction_when_cut` value drives the two early blocks.
+        // `LongRectrationLevel::EnableFilament` is 2, so 0 and 1 take the "ignore the value in
+        // filament params" path at `:12364-12378`.
+        let gates = ["0", "2"];
+        // The "old machine" config: equal to the full one (nothing changes) or differing.
+        let old_variants: Vec<Vec<String>> = vec![
+            vec![],
+            probe(&["retraction_length=9.5", "retraction_speed=11", "z_hop=4.25"]),
+            probe(&[
+                "long_retractions_when_cut=1",
+                "retraction_distances_when_cut=7",
+            ]),
+        ];
+        let index_sets: Vec<Vec<i32>> = vec![vec![], vec![0], vec![0, 0], vec![0, 1], vec![-1, 0]];
+
+        let mut full_variants: Vec<(String, Vec<String>)> = Vec::new();
+        for key in keys {
+            for gate in gates {
+                for fv in filament_value(key) {
+                    full_variants.push((
+                        key.to_string(),
+                        vec![
+                            format!("enable_long_retraction_when_cut={gate}"),
+                            format!("filament_{key}={fv}"),
+                        ],
+                    ));
+                }
+            }
+        }
+        // 19 of the 20, not all 20: `travel_slope` is in `extruder_retract_keys()`
+        // (`PrintConfig.cpp:9046`) but not in `filament_extruder_override_keys`
+        // (`:96-123`), so no `filament_travel_slope` is ever defined and the vendored caller's
+        // own `if (opt_new_filament)` guard (`Print.cpp:4794`) skips it. Asserted rather than
+        // left implicit, so a key silently losing its override counterpart fails here.
+        assert_eq!(
+            full_variants.len(),
+            (keys.len() - 1) * gates.len() * 2,
+            "19 of the 20 extruder_retract_keys have a filament_* registry key; only \
+             travel_slope should lack one"
+        );
+        assert!(
+            print_config_def()
+                .def
+                .get("filament_travel_slope")
+                .is_none(),
+            "travel_slope is the one extruder_retract_key with no filament_* counterpart"
+        );
+
+        for (key, full_kv) in &full_variants {
+            let key = key.as_str();
+            for old_kv in &old_variants {
+                for indices in &index_sets {
+                    {
+                        let theirs: Vec<String> = ora::oracle_compute_filament_override_value(
+                            full_kv, old_kv, indices, key,
+                        )
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect();
+                        let status = theirs.first().map(String::as_str).unwrap_or("");
+                        if status == "<threw>" {
+                            continue;
+                        }
+                        assert_ne!(
+                            status, "<absent>",
+                            "every probe supplies its own filament_* key, so no option \
+                             should be absent: key={key} full={full_kv:?}"
+                        );
+                        assert_ne!(status, "<refused>", "refused: cfov {full_kv:?} {old_kv:?}");
+
+                        let full = config_on("full", full_kv);
+                        let old = config_on("full", old_kv);
+                        fixtures_agree("full", full_kv, &full);
+                        fixtures_agree("full", old_kv, &old);
+
+                        use slic3r_config::config::ConfigOptionResolver as Resolver;
+                        let filament_key = format!("filament_{key}");
+                        let (Some(opt_new_filament), Some(opt_new_machine), Some(opt_old_machine)) = (
+                            Resolver::option(&full, &filament_key),
+                            Resolver::option(&full, key),
+                            Resolver::option(&old, key),
+                        ) else {
+                            continue;
+                        };
+                        let opt_new_filament = opt_new_filament.clone_box();
+                        let opt_new_machine = opt_new_machine.clone_box();
+                        let opt_old_machine = opt_old_machine.clone_box();
+
+                        let mut diff_keys: Vec<String> = Vec::new();
+                        let mut filament_overrides = DynamicPrintConfig::new();
+                        let mut f_map_indices = indices.clone();
+                        compute_filament_override_value(
+                            key,
+                            opt_old_machine.as_ref(),
+                            opt_new_machine.as_ref(),
+                            opt_new_filament.as_ref(),
+                            &full,
+                            &mut diff_keys,
+                            &mut filament_overrides,
+                            &mut f_map_indices,
+                        );
+
+                        let mut mine = vec!["<ok>".to_string(), diff_keys.join(",")];
+                        mine.extend(serialize(&filament_overrides));
+                        assert_eq!(
+                            mine, theirs,
+                            "compute_filament_override_value(key={key}, full={full_kv:?}, \
+                             old={old_kv:?}, indices={indices:?})"
+                        );
+                        checked += 1;
+                    }
+                }
+            }
+        }
+
+        // The `changed` branch really is taken both ways, so the comparison is not passing
+        // only on the "nothing to do" path.
+        let changed = ora::oracle_compute_filament_override_value(
+            &probe(&[
+                "enable_long_retraction_when_cut=2",
+                "filament_retraction_length=1.5",
+            ]),
+            &probe(&["retraction_length=9.5"]),
+            &vec![0],
+            "retraction_length",
+        );
+        assert_eq!(
+            changed.first().map(|s| s.to_string()),
+            Some("<ok>".to_string()),
+            "the changed probe should reach the function, got {changed:?}"
+        );
+        assert!(
+            changed.len() > 1 && !changed[1].is_empty(),
+            "a differing machine value should append to diff_keys, got {changed:?}"
+        );
+        let unchanged = ora::oracle_compute_filament_override_value(
+            &probe(&[
+                "enable_long_retraction_when_cut=2",
+                "filament_retraction_length=nil",
+            ]),
+            &vec![],
+            &vec![0],
+            "retraction_length",
+        );
+        assert_eq!(
+            unchanged.get(1).map(|s| s.to_string()),
+            Some(String::new()),
+            "a nil override onto an identical machine value should append nothing, got {unchanged:?}"
+        );
+
+        assert!(checked > 0, "every case was skipped");
+        println!("compute_filament_override_value: {checked} case(s) held to exact equality");
     }
 
     /// `update_values_from_single_to_multi` (`PrintConfig.cpp:10891-10993`), held to exact

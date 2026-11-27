@@ -1126,6 +1126,59 @@ oracle_update_values_from_single_to_multi(rust::Str base, const rust::Vec<rust::
     return out;
 }
 
+rust::Vec<rust::String> oracle_compute_filament_override_value(
+    const rust::Vec<rust::String> &full_kv, const rust::Vec<rust::String> &old_kv,
+    const rust::Vec<int32_t> &f_map_indices, rust::Str opt_key) {
+    rust::Vec<rust::String> out;
+    bool ok_a = false, ok_b = false;
+    // Both configs start from a full print config, as `Print.cpp:4790-4792` has them: the
+    // "machine" option comes off `m_config` and the two new ones off `m_full_print_config`.
+    Slic3r::DynamicPrintConfig full = config_from_base(rust::Str("full"), full_kv, ok_a);
+    Slic3r::DynamicPrintConfig old = config_from_base(rust::Str("full"), old_kv, ok_b);
+    if (!ok_a || !ok_b) {
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+
+    const std::string key(opt_key);
+    Slic3r::t_config_option_keys diff_keys;
+    Slic3r::DynamicPrintConfig filament_overrides;
+    std::vector<int> indices(f_map_indices.begin(), f_map_indices.end());
+
+    try {
+        const Slic3r::ConfigOption *opt_new_filament = full.option("filament_" + key);
+        const Slic3r::ConfigOption *opt_new_machine = full.option(key);
+        const Slic3r::ConfigOption *opt_old_machine = old.option(key);
+        // `Print.cpp:4794` guards only on `opt_new_filament`; the other two are guarded here
+        // as well, because this shim can be handed a key the caller's loop never would and an
+        // unguarded null would reach `opt_new_machine->clone()` at `:12380`.
+        if (opt_new_filament == nullptr || opt_new_machine == nullptr ||
+            opt_old_machine == nullptr) {
+            out.push_back(rust::String("<absent>"));
+            return out;
+        }
+        Slic3r::compute_filament_override_value(key, opt_old_machine, opt_new_machine,
+                                                opt_new_filament, full, diff_keys,
+                                                filament_overrides, indices);
+    } catch (const std::exception &) {
+        out.push_back(rust::String("<threw>"));
+        return out;
+    }
+
+    out.push_back(rust::String("<ok>"));
+    std::string joined;
+    for (const std::string &k : diff_keys) {
+        if (!joined.empty())
+            joined += ",";
+        joined += k;
+    }
+    out.push_back(rust::String(joined));
+    for (rust::String &entry : serialize_config(filament_overrides)) {
+        out.push_back(std::move(entry));
+    }
+    return out;
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

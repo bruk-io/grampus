@@ -367,6 +367,16 @@ mod ffi {
             key_set2: &Vec<String>,
         ) -> Vec<String>;
 
+        /// `compute_filament_override_value` (`PrintConfig.cpp:12358-12390`) over one
+        /// `extruder_retract_keys()` key, driven as `Print.cpp:4788-4796` drives it: a
+        /// status, the `diff_keys` appended, then the `filament_overrides` config.
+        fn oracle_compute_filament_override_value(
+            full_kv: &Vec<String>,
+            old_kv: &Vec<String>,
+            f_map_indices: &Vec<i32>,
+            opt_key: &str,
+        ) -> Vec<String>;
+
         /// `update_values_from_single_to_multi` (`PrintConfig.cpp:10891-10993`): the
         /// method's `int` return as the first entry, then the receiver serialized whole.
         fn oracle_update_values_from_single_to_multi(
@@ -447,12 +457,12 @@ mod ffi {
 }
 
 pub use ffi::{
-    oracle_bed_shape_of_sla_defaults, oracle_config_from, oracle_config_from_base,
-    oracle_config_index_base, oracle_convert_to_nvt_type, oracle_custom_gcode_placeholder_keys,
-    oracle_custom_gcode_placeholders, oracle_dynamic_from_static_serialized,
-    oracle_extruder_ams_count_roundtrip, oracle_extruder_index_of_defaults,
-    oracle_extruder_nozzle_stats_roundtrip, oracle_extruder_nozzle_volume_count,
-    oracle_extruder_option_keys, oracle_extruder_retract_keys,
+    oracle_bed_shape_of_sla_defaults, oracle_compute_filament_override_value, oracle_config_from,
+    oracle_config_from_base, oracle_config_index_base, oracle_convert_to_nvt_type,
+    oracle_custom_gcode_placeholder_keys, oracle_custom_gcode_placeholders,
+    oracle_dynamic_from_static_serialized, oracle_extruder_ams_count_roundtrip,
+    oracle_extruder_index_of_defaults, oracle_extruder_nozzle_stats_roundtrip,
+    oracle_extruder_nozzle_volume_count, oracle_extruder_option_keys, oracle_extruder_retract_keys,
     oracle_extruder_supported_nozzle_volume_types, oracle_extruder_variant_string,
     oracle_filament_option_keys, oracle_filament_retract_keys, oracle_filament_type_probe,
     oracle_find_variant_index, oracle_full_print_config_serialized, oracle_handle_legacy,

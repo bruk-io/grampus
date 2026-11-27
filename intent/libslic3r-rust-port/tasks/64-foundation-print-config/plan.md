@@ -215,8 +215,17 @@ have.
 
 ## `L(s)` is the identity function in this file
 
-`PrintConfig.cpp:90` -- `#define L(s) (s)` -- is this file's own definition (corrected from `:91`,
-which is `#define _(s) Slic3r::I18N::translate(s)`). It does not shadow a gettext-backed `L`:
+`PrintConfig.cpp:91` -- `#define L(s) (s)` -- is this file's own definition. `:92` is
+`#define _(s) Slic3r::I18N::translate(s)`, which this unit never uses, and `:90` is the second
+line of the `//!` comment above them.
+
+An earlier revision of this plan said `:90` and called that a correction of `:91`. **That was
+wrong in both halves and the original `:91` was right**; `awk 'NR>=89 && NR<=92'` over the
+vendored file is the authority, and it prints the comment at `:89-90`, `L` at `:91` and `_` at
+`:92`. The wrong citation then spread from here into the module's header, which had been
+correct. Both are fixed.
+
+It does not shadow a gettext-backed `L`:
 `I18N.hpp:31` defines `L` for the whole of libslic3r as
 `const char* L(const char* s) { return s; }`, the identity extraction marker, and only `_u8L`
 (`I18N.hpp:33`) goes through `Slic3r::I18N::translate`. So every `def->label = L("...")`,

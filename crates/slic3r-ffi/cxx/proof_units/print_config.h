@@ -266,6 +266,15 @@ oracle_update_non_diff_values_to_base_config(rust::Str base,
                                              const rust::Vec<rust::String> &key_set1,
                                              const rust::Vec<rust::String> &key_set2);
 
+// `compute_filament_override_value` (`PrintConfig.cpp:12358-12390`) over one
+// `extruder_retract_keys()` key, driven exactly as `Print.cpp:4788-4796` drives it: the three
+// options are read off the two configs rather than synthesized, so the `dynamic_cast`s at
+// `:12366`/`:12374` see the instantiations the real caller gives them. Returns a status, then
+// the `diff_keys` the call appended, then the `filament_overrides` config it wrote.
+rust::Vec<rust::String> oracle_compute_filament_override_value(
+    const rust::Vec<rust::String> &full_kv, const rust::Vec<rust::String> &old_kv,
+    const rust::Vec<int32_t> &f_map_indices, rust::Str opt_key);
+
 // `update_values_from_single_to_multi` (`PrintConfig.cpp:10891-10993`): the receiver handed
 // back whole, with the method's own `int` return prefixed as the first entry.
 rust::Vec<rust::String>
