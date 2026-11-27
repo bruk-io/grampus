@@ -19496,6 +19496,417 @@ pub fn min_object_distance(cfg: &dyn slic3r_config::config::ConfigBase) -> f64 {
     ret
 }
 
+/// `boost::split(out, s, boost::is_any_of(seps), boost::token_compress_on)`, which
+/// `PrintConfig.cpp` uses on the comma-separated variant lists.
+///
+/// `token_compress_on` merges **adjacent** separators into one, so `"a,,b"` yields two tokens;
+/// it does not drop a leading or trailing empty token, so `",a"` yields `["", "a"]` and `""`
+/// yields `[""]`. Rust's `str::split` keeps every empty token, so splitting on *runs* of
+/// separators is what reproduces it. Written out rather than reached for from a crate, because
+/// `slic3r-printconfig` has no dependency that carries it.
+fn boost_split_compress(s: &str, seps: &[char]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut last_was_sep = false;
+    for ch in s.chars() {
+        if seps.contains(&ch) {
+            if !last_was_sep {
+                out.push(std::mem::take(&mut current));
+            }
+            last_was_sep = true;
+            continue;
+        }
+        current.push(ch);
+        last_was_sep = false;
+    }
+    out.push(current);
+    out
+}
+
+impl DynamicPrintConfig {
+    /// `void normalize_fdm_1()` (`PrintConfig.cpp:10428-10478`): the first of the two halves
+    /// `normalize_fdm` is split into so `Print::Apply` can call them one at a time.
+    pub fn normalize_fdm_1(&mut self) {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+
+        if Resolver::has(self, "extruder") {
+            let extruder = Resolver::option(self, "extruder")
+                .map(|o| o.get_int())
+                .transpose()
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+            self.base.erase("extruder");
+            if extruder != 0 {
+                // Each of the six is set only when it is absent or still 0.
+                for key in [
+                    "sparse_infill_filament_id",
+                    "outer_wall_filament_id",
+                    "inner_wall_filament_id",
+                    "internal_solid_filament_id",
+                    "top_surface_filament_id",
+                    "bottom_surface_filament_id",
+                ] {
+                    let is_zero = !Resolver::has(self, key)
+                        || Resolver::option(self, key)
+                            .and_then(|o| o.get_int().ok())
+                            .is_some_and(|v| v == 0);
+                    if is_zero {
+                        if let Ok(Some(opt)) =
+                            slic3r_config::config::ConfigBase::optptr_mut(self, key, true)
+                        {
+                            let _ = opt.set_int(extruder);
+                        }
+                    }
+                }
+                // "Don't propagate the current extruder to support. For non-soluble supports,
+                // the default "0" extruder means to use the active extruder, for soluble
+                // supports one certainly does not want to set the extruder to non-soluble."
+                // -- the two `support_filament` assignments are commented out at the pin
+                // (`PrintConfig.cpp:10451-10454`) and are not revived here.
+            }
+        }
+
+        let spiral_mode = Resolver::has(self, "spiral_mode")
+            && self
+                .base
+                .opt::<ConfigOptionBool>("spiral_mode", true)
+                .is_some_and(|o| o.value);
+        if spiral_mode {
+            // "this should be actually done only on the spiral layers instead of all"
+            if let Some(opt) = self
+                .base
+                .opt::<ConfigOptionBools>("retract_when_changing_layer", true)
+            {
+                // `assign(size(), false)` keeps the length and sets every value.
+                let n = opt.values.len();
+                opt.values = vec![0; n];
+            }
+            // "Disable retract on layer change also for filament overrides."
+            if let Some(opt) = self
+                .base
+                .opt::<ConfigOptionBoolsNullable>("filament_retract_when_changing_layer", true)
+            {
+                let n = opt.values.len();
+                opt.values = vec![0; n];
+            }
+            if let Some(opt) = self.base.opt::<ConfigOptionInt>("wall_loops", true) {
+                opt.value = 1;
+            }
+            if let Some(opt) = self
+                .base
+                .opt::<ConfigOptionBool>("alternate_extra_wall", true)
+            {
+                opt.value = false;
+            }
+            if let Some(opt) = self.base.opt::<ConfigOptionInt>("top_shell_layers", true) {
+                opt.value = 0;
+            }
+            if let Some(opt) = self
+                .base
+                .opt::<ConfigOptionPercent>("sparse_infill_density", true)
+            {
+                opt.value = 0_f64;
+            }
+        }
+
+        if let Some(opt_gcode_resolution) = self.base.opt::<ConfigOptionFloat>("resolution", false)
+        {
+            // "Resolution will be above 1um."
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:10475
+            opt_gcode_resolution.value = opt_gcode_resolution.value.max(0.001);
+        }
+    }
+
+    /// `bool is_using_different_extruders()` (`PrintConfig.cpp:10773-10800`): whether any two
+    /// extruders differ in extruder type or nozzle volume type.
+    pub fn is_using_different_extruders(&self) -> bool {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let enums = |key: &str| -> Option<&ConfigOptionEnumsGeneric> {
+            Resolver::option(self, key).and_then(|o| o.as_any().downcast_ref())
+        };
+        let Some(nozzle_diameters_opt) = Resolver::option(self, "nozzle_diameter")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloats>())
+        else {
+            return false;
+        };
+        let size = nozzle_diameters_opt.values.len();
+        if size <= 1 {
+            return false;
+        }
+        let (Some(extruder_type_opt), Some(nozzle_volume_type_opt)) =
+            (enums("extruder_type"), enums("nozzle_volume_type"))
+        else {
+            return false;
+        };
+        // The vendored body casts each value to its enum and compares; the cast is the identity
+        // on the stored `int`, so the values are compared directly here. `get_at` on an empty
+        // vector is the vendored `.front()` of an empty one -- undefined there -- so an empty
+        // option is left to the length guard above rather than indexed.
+        if extruder_type_opt.values.is_empty() || nozzle_volume_type_opt.values.is_empty() {
+            return false;
+        }
+        let extruder_type = extruder_type_opt.get_at(0);
+        let nozzle_volume_type = nozzle_volume_type_opt.get_at(0);
+        for index in 1..size {
+            if extruder_type_opt.get_at(index) != extruder_type
+                || nozzle_volume_type_opt.get_at(index) != nozzle_volume_type
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// `bool has_multi_variant_filament() const` (`PrintConfig.cpp:10802-10807`): "Whether any
+    /// filament defines more than one variant (`filament_extruder_variant` longer than
+    /// `filament_diameter`). Its variants then have to be resolved even on a printer with a
+    /// single extruder variant, which picks the filament's variant of the same variant string."
+    pub fn has_multi_variant_filament(&self) -> bool {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let variants = Resolver::option(self, "filament_extruder_variant")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>());
+        let diameters = Resolver::option(self, "filament_diameter")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloats>());
+        match (variants, diameters) {
+            (Some(v), Some(d)) => v.values.len() > d.values.len(),
+            _ => false,
+        }
+    }
+
+    /// `bool support_different_extruders(int &extruder_count) const`
+    /// (`PrintConfig.cpp:10809-10830`): whether `extruder_variant_list` names more than one
+    /// distinct variant across its extruders, with the extruder count handed back.
+    ///
+    /// The out-parameter becomes the second element of the returned pair. It is written only
+    /// when `nozzle_diameter` is present, exactly as the vendored body writes it only inside
+    /// that branch, so the `None` here is "not written" rather than "written as zero".
+    pub fn support_different_extruders(&self) -> (bool, Option<i32>) {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        // FIDELITY(port): a `BTreeSet`, matching the vendored `std::set<std::string>`. Only its
+        // size is read, so the order reaches no output; the container is transcribed as the
+        // vendored one for the deduplication, not for an order.
+        let mut variant_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut extruder_count = None;
+
+        if let Some(nozzle_diameters_opt) = Resolver::option(self, "nozzle_diameter")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloats>())
+        {
+            let size = nozzle_diameters_opt.values.len();
+            extruder_count = Some(size as i32);
+            if let Some(extruder_variant_opt) = Resolver::option(self, "extruder_variant_list")
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+            {
+                if !extruder_variant_opt.values.is_empty() {
+                    for index in 0..size {
+                        let variant = extruder_variant_opt.get_at(index);
+                        // `boost::split` on any string yields at least one token, so the
+                        // vendored `!variants_list.empty()` guard is always true; the insert
+                        // runs unconditionally here for the same reason.
+                        for token in boost_split_compress(&variant, &[',']) {
+                            variant_set.insert(token);
+                        }
+                    }
+                }
+            }
+        }
+
+        (variant_set.len() > 1, extruder_count)
+    }
+
+    /// `int get_index_for_extruder(int extruder_or_filament_id, std::string id_name,
+    /// ExtruderType, NozzleVolumeType, std::string variant_name, unsigned int stride) const`
+    /// (`PrintConfig.cpp:10832-10889`): the slot index whose variant string and extruder id
+    /// match, or -1.
+    pub fn get_index_for_extruder(
+        &self,
+        extruder_or_filament_id: i32,
+        id_name: &str,
+        extruder_type: ExtruderType,
+        nozzle_volume_type: NozzleVolumeType,
+        variant_name: &str,
+        stride: u32,
+    ) -> i32 {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let mut ret = -1;
+
+        let variant_opt = Resolver::option(self, variant_name)
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>());
+        let id_opt = if id_name.is_empty() {
+            None
+        } else {
+            Resolver::option(self, id_name)
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionInts>())
+        };
+        let extruder_variant_list_opt = Resolver::option(self, "extruder_variant_list")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>());
+
+        // The vendored lambda: walk every extruder's variant tokens in order and return the
+        // 1-based extruder the `target_index`-th non-empty token belongs to.
+        //
+        // FIDELITY(port): the walk order is `extruder_variant_list`'s own, token by token
+        // within each entry, and it reaches output -- the index it counts to is the returned
+        // extruder.
+        let generated_extruder_id = |target_index: i32| -> i32 {
+            let Some(list) = extruder_variant_list_opt else {
+                return 0;
+            };
+            let mut variant_index = 0_i32;
+            for extruder_index in 0..list.values.len() as i32 {
+                for variant in boost_split_compress(&list.get_at(extruder_index as usize), &[',']) {
+                    let variant = variant.trim_matches(|c: char| c.is_whitespace());
+                    if variant.is_empty() {
+                        continue;
+                    }
+                    if variant_index == target_index {
+                        return extruder_index + 1;
+                    }
+                    variant_index += 1;
+                }
+            }
+            0
+        };
+
+        if let Some(variant_opt) = variant_opt {
+            let v_size = variant_opt.values.len() as i32;
+            let has_complete_id_map = id_opt.is_some_and(|o| o.values.len() as i32 >= v_size);
+            // "nvtHybrid not supported in presets, switch to nvtStandard to match the preset
+            // values"
+            let nozzle_volume_type = if nozzle_volume_type == NozzleVolumeType::nvtHybrid {
+                NozzleVolumeType::nvtStandard
+            } else {
+                nozzle_volume_type
+            };
+            let extruder_variant = get_extruder_variant_string(extruder_type, nozzle_volume_type);
+            for index in 0..v_size {
+                let variant = variant_opt.get_at(index as usize);
+                if extruder_variant == variant {
+                    match id_opt {
+                        Some(id_opt) => {
+                            let id = if has_complete_id_map {
+                                id_opt.get_at(index as usize)
+                            } else {
+                                generated_extruder_id(index)
+                            };
+                            if id == extruder_or_filament_id {
+                                ret = index * stride as i32;
+                                break;
+                            }
+                        }
+                        None => {
+                            ret = index * stride as i32;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        ret
+    }
+
+    /// `int get_extruder_nozzle_volume_count(int extruder_count,
+    /// std::vector<std::vector<NozzleVolumeType>> &nozzle_volume_types) const`
+    /// (`PrintConfig.cpp:11577-11603`): "Counts the config slots of a printer: one per (extruder
+    /// x nozzle volume type) as described by `extruder_nozzle_stats`, or simply one per extruder
+    /// when the stats are absent/mismatched. Fills `nozzle_volume_types` with each extruder's
+    /// volume types in ascending enum order."
+    ///
+    /// The out-parameter becomes the second element of the returned pair.
+    pub fn get_extruder_nozzle_volume_count(
+        &self,
+        extruder_count: i32,
+    ) -> (i32, Vec<Vec<NozzleVolumeType>>) {
+        use slic3r_config::config::ConfigOptionResolver as Resolver;
+        let mut count = extruder_count;
+        let opt_extruder_nozzle_stats = Resolver::option(self, "extruder_nozzle_stats")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>());
+        let mut nozzle_volume_types: Vec<Vec<NozzleVolumeType>> =
+            vec![Vec::new(); extruder_count.max(0) as usize];
+        if let Some(stats) = opt_extruder_nozzle_stats {
+            if stats.values.len() as i32 == extruder_count {
+                let extruder_nozzle_counts = get_extruder_nozzle_stats(&stats.values);
+                count = 0;
+                for i in 0..extruder_count as usize {
+                    count += extruder_nozzle_counts[i].len() as i32;
+                    // FIDELITY(port): "std::map iteration order gives the canonical slot order:
+                    // ascending NozzleVolumeType" -- the vendored comment at
+                    // `PrintConfig.cpp:11592`. A `BTreeMap<NozzleVolumeType, i32>` iterates the
+                    // same way, since `NozzleVolumeType` derives `Ord` from its declaration
+                    // order and its discriminants ascend with it. The order reaches output: it
+                    // is the slot order every caller indexes by.
+                    for volume_type in extruder_nozzle_counts[i].keys() {
+                        nozzle_volume_types[i].push(*volume_type);
+                    }
+                }
+            }
+        }
+        (count, nozzle_volume_types)
+    }
+}
+
+/// `void handle_legacy_sla(DynamicPrintConfig &config)` (`PrintConfig.cpp:10543-10563`): splits
+/// each of the two SLA correction vectors into its three per-axis scalars, where those are
+/// absent.
+pub fn handle_legacy_sla(config: &mut DynamicPrintConfig) {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+    for corr in ["relative_correction", "material_correction"] {
+        if !Resolver::has(config, corr) {
+            continue;
+        }
+        // The vendored body reads `config.opt<ConfigOptionFloats>(corr)->values[idx]` inside
+        // each branch, after creating the scalar. The two reads are hoisted here because the
+        // create borrows the same config; the source vector is not touched by the create, so
+        // the values are the ones the vendored reads see.
+        //
+        // `values[0]`/`values[1]` on a vector shorter than that is undefined at the pin
+        // (`std::vector::operator[]`, not `.at()`); a short vector is skipped here instead,
+        // which is the nearest defined behaviour and which no legacy config reaches -- both
+        // keys are `coFloats` triples.
+        let source = Resolver::option(config, corr)
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloats>())
+            .map(|o| o.values.clone())
+            .unwrap_or_default();
+        if source.len() < 2 {
+            continue;
+        }
+        for (suffix, index) in [("_x", 0_usize), ("_y", 0), ("_z", 1)] {
+            let key = format!("{corr}{suffix}");
+            if Resolver::has(config, &key) {
+                continue;
+            }
+            if let Some(opt) = config.base.opt::<ConfigOptionFloat>(&key, true) {
+                opt.value = source[index];
+            }
+        }
+    }
+}
+
+// TODO(port): src/libslic3r/PrintConfig.cpp:10439 -- `normalize_fdm_2` (`:10480-10541`) and
+// therefore `normalize_fdm` (`:10350-10427`), which calls both halves, are not ported:
+// `normalize_fdm_2` reads `has_any_mixed_filament(mixed_opt->values)`
+// (`FilamentMixer.hpp:117`), whose unit `FilamentMixer.cpp`/`FilamentMixer.hpp` is
+// `template-heavy: no` and `not-started` in `port/manifest.tsv` -- a Phase A/B fan-out module
+// this task may not write. Its result decides whether the prime tower is switched off, so
+// guessing it would change the function's answer. Named in this task's pull request body.
+
+// TODO(port): src/libslic3r/PrintConfig.cpp:10693 -- `DynamicPrintConfig::validate(bool)`
+// (`:10679-10697`) is not ported: its `ptFFF` arm returns `Slic3r::validate(fpc, under_cli)`
+// (`:12417-12686`), which calls `validate_mixed_filament_params` from the same unported
+// `FilamentMixer` unit and `is_valid_bed_exclude_volumes_string`/`has_bed_exclude_volumes`
+// from the bed-exclusion group this module does not port either.
+
+// TODO(port): src/libslic3r/PrintConfig.cpp:10648 -- `set_num_extruders` (`:10636-10654`),
+// `set_num_filaments` (`:10656-10678`) and `extend_extruder_variant` (`:10597-10634`) are not
+// ported, and the blocker is a gap in `slic3r-config` rather than an unported module. All three
+// do `static_cast<ConfigOptionVectorBase*>(opt)->resize(n, defaults.option(key))` on an option
+// reached as a `ConfigOption*`. `slic3r-config` declares `ConfigOptionVectorBase` as an
+// object-safe trait and its own doc comment says that is so a
+// `dynamic_cast<ConfigOptionVectorBase*>` becomes a `&dyn ConfigOptionVectorBase`
+// (`crates/slic3r-config/src/config.rs:1418-1420`) -- but it provides no way to obtain one from
+// a `&mut dyn ConfigOption`: `ConfigOption` carries `as_any`/`as_any_mut` for a concrete
+// downcast and nothing for a trait-to-trait one, which Rust cannot do unaided. What is needed
+// is an `as_vector`/`as_vector_mut` on `ConfigOption`. Named in this task's pull request body.
+
 // --------------------------------------------------------------------------------------------
 // `ModelConfig` (`PrintConfig.hpp:2615-2690`): a `DynamicPrintConfig` plus a timestamp the
 // Undo/Redo stack compares instead of serializing.
@@ -20933,6 +21344,390 @@ mod tests {
         }
 
         println!("min_object_distance and the filament accessors: {checked} case(s) exact");
+    }
+
+    /// The seven `DynamicPrintConfig` methods this module ports, each held to exact equality
+    /// against the oracle's own over the inputs their branches distinguish. The two mutating
+    /// ones are compared by the whole config they leave behind, key by key and value by value.
+    #[test]
+    fn print_config_dynamic_methods_match_the_oracle() {
+        /// A config carrying exactly the given `"<key>=<value>"` assignments, in the order
+        /// given -- the same content the shim's own `config_from` builds, which
+        /// `fixtures_agree` below checks rather than assumes.
+        ///
+        /// **A `coEnums` key cannot be set through `set_deserialize` here, and the reason is
+        /// finding 1 in this task's pull request body, not this test.**
+        /// `DynamicConfig::optptr_mut(key, create=true)` builds the new option with
+        /// `ConfigOptionDef::create_default_option`, and `slic3r-config`'s version of that
+        /// function drops the vendored `coEnums` arm that attaches `enum_keys_map` to the copy
+        /// (`config.rs:6965-6970` against `Config.cpp:329-337`). The created option therefore
+        /// carries `EMPTY_ENUM_VALUES`, and its `deserialize` looks every name up in that empty
+        /// map and fails -- measured: `set_deserialize("extruder_type", "Direct Drive,Direct
+        /// Drive")` returns `BadOptionValue`, where the oracle accepts it. So **no `coEnums`
+        /// option can be deserialized into a `DynamicConfig` at all** until those arms land,
+        /// which is the sharpest consequence of that finding and is recorded here rather than
+        /// worked around in `slic3r-config`'s stead.
+        ///
+        /// Such a key is set through `set_key_value` with a properly-keyed option instead. That
+        /// is a different route for the *fixture*, not a patch to the gap: `fixtures_agree`
+        /// holds the resulting config to the oracle's byte for byte, so a method comparison
+        /// built on it compares two configs known to be equal.
+        fn config_from(entries: &[String]) -> DynamicPrintConfig {
+            let mut config = DynamicPrintConfig::new();
+            let mut ctx = slic3r_config::config::ConfigSubstitutionContext::new(
+                slic3r_config::config::ForwardCompatibilitySubstitutionRule::Disable,
+            );
+            for entry in entries {
+                let (key, value) = entry.split_once('=').expect("every probe is key=value");
+                let def = print_config_def().def.get(key);
+                if def.is_some_and(|d| d.option_type == ConfigOptionType::Enums) {
+                    let def = def.expect("checked above");
+                    let mut opt = ConfigOptionEnumsGeneric::new(def.enum_keys_map);
+                    assert!(
+                        slic3r_config::config::ConfigOption::deserialize(&mut opt, value, false),
+                        "{key}={value}: a properly-keyed coEnums option should deserialize"
+                    );
+                    config.base.set_key_value(key, Box::new(opt));
+                    continue;
+                }
+                slic3r_config::config::ConfigBase::set_deserialize(
+                    &mut config,
+                    key,
+                    value,
+                    &mut ctx,
+                    false,
+                )
+                .unwrap_or_else(|e| panic!("set_deserialize({key}, {value}): {e:?}"));
+            }
+            config
+        }
+
+        /// Every method comparison below starts by holding its own fixture to the oracle's, so
+        /// a difference in the *input* can never be read as agreement or disagreement in the
+        /// method.
+        fn fixtures_agree(entries: &Vec<String>, mine: &DynamicPrintConfig) {
+            let theirs: Vec<String> = ora::oracle_config_from(entries)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_ne!(
+                theirs,
+                vec!["<refused>".to_string()],
+                "the oracle refused a fixture: {entries:?}"
+            );
+            assert_eq!(
+                serialize(mine),
+                theirs,
+                "the two sides' fixtures differ before the call: {entries:?}"
+            );
+        }
+        fn serialize(config: &dyn slic3r_config::config::ConfigBase) -> Vec<String> {
+            slic3r_config::config::ConfigBase::keys(config)
+                .into_iter()
+                .map(|key| {
+                    let value =
+                        match slic3r_config::config::ConfigOptionResolver::option(config, &key) {
+                            Some(opt) => opt.serialize(),
+                            None => "<absent>".to_string(),
+                        };
+                    format!("{key}={value}")
+                })
+                .collect()
+        }
+        fn probe(entries: &[&str]) -> Vec<String> {
+            entries.iter().map(|s| s.to_string()).collect()
+        }
+
+        let mut checked = 0_usize;
+
+        // `normalize_fdm_1`: the `extruder` propagation with each of the six targets absent,
+        // zero and non-zero; the `spiral_mode` block with vectors of several lengths; and the
+        // `resolution` clamp on either side of 0.001.
+        let fdm1_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["extruder=0"]),
+            probe(&["extruder=3"]),
+            probe(&["extruder=3", "sparse_infill_filament_id=0"]),
+            probe(&["extruder=3", "sparse_infill_filament_id=7"]),
+            probe(&[
+                "extruder=2",
+                "sparse_infill_filament_id=0",
+                "outer_wall_filament_id=5",
+                "inner_wall_filament_id=0",
+                "internal_solid_filament_id=0",
+                "top_surface_filament_id=9",
+                "bottom_surface_filament_id=0",
+            ]),
+            probe(&["spiral_mode=0"]),
+            probe(&["spiral_mode=1"]),
+            probe(&[
+                "spiral_mode=1",
+                "retract_when_changing_layer=1,1,1",
+                "filament_retract_when_changing_layer=1,1",
+                "wall_loops=4",
+                "alternate_extra_wall=1",
+                "top_shell_layers=5",
+                "sparse_infill_density=30%",
+            ]),
+            probe(&["resolution=0"]),
+            probe(&["resolution=0.0001"]),
+            probe(&["resolution=0.001"]),
+            probe(&["resolution=0.05"]),
+            probe(&["extruder=1", "spiral_mode=1", "resolution=0.0001"]),
+        ];
+        for entries in &fdm1_probes {
+            let theirs: Vec<String> = ora::oracle_normalize_fdm_1(entries)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_ne!(
+                theirs,
+                vec!["<refused>".to_string()],
+                "the oracle refused a normalize_fdm_1 probe: {entries:?}"
+            );
+            let mut mine = config_from(entries);
+            fixtures_agree(entries, &mine);
+            mine.normalize_fdm_1();
+            assert_eq!(serialize(&mine), theirs, "normalize_fdm_1({entries:?})");
+            checked += 1;
+        }
+
+        // `handle_legacy_sla`: each correction key absent, present, and present with one or
+        // more of its three scalars already set.
+        let sla_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["relative_correction=1,2,3"]),
+            probe(&["material_correction=4,5,6"]),
+            probe(&["relative_correction=1,2,3", "material_correction=4,5,6"]),
+            probe(&["relative_correction=1,2,3", "relative_correction_x=9"]),
+            probe(&[
+                "relative_correction=1,2,3",
+                "relative_correction_x=9",
+                "relative_correction_y=8",
+                "relative_correction_z=7",
+            ]),
+            probe(&["relative_correction=1,2"]),
+        ];
+        for entries in &sla_probes {
+            let theirs: Vec<String> = ora::oracle_handle_legacy_sla(entries)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_ne!(
+                theirs,
+                vec!["<refused>".to_string()],
+                "the oracle refused a handle_legacy_sla probe: {entries:?}"
+            );
+            let mut mine = config_from(entries);
+            fixtures_agree(entries, &mine);
+            handle_legacy_sla(&mut mine);
+            assert_eq!(serialize(&mine), theirs, "handle_legacy_sla({entries:?})");
+            checked += 1;
+        }
+
+        // The four query methods share a probe set covering: no keys at all; a single extruder;
+        // two and three extruders with matching and differing types and volume types; an
+        // `extruder_variant_list` of one, several and comma-separated variants; a filament
+        // variant list longer and shorter than the diameters; and `extruder_nozzle_stats` whose
+        // length matches and does not match the extruder count.
+        let query_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["nozzle_diameter=0.4"]),
+            probe(&["nozzle_diameter=0.4,0.4"]),
+            probe(&[
+                "nozzle_diameter=0.4,0.4",
+                "extruder_type=Direct Drive,Direct Drive",
+                "nozzle_volume_type=Standard,Standard",
+            ]),
+            probe(&[
+                "nozzle_diameter=0.4,0.4",
+                "extruder_type=Direct Drive,Bowden",
+                "nozzle_volume_type=Standard,Standard",
+            ]),
+            probe(&[
+                "nozzle_diameter=0.4,0.4",
+                "extruder_type=Direct Drive,Direct Drive",
+                "nozzle_volume_type=Standard,High Flow",
+            ]),
+            probe(&[
+                "nozzle_diameter=0.4,0.4,0.4",
+                "extruder_type=Direct Drive,Direct Drive,Bowden",
+                "nozzle_volume_type=Standard,Standard,Standard",
+            ]),
+            probe(&["nozzle_diameter=0.4,0.4", "extruder_type=Direct Drive"]),
+            probe(&[
+                "nozzle_diameter=0.4,0.4",
+                "extruder_variant_list=\"Direct Drive Standard\";\"Direct Drive Standard\"",
+            ]),
+            probe(&[
+                "nozzle_diameter=0.4,0.4",
+                "extruder_variant_list=\"Direct Drive Standard\";\"Bowden Standard\"",
+            ]),
+            probe(&[
+                "nozzle_diameter=0.4,0.4",
+                "extruder_variant_list=\"Direct Drive Standard,Direct Drive High Flow\";\"Bowden Standard\"",
+            ]),
+            probe(&["extruder_variant_list=\"Direct Drive Standard\""]),
+            probe(&[
+                "filament_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                "filament_diameter=1.75",
+            ]),
+            probe(&[
+                "filament_extruder_variant=\"Direct Drive Standard\"",
+                "filament_diameter=1.75,1.75",
+            ]),
+            probe(&["filament_diameter=1.75"]),
+            probe(&["extruder_nozzle_stats=\"Standard#2\""]),
+            probe(&["extruder_nozzle_stats=\"Standard#2\";\"High Flow#1|Standard#3\""]),
+            probe(&[
+                "extruder_nozzle_stats=\"Extra High Flow#1|Standard#4|High Flow#2\";\"Standard#1\"",
+            ]),
+            probe(&["extruder_nozzle_stats=\"Nonsense#3\""]),
+        ];
+        for entries in &query_probes {
+            let mine = config_from(entries);
+            fixtures_agree(entries, &mine);
+
+            let theirs = ora::oracle_is_using_different_extruders(entries);
+            assert_ne!(
+                theirs, -1,
+                "refused: is_using_different_extruders {entries:?}"
+            );
+            assert_eq!(
+                i32::from(mine.is_using_different_extruders()),
+                theirs,
+                "is_using_different_extruders({entries:?})"
+            );
+            checked += 1;
+
+            let theirs = ora::oracle_has_multi_variant_filament(entries);
+            assert_ne!(
+                theirs, -1,
+                "refused: has_multi_variant_filament {entries:?}"
+            );
+            assert_eq!(
+                i32::from(mine.has_multi_variant_filament()),
+                theirs,
+                "has_multi_variant_filament({entries:?})"
+            );
+            checked += 1;
+
+            let theirs = ora::oracle_support_different_extruders(entries);
+            assert_ne!(theirs, vec![-1], "refused: support_different_extruders");
+            let (result, count) = mine.support_different_extruders();
+            let mine_flat = vec![
+                i32::from(result),
+                i32::from(count.is_some()),
+                count.unwrap_or(-12345),
+            ];
+            assert_eq!(
+                mine_flat, theirs,
+                "support_different_extruders({entries:?}) -- [result, written?, value]"
+            );
+            checked += 1;
+
+            for extruder_count in [0_i32, 1, 2, 3] {
+                let theirs = ora::oracle_extruder_nozzle_volume_count(entries, extruder_count);
+                assert_ne!(theirs, vec![-1], "refused: extruder_nozzle_volume_count");
+                let (count, types) = mine.get_extruder_nozzle_volume_count(extruder_count);
+                let mut mine_flat = vec![count, types.len() as i32];
+                for per_extruder in &types {
+                    mine_flat.push(per_extruder.len() as i32);
+                    for t in per_extruder {
+                        mine_flat.push(*t as i32);
+                    }
+                }
+                assert_eq!(
+                    mine_flat, theirs,
+                    "get_extruder_nozzle_volume_count({entries:?}, {extruder_count})"
+                );
+                checked += 1;
+            }
+        }
+
+        // `get_index_for_extruder`: the variant-name key present and absent, an id key named
+        // and empty, an id map complete and short (which is what turns on the
+        // `generated_extruder_id` walk), `nvtHybrid` (which the body rewrites to `nvtStandard`),
+        // and a stride other than 1.
+        let index_probes: Vec<Vec<String>> = vec![
+            probe(&[]),
+            probe(&["printer_extruder_variant=\"Direct Drive Standard\""]),
+            probe(&[
+                "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                "printer_extruder_id=1,2",
+            ]),
+            probe(&[
+                "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                "printer_extruder_id=1",
+            ]),
+            probe(&[
+                "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                "printer_extruder_id=1",
+                "extruder_variant_list=\"Direct Drive Standard\";\"Bowden Standard\"",
+            ]),
+            probe(&[
+                "printer_extruder_variant=\"Direct Drive Standard\";\"Direct Drive High Flow\";\"Bowden Standard\"",
+                "extruder_variant_list=\"Direct Drive Standard,Direct Drive High Flow\";\"Bowden Standard\"",
+                "printer_extruder_id=1",
+            ]),
+            probe(&[
+                "filament_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                "filament_self_index=1,2",
+            ]),
+        ];
+        for entries in &index_probes {
+            let mine = config_from(entries);
+            fixtures_agree(entries, &mine);
+            for variant_name in ["printer_extruder_variant", "filament_extruder_variant"] {
+                for id_name in ["", "printer_extruder_id", "filament_self_index"] {
+                    for et in [ExtruderType::etDirectDrive, ExtruderType::etBowden] {
+                        for vt in [
+                            NozzleVolumeType::nvtStandard,
+                            NozzleVolumeType::nvtHighFlow,
+                            NozzleVolumeType::nvtHybrid,
+                        ] {
+                            for id in [0_i32, 1, 2] {
+                                for stride in [1_u32, 2] {
+                                    let theirs = ora::oracle_index_for_extruder(
+                                        entries,
+                                        id,
+                                        id_name,
+                                        et as i32,
+                                        vt as i32,
+                                        variant_name,
+                                        stride,
+                                    );
+                                    assert_ne!(
+                                        theirs, -12345,
+                                        "refused: get_index_for_extruder {entries:?}"
+                                    );
+                                    assert_eq!(
+                                        mine.get_index_for_extruder(
+                                            id,
+                                            id_name,
+                                            et,
+                                            vt,
+                                            variant_name,
+                                            stride
+                                        ),
+                                        theirs,
+                                        "get_index_for_extruder({entries:?}, id={id}, \
+                                         id_name={id_name:?}, {et:?}, {vt:?}, \
+                                         variant={variant_name:?}, stride={stride})"
+                                    );
+                                    checked += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        println!(
+            "DynamicPrintConfig methods: {checked} case(s) held to exact equality \
+             across 7 methods"
+        );
     }
 
     /// `ModelConfig` (`PrintConfig.hpp:2615-2690`): the timestamp discipline its own comment

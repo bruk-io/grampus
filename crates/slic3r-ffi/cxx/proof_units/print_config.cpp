@@ -624,6 +624,142 @@ rust::Vec<rust::String> oracle_filament_type_probe(rust::Str filament_type, rust
     return out;
 }
 
+// A `DynamicPrintConfig` carrying exactly the given `"<key>=<value>"` assignments, deserialized
+// in the order given. `ok` is false when any assignment was refused, which the callers report
+// rather than letting an exception escape the bridge.
+static Slic3r::DynamicPrintConfig config_from(const rust::Vec<rust::String> &keys_and_values,
+                                              bool &ok) {
+    Slic3r::DynamicPrintConfig config;
+    Slic3r::ConfigSubstitutionContext ctx(Slic3r::ForwardCompatibilitySubstitutionRule::Disable);
+    ok = true;
+    for (const rust::String &entry : keys_and_values) {
+        const std::string text(entry);
+        const size_t eq = text.find('=');
+        if (eq == std::string::npos) {
+            ok = false;
+            continue;
+        }
+        try {
+            config.set_deserialize(text.substr(0, eq), text.substr(eq + 1), ctx);
+        } catch (const std::exception &) {
+            ok = false;
+        }
+    }
+    return config;
+}
+
+rust::Vec<rust::String> oracle_config_from(const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String> oracle_normalize_fdm_1(const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    config.normalize_fdm_1();
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String> oracle_handle_legacy_sla(const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    Slic3r::handle_legacy_sla(config);
+    return serialize_config(config);
+}
+
+int32_t oracle_is_using_different_extruders(const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        return -1;
+    }
+    return config.is_using_different_extruders() ? 1 : 0;
+}
+
+int32_t oracle_has_multi_variant_filament(const rust::Vec<rust::String> &keys_and_values) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        return -1;
+    }
+    return config.has_multi_variant_filament() ? 1 : 0;
+}
+
+rust::Vec<int32_t>
+oracle_support_different_extruders(const rust::Vec<rust::String> &keys_and_values) {
+    rust::Vec<int32_t> out;
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        out.push_back(-1);
+        return out;
+    }
+    // A sentinel the method never writes, so "left untouched" is distinguishable from any value
+    // it could write -- the vendored body writes the out-parameter only inside its one branch.
+    int extruder_count = -12345;
+    const bool result = config.support_different_extruders(extruder_count);
+    out.push_back(result ? 1 : 0);
+    out.push_back(extruder_count == -12345 ? 0 : 1);
+    out.push_back(static_cast<int32_t>(extruder_count));
+    return out;
+}
+
+rust::Vec<int32_t>
+oracle_extruder_nozzle_volume_count(const rust::Vec<rust::String> &keys_and_values,
+                                    int32_t extruder_count) {
+    rust::Vec<int32_t> out;
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        out.push_back(-1);
+        return out;
+    }
+    std::vector<std::vector<Slic3r::NozzleVolumeType>> nozzle_volume_types;
+    const int count =
+        config.get_extruder_nozzle_volume_count(static_cast<int>(extruder_count),
+                                                nozzle_volume_types);
+    out.push_back(static_cast<int32_t>(count));
+    out.push_back(static_cast<int32_t>(nozzle_volume_types.size()));
+    for (const auto &per_extruder : nozzle_volume_types) {
+        out.push_back(static_cast<int32_t>(per_extruder.size()));
+        for (const Slic3r::NozzleVolumeType type : per_extruder) {
+            out.push_back(static_cast<int32_t>(type));
+        }
+    }
+    return out;
+}
+
+int32_t oracle_index_for_extruder(const rust::Vec<rust::String> &keys_and_values,
+                                  int32_t extruder_or_filament_id, rust::Str id_name,
+                                  int32_t extruder_type, int32_t nozzle_volume_type,
+                                  rust::Str variant_name, uint32_t stride) {
+    bool ok = false;
+    Slic3r::DynamicPrintConfig config = config_from(keys_and_values, ok);
+    if (!ok) {
+        return -12345;
+    }
+    return static_cast<int32_t>(config.get_index_for_extruder(
+        static_cast<int>(extruder_or_filament_id), std::string(id_name),
+        Slic3r::ExtruderType(extruder_type), Slic3r::NozzleVolumeType(nozzle_volume_type),
+        std::string(variant_name), static_cast<unsigned int>(stride)));
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

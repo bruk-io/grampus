@@ -160,6 +160,37 @@ rust::Vec<rust::String> oracle_filament_type_probe(rust::Str filament_type, rust
                                                    rust::Str filament_is_support,
                                                    rust::Str filament_vendor, uint64_t id);
 
+// The seven `DynamicPrintConfig` methods this unit ports, each against a config built from the
+// given `"<key>=<value>"` assignments (deserialized in the order given) and nothing else.
+//
+// `keys_and_values` is the config's whole content. A refused assignment is reported rather than
+// allowed to throw out of the bridge -- see `oracle_filament_type_probe`'s own note.
+//
+// `oracle_normalize_fdm_1` and `oracle_handle_legacy_sla` mutate the config and hand back its
+// whole serialized form, the same shape `serialize_config` produces everywhere here, so the
+// comparison is of every key and value the call leaves behind.
+// The config `config_from` builds, serialized, with no method called on it. This is what lets a
+// method comparison mean something: it proves both sides start from the same config before the
+// call, rather than assuming two different construction routes agree.
+rust::Vec<rust::String> oracle_config_from(const rust::Vec<rust::String> &keys_and_values);
+
+rust::Vec<rust::String> oracle_normalize_fdm_1(const rust::Vec<rust::String> &keys_and_values);
+rust::Vec<rust::String> oracle_handle_legacy_sla(const rust::Vec<rust::String> &keys_and_values);
+
+// The four query methods, as one call each. `support_different_extruders` and
+// `get_extruder_nozzle_volume_count` write an out-parameter, which the returned list carries
+// after the result: `[result, written?, values...]`.
+int32_t oracle_is_using_different_extruders(const rust::Vec<rust::String> &keys_and_values);
+int32_t oracle_has_multi_variant_filament(const rust::Vec<rust::String> &keys_and_values);
+rust::Vec<int32_t> oracle_support_different_extruders(const rust::Vec<rust::String> &keys_and_values);
+rust::Vec<int32_t>
+oracle_extruder_nozzle_volume_count(const rust::Vec<rust::String> &keys_and_values,
+                                    int32_t extruder_count);
+int32_t oracle_index_for_extruder(const rust::Vec<rust::String> &keys_and_values,
+                                  int32_t extruder_or_filament_id, rust::Str id_name,
+                                  int32_t extruder_type, int32_t nozzle_volume_type,
+                                  rust::Str variant_name, uint32_t stride);
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi
