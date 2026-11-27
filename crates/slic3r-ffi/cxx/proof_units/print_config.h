@@ -128,6 +128,38 @@ rust::Vec<rust::String> oracle_extruder_nozzle_stats_roundtrip(const rust::Vec<r
 uint64_t oracle_extruder_index_of_defaults(uint32_t filament_id);
 double oracle_nozzle_diameter_for_filament_of_defaults(int32_t filament_id, bool is_bbl_printer);
 
+// `DynamicPrintConfig::full_print_config()` (`PrintConfig.cpp:10307-10310`), as the whole
+// config serialized: every key in the `std::map`'s own order, one `"<key>=<serialized>"` entry
+// each. The construction route for the comparisons below, and a check of its own -- the
+// vendored body casts a `FullPrintConfig` to `PrintRegionConfig` before handing it to the
+// `const StaticPrintConfig&` constructor, so which keys land is not what the name suggests.
+rust::Vec<rust::String> oracle_full_print_config_serialized();
+
+// `DynamicPrintConfig::new_from_defaults_keys(keys)` (`:10316-10321`), serialized the same way.
+rust::Vec<rust::String> oracle_new_from_defaults_keys_serialized(const rust::Vec<rust::String> &keys);
+
+// `DynamicPrintConfig(const StaticPrintConfig&)` (`:10312-10314`) over one of the 11 static
+// classes by name, serialized the same way.
+rust::Vec<rust::String> oracle_dynamic_from_static_serialized(rust::Str which);
+
+// `DynamicPrintConfig::get_parameter_size(param_name, extruder_nums)` (`:10565-10595`), against
+// a config built from `full_print_config()`.
+uint64_t oracle_parameter_size_of_full(rust::Str param_name, uint64_t extruder_nums);
+
+// `min_object_distance(const ConfigBase&)` (`:10323-10348`), against `full_print_config()` with
+// `print_sequence` and `extruder_clearance_radius` overridden to the given values; an empty
+// override string leaves the key absent, which is what the function's two null checks turn on.
+double oracle_min_object_distance(rust::Str print_sequence, rust::Str clearance_radius,
+                                  rust::Str printer_technology);
+
+// `DynamicPrintConfig::get_filament_vendor()` / `get_filament_type()` (`:11552-11575`) and
+// `get_filament_type(displayed, id)` (`:10698-10771`), against a config carrying exactly the
+// given option values. The three-element result of the last one is
+// {returned type, displayed type}.
+rust::Vec<rust::String> oracle_filament_type_probe(rust::Str filament_type, rust::Str filament_id,
+                                                   rust::Str filament_is_support,
+                                                   rust::Str filament_vendor, uint64_t id);
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

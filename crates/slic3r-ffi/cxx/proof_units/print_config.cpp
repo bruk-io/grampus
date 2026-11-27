@@ -36,6 +36,8 @@
 
 #include "PrintConfig.hpp"
 
+#include <limits>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -473,6 +475,156 @@ double oracle_nozzle_diameter_for_filament_of_defaults(int32_t filament_id, bool
                                                 static_cast<int>(filament_id), is_bbl_printer);
 }
 
+// One `ConfigBase` serialized whole: every key in the `std::map`'s own order, one
+// `"<key>=<serialized>"` entry each. The comparison form for every `DynamicPrintConfig` call
+// below -- a config's observable content is its keys and their serialized values.
+static rust::Vec<rust::String> serialize_config(const Slic3r::ConfigBase &config) {
+    rust::Vec<rust::String> out;
+    for (const std::string &key : config.keys()) {
+        const Slic3r::ConfigOption *opt = config.option(key);
+        out.push_back(rust::String(key + "=" +
+                                   (opt == nullptr ? std::string("<absent>") : opt->serialize())));
+    }
+    return out;
+}
+
+rust::Vec<rust::String> oracle_full_print_config_serialized() {
+    Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
+    return serialize_config(config);
+}
+
+rust::Vec<rust::String>
+oracle_new_from_defaults_keys_serialized(const rust::Vec<rust::String> &keys) {
+    std::vector<std::string> key_vec;
+    for (const rust::String &key : keys) {
+        key_vec.push_back(std::string(key));
+    }
+    std::unique_ptr<Slic3r::DynamicPrintConfig> config(
+        Slic3r::DynamicPrintConfig::new_from_defaults_keys(key_vec));
+    return serialize_config(*config);
+}
+
+template <class T> static rust::Vec<rust::String> dynamic_from_static() {
+    Slic3r::DynamicPrintConfig config(static_cast<const Slic3r::StaticPrintConfig &>(T::defaults()));
+    return serialize_config(config);
+}
+
+// Only the eight non-derived classes: the three derived ones inherit `StaticPrintConfig`
+// through each of their parents, so a conversion to it is ambiguous and the vendored
+// `DynamicPrintConfig(const StaticPrintConfig&)` constructor cannot be called with one at all.
+// That is exactly why `full_print_config()` casts its `FullPrintConfig` to `PrintRegionConfig`
+// first (`PrintConfig.cpp:10309`), and why this shim offers the three through
+// `oracle_full_print_config_serialized` rather than here. An unknown or derived name yields an
+// empty list, which the port's own proof asserts against.
+rust::Vec<rust::String> oracle_dynamic_from_static_serialized(rust::Str which) {
+    const std::string name(which);
+    if (name == "PrintObjectConfig") {
+        return dynamic_from_static<Slic3r::PrintObjectConfig>();
+    }
+    if (name == "PrintRegionConfig") {
+        return dynamic_from_static<Slic3r::PrintRegionConfig>();
+    }
+    if (name == "MachineEnvelopeConfig") {
+        return dynamic_from_static<Slic3r::MachineEnvelopeConfig>();
+    }
+    if (name == "GCodeConfig") {
+        return dynamic_from_static<Slic3r::GCodeConfig>();
+    }
+    if (name == "SLAPrintConfig") {
+        return dynamic_from_static<Slic3r::SLAPrintConfig>();
+    }
+    if (name == "SLAPrintObjectConfig") {
+        return dynamic_from_static<Slic3r::SLAPrintObjectConfig>();
+    }
+    if (name == "SLAMaterialConfig") {
+        return dynamic_from_static<Slic3r::SLAMaterialConfig>();
+    }
+    if (name == "SLAPrinterConfig") {
+        return dynamic_from_static<Slic3r::SLAPrinterConfig>();
+    }
+    return rust::Vec<rust::String>();
+}
+
+uint64_t oracle_parameter_size_of_full(rust::Str param_name, uint64_t extruder_nums) {
+    Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
+    return static_cast<uint64_t>(
+        config.get_parameter_size(std::string(param_name), static_cast<size_t>(extruder_nums)));
+}
+
+double oracle_min_object_distance(rust::Str print_sequence, rust::Str clearance_radius,
+                                  rust::Str printer_technology) {
+    Slic3r::DynamicPrintConfig config;
+    Slic3r::ConfigSubstitutionContext ctx(Slic3r::ForwardCompatibilitySubstitutionRule::Disable);
+    // An empty override leaves the key absent, which is what the function's two null checks and
+    // its `ptUnknown` fallback turn on.
+    // As in `oracle_filament_type_probe`: a refused value must not let an exception escape the
+    // bridge. A refusal yields NaN, which no real result is, so the Rust side sees a mismatch
+    // rather than the binary aborting.
+    try {
+        if (!print_sequence.empty()) {
+            config.set_deserialize("print_sequence", std::string(print_sequence), ctx);
+        }
+        if (!clearance_radius.empty()) {
+            config.set_deserialize("extruder_clearance_radius", std::string(clearance_radius),
+                                   ctx);
+        }
+        if (!printer_technology.empty()) {
+            config.set_deserialize("printer_technology", std::string(printer_technology), ctx);
+        }
+    } catch (const std::exception &) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return Slic3r::min_object_distance(config);
+}
+
+rust::Vec<rust::String> oracle_filament_type_probe(rust::Str filament_type, rust::Str filament_id,
+                                                   rust::Str filament_is_support,
+                                                   rust::Str filament_vendor, uint64_t id) {
+    Slic3r::DynamicPrintConfig config;
+    Slic3r::ConfigSubstitutionContext ctx(Slic3r::ForwardCompatibilitySubstitutionRule::Disable);
+    // A `?` marks the key as absent; an empty string sets it to an empty vector, which is the
+    // other case the body's "treat an empty option the same as a missing one" guard covers.
+    // `set_deserialize` throws `BadOptionValueException` for a value the option cannot parse,
+    // and an exception escaping a `cxx` bridge function declared to return a value aborts the
+    // whole test binary rather than failing one case. A refused value is reported as the marker
+    // below instead, so a probe the oracle rejects shows up as a mismatch the Rust side can
+    // print.
+    bool refused = false;
+    std::string refused_key;
+    auto set = [&](const char *key, rust::Str value) {
+        const std::string v(value);
+        if (v == "?") {
+            return;
+        }
+        try {
+            config.set_deserialize(key, v, ctx);
+        } catch (const std::exception &) {
+            refused = true;
+            if (refused_key.empty()) {
+                refused_key = key;
+            }
+        }
+    };
+    set("filament_type", filament_type);
+    set("filament_id", filament_id);
+    set("filament_is_support", filament_is_support);
+    set("filament_vendor", filament_vendor);
+
+    rust::Vec<rust::String> out;
+    if (refused) {
+        out.push_back(rust::String("<refused:" + refused_key + ">"));
+        return out;
+    }
+    std::string displayed;
+    const std::string returned = config.get_filament_type(displayed, static_cast<int>(id));
+    out.push_back(rust::String(returned));
+    out.push_back(rust::String(displayed));
+    out.push_back(rust::String(config.get_filament_vendor()));
+    out.push_back(rust::String(config.get_filament_type()));
+    return out;
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi
+

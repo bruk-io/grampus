@@ -224,6 +224,48 @@ mod ffi {
             filament_id: i32,
             is_bbl_printer: bool,
         ) -> f64;
+
+        /// `DynamicPrintConfig::full_print_config()` (`PrintConfig.cpp:10307-10310`), as every
+        /// key in the `std::map`'s own order, one `"<key>=<serialized>"` entry each.
+        fn oracle_full_print_config_serialized() -> Vec<String>;
+
+        /// `DynamicPrintConfig::new_from_defaults_keys(keys)` (`:10316-10321`), serialized the
+        /// same way.
+        fn oracle_new_from_defaults_keys_serialized(keys: &Vec<String>) -> Vec<String>;
+
+        /// `DynamicPrintConfig(const StaticPrintConfig&)` (`:10312-10314`) over one of the
+        /// **eight non-derived** static classes by name. The three derived ones inherit
+        /// `StaticPrintConfig` through each parent, so a conversion to it is ambiguous and the
+        /// vendored constructor cannot be called with one; empty for those and for an unknown
+        /// name.
+        fn oracle_dynamic_from_static_serialized(which: &str) -> Vec<String>;
+
+        /// `DynamicPrintConfig::get_parameter_size(param_name, extruder_nums)`
+        /// (`:10565-10595`), against a config built from `full_print_config()`.
+        fn oracle_parameter_size_of_full(param_name: &str, extruder_nums: u64) -> u64;
+
+        /// `min_object_distance(const ConfigBase&)` (`:10323-10348`), against a config carrying
+        /// exactly the given overrides; an empty string leaves that key absent, which is what
+        /// the function's two null checks and its `ptUnknown` fallback turn on.
+        fn oracle_min_object_distance(
+            print_sequence: &str,
+            clearance_radius: &str,
+            printer_technology: &str,
+        ) -> f64;
+
+        /// `get_filament_type(displayed, id)` (`:10698-10771`), `get_filament_vendor()` and
+        /// `get_filament_type()` (`:11552-11575`), against a config carrying exactly the given
+        /// option values -- `"?"` for a key left absent, `""` for one set to an empty vector,
+        /// which is the other case the body's "treat an empty option the same as a missing one"
+        /// guard covers. The result is
+        /// `[returned type, displayed type, vendor, first filament_type]`.
+        fn oracle_filament_type_probe(
+            filament_type: &str,
+            filament_id: &str,
+            filament_is_support: &str,
+            filament_vendor: &str,
+            id: u64,
+        ) -> Vec<String>;
     }
 }
 
@@ -232,7 +274,10 @@ pub use ffi::{
     oracle_extruder_option_keys, oracle_extruder_retract_keys, oracle_filament_option_keys,
     oracle_filament_retract_keys, oracle_handle_legacy, oracle_option_info, oracle_option_keys,
     oracle_config_index_base, oracle_convert_to_nvt_type, oracle_extruder_ams_count_roundtrip,
-    oracle_extruder_index_of_defaults, oracle_nozzle_diameter_for_filament_of_defaults,
+    oracle_dynamic_from_static_serialized, oracle_extruder_index_of_defaults,
+    oracle_filament_type_probe, oracle_full_print_config_serialized, oracle_min_object_distance,
+    oracle_new_from_defaults_keys_serialized, oracle_nozzle_diameter_for_filament_of_defaults,
+    oracle_parameter_size_of_full,
     oracle_extruder_nozzle_stats_roundtrip, oracle_extruder_variant_string,
     oracle_find_variant_index, oracle_map_variant_indices, oracle_nozzle_volume_type_string,
     oracle_option_set, oracle_other_def_keys, oracle_other_def_option_info,

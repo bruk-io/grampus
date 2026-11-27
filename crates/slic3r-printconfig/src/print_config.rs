@@ -19129,6 +19129,676 @@ pub fn filament_dev_options() -> &'static std::collections::BTreeSet<String> {
     })
 }
 
+// --------------------------------------------------------------------------------------------
+// `DynamicPrintConfig` (`PrintConfig.hpp:915-1039`) -- its type, its constructors and the
+// accessors that need nothing but the registry. Its ~25 transformation methods
+// (`PrintConfig.cpp:10350-12416`) are not ported here and are named in this task's pull request
+// body; so is `handle_legacy_composite`, which is blocked on a fan-out module.
+//
+// The vendored class inherits `DynamicConfig`; Rust has no inheritance, so the base is a field.
+// It is a `DynamicConfig<'static>` because `def()` returns `&print_config_def`, which this
+// port hands out as `&'static`.
+// --------------------------------------------------------------------------------------------
+
+/// `class DynamicPrintConfig : public DynamicConfig` (`PrintConfig.hpp:915-1039`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicPrintConfig {
+    /// The `DynamicConfig` base.
+    pub base: slic3r_config::config::DynamicConfig<'static>,
+}
+
+impl Default for DynamicPrintConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DynamicPrintConfig {
+    /// `DynamicPrintConfig()` (`PrintConfig.hpp:918`).
+    ///
+    /// **PORT NOTE: the base is constructed *with* the registry, and that is what reproduces
+    /// the vendored `def()` override rather than an extra liberty taken here.** The vendored
+    /// `DynamicConfig` holds no definition pointer: its `def()` is virtual and
+    /// `DynamicPrintConfig::def()` overrides it to return `&print_config_def`
+    /// (`PrintConfig.hpp:929`), so every base method reaching `this->def()` -- `optptr(key,
+    /// create=true)`, which creates an option from its `ConfigOptionDef`, and everything built
+    /// on it including `set_deserialize` and `apply_only` -- sees the registry. `slic3r-config`
+    /// ports `DynamicConfig` with a `def` **field** read directly rather than through a virtual
+    /// call (`crates/slic3r-config/src/config.rs:9062`), so delegating to the base leaves that
+    /// field at `None` and every create-path call fails with `NoDefinition`. Measured, not
+    /// assumed: with the base default-constructed, `set_deserialize("layer_height", ...)` on a
+    /// fresh `DynamicPrintConfig` returns
+    /// `NoDefinition("No definition exception: layer_height")`. Filling the field at
+    /// construction is how a field stands in for the override.
+    pub fn new() -> Self {
+        DynamicPrintConfig {
+            base: slic3r_config::config::DynamicConfig::with_def(&print_config_def().def),
+        }
+    }
+
+    /// `DynamicConfig(const ConfigBase &rhs, const t_config_option_keys &keys)`
+    /// (`Config.cpp:1693-1697`) with the registry in place, which is what both of this class's
+    /// copying constructors below reduce to. `DynamicConfig::from_config_base` is not called:
+    /// it leaves `def` at `None` (`config.rs:8774`), for the reason [`DynamicPrintConfig::new`]
+    /// records, so the same body is run against a `with_def` base instead.
+    fn from_base_and_keys(rhs: &dyn slic3r_config::config::ConfigBase, keys: &[String]) -> Self {
+        let mut base = slic3r_config::config::DynamicConfig::with_def(&print_config_def().def);
+        for key in keys {
+            if let Some(opt) = slic3r_config::config::ConfigOptionResolver::option(rhs, key) {
+                base.set_key_value(key, opt.clone_box());
+            }
+        }
+        DynamicPrintConfig { base }
+    }
+
+    /// `explicit DynamicPrintConfig(const StaticPrintConfig &rhs)`
+    /// (`PrintConfig.hpp:921`, defined at `PrintConfig.cpp:10312-10314`): the vendored
+    /// initialiser is `DynamicConfig(rhs, rhs.keys_ref())` -- every key the static class
+    /// reports, cloned out of it.
+    pub fn from_static_print_config<T>(rhs: &T) -> Self
+    where
+        T: StaticPrintConfig,
+    {
+        Self::from_base_and_keys(rhs, rhs.keys_ref())
+    }
+
+    /// `explicit DynamicPrintConfig(const ConfigBase &rhs)` (`PrintConfig.hpp:922`), whose
+    /// initialiser is `DynamicConfig(rhs)` -- the base's own `ConfigBase` constructor, which
+    /// takes `rhs.keys()`.
+    pub fn from_config_base(rhs: &dyn slic3r_config::config::ConfigBase) -> Self {
+        Self::from_base_and_keys(rhs, &slic3r_config::config::ConfigBase::keys(rhs))
+    }
+
+    /// `static DynamicPrintConfig full_print_config()` (`PrintConfig.hpp:925`, defined at
+    /// `PrintConfig.cpp:10307-10310`).
+    ///
+    /// **PORT NOTE: the vendored cast does not narrow the key set, and this was got wrong
+    /// once before being measured.** The body is
+    /// `return DynamicPrintConfig((const PrintRegionConfig&)FullPrintConfig::defaults());`. The
+    /// C-style cast is an upcast to a base subobject, and its only effect is to select the
+    /// `const StaticPrintConfig&` constructor overload -- it does **not** change the object's
+    /// dynamic type, so the `rhs.keys_ref()` that constructor's initialiser calls
+    /// (`PrintConfig.cpp:10312`) is a **virtual** call (`PrintConfig.hpp:1049`) that still
+    /// dispatches to `FullPrintConfig`'s override. The config therefore carries every key
+    /// `FullPrintConfig` reports, not `PrintRegionConfig`'s 177.
+    ///
+    /// Reaching the parent field instead -- `FullPrintConfig::defaults().print_region_config`,
+    /// which is what an upcast looks like in Rust -- gives a *different object* and so the
+    /// narrow list, and that is what a first version of this function did. The comparison
+    /// against the oracle is what caught it: 177 keys here against the oracle's 700-odd.
+    pub fn full_print_config() -> Self {
+        Self::from_static_print_config(FullPrintConfig::defaults())
+    }
+
+    /// `static DynamicPrintConfig* new_from_defaults_keys(const std::vector<std::string> &keys)`
+    /// (`PrintConfig.hpp:926`, defined at `PrintConfig.cpp:10316-10321`).
+    ///
+    /// Returns the value rather than a `new`-allocated pointer: the vendored function hands
+    /// ownership to its caller, which is what a returned value is here.
+    pub fn new_from_defaults_keys(keys: &[String]) -> Self {
+        let mut out = DynamicPrintConfig::new();
+        let _ = slic3r_config::config::ConfigBase::apply_only(
+            &mut out,
+            FullPrintConfig::defaults(),
+            keys,
+            false,
+        );
+        out
+    }
+
+    /// `size_t get_parameter_size(const std::string&, size_t)`
+    /// (`PrintConfig.cpp:10565-10595`): how many values one key holds, from whichever
+    /// option-set global names it.
+    pub fn get_parameter_size(&self, param_name: &str, extruder_nums: usize) -> usize {
+        // PORT SRC: src/libslic3r/PrintConfig.cpp:10567
+        const DEFAULT_PARAM_LENGTH: usize = 1;
+        let mut filament_variant_length = DEFAULT_PARAM_LENGTH;
+        let mut process_variant_length = DEFAULT_PARAM_LENGTH;
+        let mut machine_variant_length = DEFAULT_PARAM_LENGTH;
+
+        let strings_len = |key: &str| -> Option<usize> {
+            slic3r_config::config::ConfigOptionResolver::option(self, key)
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+                .map(|o| o.values.len())
+        };
+        if slic3r_config::config::ConfigOptionResolver::has(self, "filament_extruder_variant") {
+            if let Some(n) = strings_len("filament_extruder_variant") {
+                filament_variant_length = n;
+            }
+        }
+        if slic3r_config::config::ConfigOptionResolver::has(self, "print_extruder_variant") {
+            if let Some(n) = strings_len("print_extruder_variant") {
+                process_variant_length = n;
+            }
+        }
+        if slic3r_config::config::ConfigOptionResolver::has(self, "printer_extruder_variant") {
+            if let Some(n) = strings_len("printer_extruder_variant") {
+                machine_variant_length = n;
+            }
+        }
+
+        if printer_options_with_variant_1().contains(param_name) {
+            machine_variant_length
+        } else if printer_options_with_variant_2().contains(param_name) {
+            machine_variant_length * 2
+        } else if filament_options_with_variant().contains(param_name) {
+            filament_variant_length
+        } else if print_options_with_variant().contains(param_name) {
+            process_variant_length
+        } else {
+            extruder_nums
+        }
+    }
+
+    /// `std::string get_filament_vendor() const` (`PrintConfig.cpp:11552-11563`): the first
+    /// value of `filament_vendor`, or the empty string.
+    pub fn get_filament_vendor(&self) -> String {
+        self.first_string_value("filament_vendor")
+    }
+
+    /// `std::string get_filament_type() const` (`PrintConfig.cpp:11565-11575`): the first value
+    /// of `filament_type`, or the empty string.
+    pub fn get_filament_type_first(&self) -> String {
+        self.first_string_value("filament_type")
+    }
+
+    /// The body both of the two above share: `dynamic_cast<const ConfigOptionStrings*>` of the
+    /// option, then `values[0]` if it is non-empty.
+    fn first_string_value(&self, key: &str) -> String {
+        slic3r_config::config::ConfigOptionResolver::option(self, key)
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+            .and_then(|o| o.values.first().cloned())
+            .unwrap_or_default()
+    }
+
+    /// `std::string get_filament_type(std::string &displayed_filament_type, int id)`
+    /// (`PrintConfig.cpp:10698-10771`): the filament's type for slicing, with the support
+    /// filaments' `"PLA-S"`/`"PA-S"` substitutions and the display name the vendored body
+    /// writes through its out-parameter.
+    ///
+    /// The out-parameter becomes the second element of the returned pair, which is what an
+    /// in-place-written reference argument is here; the caller reads both.
+    pub fn get_filament_type_for_id(&self, id: usize) -> (String, String) {
+        let strings = |key: &str| -> Option<&ConfigOptionStrings> {
+            slic3r_config::config::ConfigOptionResolver::option(self, key)
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+        };
+        let bools = |key: &str| -> Option<&ConfigOptionBools> {
+            slic3r_config::config::ConfigOptionResolver::option(self, key)
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionBools>())
+        };
+        let mut filament_id = strings("filament_id");
+        let filament_type = strings("filament_type");
+        let mut filament_is_support = bools("filament_is_support");
+
+        // "get_at() on an empty vector option is undefined behavior (.front() of an empty
+        // vector), and e.g. filament_id is never populated on a CLI from-scratch slice - treat
+        // an empty option the same as a missing one."
+        if filament_id.is_some_and(|o| o.values.is_empty()) {
+            filament_id = None;
+        }
+        if filament_is_support.is_some_and(|o| o.values.is_empty()) {
+            filament_is_support = None;
+        }
+
+        let Some(filament_type) = filament_type.filter(|o| !o.values.is_empty()) else {
+            return (String::new(), String::new());
+        };
+        let type_at = |i: usize| filament_type.get_at(i);
+
+        let Some(filament_is_support) = filament_is_support else {
+            // The vendored `if (filament_type)` here is always true: the early return above
+            // already left the function for a null or empty `filament_type`. Its `else` arm
+            // (`displayed_filament_type = ""`, return `""`) is therefore dead at the pin, and
+            // is not ported as a live branch.
+            let t = type_at(id);
+            return (t.clone(), t);
+        };
+
+        let is_support = filament_is_support.get_at(id);
+        if !is_support {
+            let t = type_at(id);
+            return (t.clone(), t);
+        }
+
+        // A support filament. `filament_id`'s two known support materials name themselves; any
+        // other support filament falls back to its own type's PLA/PA substitution.
+        if let Some(filament_id) = filament_id {
+            match filament_id.get_at(id).as_str() {
+                "GFS00" => return ("PLA-S".to_string(), "Sup.PLA".to_string()),
+                "GFS01" => return ("PA-S".to_string(), "Sup.PA".to_string()),
+                _ => {}
+            }
+        }
+        match type_at(id).as_str() {
+            "PLA" => ("PLA-S".to_string(), "Sup.PLA".to_string()),
+            "PA" => ("PA-S".to_string(), "Sup.PA".to_string()),
+            _ => {
+                let t = type_at(id);
+                (t.clone(), t)
+            }
+        }
+        // The vendored body's final `return "PLA";` (`PrintConfig.cpp:10770`) is unreachable:
+        // every branch above it returns. Not ported as a live arm.
+    }
+}
+
+impl slic3r_config::config::ConfigOptionResolver for DynamicPrintConfig {
+    fn optptr(&self, opt_key: &str) -> Option<&dyn slic3r_config::config::ConfigOption> {
+        slic3r_config::config::ConfigOptionResolver::optptr(&self.base, opt_key)
+    }
+}
+
+impl slic3r_config::config::ConfigBase for DynamicPrintConfig {
+    /// `def()` (`PrintConfig.hpp:929`): "Overrides ConfigBase::def(). Static configuration
+    /// definition."
+    fn def(&self) -> Option<&ConfigDef<'_>> {
+        Some(&print_config_def().def)
+    }
+
+    fn optptr_mut(
+        &mut self,
+        opt_key: &str,
+        create: bool,
+    ) -> Result<
+        Option<&mut (dyn slic3r_config::config::ConfigOption + '_)>,
+        slic3r_config::config::ConfigError,
+    > {
+        slic3r_config::config::ConfigBase::optptr_mut(&mut self.base, opt_key, create)
+    }
+
+    fn keys(&self) -> Vec<String> {
+        slic3r_config::config::ConfigBase::keys(&self.base)
+    }
+
+    /// `handle_legacy()` (`PrintConfig.hpp:950-951`): delegates to
+    /// `PrintConfigDef::handle_legacy`.
+    fn handle_legacy(&self, opt_key: &mut String, value: &mut String) {
+        PrintConfigDef::handle_legacy(opt_key, value);
+    }
+
+    /// `handle_legacy_composite()` (`PrintConfig.hpp:956-957`): delegates to
+    /// `PrintConfigDef::handle_legacy_composite(*this)`.
+    ///
+    /// TODO(port): src/libslic3r/PrintConfig.cpp:10057 --
+    /// `PrintConfigDef::handle_legacy_composite` (`:10046-10101`) is not ported, so this
+    /// override has nothing to delegate to and is left as the vendored `ConfigBase`'s own empty
+    /// body. Its first branch calls `GCodeThumbnails::make_and_check_thumbnail_list` and
+    /// `GCodeThumbnails::get_error_string`, whose unit `GCode/Thumbnails` is
+    /// `template-heavy: no` and `not-started` in `port/manifest.tsv` -- a Phase A/B fan-out
+    /// module this task may not write (`task.md`: "leave a `// TODO(port):` marker rather than
+    /// a guess and name it in the pull request"). Its other two branches, the
+    /// `wiping_volumes_matrix` default detection (`:10076-10094`) and
+    /// `normalize_filament_values_to_variants` (`:10099`), are blocked instead on the
+    /// `DynamicPrintConfig` transformation methods this module does not port either. Named in
+    /// this task's pull request body.
+    fn handle_legacy_composite(&mut self) {}
+}
+
+/// `double min_object_distance(const ConfigBase &cfg)` (`PrintConfig.cpp:10323-10348`): the
+/// minimum distance between two printed objects, in mm.
+pub fn min_object_distance(cfg: &dyn slic3r_config::config::ConfigBase) -> f64 {
+    // The vendored body reads `option<ConfigOptionEnum<PrinterTechnology>>`; the registry
+    // stores `printer_technology`'s value as a `ConfigOptionEnumGeneric` here (the orphan rule;
+    // see the registry's own row), so the generic form is what a config built from the registry
+    // carries and what is read back.
+    // The value is compared as the `i32` the option stores, not through
+    // `ConfigOptionEnumValue::from_i32`: the orphan rule is exactly why this crate cannot
+    // implement that trait for `PrinterTechnology` (see the registry's own `printer_technology`
+    // row), so there is no `from_i32` for it to call. `PrinterTechnology`'s discriminants are
+    // transcribed in the vendored declaration order, so `Sla as i32` is the value the oracle's
+    // `ptSLA` is.
+    let printer_technology =
+        slic3r_config::config::ConfigOptionResolver::option(cfg, "printer_technology").and_then(
+            |o| {
+                o.as_any()
+                    .downcast_ref::<ConfigOptionEnumGeneric>()
+                    .map(|e| e.value)
+            },
+        );
+    let printer_technology =
+        printer_technology.unwrap_or(slic3r_config::config::PrinterTechnology::Unknown as i32);
+
+    // PORT SRC: src/libslic3r/PrintConfig.cpp:10328
+    let mut ret = 0.;
+
+    if printer_technology == slic3r_config::config::PrinterTechnology::Sla as i32 {
+        // PORT SRC: src/libslic3r/PrintConfig.cpp:10331
+        ret = 6.;
+    } else {
+        // "BBS: duplicate_distance seam to be useless"
+        // PORT SRC: src/libslic3r/PrintConfig.cpp:10334
+        const DUPLICATE_DISTANCE: f64 = 6.;
+        let ecr_opt =
+            slic3r_config::config::ConfigOptionResolver::option(cfg, "extruder_clearance_radius")
+                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloat>())
+                .map(|o| o.value);
+        let co_opt = slic3r_config::config::ConfigOptionResolver::option(cfg, "print_sequence")
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnum<PrintSequence>>())
+            .map(|o| o.value);
+
+        match (ecr_opt, co_opt) {
+            (Some(ecr), Some(co)) => {
+                // "min object distance is max(duplicate_distance, clearance_radius)"
+                ret = if co == PrintSequence::ByObject && ecr > DUPLICATE_DISTANCE {
+                    ecr
+                } else {
+                    DUPLICATE_DISTANCE
+                };
+            }
+            _ => {
+                // PORT SRC: src/libslic3r/PrintConfig.cpp:10339
+                ret = 0.;
+            }
+        }
+    }
+
+    ret
+}
+
+// --------------------------------------------------------------------------------------------
+// `ModelConfig` (`PrintConfig.hpp:2615-2690`): a `DynamicPrintConfig` plus a timestamp the
+// Undo/Redo stack compares instead of serializing.
+// --------------------------------------------------------------------------------------------
+
+/// `uint64_t ModelConfig::s_last_timestamp = 1` (`PrintConfig.cpp:13783`), the global counter
+/// every `ModelConfig` change bumps.
+///
+/// An `AtomicU64` rather than a bare `static mut`: the vendored member is a plain `uint64_t`
+/// and the class's own comment says so ("Modification of the ModelConfig is not thread safe due
+/// to the global timestamp counter! Don't call modification methods from the back-end!"), which
+/// is a documented caller-side rule, not a property of the counter. An atomic keeps the same
+/// observable sequence for a single modifying thread -- each `touch()` reads one value higher
+/// than the last -- without making a data race the way a `static mut` would.
+// PORT SRC: src/libslic3r/PrintConfig.cpp:13783
+static MODEL_CONFIG_LAST_TIMESTAMP: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+/// `class ModelConfig` (`PrintConfig.hpp:2615-2690`).
+///
+/// The vendored class's own comment: "As there is a global counter and it is being increased
+/// with each change to any ModelConfig, if two ModelConfig dictionaries differ, they should
+/// differ with their timestamp as well. Therefore copying the ModelConfig including its
+/// timestamp is safe as there is no harm in having multiple ModelConfig with equal timestamps as
+/// long as their dictionaries are equal. The timestamp is used by the Undo/Redo stack. As zero
+/// timestamp means invalid timestamp to the Undo/Redo stack (zero timestamp means the Undo/Redo
+/// stack needs to serialize and compare serialized data for differences), zero timestamp shall
+/// never be used. Timestamp==1 shall only be used for empty dictionaries."
+#[derive(Debug, Clone)]
+pub struct ModelConfig {
+    /// `uint64_t m_timestamp { 1 }` (`PrintConfig.hpp:2686`).
+    // PORT SRC: src/libslic3r/PrintConfig.hpp:2686
+    m_timestamp: u64,
+    /// `DynamicPrintConfig m_data` (`PrintConfig.hpp:2687`).
+    m_data: DynamicPrintConfig,
+}
+
+impl Default for ModelConfig {
+    /// The vendored class has no declared constructor, so its implicit default one leaves
+    /// `m_timestamp` at its member initialiser and `m_data` default-constructed.
+    fn default() -> Self {
+        ModelConfig {
+            // PORT SRC: src/libslic3r/PrintConfig.hpp:2686
+            m_timestamp: 1,
+            m_data: DynamicPrintConfig::new(),
+        }
+    }
+}
+
+impl ModelConfig {
+    /// A default-constructed `ModelConfig`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `void reset()` (`PrintConfig.hpp:2620`): "Following method clears the config and
+    /// increases its timestamp, so the deleted state is considered changed from perspective of
+    /// the undo/redo stack."
+    pub fn reset(&mut self) {
+        self.m_data.base.clear();
+        self.touch();
+    }
+
+    /// `void assign_config(const ModelConfig &rhs)` (`PrintConfig.hpp:2622-2627`): assigns only
+    /// when the timestamps differ, so an equal dictionary does not bump the counter.
+    pub fn assign_config_from_model(&mut self, rhs: &ModelConfig) {
+        if self.m_timestamp != rhs.m_timestamp {
+            self.m_data = rhs.m_data.clone();
+            self.m_timestamp = rhs.m_timestamp;
+        }
+    }
+
+    /// `void assign_config(ModelConfig &&rhs)` (`PrintConfig.hpp:2628-2634`): the move
+    /// overload, which additionally `reset()`s the source.
+    pub fn assign_config_from_model_moved(&mut self, rhs: &mut ModelConfig) {
+        if self.m_timestamp != rhs.m_timestamp {
+            self.m_data = std::mem::take(&mut rhs.m_data);
+            self.m_timestamp = rhs.m_timestamp;
+            rhs.reset();
+        }
+    }
+
+    /// `void assign_config(const DynamicPrintConfig &rhs)` (`PrintConfig.hpp:2639`):
+    /// "Assign methods don't assign if src==dst to not having to bump the timestamp in case
+    /// they are equal."
+    pub fn assign_config(&mut self, rhs: &DynamicPrintConfig) {
+        if &self.m_data != rhs {
+            self.m_data = rhs.clone();
+            self.touch();
+        }
+    }
+
+    /// `void apply(const ConfigBase &other, bool ignore_nonexistent)`
+    /// (`PrintConfig.hpp:2642`), whose body is
+    /// `m_data.apply_only(other, other.keys(), ignore_nonexistent); this->touch();`.
+    pub fn apply(
+        &mut self,
+        other: &dyn slic3r_config::config::ConfigBase,
+        ignore_nonexistent: bool,
+    ) -> Result<(), slic3r_config::config::ConfigError> {
+        let keys = slic3r_config::config::ConfigBase::keys(other);
+        let out = slic3r_config::config::ConfigBase::apply_only(
+            &mut self.m_data,
+            other,
+            &keys,
+            ignore_nonexistent,
+        );
+        self.touch();
+        out
+    }
+
+    /// `void apply(const ModelConfig &other, bool ignore_nonexistent)`
+    /// (`PrintConfig.hpp:2641`), which forwards `other.get()`.
+    pub fn apply_from_model(
+        &mut self,
+        other: &ModelConfig,
+        ignore_nonexistent: bool,
+    ) -> Result<(), slic3r_config::config::ConfigError> {
+        let keys = slic3r_config::config::ConfigBase::keys(other.get());
+        let out = slic3r_config::config::ConfigBase::apply_only(
+            &mut self.m_data,
+            other.get(),
+            &keys,
+            ignore_nonexistent,
+        );
+        self.touch();
+        out
+    }
+
+    /// `void apply_only(const ConfigBase &other, const t_config_option_keys &keys,
+    /// bool ignore_nonexistent)` (`PrintConfig.hpp:2644`).
+    pub fn apply_only(
+        &mut self,
+        other: &dyn slic3r_config::config::ConfigBase,
+        keys: &[String],
+        ignore_nonexistent: bool,
+    ) -> Result<(), slic3r_config::config::ConfigError> {
+        let out = slic3r_config::config::ConfigBase::apply_only(
+            &mut self.m_data,
+            other,
+            keys,
+            ignore_nonexistent,
+        );
+        self.touch();
+        out
+    }
+
+    /// `void apply_only(const ModelConfig &other, const t_config_option_keys &keys,
+    /// bool ignore_nonexistent)` (`PrintConfig.hpp:2643`).
+    pub fn apply_only_from_model(
+        &mut self,
+        other: &ModelConfig,
+        keys: &[String],
+        ignore_nonexistent: bool,
+    ) -> Result<(), slic3r_config::config::ConfigError> {
+        self.apply_only(other.get(), keys, ignore_nonexistent)
+    }
+
+    /// `bool set_key_value(const std::string &opt_key, ConfigOption *opt)`
+    /// (`PrintConfig.hpp:2645`).
+    pub fn set_key_value(
+        &mut self,
+        opt_key: &str,
+        opt: Box<dyn slic3r_config::config::ConfigOption>,
+    ) -> bool {
+        let out = self.m_data.base.set_key_value(opt_key, opt);
+        self.touch();
+        out
+    }
+
+    /// `void set_deserialize(const t_config_option_key &opt_key, const std::string &str,
+    /// ConfigSubstitutionContext &substitution_context, bool append)`
+    /// (`PrintConfig.hpp:2648-2649`).
+    pub fn set_deserialize(
+        &mut self,
+        opt_key: &str,
+        str: &str,
+        substitution_context: &mut slic3r_config::config::ConfigSubstitutionContext,
+        append: bool,
+    ) -> Result<(), slic3r_config::config::ConfigError> {
+        let out = slic3r_config::config::ConfigBase::set_deserialize(
+            &mut self.m_data,
+            opt_key,
+            str,
+            substitution_context,
+            append,
+        );
+        self.touch();
+        out
+    }
+
+    /// `bool erase(const t_config_option_key &opt_key)` (`PrintConfig.hpp:2650`): bumps the
+    /// timestamp only when something was erased.
+    pub fn erase(&mut self, opt_key: &str) -> bool {
+        let out = self.m_data.base.erase(opt_key);
+        if out {
+            self.touch();
+        }
+        out
+    }
+
+    /// `const DynamicPrintConfig& get() const` (`PrintConfig.hpp:2655`). "Getters are thread
+    /// safe."
+    pub fn get(&self) -> &DynamicPrintConfig {
+        &self.m_data
+    }
+
+    /// `bool empty() const` (`PrintConfig.hpp:2656`).
+    pub fn is_empty(&self) -> bool {
+        self.m_data.base.is_empty()
+    }
+
+    /// `size_t size() const` (`PrintConfig.hpp:2657`).
+    pub fn len(&self) -> usize {
+        self.m_data.base.len()
+    }
+
+    /// `t_config_option_keys keys() const` (`PrintConfig.hpp:2660`).
+    pub fn keys(&self) -> Vec<String> {
+        slic3r_config::config::ConfigBase::keys(&self.m_data)
+    }
+
+    /// `bool has(const t_config_option_key &opt_key) const` (`PrintConfig.hpp:2661`).
+    pub fn has(&self, opt_key: &str) -> bool {
+        slic3r_config::config::ConfigOptionResolver::has(&self.m_data, opt_key)
+    }
+
+    /// `const ConfigOption* option(const t_config_option_key &opt_key) const`
+    /// (`PrintConfig.hpp:2662`).
+    pub fn option(&self, opt_key: &str) -> Option<&dyn slic3r_config::config::ConfigOption> {
+        slic3r_config::config::ConfigOptionResolver::option(&self.m_data, opt_key)
+    }
+
+    /// `int opt_int(const t_config_option_key &opt_key) const` (`PrintConfig.hpp:2663`),
+    /// which delegates to `m_data.opt_int(opt_key)`.
+    ///
+    /// TODO(port): src/libslic3r/Config.hpp:3057 -- `slic3r-config`'s `DynamicConfig` ports no
+    /// `opt_int`, so there is nothing to delegate to. The vendored `DynamicConfig::opt_int`'s
+    /// own const body, `dynamic_cast<const ConfigOptionInt*>(this->option(opt_key))->value`, is
+    /// inlined here instead, which gives the same value for every key that has one. The
+    /// difference is the missing-key case: the vendored body dereferences a null
+    /// `dynamic_cast` result, which is undefined behaviour, where this returns `None`.
+    /// `slic3r-config` is the module to add those accessors to, and this task's pull request
+    /// body names it.
+    pub fn opt_int(&self, opt_key: &str) -> Option<i32> {
+        self.option(opt_key)
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionInt>())
+            .map(|o| o.value)
+    }
+
+    /// `int extruder() const` (`PrintConfig.hpp:2664`): `opt_int("extruder")`.
+    pub fn extruder(&self) -> Option<i32> {
+        self.opt_int("extruder")
+    }
+
+    /// `double opt_float(const t_config_option_key &opt_key) const`
+    /// (`PrintConfig.hpp:2665-2667`). The same missing accessor as [`ModelConfig::opt_int`]:
+    /// the vendored `DynamicConfig::opt_float`'s const body (`Config.hpp:3048`) is inlined.
+    pub fn opt_float(&self, opt_key: &str) -> Option<f64> {
+        self.option(opt_key)
+            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloat>())
+            .map(|o| o.value)
+    }
+
+    /// `double get_abs_value(const t_config_option_key &opt_key) const`
+    /// (`PrintConfig.hpp:2668-2670`).
+    pub fn get_abs_value(&self, opt_key: &str) -> Result<f64, slic3r_config::config::ConfigError> {
+        slic3r_config::config::ConfigBase::get_abs_value(&self.m_data, opt_key)
+    }
+
+    /// `std::string opt_serialize(const t_config_option_key &opt_key) const`
+    /// (`PrintConfig.hpp:2671`).
+    pub fn opt_serialize(&self, opt_key: &str) -> String {
+        slic3r_config::config::ConfigBase::opt_serialize(&self.m_data, opt_key)
+    }
+
+    /// `virtual uint64_t timestamp() const` (`PrintConfig.hpp:2677`): "Return an optional
+    /// timestamp of this object. If the timestamp returned is non-zero, then the serialization
+    /// framework will only save this object on the Undo/Redo stack if the timestamp is
+    /// different from the timestmap of the object at the top of the Undo / Redo stack."
+    pub fn timestamp(&self) -> u64 {
+        self.m_timestamp
+    }
+
+    /// `bool timestamp_matches(const ModelConfig &rhs) const` (`PrintConfig.hpp:2678`).
+    pub fn timestamp_matches(&self, rhs: &ModelConfig) -> bool {
+        self.m_timestamp == rhs.m_timestamp
+    }
+
+    /// `void touch()` (`PrintConfig.hpp:2680`): `m_timestamp = ++ s_last_timestamp`, so the new
+    /// value is the incremented counter and never the value it had before.
+    pub fn touch(&mut self) {
+        self.m_timestamp =
+            MODEL_CONFIG_LAST_TIMESTAMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    }
+}
+
+// TODO(port): src/libslic3r/PrintConfig.hpp:2659 -- `ModelConfig::cbegin()`/`cend()` hand out
+// `m_data.cbegin()`/`cend()` (`Config.hpp:3080-3081`), and `slic3r-config`'s `DynamicConfig`
+// ports neither: its `options` field is private and it exposes no iterator at all, so no other
+// crate can supply one. The two accessors are therefore not ported. Named in this task's pull
+// request body as a finding against `slic3r-config`.
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -19952,6 +20622,439 @@ mod tests {
                     .join("\u{1}"),
             ),
         ])
+    }
+
+    /// `DynamicPrintConfig`'s constructors, static factories and registry-only accessors, each
+    /// held to exact equality against the oracle's own. A config's observable content is its
+    /// keys and their serialized values, so every comparison here is of that whole list.
+    #[test]
+    fn dynamic_print_config_matches_the_oracle() {
+        /// One config as the shim serializes it: `"<key>=<serialized>"` per key, in the key
+        /// order `ConfigBase::keys()` reports.
+        fn serialize(config: &dyn slic3r_config::config::ConfigBase) -> Vec<String> {
+            slic3r_config::config::ConfigBase::keys(config)
+                .into_iter()
+                .map(|key| {
+                    let value =
+                        match slic3r_config::config::ConfigOptionResolver::option(config, &key) {
+                            Some(opt) => opt.serialize(),
+                            None => "<absent>".to_string(),
+                        };
+                    format!("{key}={value}")
+                })
+                .collect()
+        }
+
+        // `full_print_config()`. This is the one that checks the cast in the vendored body:
+        // `DynamicPrintConfig((const PrintRegionConfig&)FullPrintConfig::defaults())` selects
+        // the `const StaticPrintConfig&` constructor through a `PrintRegionConfig` subobject,
+        // so the keys that land are `PrintRegionConfig`'s and not `FullPrintConfig`'s. Reading
+        // the cast the other way would give a list hundreds of keys longer, which this would
+        // fail on.
+        let oracle_full: Vec<String> = ora::oracle_full_print_config_serialized()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(
+            !oracle_full.is_empty(),
+            "the oracle's full_print_config() is empty"
+        );
+        let mine_full = DynamicPrintConfig::full_print_config();
+        assert_eq!(
+            serialize(&mine_full),
+            oracle_full,
+            "full_print_config() differs"
+        );
+
+        // The `const StaticPrintConfig&` constructor, over the eight non-derived classes. The
+        // three derived ones are not probed because the vendored constructor cannot be called
+        // with one at all: each inherits `StaticPrintConfig` through every parent, so the
+        // conversion is ambiguous and the call does not compile. The ported
+        // `from_static_print_config` is therefore *wider* than the vendored constructor -- Rust
+        // has no ambiguous-base rule to stop it -- and the extra reach is not something the pin
+        // can be compared on.
+        let non_derived = [
+            "PrintObjectConfig",
+            "PrintRegionConfig",
+            "MachineEnvelopeConfig",
+            "GCodeConfig",
+            "SLAPrintConfig",
+            "SLAPrintObjectConfig",
+            "SLAMaterialConfig",
+            "SLAPrinterConfig",
+        ];
+        let mut from_static: Vec<(&str, Vec<String>)> = vec![
+            (
+                "PrintObjectConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    PrintObjectConfig::defaults(),
+                )),
+            ),
+            (
+                "PrintRegionConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    PrintRegionConfig::defaults(),
+                )),
+            ),
+            (
+                "MachineEnvelopeConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    MachineEnvelopeConfig::defaults(),
+                )),
+            ),
+            (
+                "GCodeConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    GCodeConfig::defaults(),
+                )),
+            ),
+            (
+                "SLAPrintConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    SLAPrintConfig::defaults(),
+                )),
+            ),
+            (
+                "SLAPrintObjectConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    SLAPrintObjectConfig::defaults(),
+                )),
+            ),
+            (
+                "SLAMaterialConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    SLAMaterialConfig::defaults(),
+                )),
+            ),
+            (
+                "SLAPrinterConfig",
+                serialize(&DynamicPrintConfig::from_static_print_config(
+                    SLAPrinterConfig::defaults(),
+                )),
+            ),
+        ];
+        assert_eq!(from_static.len(), non_derived.len());
+        for (which, mine) in from_static.drain(..) {
+            let theirs: Vec<String> = ora::oracle_dynamic_from_static_serialized(which)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert!(
+                !theirs.is_empty(),
+                "{which}: the oracle's DynamicPrintConfig(static) is empty"
+            );
+            assert_eq!(mine, theirs, "{which}: DynamicPrintConfig(static) differs");
+        }
+        // A derived name really does come back empty from the shim, which is what the three
+        // being unprobeable means rather than something this test glosses.
+        for which in ["PrintConfig", "FullPrintConfig", "SLAFullPrintConfig"] {
+            assert!(
+                ora::oracle_dynamic_from_static_serialized(which).is_empty(),
+                "{which}: the vendored StaticPrintConfig& constructor should be unreachable \
+                 for a derived class"
+            );
+        }
+
+        // `new_from_defaults_keys`, over key lists that exercise its `apply_only`: an empty
+        // list, keys of several types, a key the registry does not know, and a duplicate.
+        let key_lists: Vec<Vec<String>> = vec![
+            vec![],
+            vec!["layer_height".to_string()],
+            vec![
+                "layer_height".to_string(),
+                "filament_type".to_string(),
+                "nozzle_diameter".to_string(),
+                "printer_technology".to_string(),
+                "brim_type".to_string(),
+                "overhang_fan_threshold".to_string(),
+            ],
+            vec!["layer_height".to_string(), "layer_height".to_string()],
+        ];
+        for keys in &key_lists {
+            let theirs: Vec<String> = ora::oracle_new_from_defaults_keys_serialized(keys)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mine = DynamicPrintConfig::new_from_defaults_keys(keys);
+            assert_eq!(
+                serialize(&mine),
+                theirs,
+                "new_from_defaults_keys({keys:?}) differs"
+            );
+        }
+
+        // `get_parameter_size`, over one key from each of the four option-set globals it
+        // consults plus a key none of them names, which falls through to `extruder_nums`.
+        let probes = [
+            "layer_height",
+            "nozzle_diameter",
+            "outer_wall_speed",
+            "filament_type",
+            "filament_diameter",
+            "printer_extruder_variant",
+            "not_a_real_key",
+        ];
+        for param in probes {
+            for extruder_nums in [0_u64, 1, 4] {
+                assert_eq!(
+                    mine_full.get_parameter_size(param, extruder_nums as usize) as u64,
+                    ora::oracle_parameter_size_of_full(param, extruder_nums),
+                    "get_parameter_size({param:?}, {extruder_nums})"
+                );
+            }
+        }
+
+        println!(
+            "DynamicPrintConfig: full_print_config ({} keys), 8 static-class constructions, \
+             {} key lists, {} parameter-size probes -- all exact",
+            oracle_full.len(),
+            key_lists.len(),
+            probes.len() * 3
+        );
+    }
+
+    /// `min_object_distance` (`PrintConfig.cpp:10323-10348`) and the three filament-type
+    /// accessors (`:10698-10771`, `:11552-11575`), each held to exact equality against the
+    /// oracle's own over the inputs their branches distinguish.
+    #[test]
+    fn print_config_distance_and_filament_accessors_match_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `min_object_distance`: the SLA arm, both null checks, and the `ByObject`-with-a-large
+        // radius comparison on either side of the 6 mm duplicate distance.
+        for tech in ["", "FFF", "SLA"] {
+            for sequence in ["", "by layer", "by object"] {
+                for radius in ["", "0", "1", "6", "6.5", "20"] {
+                    let theirs = ora::oracle_min_object_distance(sequence, radius, tech);
+                    let mut cfg = DynamicPrintConfig::new();
+                    let mut ctx = slic3r_config::config::ConfigSubstitutionContext::new(
+                        slic3r_config::config::ForwardCompatibilitySubstitutionRule::Disable,
+                    );
+                    for (key, value) in [
+                        ("print_sequence", sequence),
+                        ("extruder_clearance_radius", radius),
+                        ("printer_technology", tech),
+                    ] {
+                        if !value.is_empty() {
+                            slic3r_config::config::ConfigBase::set_deserialize(
+                                &mut cfg, key, value, &mut ctx, false,
+                            )
+                            .unwrap_or_else(|e| panic!("set_deserialize({key}, {value}): {e:?}"));
+                        }
+                    }
+                    assert!(
+                        !theirs.is_nan(),
+                        "the oracle refused a min_object_distance probe \
+                         (tech={tech:?}, seq={sequence:?}, r={radius:?})"
+                    );
+                    assert_eq!(
+                        min_object_distance(&cfg),
+                        theirs,
+                        "min_object_distance(tech={tech:?}, seq={sequence:?}, r={radius:?})"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+
+        // The filament-type accessors. `"?"` leaves the key absent and `""` sets it to an empty
+        // vector -- the two cases the body's "treat an empty option the same as a missing one"
+        // guard covers -- and the type/id/support combinations reach every one of its arms,
+        // including the two `filament_id` support materials and the PLA/PA fallbacks.
+        let types = ["?", "", "PLA", "PA", "PETG", "PLA,PA,PETG"];
+        let ids = ["?", "", "GFS00", "GFS01", "GFA00", "GFA00,GFS00,GFS01"];
+        let supports = ["?", "", "0", "1", "0,1,1"];
+        let vendors = ["?", "", "Acme", "Acme,Other"];
+        for t in types {
+            for i in ids {
+                for sup in supports {
+                    for v in vendors {
+                        for id in 0_u64..2 {
+                            let theirs: Vec<String> =
+                                ora::oracle_filament_type_probe(t, i, sup, v, id)
+                                    .iter()
+                                    .map(|s| s.to_string())
+                                    .collect();
+                            // The oracle's `get_at` is undefined behaviour past the end of a
+                            // non-empty vector (`.front()` of an empty one is the case the
+                            // vendored body guards; a short non-empty one it indexes anyway),
+                            // so a probe whose `id` exceeds a set vector's length is skipped
+                            // rather than compared against undefined behaviour.
+                            let n = |s: &str| -> usize {
+                                if s == "?" || s.is_empty() {
+                                    usize::MAX
+                                } else {
+                                    s.split(',').count()
+                                }
+                            };
+                            if (id as usize) >= n(t).min(n(i)).min(n(sup)) {
+                                continue;
+                            }
+                            let mut cfg = DynamicPrintConfig::new();
+                            let mut ctx =
+                                slic3r_config::config::ConfigSubstitutionContext::new(
+                                    slic3r_config::config::ForwardCompatibilitySubstitutionRule
+                                        ::Disable,
+                                );
+                            for (key, value) in [
+                                ("filament_type", t),
+                                ("filament_id", i),
+                                ("filament_is_support", sup),
+                                ("filament_vendor", v),
+                            ] {
+                                if value != "?" {
+                                    let _ = slic3r_config::config::ConfigBase::set_deserialize(
+                                        &mut cfg, key, value, &mut ctx, false,
+                                    );
+                                }
+                            }
+                            let (returned, displayed) = cfg.get_filament_type_for_id(id as usize);
+                            let mine = vec![
+                                returned,
+                                displayed,
+                                cfg.get_filament_vendor(),
+                                cfg.get_filament_type_first(),
+                            ];
+                            assert!(
+                                theirs.len() == 4,
+                                "the oracle refused a probe value: {theirs:?} \
+                                 (type={t:?}, id={i:?}, support={sup:?}, vendor={v:?})"
+                            );
+                            assert_eq!(
+                                mine, theirs,
+                                "filament accessors (type={t:?}, id={i:?}, support={sup:?}, \
+                                 vendor={v:?}, index={id})"
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("min_object_distance and the filament accessors: {checked} case(s) exact");
+    }
+
+    /// `ModelConfig` (`PrintConfig.hpp:2615-2690`): the timestamp discipline its own comment
+    /// fixes, checked against that comment rather than against the oracle.
+    ///
+    /// **Why this one does not call the oracle, said plainly.** `ModelConfig` has no `extern`
+    /// instance and no externally-linked member function to reach: every method is defined
+    /// inline in the header, so the only symbol of it in the library is
+    /// `ModelConfig::s_last_timestamp` (`PrintConfig.cpp:13783`). A shim could reach the class
+    /// only by `#include`ing the header and constructing one, which would compare this port
+    /// against a second copy of the *same* inline code the compiler also gives the oracle --
+    /// true by construction and worth nothing. What is checkable is the behaviour the class's
+    /// own comment specifies, and that is what is asserted: the counter never yields zero, an
+    /// assign of an equal timestamp does not bump it, every modification does, and an empty
+    /// dictionary starts at 1.
+    #[test]
+    fn print_config_model_config_keeps_its_timestamp_discipline() {
+        // "Timestamp==1 shall only be used for empty dictionaries."
+        let fresh = ModelConfig::new();
+        assert_eq!(fresh.timestamp(), 1);
+        assert!(fresh.is_empty());
+        assert_eq!(fresh.len(), 0);
+
+        // Every modification bumps the timestamp, and "zero timestamp shall never be used".
+        let mut a = ModelConfig::new();
+        let mut last = a.timestamp();
+        for _ in 0..4 {
+            a.set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.2)));
+            assert!(
+                a.timestamp() > last && a.timestamp() != 0,
+                "touch() must yield a strictly greater non-zero timestamp"
+            );
+            last = a.timestamp();
+        }
+        assert_eq!(a.len(), 1);
+        assert_eq!(a.opt_float("layer_height"), Some(0.2));
+        assert_eq!(
+            a.opt_int("layer_height"),
+            None,
+            "wrong type reads as absent"
+        );
+        assert!(a.has("layer_height"));
+        assert_eq!(a.keys(), vec!["layer_height".to_string()]);
+        assert_eq!(a.opt_serialize("layer_height"), "0.2");
+
+        // `erase` bumps only when something was erased.
+        let before = a.timestamp();
+        assert!(!a.erase("not_present"));
+        assert_eq!(a.timestamp(), before, "an erase of nothing must not touch");
+        assert!(a.erase("layer_height"));
+        assert!(a.timestamp() > before);
+
+        // `reset` clears and touches.
+        let mut b = ModelConfig::new();
+        b.set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.3)));
+        let before = b.timestamp();
+        b.reset();
+        assert!(b.is_empty());
+        assert!(b.timestamp() > before);
+
+        // "Assign methods don't assign if src==dst to not having to bump the timestamp in case
+        // they are equal": the `ModelConfig` overload compares timestamps, so assigning from a
+        // config whose timestamp already matches is a no-op even when the dictionaries differ.
+        let mut c = ModelConfig::new();
+        c.set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.4)));
+        let mut d = c.clone();
+        let d_timestamp = d.timestamp();
+        let mut other = ModelConfig::new();
+        other.set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.9)));
+        d.assign_config_from_model(&c);
+        assert_eq!(
+            d.timestamp(),
+            d_timestamp,
+            "assigning from a matching timestamp must not assign"
+        );
+        d.assign_config_from_model(&other);
+        assert_eq!(d.timestamp(), other.timestamp());
+        assert_eq!(d.opt_float("layer_height"), Some(0.9));
+
+        // The `DynamicPrintConfig` overload compares dictionaries instead, so an equal one is
+        // the no-op and a different one touches.
+        let mut e = ModelConfig::new();
+        let mut data = DynamicPrintConfig::new();
+        data.base
+            .set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.5)));
+        e.assign_config(&data);
+        let after_first = e.timestamp();
+        e.assign_config(&data);
+        assert_eq!(
+            e.timestamp(),
+            after_first,
+            "assigning an equal dictionary must not touch"
+        );
+        data.base
+            .set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.6)));
+        e.assign_config(&data);
+        assert!(e.timestamp() > after_first);
+
+        // The move overload resets the source.
+        let mut src = ModelConfig::new();
+        src.set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.7)));
+        let src_timestamp = src.timestamp();
+        let mut dst = ModelConfig::new();
+        dst.assign_config_from_model_moved(&mut src);
+        assert_eq!(dst.timestamp(), src_timestamp);
+        assert_eq!(dst.opt_float("layer_height"), Some(0.7));
+        assert!(src.is_empty(), "the moved-from source must be reset");
+
+        // `apply` goes through the dictionary and touches.
+        let mut f = ModelConfig::new();
+        let before = f.timestamp();
+        f.apply(&data, false).expect("apply");
+        assert!(f.timestamp() > before);
+        assert_eq!(f.opt_float("layer_height"), Some(0.6));
+
+        // `extruder()` is `opt_int("extruder")`.
+        assert_eq!(f.extruder(), None);
+        f.set_key_value("extruder", Box::new(ConfigOptionInt::new(3)));
+        assert_eq!(f.extruder(), Some(3));
+
+        assert!(f.timestamp_matches(&f.clone()));
+        println!("ModelConfig: timestamp discipline and every delegating accessor checked");
     }
 
     /// The seven option-set globals (`PrintConfig.cpp:10105-10305`), each held to exact
