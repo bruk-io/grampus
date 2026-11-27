@@ -3,3 +3,4 @@
 //! `mod` line per ported module, in alphabetical order, as docs/WORKFLOW.md states.
 
 pub mod pchip_interpolator_helper;
+pub mod precise_seam_internal;
