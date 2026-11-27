@@ -3412,12 +3412,9 @@ impl PrintConfigDef {
 
     /// `PrintConfigDef::init_fff_params()` (`PrintConfig.cpp:1317-8991`).
     fn init_fff_params(&mut self) {
-        // `const int max_temp = 1500` (`PrintConfig.cpp:1322`), a local of the vendored body,
-        // used as the `max` of every nozzle-temperature option below. "Maximum extruder
-        // temperature, bumped to 1500 to support printing of glass."
-        // PORT SRC: src/libslic3r/PrintConfig.cpp:1322
-        let max_temp: i32 = 1500;
-        let _ = max_temp;
+        // `const int max_temp = 1500` (`PrintConfig.cpp:1322`) is a local of the vendored body,
+        // used as the `max` of every nozzle-temperature option. It lands with the first of those
+        // options; declaring it now would be a binding nothing reads.
 
         {
             let def = self.def.add("reduce_crossing_wall", ConfigOptionType::Bool);
@@ -4506,20 +4503,16 @@ impl PrintConfigDef {
 fn cpp_getline_split(s: &str, sep: char) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut current = String::new();
-    let mut saw_any = false;
     for c in s.chars() {
         if c == sep {
             out.push(std::mem::take(&mut current));
-            saw_any = true;
         } else {
             current.push(c);
-            saw_any = true;
         }
     }
     if !current.is_empty() {
         out.push(current);
     }
-    let _ = saw_any;
     out
 }
 
@@ -4887,10 +4880,22 @@ mod tests {
     ///
     /// The vendored body's last statement clears `opt_key` when the registry does not know it,
     /// so while the table is incomplete the two sides legitimately differ on a key the oracle
-    /// keeps and this registry has not got yet. Rather than skip those cases (which would let a
-    /// real divergence hide behind the shortfall), this asserts the full chain for every case
-    /// where the oracle's surviving key is one this registry *does* know, which is exactly the
-    /// set where the two sides must agree, and which grows to everything as rows are added.
+    /// keeps and this registry has not got yet. This asserts the full chain for every case where
+    /// the oracle's surviving key is one this registry *does* know, which is exactly the set
+    /// where the two sides must agree, and which grows to everything as rows are added.
+    ///
+    /// **What that deferral excludes today, stated so the case count is not read as more than it
+    /// is.** A branch whose key the oracle keeps and this registry has not transcribed is
+    /// deferred whatever this module does with it, so the value-rewriting branches of
+    /// `filament_type` (the `"ASA-Aero"` rebuild), `support_type`, `extruder_type`,
+    /// `enable_power_loss_recovery`, `ensure_vertical_shell_thickness` and `timelapse_type` are
+    /// **not** covered here yet, and neither is a rename whose target is untranscribed
+    /// (`support_material_angle` -> `support_angle`, for one). What the case count does cover is
+    /// the obsolete-key clearing, the `has()`-miss clearing, and every branch whose surviving key
+    /// is among the transcribed rows -- `curr_bed_type` -> `"Supertack Plate"` and
+    /// `overhang_fan_threshold` -> `"10%"` among them. The wider throwaway probe in
+    /// `oracle/.cache/tmp/` is what reaches the rest today, by attributing each difference instead
+    /// of deferring it; this test takes over from it as rows land.
     #[test]
     fn handle_legacy_matches_the_oracle() {
         let mut keys: Vec<String> = ora::oracle_option_keys()
