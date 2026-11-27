@@ -226,6 +226,30 @@ int32_t oracle_is_xl_printer_of_print_defaults();
 // union of the registry and the three command line tables, and its `handle_legacy`, which
 // delegates to the registry's only for a key none of those three tables names.
 rust::Vec<rust::String> oracle_print_and_cli_def_keys();
+
+// `update_static_print_config_from_dynamic` (`PrintConfig.cpp:12393-12413`, declared
+// `PrintConfig.hpp:1035`) and `set_variant_override` (`:11394-11402`, declared `:1016`), each
+// externally linked and called directly.
+//
+// `ensure_process_variant_columns` (`:11604-11632`) and `normalize_stride2_floats`
+// (`:12089-12127`) are **not** here: both are file-scope `static` in the vendored translation
+// unit, so neither has a symbol to call. They are the kind of internal-linkage helper this
+// unit's `proof path: 3` cell exists for, and the only route to them is through a caller --
+// `update_values_to_printer_extruders` and `update_non_diff_values_to_base_config`
+// respectively, neither of which this unit ports yet. Both are ported and recorded as awaiting
+// their enclosing caller's comparison.
+rust::Vec<rust::String>
+oracle_update_static_print_config_from_dynamic(rust::Str base,
+                                               const rust::Vec<rust::String> &target_kv,
+                                               const rust::Vec<rust::String> &dest_kv,
+                                               const rust::Vec<int32_t> &variant_index,
+                                               const rust::Vec<rust::String> &key_set1,
+                                               int32_t stride);
+// `set_variant_override` (`:11394-11402`) over one `coFloats` pair: the target's serialized
+// value after the override.
+rust::String oracle_set_variant_override(rust::Str target_value, rust::Str source_value,
+                                         const rust::Vec<int32_t> &variant_index,
+                                         int32_t stride);
 OracleLegacyResult oracle_print_and_cli_handle_legacy(rust::Str opt_key, rust::Str value);
 rust::Vec<int64_t> oracle_bed_shape_of_sla_defaults();
 

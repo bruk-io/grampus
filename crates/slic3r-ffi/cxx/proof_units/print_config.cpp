@@ -49,6 +49,7 @@
 // externally-linked symbol in this file changes nothing under `vendor/OrcaSlicer/`.
 namespace Slic3r {
 std::vector<std::string> get_shaper_type_values_for_flavor(GCodeFlavor flavor);
+
 } // namespace Slic3r
 
 namespace slic3r_ffi {
@@ -970,6 +971,59 @@ oracle_extruder_supported_nozzle_volume_types(const rust::Vec<rust::String> &key
         out.push_back(static_cast<int32_t>(type));
     }
     return out;
+}
+
+rust::Vec<rust::String>
+oracle_update_static_print_config_from_dynamic(rust::Str base,
+                                               const rust::Vec<rust::String> &target_kv,
+                                               const rust::Vec<rust::String> &dest_kv,
+                                               const rust::Vec<int32_t> &variant_index,
+                                               const rust::Vec<rust::String> &key_set1,
+                                               int32_t stride) {
+    bool ok_a = false, ok_b = false;
+    Slic3r::DynamicPrintConfig target = config_from_base(base, target_kv, ok_a);
+    Slic3r::DynamicPrintConfig dest = config_from(dest_kv, ok_b);
+    if (!ok_a || !ok_b) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<refused>"));
+        return out;
+    }
+    std::vector<int> indices;
+    for (int32_t i : variant_index) {
+        indices.push_back(static_cast<int>(i));
+    }
+    std::set<std::string> keys;
+    for (const rust::String &k : key_set1) {
+        keys.insert(std::string(k));
+    }
+    Slic3r::update_static_print_config_from_dynamic(target, dest, indices, keys,
+                                                    static_cast<int>(stride));
+    return serialize_config(target);
+}
+
+rust::String oracle_set_variant_override(rust::Str target_value, rust::Str source_value,
+                                         const rust::Vec<int32_t> &variant_index,
+                                         int32_t stride) {
+    Slic3r::ConfigOptionFloats target, source;
+    // `ConfigOptionFloatsTempl<false>::deserialize` **throws** `ConfigurationError`
+    // ("Deserializing nil into a non-nullable object") for a `nil` element rather than
+    // returning false, and an exception escaping a `cxx` bridge function declared to return a
+    // value aborts the whole test binary. Reported as a refusal instead -- observed: the first
+    // run of this comparison died with `SIGABRT` on a `nil` probe.
+    try {
+        if (!target.deserialize(std::string(target_value)) ||
+            !source.deserialize(std::string(source_value))) {
+            return rust::String("<refused>");
+        }
+    } catch (const std::exception &) {
+        return rust::String("<refused>");
+    }
+    std::vector<int> indices;
+    for (int32_t i : variant_index) {
+        indices.push_back(static_cast<int>(i));
+    }
+    Slic3r::set_variant_override(target, source, indices, static_cast<int>(stride));
+    return rust::String(target.serialize());
 }
 
 } // namespace print_config

@@ -331,6 +331,26 @@ mod ffi {
         /// the union of the registry and the three command line tables, in the map's own order.
         fn oracle_print_and_cli_def_keys() -> Vec<String>;
 
+        /// `update_static_print_config_from_dynamic` (`PrintConfig.cpp:12393-12413`), with
+        /// the target config handed back whole.
+        fn oracle_update_static_print_config_from_dynamic(
+            base: &str,
+            target_kv: &Vec<String>,
+            dest_kv: &Vec<String>,
+            variant_index: &Vec<i32>,
+            key_set1: &Vec<String>,
+            stride: i32,
+        ) -> Vec<String>;
+
+        /// `set_variant_override` (`:11394-11402`) over one `coFloats` pair, as the target's
+        /// serialized value after the override.
+        fn oracle_set_variant_override(
+            target_value: &str,
+            source_value: &str,
+            variant_index: &Vec<i32>,
+            stride: i32,
+        ) -> String;
+
         /// `DynamicPrintAndCLIConfig::handle_legacy` (`PrintConfig.cpp:13267-13274`), which
         /// delegates to `PrintConfigDef::handle_legacy` only for a key none of the three
         /// command line tables names.
@@ -409,6 +429,8 @@ pub use ffi::{
     oracle_other_def_keys, oracle_other_def_option_info, oracle_parameter_size_of_full,
     oracle_print_and_cli_def_keys, oracle_print_and_cli_handle_legacy, oracle_real_skirt_dist,
     oracle_set_filament_dev_options, oracle_set_num_extruders, oracle_set_num_filaments,
-    oracle_shaper_type_values_for_flavor, oracle_static_class_defaults, oracle_static_class_keys,
-    oracle_support_different_extruders, OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
+    oracle_set_variant_override, oracle_shaper_type_values_for_flavor,
+    oracle_static_class_defaults, oracle_static_class_keys, oracle_support_different_extruders,
+    oracle_update_static_print_config_from_dynamic, OracleEnumKeyValue, OracleLegacyResult,
+    OracleOptionInfo,
 };

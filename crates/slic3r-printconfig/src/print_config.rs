@@ -20691,6 +20691,269 @@ pub fn is_xl_printer(cfg: &PrintConfig) -> bool {
     is_xl_printer_notes(&cfg.printer_notes.value)
 }
 
+/// `void set_variant_override(ConfigOptionVectorBase &target, const ConfigOptionVectorBase
+/// &source, const std::vector<int> &variant_index, int stride)`
+/// (`PrintConfig.cpp:11394-11402`).
+pub fn set_variant_override(
+    target: &mut dyn slic3r_config::config::ConfigOptionVectorBase,
+    source: &dyn slic3r_config::config::ConfigOptionVectorBase,
+    variant_index: &[i32],
+    stride: i32,
+) {
+    // "A single-value object or region override applies to every nozzle variant."
+    let mut indices = variant_index.to_vec();
+    if source.len_values() == 1 && !source.is_nil_at(0) {
+        indices.fill(0);
+    }
+    let _ = target.set_to_index(source, &indices, stride);
+}
+
+/// `static void normalize_stride2_floats(ConfigOptionFloats &opt, size_t expected_size)`
+/// (`PrintConfig.cpp:12089-12127`): resizes a stride-2 `(normal, silent)` vector to
+/// `expected_size`, replicating the first pair into any variants it gains.
+fn normalize_stride2_floats(opt: &mut ConfigOptionFloats, expected_size: usize) {
+    let v = &mut opt.values;
+    if expected_size == 0 {
+        v.clear();
+        return;
+    }
+    if v.is_empty() {
+        // "Fallback: keep behavior predictable instead of crashing. This should be rare."
+        // PORT SRC: src/libslic3r/PrintConfig.cpp:12098
+        v.resize(expected_size, 0.0);
+        return;
+    }
+
+    let first = v[0];
+    // PORT SRC: src/libslic3r/PrintConfig.cpp:12103
+    let second = if v.len() >= 2 { v[1] } else { first };
+
+    // "Ensure we have at least one (normal,silent) pair to replicate."
+    // PORT SRC: src/libslic3r/PrintConfig.cpp:12106
+    if v.len() < 2 {
+        // PORT SRC: src/libslic3r/PrintConfig.cpp:12107
+        v.resize(2, first);
+        v[1] = second;
+    }
+    // "Keep pair alignment if some legacy preset produced odd length."
+    if v.len() % 2 != 0 {
+        v.push(second);
+    }
+
+    if v.len() > expected_size {
+        v.truncate(expected_size);
+        return;
+    }
+
+    let have_variants = v.len() / 2;
+    let want_variants = expected_size / 2;
+    // `std::vector::resize` grows with a default-constructed `double`, i.e. 0.0.
+    v.resize(expected_size, 0_f64);
+    for vi in have_variants..want_variants {
+        v[vi * 2] = first;
+        if vi * 2 + 1 < v.len() {
+            v[vi * 2 + 1] = second;
+        }
+    }
+}
+
+// PORT NOTE: src/libslic3r/PrintConfig.cpp:12129 -- `log_normalize_legacy_vector_size`
+// (`:12129-12138`) is a `BOOST_LOG_TRIVIAL(debug)` statement and nothing else: it reads its
+// eleven arguments, formats them and returns. `boost::log` has no counterpart here and a log
+// line is not behaviour this unit's proof can compare, so it is not ported, the same boundary
+// every other `BOOST_LOG_TRIVIAL` site in this module records. Its callers are the
+// transformation methods this module does not port either.
+
+/// `static void ensure_process_variant_columns(DynamicPrintConfig &config, const
+/// DynamicPrintConfig &printer_config)` (`PrintConfig.cpp:11604-11632`): synthesises the
+/// process scope's per-variant columns from the printer's `extruder_variant_list`, for the
+/// reason the vendored comment above it gives at `:11595-11603` -- a custom multi-extruder
+/// printer keeps the length-1 process defaults, and expanding with that degenerate map makes
+/// every per-extruder lookup fail.
+pub fn ensure_process_variant_columns(
+    config: &mut DynamicPrintConfig,
+    printer_config: &DynamicPrintConfig,
+) {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+    let id_len = Resolver::option(config, "print_extruder_id")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionInts>())
+        .map(|o| o.values.len());
+    let variant_len = Resolver::option(config, "print_extruder_variant")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+        .map(|o| o.values.len());
+    let list: Vec<String> = match Resolver::option(printer_config, "extruder_variant_list")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionStrings>())
+    {
+        Some(o) => o.values.clone(),
+        None => return,
+    };
+    // All three must be present; the two lengths must both be 1.
+    if id_len != Some(1) || variant_len != Some(1) {
+        return;
+    }
+
+    // FIDELITY(port): the two rebuilt columns are filled by walking
+    // `extruder_variant_list`'s entries in order and each entry's comma-separated tokens in
+    // order, and they pair positionally -- the order reaches output, because every
+    // per-variant lookup indexes them together.
+    let mut ids: Vec<i32> = Vec::new();
+    let mut variants: Vec<String> = Vec::new();
+    for (i, entry) in list.iter().enumerate() {
+        for token in boost_split_compress(entry, &[',']) {
+            let token = token.trim_matches(|c: char| c.is_whitespace());
+            if token.is_empty() {
+                continue;
+            }
+            ids.push(i as i32 + 1);
+            variants.push(token.to_string());
+        }
+    }
+    // "A single column is the legitimate single-extruder layout, not a degenerate one."
+    if ids.len() <= 1 {
+        return;
+    }
+    if let Some(opt) = config
+        .base
+        .opt::<ConfigOptionInts>("print_extruder_id", false)
+    {
+        opt.values = ids;
+    }
+    if let Some(opt) = config
+        .base
+        .opt::<ConfigOptionStrings>("print_extruder_variant", false)
+    {
+        opt.values = variants;
+    }
+}
+
+/// `void compute_filament_override_value(const std::string &opt_key, const ConfigOption
+/// *opt_old_machine, const ConfigOption *opt_new_machine, const ConfigOption
+/// *opt_new_filament, const DynamicPrintConfig &new_full_config, t_config_option_keys
+/// &diff_keys, DynamicPrintConfig &filament_overrides, std::vector<int> &f_map_indices)`
+/// (`PrintConfig.cpp:12358-12390`): applies a filament's override onto the machine value and
+/// records it only where the result differs.
+///
+/// The two in-place-written arguments (`diff_keys`, `filament_overrides`) stay as `&mut`
+/// parameters, which is what a reference argument is here.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_filament_override_value(
+    opt_key: &str,
+    opt_old_machine: &dyn slic3r_config::config::ConfigOption,
+    opt_new_machine: &dyn slic3r_config::config::ConfigOption,
+    opt_new_filament: &dyn slic3r_config::config::ConfigOption,
+    new_full_config: &DynamicPrintConfig,
+    diff_keys: &mut Vec<String>,
+    filament_overrides: &mut DynamicPrintConfig,
+    f_map_indices: &mut Vec<i32>,
+) {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+    // The vendored body's `bool is_nil = opt_new_filament->is_nil();` is never read
+    // (`PrintConfig.cpp:12361`); it is not transcribed as a binding nothing uses.
+
+    let enable_level = Resolver::option(new_full_config, "enable_long_retraction_when_cut")
+        .and_then(|o| o.as_any().downcast_ref::<ConfigOptionInt>())
+        .map(|o| o.value);
+    let not_filament_level = enable_level != Some(LongRectrationLevel::EnableFilament as i32);
+
+    // "ugly code, for these params, we should ignore the value in filament params"
+    let mut long_retraction_default = ConfigOptionBoolsNullable::new();
+    let mut retraction_distance_default =
+        ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
+    let mut substitute: Option<&dyn slic3r_config::config::ConfigOption> = None;
+    if opt_key == "long_retractions_when_cut" && not_filament_level {
+        if let Some(ptr) = opt_new_filament
+            .as_any()
+            .downcast_ref::<ConfigOptionBoolsNullable>()
+        {
+            long_retraction_default.values =
+                vec![ConfigOptionBoolsNullable::nil_value(); ptr.values.len()];
+            substitute = Some(&long_retraction_default);
+        }
+    }
+    // PORT NOTE: the vendored `retraction_distances_when_cut` arm (`:12372-12378`) has a bug
+    // that is transcribed rather than fixed, because the oracle is the authority on what this
+    // function does: its loop pushes into `opt_long_retraction_default` (`:12376`) -- the
+    // *other* local, already filled by the arm above -- and then points `opt_new_filament` at
+    // `opt_retraction_distance_default`, which is therefore left **empty**. So on this path the
+    // override applied is an empty vector, not a vector of nils. Reproduced exactly: the Rust
+    // arm leaves `retraction_distance_default` empty too, and pushes the same values into
+    // `long_retraction_default` the vendored line pushes into.
+    if opt_key == "retraction_distances_when_cut" && not_filament_level {
+        if let Some(ptr) = opt_new_filament
+            .as_any()
+            .downcast_ref::<ConfigOptionFloatsNullable>()
+        {
+            long_retraction_default.values =
+                vec![ConfigOptionBoolsNullable::nil_value(); ptr.values.len()];
+        }
+        substitute = Some(&retraction_distance_default);
+    }
+    let opt_new_filament = substitute.unwrap_or(opt_new_filament);
+
+    let mut opt_copy = opt_new_machine.clone_box();
+    let _ = opt_copy.apply_override(opt_new_filament, f_map_indices);
+    // `*opt_old_machine != *opt_copy` is `ConfigOption::operator==`'s negation, which
+    // `eq_dyn` is. An incompatible pair is `!=` at the pin (the vendored `operator==` returns
+    // false for a type mismatch), which is what the `Err` arm reads as.
+    let changed = !matches!(opt_old_machine.eq_dyn(opt_copy.as_ref()), Ok(true));
+
+    if changed {
+        diff_keys.push(opt_key.to_string());
+        filament_overrides.base.set_key_value(opt_key, opt_copy);
+    }
+    // The vendored `else delete opt_copy;` is the clone's owner releasing it; dropping the
+    // `Box` is the same thing and needs no statement.
+}
+
+/// `void update_static_print_config_from_dynamic(ConfigBase &config, const DynamicPrintConfig
+/// &dest_config, std::vector<int> variant_index, std::set<std::string> &key_set1, int stride)`
+/// (`PrintConfig.cpp:12393-12413`).
+pub fn update_static_print_config_from_dynamic(
+    config: &mut dyn slic3r_config::config::ConfigBase,
+    dest_config: &DynamicPrintConfig,
+    variant_index: &[i32],
+    key_set1: &std::collections::BTreeSet<String>,
+    stride: i32,
+) {
+    use slic3r_config::config::ConfigOptionResolver as Resolver;
+    if variant_index.is_empty() {
+        let keys = slic3r_config::config::ConfigBase::keys(dest_config);
+        let _ = slic3r_config::config::ConfigBase::apply_only(config, dest_config, &keys, true);
+        return;
+    }
+
+    // FIDELITY(port): `dest_config.keys()` is the `std::map`'s own bytewise-ascending order,
+    // and the loop writes into `config` in that order. It reaches output wherever two keys
+    // resolve to the same field.
+    for key in slic3r_config::config::ConfigBase::keys(dest_config) {
+        let Some(opt_dest) = Resolver::option(dest_config, &key) else {
+            continue;
+        };
+        let dest_is_scalar = opt_dest.is_scalar();
+        let in_key_set1 = key_set1.contains(&key);
+        // The source value is cloned out before `config` is borrowed mutably, because the
+        // comparison and the write both need it and the vendored code holds two raw pointers
+        // where this holds one borrow at a time. `dest_config` is not written by this loop, so
+        // the clone is the value the vendored comparison sees.
+        let dest_copy = opt_dest.clone_box();
+
+        let Ok(Some(opt_src)) = slic3r_config::config::ConfigBase::optptr_mut(config, &key, false)
+        else {
+            continue;
+        };
+        if matches!(opt_src.eq_dyn(dest_copy.as_ref()), Ok(true)) {
+            continue;
+        }
+        if dest_is_scalar || !in_key_set1 {
+            let _ = opt_src.set(dest_copy.as_ref());
+        } else if let Some(src_vec) = as_vector_mut(opt_src) {
+            if let Some(dest_vec) = as_vector(dest_copy.as_ref()) {
+                set_variant_override(src_vec, dest_vec, variant_index, stride);
+            }
+        }
+    }
+}
+
 /// `class DynamicPrintAndCLIConfig : public DynamicPrintConfig` (`PrintConfig.hpp:2512-2543`):
 /// a `DynamicPrintConfig` whose definition is the union of the registry and the three command
 /// line tables, so a CLI argument and a print setting can be deserialized into one config.
@@ -23266,6 +23529,173 @@ mod tests {
         }
 
         println!("bed shape supported: {checked} case(s) held to exact equality");
+    }
+
+    /// `set_variant_override` (`PrintConfig.cpp:11394-11402`) and
+    /// `update_static_print_config_from_dynamic` (`:12393-12413`), held to exact equality
+    /// against the oracle. Both are externally linked and called directly.
+    ///
+    /// `ensure_process_variant_columns` (`:11604-11632`) and `normalize_stride2_floats`
+    /// (`:12089-12127`) are ported but **not** compared here, and the reason is positional
+    /// rather than a gap in this test: both are file-scope `static` in the vendored translation
+    /// unit, so neither has a symbol a shim can call. They are the kind of internal-linkage
+    /// helper this unit's `proof path: 3` cell exists for, and the only route to them is through
+    /// a caller -- `update_values_to_printer_extruders` and
+    /// `update_non_diff_values_to_base_config` -- neither of which this unit ports yet. Their
+    /// comparison lands with those callers.
+    #[test]
+    fn print_config_variant_override_matches_the_oracle() {
+        let mut checked = 0_usize;
+
+        // `set_variant_override` over: a single-value source (which the body spreads to every
+        // variant by zeroing the index list), a multi-value source, a nil single value (which
+        // the `is_nil(0)` guard excludes from that spreading), an index list with -1 in it, and
+        // strides 1 and 2.
+        let pairs: [(&str, &str); 6] = [
+            ("1,2,3,4", "9"),
+            ("1,2,3,4", "7,8"),
+            ("1,2,3,4", "7,8,9,10"),
+            ("1,2", "5"),
+            ("1,2,3,4", "nil"),
+            ("1,2,3,4", "nil,8"),
+        ];
+        let index_lists: Vec<Vec<i32>> = vec![
+            vec![],
+            vec![0],
+            vec![0, 1],
+            vec![1, 0],
+            vec![0, 0, 0, 0],
+            vec![-1, 0],
+        ];
+        for (target_value, source_value) in pairs {
+            for indices in &index_lists {
+                for stride in [1_i32, 2] {
+                    let theirs = ora::oracle_set_variant_override(
+                        target_value,
+                        source_value,
+                        indices,
+                        stride,
+                    );
+                    if theirs == "<refused>" {
+                        // A non-nullable `coFloats` cannot hold `nil`: the vendored
+                        // `deserialize` **throws** `ConfigurationError` for it rather than
+                        // returning false, so the shim reports a refusal. The pair is skipped
+                        // on both sides rather than compared against one -- and the port's own
+                        // `deserialize` is asserted to refuse it too, just below, so the skip
+                        // cannot hide a difference.
+                        let mut probe = ConfigOptionFloats::new();
+                        assert!(
+                            !slic3r_config::config::ConfigOption::deserialize(
+                                &mut probe,
+                                target_value,
+                                false
+                            ) || !slic3r_config::config::ConfigOption::deserialize(
+                                &mut probe,
+                                source_value,
+                                false
+                            ),
+                            "the oracle refused ({target_value:?}, {source_value:?}) but the \
+                             port accepted both"
+                        );
+                        continue;
+                    }
+                    let mut target = ConfigOptionFloats::new();
+                    assert!(
+                        slic3r_config::config::ConfigOption::deserialize(
+                            &mut target,
+                            target_value,
+                            false
+                        ),
+                        "target {target_value:?} should deserialize"
+                    );
+                    let mut source = ConfigOptionFloats::new();
+                    assert!(
+                        slic3r_config::config::ConfigOption::deserialize(
+                            &mut source,
+                            source_value,
+                            false
+                        ),
+                        "source {source_value:?} should deserialize"
+                    );
+                    set_variant_override(&mut target, &source, indices, stride);
+                    assert_eq!(
+                        slic3r_config::config::ConfigOption::serialize(&target),
+                        theirs,
+                        "set_variant_override({target_value:?}, {source_value:?}, \
+                         {indices:?}, {stride})"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+
+        // `update_static_print_config_from_dynamic`, over: an empty `variant_index` (which
+        // takes the whole-config `apply` arm), a non-empty one with the key in and out of
+        // `key_set1`, a scalar key (which takes the plain `set` arm whatever `key_set1` says),
+        // and a vector key with and without a differing value.
+        let cases: Vec<(Vec<String>, Vec<i32>, Vec<String>, i32)> = vec![
+            (vec!["layer_height=0.3".to_string()], vec![], vec![], 1),
+            (vec!["layer_height=0.3".to_string()], vec![0, 1], vec![], 1),
+            (
+                vec!["nozzle_diameter=0.6,0.6".to_string()],
+                vec![0, 1],
+                vec![],
+                1,
+            ),
+            (
+                vec!["nozzle_diameter=0.6,0.6".to_string()],
+                vec![0, 1],
+                vec!["nozzle_diameter".to_string()],
+                1,
+            ),
+            (
+                vec!["nozzle_diameter=0.6".to_string()],
+                vec![0, 1],
+                vec!["nozzle_diameter".to_string()],
+                2,
+            ),
+            (
+                vec![
+                    "layer_height=0.3".to_string(),
+                    "nozzle_diameter=0.6,0.6".to_string(),
+                ],
+                vec![1, 0],
+                vec!["nozzle_diameter".to_string()],
+                1,
+            ),
+        ];
+        for (dest_kv, indices, key_set, stride) in &cases {
+            let theirs: Vec<String> = ora::oracle_update_static_print_config_from_dynamic(
+                "full",
+                &Vec::new(),
+                dest_kv,
+                indices,
+                key_set,
+                *stride,
+            )
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+            assert_ne!(
+                theirs,
+                vec!["<refused>".to_string()],
+                "refused: update_static_print_config_from_dynamic {dest_kv:?}"
+            );
+            let mut target = config_on("full", &[]);
+            fixtures_agree("full", &Vec::new(), &target);
+            let dest = config_on("empty", dest_kv);
+            let keys: std::collections::BTreeSet<String> = key_set.iter().cloned().collect();
+            update_static_print_config_from_dynamic(&mut target, &dest, indices, &keys, *stride);
+            assert_eq!(
+                serialize(&target),
+                theirs,
+                "update_static_print_config_from_dynamic({dest_kv:?}, {indices:?}, \
+                 {key_set:?}, {stride})"
+            );
+            checked += 1;
+        }
+
+        println!("variant override: {checked} case(s) held to exact equality");
     }
 
     /// `DynamicPrintAndCLIConfig` (`PrintConfig.hpp:2512-2543`), held to exact equality against
