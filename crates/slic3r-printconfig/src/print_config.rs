@@ -2959,6 +2959,17 @@ pub fn is_filament_extruder_override_key(opt_key: &str) -> bool {
 /// checked `downcast_ref`, because `slic3r-config` gives one `ConfigOptionType` tag to both
 /// instantiations of each `…Templ<NULLABLE>` and so cannot distinguish them by tag alone.
 ///
+/// **Why these four downcasts are type-exact where [`tagged`] exists for exactly this hazard.**
+/// The vendored source is `it_opt->second.default_value.get()` (`:8807-8810`) -- read straight
+/// out of `ConfigOptionDef::default_value`, through neither `ConfigBase::option<T>` nor
+/// `DynamicConfig::opt<T>` -- so the accessor question [`tagged`] answers does not arise here,
+/// and the `static_cast` is not even tag-checked. What makes the downcasts safe is not that
+/// reasoning but a measurement: the registry comparison holds all 881 keys to exact equality on
+/// every field including `default_value->serialize()`, and these 19 keys plus the five widened
+/// in [`is_filament_extruder_override_key`] are among them. A `downcast_ref` returning `None`
+/// where the `static_cast` reinterpreted would leave that key's default unset and the
+/// comparison would fail on it. It does not.
+///
 /// PORT NOTE: the vendored `default: assert(false)` (`:8811`) is `<cassert>`'s, compiled out by
 /// `NDEBUG` in the oracle's Release build, where the arm then falls through leaving
 /// `default_value` unset. `None` reproduces that, and the caller sets no default for it; a
