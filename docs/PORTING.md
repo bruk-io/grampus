@@ -482,6 +482,10 @@ oracle's release build (standard `NDEBUG` behaviour), so it becomes `debug_asser
 live `panic!` — a live panic at a site the oracle has compiled the check out of is itself a
 divergence (see `## Banned-substitution list`).
 
+Code that is itself undefined at the pin on some input (an out-of-range read after the assert, or
+with no assert at all) is a different case, settled by decision 1 of "Decisions recorded on
+2026-11-27" below.
+
 libslic3r's own exception hierarchy (`src/libslic3r/Exception.hpp:9-49`) is: `Exception` (the
 base, deriving `std::runtime_error`), and under it `CriticalException`, under which
 `RuntimeError`, `LogicError` (under which `InvalidArgument` and `OutOfRange`), `HardCrash`,
@@ -1080,3 +1084,103 @@ is a known overcount of two rows and is recorded here so the gate's number can b
 `Geometry/Voronoi.cpp`/`Voronoi.hpp` stay `drafted` and in the remaining count, as
 `76-foundation-voronoi-curves`'s own task text states and `77-foundation-voronoi-offset` finishes.
 Made by Claude acting for Bruk Habtu under the delegation for this intent, on 2026-11-26.
+
+## Decisions recorded on 2026-11-27
+
+Two findings from the review of `64-foundation-print-config` (#76) and of the `slic3r-config`
+accessor amendment (#82) that no existing rule settles. Decision 1 says what a port does where the
+vendored code itself has undefined behaviour; decision 2 says what a marker's justification has to
+rest on. Both were made by Claude acting for Bruk Habtu, under the delegation for this intent, on
+2026-11-27. Like the sections above, this is a record: where a decision changes a rule above, the
+rule's own text says so and points here.
+
+### 1. Where the pin's behaviour is undefined, the port substitutes a defined result
+
+**The gap.** `### Error sets` says an `assert` the oracle compiles out becomes `debug_assert!` and
+never a live `panic!`. It does not say what happens when the code *after* that assert, or code with
+no assert at all, dereferences out of range. Four such sites are known, all in `Config.hpp` and
+`Config.cpp`, and a faithful transcription of each panics in Rust where the oracle reads past the
+end of a `std::vector` or through a mis-typed pointer:
+
+- `ConfigOptionVector<T>::set_only_diff` validates only `this->values.size()` (`Config.hpp:593-594`)
+  and reads `other->values[diff_index[i] * stride + j]` unchecked (`:600`).
+- `ConfigOptionVector<T>::set_to_index` opens with `other->values.front()` (`Config.hpp:617`) on a
+  possibly empty vector, three lines above its own per-slot bounds check (`:626`).
+- `ConfigOptionVector<T>::get_at` asserts non-empty (`Config.hpp:678`) and then returns
+  `values.front()` (`:679`).
+- `ConfigBase::get_abs_value_at` asserts the `ratio_over` option's tag (`Config.cpp:731-734`) and
+  then `static_cast`s it and reads through the cast.
+
+On those inputs there is no oracle answer to match: a panic, an `Err`, a skip and a wrong read all
+diverge from "undefined". The banned-substitution list's row against a live `panic!` was written
+for the assert, not for this, and `// FIDELITY(port):` was defined for order and determinism
+choices only (`docs/WORKFLOW.md`).
+
+**The decision.**
+
+1. *When it applies.* Only where the vendored code at the pin has undefined behaviour on a stated
+   input, shown by reading the vendored lines: an out-of-range index, `front()`/`back()` on an
+   empty container, a null or mis-typed dereference. A compiled-out assert followed by code that
+   is well defined is not this case; the `debug_assert!` rule covers it unchanged.
+2. *No panic reachable from data.* On such an input the port neither panics nor aborts, unless the
+   input is shown unreachable from the function's callers by a trace that is written at the site.
+3. *The narrowest defined substitute.* The port behaves exactly as the pin on every input where
+   the pin is defined, so the substitute's condition is the exact condition under which the pin's
+   read is out of range, not an approximation of it. On the remaining inputs the port, in order of
+   preference: applies the bounds check the vendored file itself uses for the same read in a
+   sibling function, where one exists (`Config.hpp:620-628` is that check for the two vector
+   copies); otherwise leaves the affected element, or the whole call if the bad read precedes
+   every write, unwritten; or returns an error variant the function can already return. It never
+   adds an error variant and never returns `Result` from a function that otherwise cannot fail.
+4. *The marker.* The site carries a `// FIDELITY(port):` marker, which this decision extends to
+   this use. Its text names the vendored line, states the exact input condition, says the pin is
+   undefined there, and says what the port does. It does not describe what the pin "does" on that
+   input, including what it has written before the bad read: after the first out-of-range read
+   nothing about the oracle's behaviour is promised.
+5. *The proof.* No oracle comparison is committed on an input where the pin is undefined; a
+   comparison against undefined behaviour establishes nothing. The substitute is held by a
+   port-only test, labelled as not an oracle comparison, and where an input on the defined side of
+   the boundary can be produced through the public entry point, by an oracle-compared fixture
+   that fails if the condition is loosened.
+6. *Where the substitute lives.* In the function that contains the read. Where that function is in
+   a crate the task may not write, the task compensates at the narrowest point every caller passes
+   through, inside its own public function and not at one call to it, and lists the compensation
+   in its pull request so it is deleted when the owning crate is fixed.
+
+**Owners.** The four sites are fixed in `slic3r-config` by the amendment that follows #82, in the
+per-slot shape of `Config.hpp:620-628`. Until then #76 compensates for the first two at its call
+sites, and #82's markers at the last two cite this decision. Each compensation is one entry or one
+call coarser than the per-slot form and is recorded as such at its site.
+
+### 2. A marker's justification rests on a line its author opened
+
+**The gap.** Two of #76's `// FIDELITY(port):` and disclosure comments explained a true
+observation by a mechanism that does not exist: an order "kept because `GCode.cpp` reads the list
+positionally" (`GCode.cpp` never reads it), and a branch "uncovered because the caller returns
+early" (the caller has no such return). Both passed every check: the cited lines exist, the named
+symbols exist, and a mutation probe confirms the outcome the comment predicts. One further false
+justification reached the file because a reviewer supplied a conclusion ("that order is
+observable") after tracing a list into a container and not out of it to a reader, and the builder
+wrote it down.
+
+**The decision.**
+
+- When a marker or disclosure says *because*, its author has opened the line the reason rests on
+  and cites it. Where no mechanism has been opened, the comment says "no mechanism identified" and
+  states only the observation.
+- A reviewer who proposes a justification supplies the trace, link by link, and says where it
+  stops; never the conclusion alone. A justification from a reviewer carries no more authority
+  than one from the builder, and the builder follows the trace in the vendored tree before writing
+  it. The dangerous case is a reviewer being wrong in a form the builder can paste (the
+  formulation is `review-76-fidelity`'s).
+- One comment gives one reason for one subject. A marker covering two lists, branches or callers
+  states each one's reason separately, because their answers can differ.
+- A surviving mutation shows that no committed test is sensitive to that edit. It does not show
+  why, so "unreachable", "semantically equivalent" and "dead" are claims established by reading
+  and are labelled as such, each with its own reason.
+
+This arose from one justification that reached the file through review, and two written by the
+builder. What a citation check can and cannot see is recorded with it: a marker that quotes or
+names vendored text can be checked mechanically against its cited line; a marker that cites a file
+but no line, one that gives a single reason for two subjects, and one that explains a true outcome
+by a false mechanism cannot, and stay a reviewer's job.
