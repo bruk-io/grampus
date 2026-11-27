@@ -94,13 +94,31 @@ plan does the same.
 "which defaults, enum key maps and CLI spellings are proven against the oracle through proof path 3
 and which are proven through the resolved-config goldens plan step 9 committed." Read plainly: the
 behaviourally load-bearing fields -- the default value, the enum name/value map, the CLI spelling --
-are mechanically checked against the oracle's own `print_config_def`; the GUI-presentation fields
-(`label`, `full_label`, `tooltip`, `sidetext`, `category`, `mode`, `height`, `width`, `gui_type`,
-`gui_flags`, ...) are not slicing behaviour, are not separately exercised by any oracle entry point,
-and are instead caught the way every transcribed literal is caught: a `// PORT SRC:` marker per
-value and the two-pass adversarial review reading the diff against the vendored source. This is the
-split that turns "14,438 unreviewable lines" into "881 mechanically-checked rows plus N
-reviewed-by-reading rows," which is the actual risk `task.md` asks this plan to resolve.
+are mechanically checked against the oracle's own `print_config_def`.
+
+**CORRECTED, against what building the shim proved: there is no such split, and the
+GUI-presentation fields are mechanically checked too.** An earlier version of this paragraph said
+that `label`, `full_label`, `tooltip`, `sidetext`, `category`, `mode`, `height`, `width`,
+`gui_type` and `gui_flags` "are not separately exercised by any oracle entry point" and had to be
+left to a `// PORT SRC:` marker per value plus the two-pass adversarial review. That is wrong.
+`ConfigOptionDef` carries all of them as ordinary members, so a shim that reads the whole struct
+rather than six of its fields compares them like any other, and the strings compare **bytewise**
+because `L(s)` is the identity marker inside libslic3r (see this plan's own `L(s)` section below,
+and `I18N.hpp:31` for the libslic3r-wide definition the `.cpp`'s own `#define` agrees with). The
+shim therefore exposes every field of `ConfigOptionDef` that the registry's `init_*` bodies can
+set -- 29 of them, less `opt_key` (the lookup key) and `serialization_key_ordinal` (drawn from a
+process-wide atomic in `slic3r-config`, so not a property of the transcription).
+
+Correcting this is not a tidying-up. Measured on the first run with the wider shim, the
+transcription came back with **23 real defects in fields the six-field version could not see** --
+`L_CONTEXT`'s second argument concatenated into 19 `sidetext`/`label` values, and whitespace
+collapsed inside three multi-line strings. Every one would have shipped green under the split this
+paragraph used to describe. So the risk `task.md` asks this plan to resolve is answered the other
+way round from how it was first written: "14,438 unreviewable lines" becomes **881 rows all 29 of
+whose fields are mechanically checked**, with the adversarial review left to read what a bytewise
+comparison cannot judge -- whether a `// FIDELITY(port):` justification holds, whether a
+`// PORT NOTE:` describes the vendored line correctly, and whether a divergence is recorded in the
+right place.
 
 **Shim shape**, in `cxx/proof_units/print_config.{h,cpp}` -- as actually built in this task's first
 commits, corrected here from an earlier draft of this plan that named five per-field accessors:
@@ -197,11 +215,22 @@ have.
 
 ## `L(s)` is the identity function in this file
 
-`PrintConfig.cpp:91` -- `#define L(s) (s)` -- shadows the gettext-backed `L` every other `.cpp` in
-the tree defines (`Slic3r::I18N::translate(s)`). Every `def->label = L("...")`,
-`->tooltip = L("...")` etc. in this unit is therefore the literal string with no I18N call, verified
-by that one line rather than assumed from the macro's name elsewhere in the tree -- so this unit adds
-no dependency on `crates/slic3r-i18n` and every `L("...")` becomes `"...".to_string()` directly.
+`PrintConfig.cpp:90` -- `#define L(s) (s)` -- is this file's own definition (corrected from `:91`,
+which is `#define _(s) Slic3r::I18N::translate(s)`). It does not shadow a gettext-backed `L`:
+`I18N.hpp:31` defines `L` for the whole of libslic3r as
+`const char* L(const char* s) { return s; }`, the identity extraction marker, and only `_u8L`
+(`I18N.hpp:33`) goes through `Slic3r::I18N::translate`. So every `def->label = L("...")`,
+`->tooltip = L("...")` etc. in this unit is the literal string with no I18N call either way --
+this unit adds no dependency on `crates/slic3r-i18n` and every `L("...")` becomes
+`"...".to_string()` directly.
+
+**`L_CONTEXT` is not the same function, and getting that wrong cost 19 rows.**
+`L_CONTEXT(s, context)` (`I18N.hpp:32`) is
+`const char* L_CONTEXT(const char* s, const char* context) { return s; }` -- it returns its
+**first** argument and discards the disambiguation context. `PrintConfig.cpp` uses it 19 times
+(`def->sidetext = L_CONTEXT("s", "second")` and the like), and treating it like `L` by
+concatenating both arguments transcribes `"ssecond"` where the oracle holds `"s"`. Caught by the
+widened shim, not by reading.
 
 ## Order of work
 
