@@ -158,6 +158,18 @@ test = false
 doc = false
 bench = false
 
+# `slic3r-geometry`, added by task `66-foundation-geometry`: `Geometry.cpp`/`Geometry.hpp`'s row
+# is `fuzz target: required` on both cells. `docs/WORKFLOW.md`'s "A `required` fuzz target" rule
+# names this file as the one crate manifest a foundation task may touch; appended here, at the
+# end, so two branches conflict textually rather than reordering silently. `slic3r-point` is
+# already a dependency of this crate (added by `56-foundation-point`'s own fuzz target, above).
+[dependencies.slic3r-geometry]
+path = "../../slic3r-geometry"
+
+[[bin]]
+name = "slic3r-geometry_geometry"
+path = "fuzz_targets/slic3r-geometry_geometry.rs"
+
 # `slic3r-geometry-dir`, added by task `76-foundation-voronoi-curves` for its `Geometry/Circle.cpp`/
 # `Circle.hpp` unit, whose manifest rows are both `fuzz target: required`. `docs/WORKFLOW.md`'s "A
 # `required` fuzz target" rule names this file as the one crate manifest a foundation task may

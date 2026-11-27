@@ -480,6 +480,7 @@ dependencies = [
  "slic3r-arachne-utils",
  "slic3r-boundingbox",
  "slic3r-ffi",
+ "slic3r-geometry",
  "slic3r-geometry-dir",
  "slic3r-line",
  "slic3r-multipoint",
