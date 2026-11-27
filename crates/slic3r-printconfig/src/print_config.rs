@@ -2,31 +2,41 @@
 //! `64-foundation-print-config`, `port/foundation.tsv`'s `foundation-13`): the print
 //! configuration option set.
 //!
-//! **Status: incomplete, and `drafted` rather than `ported`.** This module is being built in
-//! the order `intent/libslic3r-rust-port/tasks/64-foundation-print-config/plan.md` sets out
-//! (Step 2 the enums, Step 3 `StaticCache`/`StaticPrintConfig`, Step 4 the 11 derived classes,
-//! Step 5 the option table, Step 6 `handle_legacy`). Steps 2, 3 and 6 are in; Step 5 is
-//! partial -- `init_common_params`, `init_extruder_option_keys` and
-//! `init_filament_option_keys` in full, plus the first options of `init_fff_params`, with the
-//! rest of `init_fff_params` and all of `init_sla_params` still placeholders -- and Step 4 is
-//! not started.
+//! **Status: both manifest rows derive `ported`, and the unit is not complete.** Those are two
+//! different statements and this module says both. `port/port-status` reads `ported` for a row
+//! whose module a `mod` line reaches, which holds no live `todo!()`/`unimplemented!()`, and
+//! whose `// PROOF:` marker is present over a differential comparison; all three hold, and
+//! `./port/port-status` reports two fewer in-scope rows remaining than `main` does. What is
+//! **not** claimed is that `PrintConfig.cpp` and `PrintConfig.hpp` are fully ported: the
+//! remaining `DynamicPrintConfig` transformation methods (`PrintConfig.cpp:10891-12416`),
+//! `validate(const FullPrintConfig&, bool)`, `handle_legacy_composite`, `get_shared_poly` and
+//! the bed-exclusion group are absent, each with a `// TODO(port):` at its own site naming the
+//! vendored lines and the real blocker. This task's pull request body lists them.
 //!
-//! `crates/slic3r-printconfig/src/lib.rs` **does** carry `pub mod print_config;`, landed in
-//! `d6e3f55`. That is `docs/WORKFLOW.md`'s rule satisfied, not a completeness claim: the rule
-//! is never to land a `mod` line over a live `todo!()`/`unimplemented!()`, because a
-//! `mod`-reached `todo!()` derives `not-started` and hides in the burn-down, and this module
-//! holds neither. What keeps the unit's two manifest rows at `drafted` is the **absent**
-//! `// PROOF: 3` marker: `derive_row_status` reads `ported` only for a `mod`-reached row whose
-//! marker is present, so until the whole-key-set comparison test is green over all 881 oracle
-//! keys and lands with that marker, both rows stay in `in-scope rows remaining`. Which slices
-//! are in is recorded in this task's pull request body, measured rather than estimated.
+//! What is in: the enums and all 65 key maps; `StaticPrintConfig`/`StaticCacheBase`/
+//! `StaticCache`; the registry (`PrintConfigDef` and all five `init_*` bodies, 881 of 881 keys
+//! exact against the oracle on every settable `ConfigOptionDef` field); `handle_legacy`; the 11
+//! `StaticPrintConfig`-derived classes; the 13 other `ConfigDef` subclasses with the
+//! custom-G-code placeholder map; the variant and nozzle-inventory free functions; the seven
+//! option-set globals; `DynamicPrintConfig`'s type, constructors, factories and fourteen of its
+//! methods; `min_object_distance`; `ModelConfig`; the skirt and XL-printer predicates; and
+//! `get_bed_shape(const SLAPrinterConfig&)`. Every one of those is held to the oracle by a
+//! committed test in this file.
 //!
-//! **`L(s)` is the identity function in this translation unit.** `PrintConfig.cpp:91` is
-//! `#define L(s) (s)`, shadowing the gettext-backed `L` every other `.cpp` in the vendored tree
-//! defines (`Slic3r::I18N::translate(s)`). Every `def->label = L("...")`, `->tooltip = L("...")`
-//! and so on in this unit is therefore the literal string with no I18N call at all, so this
-//! module reaches `crates/slic3r-i18n` for nothing and each `L("...")` becomes a plain
-//! `.to_string()`.
+//! **`L(s)` is the identity function, and `L_CONTEXT(s, context)` returns its first argument.**
+//! `PrintConfig.cpp:90` is `#define L(s) (s)` (`:91` is
+//! `#define _(s) Slic3r::I18N::translate(s)`, which this unit never uses), and it shadows
+//! nothing: `I18N.hpp:31` already defines `L` as `const char* L(const char* s) { return s; }`
+//! for the whole of libslic3r, and only `_u8L` (`I18N.hpp:33`) translates. So every
+//! `def->label = L("...")` and `->tooltip = L("...")` in this unit is the literal string with
+//! no I18N call, this module reaches `crates/slic3r-i18n` for nothing, and each `L("...")`
+//! becomes a plain `.to_string()` -- which is also why the presentation fields compare
+//! **bytewise** against the oracle rather than being left to review.
+//!
+//! `L_CONTEXT` (`I18N.hpp:32`) is `const char* L_CONTEXT(const char* s, const char* context)
+//! { return s; }`: it returns its **first** argument and discards the disambiguation context.
+//! `PrintConfig.cpp` uses it 19 times, and treating it like `L` by concatenating both arguments
+//! transcribes `L_CONTEXT("s", "second")` as `"ssecond"` where the oracle holds `"s"`.
 //!
 //! **Proof path 3**, through `crates/slic3r-ffi`'s per-unit shim
 //! (`cxx/proof_units/print_config.{h,cpp}`, `src/proof_units/print_config.rs`), re-exported by
@@ -16420,22 +16430,23 @@ fn obsolete_option_keys() -> &'static std::collections::BTreeSet<&'static str> {
     })
 }
 
-// <<<APPEND>>>
-
 // --------------------------------------------------------------------------------------------
-// Unit tests against the real oracle. **These are not this unit's R19 proof** and carry no
-// `// PROOF:` marker: the proof is `crates/slic3r-printconfig/tests/print_config_proof.rs`,
-// which asserts exact equality over all 881 registry keys and lands at the plan's Step 7,
-// atomically with the `mod print_config;` line, once the table is complete.
+// Unit tests against the real oracle.
 //
-// What these are for: every assertion below is true of the table as it stands *and* stays true
-// as the table fills, so the measurements this task's pull request reports are reproducible
-// from the tree rather than only from the session that ran them. `lib.rs` carries
-// `pub mod print_config;` (landed in `d6e3f55`), so these five tests are compiled and run by
-// `cargo test --workspace` and therefore by CI -- `cargo test -p slic3r-printconfig` reports
-// `5 passed`, and CI's oracle-checks job ran them on `2c3b262`. Nothing here weakens into a
-// check that cannot fail: each one would fail on a mistranscribed enum value, option type,
-// default, CLI spelling or legacy branch.
+// **This unit's R19 proof is one of them**: `print_config_def_matches_the_oracle_exactly`,
+// which carries the `// PROOF: 3` marker and holds all 881 registry rows to exact equality
+// field by field. `port/port-status`'s `proof_present` accepts the marker in a `#[cfg(test)]`
+// module inside the module file, which is where it is; there is no
+// `crates/slic3r-printconfig/tests/` directory and no separate proof file, and an earlier
+// version of this comment named one that never existed.
+//
+// Every other test here is an oracle comparison of its own over a part of the unit the R19
+// proof does not reach -- the 11 `StaticPrintConfig` classes, the 13 other `ConfigDef`
+// subclasses, `handle_legacy`, the option-set globals, the free functions and the
+// `DynamicPrintConfig` methods. Each would fail on a mistranscribed enum value, option type,
+// default, CLI spelling, presentation string or legacy branch; none of them weakens into a
+// check that cannot fail. `lib.rs` carries `pub mod print_config;`, so `cargo test --workspace`
+// runs them all and therefore so does CI.
 // --------------------------------------------------------------------------------------------
 
 // --------------------------------------------------------------------------------------------
@@ -16608,7 +16619,6 @@ impl CLIActionsConfigDef {
             def.tooltip = "Send progress to pipe.".to_string();
             def.cli_params = "pipename".to_string();
             def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
-            // <<<UNHANDLED 12895>>>
         }
     }
 }
@@ -16746,7 +16756,6 @@ impl CLITransformConfigDef {
             def.cli_params = "factor".to_string();
             // PORT SRC: src/libslic3r/PrintConfig.cpp:13036
             def.set_default_value(Box::new(ConfigOptionFloat::new(1.)));
-            // <<<UNHANDLED 13046>>>
         }
     }
 }
@@ -16992,7 +17001,6 @@ impl CLIMiscConfigDef {
             def.tooltip =
                 "Allow filaments with high/low temperature to be printed together.".to_string();
             def.set_default_value(Box::new(ConfigOptionBool::new(false)));
-            // <<<UNHANDLED 13259>>>
         }
     }
 }
@@ -17041,7 +17049,6 @@ impl ReadOnlySlicingStatesConfigDef {
             def.label = "Current Z-hop".to_string();
             def.tooltip =
                 "Contains Z-hop present at the beginning of the custom G-code block.".to_string();
-            // <<<UNHANDLED 13289>>>
         }
     }
 }
@@ -17090,7 +17097,6 @@ impl ReadWriteSlicingStatesConfigDef {
             let def = self.def.add("e_position", ConfigOptionType::Floats);
             def.label = "Absolute E position".to_string();
             def.tooltip = "Current position of the extruder axis. Only used with absolute extruder addressing.".to_string();
-            // <<<UNHANDLED 13312>>>
         }
     }
 }
@@ -17203,7 +17209,6 @@ impl OtherSlicingStatesConfigDef {
             let def = self.def.add("imex_mode_gcode", ConfigOptionType::String);
             def.label = "IDEX/IQEX active mode G-code".to_string();
             def.tooltip = "The raw mode G-code template for the active IDEX/IQEX parallel print mode, after placeholder evaluation. Globals defined here flow into machine_start_gcode.".to_string();
-            // <<<UNHANDLED 13361>>>
         }
     }
 }
@@ -17344,7 +17349,6 @@ impl PrintStatisticsConfigDef {
                 .add("used_filament_length", ConfigOptionType::String);
             def.label = "Filament length (meters)".to_string();
             def.tooltip = "Total filament length used in meters. Replaced with actual value during post-processing.".to_string();
-            // <<<UNHANDLED 13454>>>
         }
     }
 }
@@ -17405,7 +17409,6 @@ impl ObjectsInfoConfigDef {
             let def = self.def.add("plate_name", ConfigOptionType::String);
             def.label = "Plate name".to_string();
             def.tooltip = "Name of the plate sliced.".to_string();
-            // <<<UNHANDLED 13480>>>
         }
     }
 }
@@ -17502,7 +17505,6 @@ impl DimensionsConfigDef {
             let def = self.def.add("first_layer_height", ConfigOptionType::Float);
             def.label = "First layer height".to_string();
             def.tooltip = "Height of the first layer.".to_string();
-            // <<<UNHANDLED 13520>>>
         }
     }
 }
@@ -17641,7 +17643,6 @@ impl TimestampsConfigDef {
         {
             let def = self.def.add("second", ConfigOptionType::Int);
             def.label = "Second".to_string();
-            // <<<UNHANDLED 13562>>>
         }
     }
 }
@@ -17691,7 +17692,6 @@ impl OtherPresetsConfigDef {
                 .add("physical_printer_preset", ConfigOptionType::String);
             def.label = "Physical printer name".to_string();
             def.tooltip = "Name of the physical printer used for slicing.".to_string();
-            // <<<UNHANDLED 13584>>>
         }
     }
 }
@@ -18443,7 +18443,6 @@ impl CustomGcodeSpecificConfigDef {
                 .add("last_extrusion_role", ConfigOptionType::String);
             def.label = "Last extrusion role".to_string();
             def.tooltip = "The previously used extrusion role/type\nPossible values:\n[\"Perimeter\", \"ExternalPerimeter\", \"OverhangPerimeter\", \"InternalInfill\", \"SolidInfill\", \"TopSolidInfill\", \"BottomSurface\", \"BridgeInfill\", \"GapFill\", \"Ironing\", \"Skirt\", \"Brim\", \"SupportMaterial\", \"SupportMaterialInterface\", \"SupportTransition\", \"WipeTower\", \"Mixed\"]".to_string();
-            // <<<UNHANDLED 13777>>>
         }
     }
 }
@@ -20793,14 +20792,21 @@ impl ModelConfig {
         ignore_nonexistent: bool,
     ) -> Result<(), slic3r_config::config::ConfigError> {
         let keys = slic3r_config::config::ConfigBase::keys(other);
-        let out = slic3r_config::config::ConfigBase::apply_only(
+        // The timestamp moves only on success. The vendored body is
+        // `m_data.apply_only(...); this->touch();` (`PrintConfig.hpp:2642`), and the inner call
+        // **throws** `UnknownOptionException` for a key the target does not have and
+        // `ignore_nonexistent` does not excuse (`Config.cpp:518`) -- so the `touch()` on the
+        // next statement never runs on that path. Returning the `Err` after touching, as an
+        // earlier version of this method did, moved the timestamp on a failed apply and made
+        // the Undo/Redo stack see a change that did not happen.
+        slic3r_config::config::ConfigBase::apply_only(
             &mut self.m_data,
             other,
             &keys,
             ignore_nonexistent,
-        );
+        )?;
         self.touch();
-        out
+        Ok(())
     }
 
     /// `void apply(const ModelConfig &other, bool ignore_nonexistent)`
@@ -20811,14 +20817,15 @@ impl ModelConfig {
         ignore_nonexistent: bool,
     ) -> Result<(), slic3r_config::config::ConfigError> {
         let keys = slic3r_config::config::ConfigBase::keys(other.get());
-        let out = slic3r_config::config::ConfigBase::apply_only(
+        // Only on success -- see [`ModelConfig::apply`]'s own note.
+        slic3r_config::config::ConfigBase::apply_only(
             &mut self.m_data,
             other.get(),
             &keys,
             ignore_nonexistent,
-        );
+        )?;
         self.touch();
-        out
+        Ok(())
     }
 
     /// `void apply_only(const ConfigBase &other, const t_config_option_keys &keys,
@@ -20829,14 +20836,15 @@ impl ModelConfig {
         keys: &[String],
         ignore_nonexistent: bool,
     ) -> Result<(), slic3r_config::config::ConfigError> {
-        let out = slic3r_config::config::ConfigBase::apply_only(
+        // Only on success -- see [`ModelConfig::apply`]'s own note.
+        slic3r_config::config::ConfigBase::apply_only(
             &mut self.m_data,
             other,
             keys,
             ignore_nonexistent,
-        );
+        )?;
         self.touch();
-        out
+        Ok(())
     }
 
     /// `void apply_only(const ModelConfig &other, const t_config_option_keys &keys,
@@ -20872,15 +20880,20 @@ impl ModelConfig {
         substitution_context: &mut slic3r_config::config::ConfigSubstitutionContext,
         append: bool,
     ) -> Result<(), slic3r_config::config::ConfigError> {
-        let out = slic3r_config::config::ConfigBase::set_deserialize(
+        // Only on success. `ConfigBase::set_deserialize` throws for an unknown key or an
+        // unparseable value at the pin (`Config.cpp:1139`, through the same
+        // `UnknownOptionException` path `apply_only` takes), so the vendored
+        // `m_data.set_deserialize(...); this->touch();` (`PrintConfig.hpp:2648-2649`) does not
+        // reach its `touch()` on that path either.
+        slic3r_config::config::ConfigBase::set_deserialize(
             &mut self.m_data,
             opt_key,
             str,
             substitution_context,
             append,
-        );
+        )?;
         self.touch();
-        out
+        Ok(())
     }
 
     /// `bool erase(const t_config_option_key &opt_key)` (`PrintConfig.hpp:2650`): bumps the
@@ -21515,6 +21528,17 @@ mod tests {
             "handle_legacy: {checked} case(s) held to exact equality, \
              {shortfall} case(s) deferred to a key not yet transcribed"
         );
+        // The deferral above is what let this test pass while the registry was incomplete: a
+        // case whose surviving key the port had not transcribed was skipped rather than
+        // compared. The registry is complete, so nothing may be skipped any more, and this
+        // asserts it rather than leaving the figure to be read out of the printed line -- a
+        // skipped case would otherwise pass silently.
+        assert_eq!(
+            shortfall, 0,
+            "{shortfall} case(s) were skipped instead of compared; with all 881 registry keys \
+             transcribed there is no key left for the vendored body's final has() check to \
+             clear, so a skip now means a key went missing"
+        );
         assert!(
             mismatches.is_empty(),
             "handle_legacy divergences: {:#?}",
@@ -21941,15 +21965,28 @@ mod tests {
             );
             assert_eq!(mine, theirs, "{which}: DynamicPrintConfig(static) differs");
         }
-        // A derived name really does come back empty from the shim, which is what the three
-        // being unprobeable means rather than something this test glosses.
-        for which in ["PrintConfig", "FullPrintConfig", "SLAFullPrintConfig"] {
-            assert!(
-                ora::oracle_dynamic_from_static_serialized(which).is_empty(),
-                "{which}: the vendored StaticPrintConfig& constructor should be unreachable \
-                 for a derived class"
-            );
-        }
+        // The three derived classes are **not** probed, and the claim that they are
+        // unreachable is deliberately *not* asserted here.
+        //
+        // An earlier version of this test asserted that
+        // `oracle_dynamic_from_static_serialized` comes back empty for them. That assertion was
+        // circular and proved nothing about the vendored code: the shim simply has no arm for
+        // those three names (`cxx/proof_units/print_config.cpp`'s own dispatch) and returns an
+        // empty vector for any name it does not know, so the assertion held by construction and
+        // would have held just as well if the names were misspelled.
+        //
+        // The real evidence is a compiler error, and it is recorded rather than re-asserted: a
+        // first version of that shim dispatched all eleven classes through one
+        // `dynamic_from_static<T>()` template, and `c++` refused it with
+        // `error: ambiguous conversion from derived class 'const PrintConfig' to base class
+        // 'const Slic3r::StaticPrintConfig'`, once for each of `PrintConfig`,
+        // `FullPrintConfig` and `SLAFullPrintConfig`. Each inherits `StaticPrintConfig` through
+        // every parent, so the conversion the vendored
+        // `DynamicPrintConfig(const StaticPrintConfig&)` constructor needs is ambiguous and the
+        // call does not compile at all -- which is why `full_print_config()` casts to
+        // `PrintRegionConfig` before handing its `FullPrintConfig` over (`:10309`). A test
+        // cannot assert that something does not compile, so the shim was narrowed to the eight
+        // and this comment carries the finding.
 
         // `new_from_defaults_keys`, over key lists that exercise its `apply_only`: an empty
         // list, keys of several types, a key the registry does not know, and a duplicate.
@@ -23170,7 +23207,99 @@ mod tests {
         assert_eq!(f.extruder(), Some(3));
 
         assert!(f.timestamp_matches(&f.clone()));
-        println!("ModelConfig: timestamp discipline and every delegating accessor checked");
+
+        // **The error paths must not move the timestamp.** The vendored bodies are
+        // `m_data.<call>(...); this->touch();`, and the inner call throws for a key the target
+        // does not have (`Config.cpp:518`, `UnknownOptionException`), so the `touch()` on the
+        // next statement never runs. An earlier version of these wrappers touched and then
+        // returned the `Err`, which moved the timestamp on a failed call and made the Undo/Redo
+        // stack see a change that did not happen. Each of the four is checked here.
+        let mut g = ModelConfig::new();
+        g.set_key_value("layer_height", Box::new(ConfigOptionFloat::new(0.2)));
+        let before = g.timestamp();
+
+        // `apply`/`apply_only` over a key the registry does not know, with
+        // `ignore_nonexistent` false: `apply_only` fails and the timestamp must not move.
+        let mut source = DynamicPrintConfig::new();
+        source
+            .base
+            .set_key_value("not_a_real_key", Box::new(ConfigOptionFloat::new(1.0)));
+        assert!(
+            g.apply_only(&source, &["not_a_real_key".to_string()], false)
+                .is_err(),
+            "apply_only of an unknown key should fail"
+        );
+        assert_eq!(
+            g.timestamp(),
+            before,
+            "a failed apply_only must not move the timestamp"
+        );
+        assert!(
+            g.apply(&source, false).is_err(),
+            "apply of a config holding an unknown key should fail"
+        );
+        assert_eq!(
+            g.timestamp(),
+            before,
+            "a failed apply must not move the timestamp"
+        );
+
+        // The same through the `ModelConfig` overload.
+        let mut other_model = ModelConfig::new();
+        other_model.set_key_value("not_a_real_key", Box::new(ConfigOptionFloat::new(1.0)));
+        let before = g.timestamp();
+        assert!(
+            g.apply_from_model(&other_model, false).is_err(),
+            "apply_from_model of an unknown key should fail"
+        );
+        assert_eq!(
+            g.timestamp(),
+            before,
+            "a failed apply_from_model must not move the timestamp"
+        );
+
+        // `set_deserialize` of a **known** key with an unparseable value.
+        //
+        // An unknown *key* is deliberately not used here, and the first version of this test
+        // got that wrong: `ConfigBase::set_deserialize_nothrow` runs `handle_legacy` first
+        // (`Config.cpp:605`, ported at `config.rs:7585`), and
+        // `PrintConfigDef::handle_legacy`'s final statement clears `opt_key` for any key the
+        // registry does not have -- so an unknown key is a recognised no-op that **succeeds**,
+        // at the pin as much as here. A value the option cannot parse is what actually reaches
+        // the `BadOptionValue` return.
+        let mut ctx = slic3r_config::config::ConfigSubstitutionContext::new(
+            slic3r_config::config::ForwardCompatibilitySubstitutionRule::Disable,
+        );
+        assert!(
+            g.set_deserialize("layer_height", "not_a_number", &mut ctx, false)
+                .is_err(),
+            "set_deserialize of an unparseable value should fail"
+        );
+        assert_eq!(
+            g.timestamp(),
+            before,
+            "a failed set_deserialize must not move the timestamp"
+        );
+
+        // And each one still moves it on success, so the fix did not simply stop touching.
+        assert!(g
+            .apply_only(&data, &["layer_height".to_string()], false)
+            .is_ok());
+        assert!(g.timestamp() > before, "a successful apply_only must touch");
+        let before = g.timestamp();
+        assert!(g
+            .set_deserialize("layer_height", "0.3", &mut ctx, false)
+            .is_ok());
+        assert!(
+            g.timestamp() > before,
+            "a successful set_deserialize must touch"
+        );
+        assert_eq!(g.opt_float("layer_height"), Some(0.3));
+
+        println!(
+            "ModelConfig: timestamp discipline, every delegating accessor, and all four \
+             error paths checked"
+        );
     }
 
     /// The seven option-set globals (`PrintConfig.cpp:10105-10305`), each held to exact
