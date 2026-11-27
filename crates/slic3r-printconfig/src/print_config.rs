@@ -18592,6 +18592,21 @@ pub fn nozzle_diameter_for_filament(
     {
         extruder = filament_map.get_at((filament_id - 1) as usize);
     }
+    // PORT NOTE: this final `get_at` is site 3 of `docs/PORTING.md`'s decision 1 of
+    // 2026-11-27 -- `ConfigOptionVector<T>::get_at` asserts non-empty (`Config.hpp:678`) and
+    // then returns `values.front()` (`:679`), so an **empty** `nozzle_diameter` is undefined at
+    // the pin and `slic3r-config`'s transcription would panic. No compensation is added here,
+    // under clause 2's exemption, and this is the trace it requires: `nozzle_diameter` is a
+    // field of `PrintConfig`, a `StaticPrintConfig` subclass whose every field carries its
+    // registry default from `StaticCache::finalize`, so it holds at least one value from
+    // construction and nothing in this unit empties it. The function takes `&PrintConfig` by
+    // reference and cannot be handed a vector that does not exist.
+    //
+    // The *other* unguarded shape here is defined on both sides and is compared: `extruder - 1`
+    // is `-1` when `filament_id` is 0 and the `if` above does not fire, which casts to an
+    // enormous index, and `get_at` returns `values[0]` for it at the pin
+    // (`(i < size) ? values[i] : values.front()`) exactly as the port does. The 882-case
+    // comparison sweeps `filament_id` past the end of `filament_map` for that reason.
     nozzle_diameter.get_at((extruder - 1) as usize)
 }
 
@@ -21228,7 +21243,21 @@ pub fn set_variant_override(
     if source.len_values() == 1 && !source.is_nil_at(0) {
         indices.fill(0);
     }
-    // FIDELITY(port): `set_to_index`'s first statement is
+    // FIDELITY(port): governed by `docs/PORTING.md`, "Decisions recorded on 2026-11-27",
+    // decision 1, which names this read as one of its four sites. Clause 3 lists "the whole
+    // call if the bad read precedes every write" as an accepted substitute, and that is the
+    // case here: the access *is* the first statement, so there is no partial effect to
+    // preserve and nothing finer than a whole-call skip to choose. That is what makes this
+    // remedy different from the sanitiser at the `set_only_diff` call site, where the bad read
+    // sits inside a loop that writes as it goes -- same hazard class, opposite remedies, and
+    // the discriminator is where the access sits relative to the first write.
+    //
+    // Clause 6 is why the guard is here and not at this unit's one call: `set_variant_override`
+    // is `pub` and `PrintObject.cpp:4372` is a vendored caller outside this unit, so a guard at
+    // the internal call would leave the public function panicking for whoever ports that
+    // caller.
+    //
+    // `set_to_index`'s first statement is
     // `T v = other->values.front();` (`Config.hpp:617`) with no emptiness test, so an **empty**
     // source is undefined at the pin -- `front()` on an empty `std::vector`. Established rather
     // than assumed: `slic3r-config`'s transcription of that line is `other_values[0].clone()`,
@@ -21659,7 +21688,27 @@ impl DynamicPrintConfig {
             // "An override's nil means 'disabled' and is the child's value; every other nil
             // column inherits."
             if let Some(target_vec) = as_vector(target_copy.as_ref()) {
-                // FIDELITY(port): `set_only_diff` (`Config.hpp:587-607`) validates only
+                // FIDELITY(port): governed by `docs/PORTING.md`, "Decisions recorded on
+                // 2026-11-27", decision 1 -- where the pin's behaviour is undefined the port
+                // substitutes a defined result -- which was written from this unit's review and
+                // names this read as one of its four sites. The clauses it imposes and where
+                // each is met: the exact input condition rather than an approximation of it
+                // (below); no panic reachable from data (the sanitise); a `// FIDELITY(port):`
+                // marker that says the pin is undefined and what the port does without
+                // describing what the pin does (throughout); no oracle comparison on an
+                // undefined input, with a port-only test instead and an oracle-compared fixture
+                // on the defined side that fails if the condition is loosened (both exist, see
+                // below); and the compensation listed in the pull request for deletion when
+                // `slic3r-config` is fixed.
+                //
+                // On clause 6, "inside its own public function and not at one call to it": this
+                // unit's only call to `set_only_diff` is here, in the public
+                // `update_diff_values_to_child_config`, so this *is* the narrowest point every
+                // caller of it passes through. It protects this unit only -- a later unit
+                // calling `slic3r-config`'s `set_only_diff` directly is not covered by it, and
+                // the amendment that follows #82 is what covers everyone.
+                //
+                // `set_only_diff` (`Config.hpp:587-607`) validates only
                 // **its own** length -- `if (this->values.size() != (diff_index.size()*stride))
                 // throw` (`:593-594`), which is the guard above -- and then reads the **rhs**
                 // unchecked. For each `i` with `diff_index[i] != -1` (`:597`) it reads
