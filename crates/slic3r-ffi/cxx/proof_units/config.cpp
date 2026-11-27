@@ -347,6 +347,46 @@ ProofCreateDefaultResult path3_create_empty_option_enum(bool enums) {
         opt->nullable(), rust::String(opt->serialize())};
 }
 
+ProofVectorCopyResult path3_set_only_diff_floats(rust::Str lhs, rust::Str rhs,
+                                                 rust::Slice<const int32_t> diff_index,
+                                                 int32_t stride, bool keep_nil) {
+    Slic3r::ConfigOptionFloats lhs_opt;
+    lhs_opt.deserialize(std::string(lhs), false);
+    Slic3r::ConfigOptionFloats rhs_opt;
+    rhs_opt.deserialize(std::string(rhs), false);
+    std::vector<int> di(diff_index.begin(), diff_index.end());
+
+    ProofVectorCopyResult out{};
+    try {
+        lhs_opt.set_only_diff(&rhs_opt, di, stride, keep_nil);
+        out.ok = true;
+    } catch (const std::exception &) {
+        out.ok = false;
+    }
+    out.serialized = rust::String(lhs_opt.serialize());
+    return out;
+}
+
+ProofVectorCopyResult path3_set_to_index_floats(rust::Str lhs, rust::Str rhs,
+                                                rust::Slice<const int32_t> dest_index,
+                                                int32_t stride) {
+    Slic3r::ConfigOptionFloats lhs_opt;
+    lhs_opt.deserialize(std::string(lhs), false);
+    Slic3r::ConfigOptionFloats rhs_opt;
+    rhs_opt.deserialize(std::string(rhs), false);
+    std::vector<int> di(dest_index.begin(), dest_index.end());
+
+    ProofVectorCopyResult out{};
+    try {
+        lhs_opt.set_to_index(&rhs_opt, di, stride);
+        out.ok = true;
+    } catch (const std::exception &) {
+        out.ok = false;
+    }
+    out.serialized = rust::String(lhs_opt.serialize());
+    return out;
+}
+
 ProofVectorBaseResult path3_option_vector_base(rust::Str type_name) {
     std::string name(type_name);
     std::unique_ptr<Slic3r::ConfigOption> opt;

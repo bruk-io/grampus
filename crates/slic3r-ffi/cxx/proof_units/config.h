@@ -116,6 +116,23 @@ ProofOptionThrowResult path3_option_throw_floats(rust::Str serialized, bool null
 // (`Config.cpp:314`, `:316`), reached when a def has no default value at all.
 ProofCreateDefaultResult path3_create_empty_option_enum(bool enums);
 
+// `ConfigOptionVector<T>::set_only_diff` (`Config.hpp:587-607`) and `::set_to_index`
+// (`:612-631`), on inputs where the pin is DEFINED only. Both are called on a `coFloats` lhs with
+// a `coFloats` rhs, through the `ConfigOptionVectorBase` surface the vendored callers use.
+//
+// These exist for the amendment that closes `docs/PORTING.md`, "Decisions recorded on
+// 2026-11-27", decision 1, whose point 5 forbids committing an oracle comparison on an input
+// where the pin is undefined. So the caller passes only in-range `diff_index`/`dest_index` and a
+// non-empty rhs: what these pin is that the port still matches the oracle everywhere the oracle
+// has an answer, which is what fails if either new bounds condition is tightened. The undefined
+// inputs are held by port-only tests instead, labelled as such.
+ProofVectorCopyResult path3_set_only_diff_floats(rust::Str lhs, rust::Str rhs,
+                                                 rust::Slice<const int32_t> diff_index,
+                                                 int32_t stride, bool keep_nil);
+ProofVectorCopyResult path3_set_to_index_floats(rust::Str lhs, rust::Str rhs,
+                                                rust::Slice<const int32_t> dest_index,
+                                                int32_t stride);
+
 // Gap 2. `dynamic_cast<ConfigOptionVectorBase*>` (`Config.cpp:497`) and the `is_vector()`-guarded
 // `static_cast<ConfigOptionVectorBase*>` (`:1872`), over every option type this unit can
 // construct. `ConfigOptionEnum<T>` is absent from the roster on purpose: it needs a `T` with a

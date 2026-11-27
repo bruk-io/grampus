@@ -120,6 +120,15 @@ mod ffi {
         const_bad_option_type: bool,
     }
 
+    /// `ConfigOptionVector<T>::set_only_diff`/`::set_to_index` on an input where the pin is
+    /// defined -- see `cxx/proof_units/config.h` for why only those.
+    struct ProofVectorCopyResult {
+        /// False when the vendored body threw.
+        ok: bool,
+        /// `lhs->serialize()` after the call: the values it actually wrote.
+        serialized: String,
+    }
+
     /// `dynamic_cast<ConfigOptionVectorBase*>` over one constructed option type.
     struct ProofVectorBaseResult {
         /// False when `type_name` is not on the shim's roster.
@@ -212,6 +221,19 @@ mod ffi {
             ask_missing_key: bool,
         ) -> ProofOptionThrowResult;
         fn path3_create_empty_option_enum(enums: bool) -> ProofCreateDefaultResult;
+        fn path3_set_only_diff_floats(
+            lhs: &str,
+            rhs: &str,
+            diff_index: &[i32],
+            stride: i32,
+            keep_nil: bool,
+        ) -> ProofVectorCopyResult;
+        fn path3_set_to_index_floats(
+            lhs: &str,
+            rhs: &str,
+            dest_index: &[i32],
+            stride: i32,
+        ) -> ProofVectorCopyResult;
         fn path3_option_vector_base(type_name: &str) -> ProofVectorBaseResult;
         fn path3_create_default_option_enum(default_value: i32) -> ProofCreateDefaultResult;
         fn path3_create_default_option_enums(
@@ -229,10 +251,11 @@ pub use ffi::{
     path3_get_abs_value_at, path3_is_end_of_gcode_line, path3_is_end_of_line, path3_is_end_of_word,
     path3_is_whitespace, path3_istream_extract_double, path3_normalize_cli_bool_value,
     path3_option_throw_floats, path3_option_vector_base, path3_serialize_float,
-    path3_tagged_vs_dynamic_enum, path3_tagged_vs_dynamic_floats, path3_unescape_string_cstyle,
-    path3_unescape_strings_cstyle, ProofAbsValueAtResult, ProofCreateDefaultResult,
-    ProofDeserializeFloatResult, ProofDeserializeIntResult, ProofDeserializePoint3Result,
-    ProofDeserializePointResult, ProofEnumPairResult, ProofIstreamExtractDoubleResult,
-    ProofOptionThrowResult, ProofTaggedAccessResult, ProofUnescapeResult,
-    ProofUnescapeStringsResult, ProofVectorBaseResult,
+    path3_set_only_diff_floats, path3_set_to_index_floats, path3_tagged_vs_dynamic_enum,
+    path3_tagged_vs_dynamic_floats, path3_unescape_string_cstyle, path3_unescape_strings_cstyle,
+    ProofAbsValueAtResult, ProofCreateDefaultResult, ProofDeserializeFloatResult,
+    ProofDeserializeIntResult, ProofDeserializePoint3Result, ProofDeserializePointResult,
+    ProofEnumPairResult, ProofIstreamExtractDoubleResult, ProofOptionThrowResult,
+    ProofTaggedAccessResult, ProofUnescapeResult, ProofUnescapeStringsResult,
+    ProofVectorBaseResult, ProofVectorCopyResult,
 };

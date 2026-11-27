@@ -6997,9 +6997,50 @@ fn vector_set_only_diff<T: Clone>(
     }
     for (i, &d) in diff_index.iter().enumerate() {
         if d != -1 {
+            // The nil test below reads slot `d * stride` (`Config.hpp:599`). Where that product
+            // overflows or lands at or past `other`'s end, every slot of this entry is out of
+            // range, so the per-slot check further down would skip all of them anyway; skipping
+            // the entry here gives the same result without computing an overflowing index.
+            let Some(base) = (d as usize).checked_mul(stride) else {
+                continue;
+            };
+            if base >= other_values.len() {
+                continue;
+            }
             for j in 0..stride {
-                if keep_nil || !other_is_nil(d as usize * stride) {
-                    values[i * stride + j] = other_values[d as usize * stride + j].clone();
+                if keep_nil || !other_is_nil(base) {
+                    // FIDELITY(port): src/libslic3r/Config.hpp:600 -- the vendored read is
+                    // `this->values[i * stride + j] = other->values[diff_index[i] * stride + j];`
+                    // and `:593-594` validates only `this->values.size()` against
+                    // `diff_index.size() * stride`, never `other->values.size()`. So on an input
+                    // where `diff_index[i] * stride + j >= other->values.size()` -- a `diff_index`
+                    // entry at or past `other`'s own length in strides -- the pin reads past the
+                    // end of `other->values` and is undefined; it promises nothing about that
+                    // read or about what it has already written.
+                    //
+                    // This port applies the bounds check the vendored file uses for the same read
+                    // in its sibling `set_to_index` (`:626`, `src_idx < other->values.size()`),
+                    // which is `docs/PORTING.md`, "Decisions recorded on 2026-11-27", decision 1
+                    // point 3's first preference, and leaves the slot unwritten where it fails.
+                    // Every in-range slot is written exactly as the pin writes it.
+                    //
+                    // The index is computed with `checked_*`, and that is not belt-and-braces:
+                    // `:597` skips only `-1`, so a `diff_index` entry of any **other** negative
+                    // value reaches `:600`, where `diff_index[i] * stride` is `int` arithmetic
+                    // used as a `size_t` subscript and becomes an enormous index. `d as usize`
+                    // reproduces that enormous value, and multiplying it by `stride` overflows,
+                    // which panics in a debug build -- measured, `attempt to multiply with
+                    // overflow` for `diff_index = [-2, 0]` with `stride = 2`, before this
+                    // `checked_mul` was here. An overflowed index is out of range by
+                    // construction, so `None` takes the same unwritten path as a too-large one.
+                    let src_idx = (d as usize)
+                        .checked_mul(stride)
+                        .and_then(|m| m.checked_add(j));
+                    if let Some(src_idx) = src_idx {
+                        if src_idx < other_values.len() {
+                            values[i * stride + j] = other_values[src_idx].clone();
+                        }
+                    }
                 }
             }
         }
@@ -7015,6 +7056,21 @@ fn vector_set_to_index<T: Clone>(
     dest_index: &[i32],
     stride: usize,
 ) -> Result<(), ConfigError> {
+    // FIDELITY(port): src/libslic3r/Config.hpp:617 -- the vendored line is
+    // `T v = other->values.front();`, with no guard of any kind before it: `:614`'s tag check is
+    // the only thing between it and the call. So on an input where `other->values` is EMPTY the
+    // pin reads the first element of an empty vector and is undefined.
+    //
+    // That read precedes every write -- the resize at `:618` is the first write and consumes its
+    // value -- so this port leaves the whole call unwritten, which is `docs/PORTING.md`,
+    // "Decisions recorded on 2026-11-27", decision 1 point 3's second preference. (Its first
+    // preference does not reach here: the vendored file's sibling check at `:626` guards the
+    // per-slot read inside the loop, not this one, and `:614` guards only the tag.) `values` is
+    // left exactly as the caller passed it, and the only input affected is the one the pin has no
+    // behaviour for.
+    if other_values.is_empty() {
+        return Ok(());
+    }
     let v = other_values[0].clone();
     values.resize(dest_index.len() * stride, v);
     for (i, &d) in dest_index.iter().enumerate() {
@@ -8077,7 +8133,7 @@ pub fn option_as_tagged_mut<'r, T: TaggedOptionType>(
 /// `create` and resolve to the non-const template above -- so it has no behaviour at the pin to
 /// translate. The proof shim surfaced that by instantiating it; see
 /// `crates/slic3r-ffi/cxx/proof_units/config.cpp` for clang's error.
-// PORT SRC: src/libslic3r/Config.hpp:2795-2796 -- `if (opt->type() != TYPE::static_type()) throw
+// PORT SRC: src/libslic3r/Config.hpp:2794-2795 -- `if (opt->type() != TYPE::static_type()) throw
 // BadOptionTypeException("Conversion to a wrong type");`.
 pub fn option_as_tagged_throw<'r, T: TaggedOptionType>(
     opt_key: &str,
@@ -11597,6 +11653,164 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // `docs/PORTING.md`, "Decisions recorded on 2026-11-27", decision 1: the two vector copies
+    // whose rhs read the pin leaves undefined. Each has an oracle comparison on the DEFINED side
+    // and a port-only test for the undefined input, which decision 1 point 5 requires be kept
+    // apart -- a comparison against undefined behaviour establishes nothing.
+    // ---------------------------------------------------------------------------------------------
+
+    /// `// PROOF: 3` -- `ConfigOptionVector<T>::set_only_diff` (`Config.hpp:587-607`) and
+    /// `::set_to_index` (`:612-631`) on inputs where the pin **is** defined: every
+    /// `diff_index`/`dest_index` entry in range for the rhs, and a non-empty rhs. This is what
+    /// fails if either new bounds condition is tightened past the pin's own behaviour — the last
+    /// in-range slot of each case sits exactly at `other.len() - 1`, so a guard written `src_idx +
+    /// 1 < len` instead of `src_idx < len` drops a value the oracle writes.
+    // PROOF: 3
+    #[test]
+    fn the_two_vector_copies_match_the_oracle_on_every_defined_input() {
+        use slic3r_proof::proof_units::config::{
+            path3_set_only_diff_floats, path3_set_to_index_floats,
+        };
+
+        // `set_only_diff` requires `lhs.len() == diff_index.len() * stride` (`:593-594`), and
+        // every `diff_index` entry below indexes a slot the rhs really has.
+        let only_diff: [(&str, &str, &[i32], i32, bool); 6] = [
+            ("1,2,3", "10,20,30", &[0, 1, 2], 1, false),
+            ("1,2,3", "10,20,30", &[2, 1, 0], 1, false),
+            ("1,2,3", "10,20,30", &[-1, 1, -1], 1, false),
+            ("1,2,3,4", "10,20,30,40", &[1, 0], 2, false),
+            ("1,2", "10,20,30", &[2, 0], 1, true),
+            ("1,2,3", "10,20,30", &[0, 0, 0], 1, true),
+        ];
+        for (lhs, rhs, diff_index, stride, keep_nil) in only_diff {
+            let oracle = path3_set_only_diff_floats(lhs, rhs, diff_index, stride, keep_nil);
+
+            let mut lhs_opt = ConfigOptionFloats::new();
+            assert!(ConfigOption::deserialize(&mut lhs_opt, lhs, false));
+            let mut rhs_opt = ConfigOptionFloats::new();
+            assert!(ConfigOption::deserialize(&mut rhs_opt, rhs, false));
+            let ported = lhs_opt.set_only_diff(&rhs_opt, diff_index, stride, keep_nil);
+
+            let label =
+                format!("set_only_diff({lhs:?}, {rhs:?}, {diff_index:?}, {stride}, {keep_nil})");
+            assert_eq!(oracle.ok, ported.is_ok(), "{label}: threw or not");
+            assert_eq!(
+                oracle.serialized,
+                lhs_opt.serialize(),
+                "{label}: values written"
+            );
+        }
+
+        // `set_to_index` resizes `lhs` to `dest_index.len() * stride`, so `lhs`'s own length is
+        // free; the rhs is non-empty in every case, which is the defined side of this one.
+        let to_index: [(&str, &str, &[i32], i32); 6] = [
+            ("1", "10,20,30", &[0, 1, 2], 1),
+            ("1,2", "10,20,30", &[2, 0], 1),
+            ("1", "10,20,30", &[-1, 0], 1),
+            ("1,2,3,4", "10,20,30,40", &[1, 0], 2),
+            ("5", "10", &[0], 1),
+            ("1,2,3", "10,20", &[0, 1, 0], 1),
+        ];
+        for (lhs, rhs, dest_index, stride) in to_index {
+            let oracle = path3_set_to_index_floats(lhs, rhs, dest_index, stride);
+
+            let mut lhs_opt = ConfigOptionFloats::new();
+            assert!(ConfigOption::deserialize(&mut lhs_opt, lhs, false));
+            let mut rhs_opt = ConfigOptionFloats::new();
+            assert!(ConfigOption::deserialize(&mut rhs_opt, rhs, false));
+            let ported = lhs_opt.set_to_index(&rhs_opt, dest_index, stride);
+
+            let label = format!("set_to_index({lhs:?}, {rhs:?}, {dest_index:?}, {stride})");
+            assert_eq!(oracle.ok, ported.is_ok(), "{label}: threw or not");
+            assert_eq!(
+                oracle.serialized,
+                lhs_opt.serialize(),
+                "{label}: values written"
+            );
+        }
+    }
+
+    /// **Not an oracle comparison**, and deliberately so: every input here is one where the pin's
+    /// own read is out of range, so it has no answer to compare against
+    /// (`docs/PORTING.md`, "Decisions recorded on 2026-11-27", decision 1, point 5). This holds
+    /// the substitutes that decision's point 3 selected — for `set_only_diff`, the sibling bounds
+    /// check of `Config.hpp:626` leaving the slot unwritten; for `set_to_index`, leaving the whole
+    /// call unwritten because the bad read precedes every write. What it asserts is that neither
+    /// panics and that nothing outside the affected slots moves.
+    #[test]
+    fn the_two_vector_copies_substitute_a_defined_result_where_the_pin_is_undefined() {
+        // `set_only_diff`: a `diff_index` entry at or past the rhs's own length in strides. The
+        // pin reads `other->values[d * stride + j]` past the end (`Config.hpp:600`); this port
+        // leaves that slot alone and writes the in-range ones.
+        let mut lhs = ConfigOptionFloats {
+            values: vec![1.0, 2.0, 3.0],
+        };
+        let rhs = ConfigOptionFloats {
+            values: vec![10.0, 20.0],
+        };
+        // Slot 0 reads rhs[0] (in range); slot 1 reads rhs[2], which the rhs does not have.
+        lhs.set_only_diff(&rhs, &[0, 2, -1], 1, false)
+            .expect("the tag matches and lhs.len() == diff_index.len() * stride");
+        assert_eq!(
+            lhs.values,
+            vec![10.0, 2.0, 3.0],
+            "the in-range slot is written, the out-of-range slot keeps its own value, and the \
+             -1 slot is skipped as the pin skips it"
+        );
+
+        // The same, with `keep_nil` true, which is the other way into that read.
+        let mut lhs2 = ConfigOptionFloats {
+            values: vec![1.0, 2.0],
+        };
+        lhs2.set_only_diff(&rhs, &[5, 0], 1, true)
+            .expect("as above");
+        assert_eq!(lhs2.values, vec![1.0, 10.0]);
+
+        // A `diff_index` entry that is negative but **not** `-1`. `Config.hpp:597` skips only
+        // `-1`, so this one reaches `:600`, where `diff_index[i] * stride` is `int` arithmetic
+        // used as a `size_t` subscript and becomes an enormous index. Before the `checked_mul`
+        // in the guard, this case panicked with `attempt to multiply with overflow` in a debug
+        // build rather than taking the unwritten path -- itself a panic reachable from data.
+        let mut lhs3 = ConfigOptionFloats {
+            values: vec![1.0, 2.0, 3.0, 4.0],
+        };
+        lhs3.set_only_diff(&rhs, &[-2, 0], 2, false)
+            .expect("the tag matches and lhs.len() == diff_index.len() * stride");
+        assert_eq!(
+            lhs3.values,
+            vec![1.0, 2.0, 10.0, 20.0],
+            "the -2 entry's two slots keep their own values; entry 0's two slots are written              from rhs[0] and rhs[1]"
+        );
+
+        // `set_to_index`: an EMPTY rhs. The pin reads `other->values.front()`
+        // (`Config.hpp:617`) before it writes anything, so this port leaves the whole call
+        // unwritten -- `values` is exactly what the caller passed, not resized.
+        let mut lhs4 = ConfigOptionFloats {
+            values: vec![7.0, 8.0],
+        };
+        let empty = ConfigOptionFloats { values: Vec::new() };
+        lhs4.set_to_index(&empty, &[0, 1, 2], 1)
+            .expect("the tag matches");
+        assert_eq!(
+            lhs4.values,
+            vec![7.0, 8.0],
+            "untouched: not resized to dest_index.len() * stride, and no slot written"
+        );
+
+        // And a non-empty rhs with an out-of-range `dest_index` still goes through the vendored
+        // per-slot check at `:626`, which this port already had -- included so the two conditions
+        // are not confused with each other.
+        let mut lhs5 = ConfigOptionFloats { values: vec![7.0] };
+        lhs5.set_to_index(&rhs, &[9, 0], 1)
+            .expect("the tag matches");
+        assert_eq!(
+            lhs5.values,
+            vec![7.0, 10.0],
+            "slot 0's source is out of range and stays at the resize fill value; slot 1 is written"
+        );
     }
 }
 
