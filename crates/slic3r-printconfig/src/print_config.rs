@@ -22142,22 +22142,35 @@ impl slic3r_config::config::ConfigBase for DynamicPrintAndCLIConfig {
 // `get_bed_shape_with_excluded_area` (`:14365-14374`) are additionally blocked by the same
 // absent `slic3r-clipperutils` dependency as `get_shared_poly` above.
 
-// TODO(port): src/libslic3r/PrintConfig.cpp:11057 -- seven of the `DynamicPrintConfig`
-// transformation methods are still not ported. Named by their line ranges alone, so this marker
-// needs no rewording as each one lands and cannot go stale the way a prose list does: `:11057`,
-// `:11248`, `:11448`, `:11634`, `:11838`, `:11857` and `:11969`, each running to the start of
-// the next entry in that list or, for the last, to `:12088` -- about 1,060 lines in all. Their
-// names are declared across `PrintConfig.hpp:976-1002` (the five member functions, at `:976`, `:978`, `:986`, `:997` and `:1002`) and `:1033`
-// (`resize_mixed_filament_metadata`, a free function); `gather_option_values` has no
-// declaration at all, being file-scope `static` at its definition. Those are the authority on
-// the names; this unit does not repeat a list that can drift.
+// TODO(port): src/libslic3r/PrintConfig.cpp:11057 -- six of the `DynamicPrintConfig`
+// transformation methods are still not ported, **795 live lines** between them:
+//
+//   `:11057-11246` (190)   `:11248-11392` (145)   `:11448-11461` (14)
+//   `:11634-11833` (200)   `:11857-11967` (111)   `:11969-12084` (116)
+//
+// **Six, not seven, and 795 lines, not the ~1,060 an earlier version of this marker implied.**
+// That version named the set by start line alone and let each entry run to the next, which
+// counts the gaps between them as if they were code. Two of those gaps are not: `:11462-11550`
+// is a commented-out `update_values_from_multi_to_single_2` (the third commented-out sibling in
+// this family, after `:10997-11052` and `PrintConfig.hpp:1004-1005`), which `docs/PORTING.md`'s
+// don't-translate list excludes, so `resize_mixed_filament_metadata` is **14** lines rather
+// than the ~104 its range suggested. End lines are given explicitly here for that reason.
+//
+// The seventh item that version listed, `gather_option_values` (`:11837-11855`), is a
+// file-scope `static` **template**. It has no symbol a shim can call, so it belongs with
+// [`normalize_stride2_floats`] and `ensure_process_variant_columns` in the internal-linkage
+// group -- see [`enum_names_from_keys_map`] for why a literal proof path 3 is not viable for
+// this unit -- and not in a list of work that can each get its own comparison. Its coverage
+// comes entirely through `:11857` and `:11969`, which call it for all seven option types.
 //
 // **These are reachable with this crate's dependencies**, so this marker records work owed and
-// not a dependency gap. The `ConfigOptionVectorBase` cast they need is [`as_vector_mut`]; an
-// earlier pass recorded that as a blocker and was wrong. They are left out because each needs
-// its own oracle comparison through this unit's config-serialization shim before it can be
-// trusted, and transcription with nothing checking it would weaken a module whose standing is
-// that every figure is asserted by a test.
+// not a dependency gap. They are left out because each needs its own oracle comparison through
+// this unit's config-serialization shim before it can be trusted, and transcription with
+// nothing checking it would weaken a module whose standing is that every figure is asserted by
+// a test. Two of them also need a new flat encoding across the bridge for a nested container
+// (`std::vector<std::vector<NozzleVolumeType>>` at `:11634`,
+// `std::unordered_map<int, std::vector<FilamentVariantUse>>` at `:11969`), which is where the
+// risk in that work sits.
 //
 // Ten of the family **are** ported, each with its own comparison; they are the ones this module
 // defines, so `git grep` over it is the authority rather than a list here that can drift.
