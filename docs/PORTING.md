@@ -1164,7 +1164,7 @@ its `nlohmann::json` call, so nothing in the port reaches it today; `PrintConfig
 `:10406`, `:10487` and `:10489` are the same shape in another crate, and `:10408` dereferences the
 result with no null check. A porter meeting one of those uses `option_as_tagged_enum`.
 
-**Two more gaps the same task found, closed with it.** (PR #76's "Findings that need a change on
+**Three more gaps the same task found, closed with it.** (PR #76's "Findings that need a change on
 `main`" section numbers **1 to 8**, and its item **9** — the tag-vs-downcast finding, with the
 `apply_override` defect recorded inside it — is numbered in the module-by-module list above that
 section, not in it. This amendment closes that item 9, finding 1 and finding 8. Findings **2 to
@@ -1217,20 +1217,42 @@ translate, and divide exactly:
 | 4 | `set_deserialize_raw` (`:674-675`, `:680-681`) | already correct — a cast to the shared element base with both twins tried by hand, and a `static_cast` to the *specific* twin chosen by `nullable()` |
 | 1 | `ConfigOptionEnumGeneric::set` (`Config.hpp:2177`) | already correct — a real `dynamic_cast` |
 
-Of the 158 `Self` sites, **12** are fixed too, and they are the costliest defect this amendment
-closes: every twinned vector type's `overriden_by` (`Config.hpp:746-764`) and `apply_override`
-(`:767-815`). Both are a tag check and then `static_cast<const ConfigOptionVector<T>*>(rhs)`
-(`:751`, `:772`), and **both exist to read a nullable `rhs` into a non-nullable `this`** — the
-vendored comment at `:765` says "possibly a nullable one", and `:752-762`/`:773-813` are those
-branches. Under a type-exact downcast every call either method exists for returned `Err`, so the
-nullable branch was unreachable through the crate's own dispatch; `64-foundation-print-config`
-measured the port reporting no change for `long_retractions_when_cut` where the oracle reported
-`long_retractions_when_cut=1`. Four of the six twinned types were also missing the vendored tag
-check (`:749-750`, `:770-771`) entirely, relying on the downcast to fail; all six now have it —
-*after* the `this->nullable()` throw of `:747-748`/`:768-769`, which comes first in the vendored
-body, so a nullable `self` reports "Cannot override a nullable ConfigOption." and not a type
-mismatch. A reviewer of this amendment caught that ordering inverted in the first revision, where
-it had been inherited from `main`'s two already-tag-checked types.
+**The fourth gap, and the costliest: `apply_override`'s dispatch.** Of the 158 `Self` sites,
+**12** are fixed, and they are the one place where the type-exact slip made the port compute a
+different answer rather than merely refuse: every twinned vector type's `overriden_by`
+(`Config.hpp:746-764`) and `apply_override` (`:767-815`). Both are a tag check and then
+`static_cast<const ConfigOptionVector<T>*>(rhs)` (`:751`, `:772`), and **both exist to read a
+nullable `rhs` into a non-nullable `this`** — the vendored comment at `:765` says "possibly a
+nullable one", and `:752-762`/`:773-813` are those branches. Under a type-exact downcast every
+call either method exists for returned `Err`, so the nullable branch was unreachable through the
+crate's own dispatch; `64-foundation-print-config` measured the port reporting no change for
+`long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+
+**The dispatch was the only wrong part, verified rather than assumed.** The private
+`vector_apply_override` and `vector_overridden_by` already held the vendored bodies: checked line
+by line against `:773-813` — the `!rhs_nullable` wholesale assign, the `cnt < 1` early return, the
+`default_value` clone *before* the resize, the resize to `rhs`'s length with `self`'s front
+element, and the loop that sets `modified` only in the non-nil arm, with `:808-811`'s three-way
+clamp. So the twelve sites are a dispatch change and nothing else.
+
+Four of the six twinned types were also missing the vendored tag check (`:749-750`, `:770-771`)
+entirely, relying on the downcast to fail; all six now have it — *after* the `this->nullable()`
+throw of `:747-748`/`:768-769`, which comes first in the vendored body, so a nullable `self`
+reports "Cannot override a nullable ConfigOption." and not a type mismatch. A reviewer of this
+amendment caught that ordering inverted in the first revision, where it had been inherited from
+`main`'s two already-tag-checked types.
+
+**Cross-checked against the compensation it replaces.** `64-foundation-print-config` carries this
+same body as `apply_override_tagged` (`crates/slic3r-printconfig/src/print_config.rs` at that
+branch's `fa1d970`), with a 1,140-case oracle comparison over
+`compute_filament_override_value` behind it. Read side by side with the fix here, the two agree on
+every substantive point: the nullable-`self` throw first, then the tag comparison, `rhs.nullable()`
+and `is_nil_at` read off the original option rather than a cast, `default_value` captured before
+the resize, and `modified` left unset in the nil arm. They differ only where the vendored code has
+no case at all — on a vector-tagged option that is somehow not a vector, that transcription yields
+`Ok(false)` where this returns `Err`, both unreachable after the tag check. That branch's
+`apply_override_tagged`, its `tagged` module and its `as_vector`/`as_vector_mut` are all deletable
+once this lands.
 
 One further divergence was found in that reading and fixed: `set_deserialize_raw` read
 `optdef->nullable` where `:670` reads the *stored option's* `nullable()`.

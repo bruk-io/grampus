@@ -1910,6 +1910,11 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsTempl<NULLABLE> {
         // nullable-`rhs` branch, so under a type-exact downcast every call this method exists for
         // returned `Err` and the whole branch was unreachable -- the port reported no change for
         // `long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+        // The shared body below ([`vector_apply_override`]) was already the vendored one, checked
+        // line by line against `:773-813`; the dispatch was the only wrong part. Cross-checked
+        // against `64-foundation-print-config`'s own transcription of the same body
+        // (`apply_override_tagged`, at that branch's `fa1d970`, with a 1,140-case oracle
+        // comparison behind it), which agrees on every substantive point.
         // See `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 11.
         let rhs_values = option_as_tagged::<Self>(Some(rhs)).ok_or_else(|| {
             ConfigError::Configuration(
@@ -2533,6 +2538,11 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionIntsTempl<NULLABLE> {
         // nullable-`rhs` branch, so under a type-exact downcast every call this method exists for
         // returned `Err` and the whole branch was unreachable -- the port reported no change for
         // `long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+        // The shared body below ([`vector_apply_override`]) was already the vendored one, checked
+        // line by line against `:773-813`; the dispatch was the only wrong part. Cross-checked
+        // against `64-foundation-print-config`'s own transcription of the same body
+        // (`apply_override_tagged`, at that branch's `fa1d970`, with a 1,140-case oracle
+        // comparison behind it), which agrees on every substantive point.
         // See `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 11.
         let rhs_values = option_as_tagged::<Self>(Some(rhs)).ok_or_else(|| {
             ConfigError::Configuration(
@@ -3593,6 +3603,11 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionPercentsTempl<NULLABLE> 
         // nullable-`rhs` branch, so under a type-exact downcast every call this method exists for
         // returned `Err` and the whole branch was unreachable -- the port reported no change for
         // `long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+        // The shared body below ([`vector_apply_override`]) was already the vendored one, checked
+        // line by line against `:773-813`; the dispatch was the only wrong part. Cross-checked
+        // against `64-foundation-print-config`'s own transcription of the same body
+        // (`apply_override_tagged`, at that branch's `fa1d970`, with a 1,140-case oracle
+        // comparison behind it), which agrees on every substantive point.
         // See `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 11.
         let rhs_values = option_as_tagged::<Self>(Some(rhs)).ok_or_else(|| {
             ConfigError::Configuration(
@@ -4139,6 +4154,11 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionFloatsOrPercentsTempl<NU
         // nullable-`rhs` branch, so under a type-exact downcast every call this method exists for
         // returned `Err` and the whole branch was unreachable -- the port reported no change for
         // `long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+        // The shared body below ([`vector_apply_override`]) was already the vendored one, checked
+        // line by line against `:773-813`; the dispatch was the only wrong part. Cross-checked
+        // against `64-foundation-print-config`'s own transcription of the same body
+        // (`apply_override_tagged`, at that branch's `fa1d970`, with a 1,140-case oracle
+        // comparison behind it), which agrees on every substantive point.
         // See `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 11.
         let rhs_values = option_as_tagged::<Self>(Some(rhs)).ok_or_else(|| {
             ConfigError::Configuration(
@@ -5876,6 +5896,11 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionBoolsTempl<NULLABLE> {
         // nullable-`rhs` branch, so under a type-exact downcast every call this method exists for
         // returned `Err` and the whole branch was unreachable -- the port reported no change for
         // `long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+        // The shared body below ([`vector_apply_override`]) was already the vendored one, checked
+        // line by line against `:773-813`; the dispatch was the only wrong part. Cross-checked
+        // against `64-foundation-print-config`'s own transcription of the same body
+        // (`apply_override_tagged`, at that branch's `fa1d970`, with a 1,140-case oracle
+        // comparison behind it), which agrees on every substantive point.
         // See `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 11.
         let rhs_values = option_as_tagged::<Self>(Some(rhs)).ok_or_else(|| {
             ConfigError::Configuration(
@@ -6548,6 +6573,11 @@ impl<const NULLABLE: bool> ConfigOption for ConfigOptionEnumsGenericTempl<NULLAB
         // nullable-`rhs` branch, so under a type-exact downcast every call this method exists for
         // returned `Err` and the whole branch was unreachable -- the port reported no change for
         // `long_retractions_when_cut` where the oracle reported `long_retractions_when_cut=1`.
+        // The shared body below ([`vector_apply_override`]) was already the vendored one, checked
+        // line by line against `:773-813`; the dispatch was the only wrong part. Cross-checked
+        // against `64-foundation-print-config`'s own transcription of the same body
+        // (`apply_override_tagged`, at that branch's `fa1d970`, with a 1,140-case oracle
+        // comparison behind it), which agrees on every substantive point.
         // See `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 11.
         let rhs_values = option_as_tagged::<Self>(Some(rhs)).ok_or_else(|| {
             ConfigError::Configuration(
