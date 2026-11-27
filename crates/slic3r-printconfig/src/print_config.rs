@@ -21639,22 +21639,53 @@ impl DynamicPrintConfig {
                 // FIDELITY(port): the vendored `set_only_diff` validates only its **own**
                 // length -- `if (this->values.size() != (diff_index.size()*stride)) throw`
                 // (`Config.hpp:593-594`), which is the guard above -- and then indexes the rhs
-                // unchecked at `:600`:
-                // `other->values[diff_index[i] * stride + j]`. So a target shorter than
-                // `diff_index.size() * stride` reads **past the end of a `std::vector`** at the
-                // pin, with no diagnostic. `slic3r-config`'s transcription of that line indexes
-                // a `Vec` instead, which **panics**.
+                // unchecked. For each `i` with `diff_index[i] != -1` it reads
+                // `other->is_nil(diff_index[i] * stride)` and
+                // `other->values[diff_index[i] * stride + j]` for `j` in `0..stride`
+                // (`:599-600`). `diff_index[i] * stride` is `int` arithmetic used as a `size_t`
+                // index, so a negative entry other than `-1` converts to an enormous index.
                 //
-                // Neither is acceptable from a library, and the vendored answer is undefined, so
-                // there is nothing to compare against: this skips, the same choice this module
-                // makes at every other unguarded vendored dereference. Found by trying to build
-                // a fixture for `normalize_stride2_floats`'s short-vector branches -- a
-                // `machine_max_speed_x` of one value reaches this line and the port panicked
-                // (`index out of bounds: the len is 1 but the index is 1`) where the oracle read
-                // out of bounds and returned a meaningless value. That is also why those two
-                // branches stay uncompared; see
+                // **The exact out-of-bounds condition is therefore: some `i` where
+                // `diff_index[i] != -1` and either `diff_index[i] < 0`, or
+                // `diff_index[i] * stride + stride > other.size()`** -- the `+ stride` because
+                // `j` reaches `stride - 1`. That is what the test below is, index by index.
+                //
+                // An earlier revision of this guard skipped when
+                // `other.len() < diff_index.len() * stride`, which is a **different
+                // predicate** and wrong in both directions: it skipped inputs on which every
+                // used index is in range -- defined at the pin, so the port would have
+                // diverged on defined input -- and it let through inputs where a used index
+                // exceeds the length, which still panicked. Caught by the lead reading the
+                // condition rather than by any test, because no fixture distinguishes them.
+                //
+                // **What this does not have is a fixture that separates the two predicates.**
+                // Instrumenting this site over the whole test shows every `variant_index`
+                // containing a `-1` is `[-1]` -- all entries unused -- so no committed case has
+                // both a used index and a `-1`, which is the shape on which the old and new
+                // tests disagree. A layout with one variant on this side and two on the other
+                // was added to try to produce it and did not. So the correctness of this guard
+                // rests on the predicate matching `Config.hpp:596-601` index for index, which
+                // is checkable by reading it, and **not** on a passing comparison. What the
+                // 660 cases do establish is that it changed nothing that was already compared.
+                //
+                // On an input that does read out of bounds, the vendored loop has already
+                // written `this->values[i * stride + j]` for every earlier in-range `i`, so the
+                // pin's observable result is a **partial** write followed by undefined
+                // behaviour -- not a clean failure. Skipping the whole key is therefore not the
+                // vendored answer either; nothing is, which is the point. The port skips because
+                // `slic3r-config`'s faithful transcription of `:600` indexes a `Vec` and
+                // **panics**, and a panic reachable from ordinary preset data is the one outcome
+                // that is certainly wrong. Measured: a `machine_max_speed_x` of one value
+                // reaches this line and the port aborted with `index out of bounds: the len is
+                // 1 but the index is 1`; with the key skipped the comparison diverges instead,
+                // because the oracle returns whatever its out-of-bounds read produced. That is
+                // also why two of `normalize_stride2_floats`'s branches stay uncompared; see
                 // `print_config_variant_override_matches_the_oracle`.
-                if target_vec.len_values() < variant_index.len() * stride as usize {
+                let stride_u = stride as usize;
+                let reads_out_of_range = variant_index.iter().any(|&d| {
+                    d != -1 && (d < 0 || d as usize * stride_u + stride_u > target_vec.len_values())
+                });
+                if reads_out_of_range {
                     continue;
                 }
                 let _ = src_vec.set_only_diff(
@@ -24859,6 +24890,28 @@ mod tests {
                     "printer_extruder_id=1",
                 ]),
             ),
+            // An attempt at `target_variant_count == 0`, for `normalize_stride2_floats`'s
+            // `expected_size == 0` branch.
+            (
+                probe(&["printer_extruder_variant="]),
+                probe(&["printer_extruder_variant="]),
+            ),
+            // **One variant on this side, two on the other**, which is the layout that produces
+            // a `variant_index` with both a used entry and a `-1`. That mix is what separates
+            // the exact out-of-range test in `update_diff_values_to_child_config` from the
+            // cruder length comparison it replaced: with a target shorter than
+            // `variant_index.len() * stride` but every *used* index in range, the pin is
+            // perfectly defined and the port must agree with it rather than skip.
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Bowden Standard\"",
+                    "printer_extruder_id=1,2",
+                ]),
+            ),
             // **Both sides two matching variants**, so `variant_index` has two entries and the
             // stride-2 `expected_size` is 4. With a `key_set2` machine limit carrying only one
             // `(normal, silent)` pair, that is the shape where `normalize_stride2_floats`
@@ -25410,36 +25463,57 @@ mod tests {
     /// only through a caller, and **their status differs, where an earlier revision of this note
     /// said both were simply waiting on unported callers. That was stale for one of them.**
     ///
-    /// - **`normalize_stride2_floats` is covered on four of its seven branches, and the claim
-    ///   is written branch by branch because a blanket one would be wrong.** It is reached
-    ///   through `update_non_diff_values_to_base_config`, which *is* ported and compared -- so
-    ///   the old reason for disclosing it (no ported caller) was stale. But at `fa1d970` nothing
-    ///   reached it in a way that changed compared output, because every layout left the
-    ///   stride-2 `expected_size` at 2, where the function is a no-op. Two fixtures fix that: a
-    ///   layout with two matching variants on both sides, and a machine limit with an **odd**
-    ///   number of values.
+    /// - **`normalize_stride2_floats`: of its eight decision points, three are pinned by this
+    ///   test, three cannot be pinned by any test because mutating them is a semantically
+    ///   equivalent rewrite, and two are genuinely uncovered.** It is reached through
+    ///   `update_non_diff_values_to_base_config`, which *is* ported and compared, so the
+    ///   original reason for disclosing it -- no ported caller -- was stale.
     ///
-    ///   Each of these four was confirmed by planting a mutation, watching the test fail, and
-    ///   reverting: the replication loop (`PrintConfig.cpp:12122-12125`), the pair-realignment
-    ///   push (`:12111-12112`), the truncate boundary (`:12114-12116`), and the
-    ///   `second = first` fallback (`:12103`).
+    ///   **Two earlier versions of this paragraph were wrong and the second was worse.** The
+    ///   first said the function was simply uncovered. The second said it "is now covered" on
+    ///   four of seven branches and that the `expected_size == 0` branch "cannot be reached
+    ///   through this caller, which returns early on an empty `variant_index`". **There is no
+    ///   such early return**, in the vendored function or in this port: the only `return` in
+    ///   `PrintConfig.cpp:12141-12270` is the trailing one at `:12268`, `:12165` leaves
+    ///   `variant_index` empty when `target_variant_count == 0`, and the vendored comment at
+    ///   `:12167-12168` says to keep it empty and "let the downstream size checks produce a
+    ///   useful error" -- the author expected an empty index to flow on. The branch count was
+    ///   wrong too: there are eight decision points, not seven. review-76-fidelity,
+    ///   review-76-conformance and the lead each read the caller and reported the invented
+    ///   return independently.
     ///
-    ///   **Three branches remain unproven, for two different reasons, and neither is a fixture
-    ///   this unit simply has not got round to writing.** The `expected_size == 0` clear
-    ///   (`:12092-12095`) is unreachable through this caller, which returns early on an empty
-    ///   `variant_index`, so `expected_size = restore_n * 2 >= 2` always. The empty-vector
-    ///   fallback (`:12096-12099`) and the `v.size() < 2` pair build (`:12106-12109`) need a
-    ///   machine limit shorter than one `(normal, silent)` pair -- and **that input is
-    ///   undefined at the pin before it ever reaches this function.** The sibling
+    ///   Measured branch by branch, each with a mutation of the condition **and** one of the
+    ///   body, because a single mutation per branch is what produced the wrong figure before:
+    ///
+    ///   | decision point | measured |
+    ///   |---|---|
+    ///   | `second = (v.size() >= 2) ? v[1] : first` (`:12103`) | pinned, both mutations caught |
+    ///   | `v.size() % 2 != 0` (`:12111`) | pinned, both caught |
+    ///   | the replication loop (`:12122`) | pinned |
+    ///   | `expected_size == 0` (`:12092`) | body pinned; **condition unpinnable** |
+    ///   | `v.size() > expected_size` (`:12114`) | body pinned; **condition unpinnable** |
+    ///   | `vi * 2 + 1 < v.size()` (`:12124`) | **condition unpinnable** |
+    ///   | `v.empty()` (`:12096`) | uncovered |
+    ///   | `v.size() < 2` (`:12106`) | uncovered |
+    ///
+    ///   **"Unpinnable" is a claim about the code, not about the fixtures**, and it is why
+    ///   three mutations survive that no fixture can catch. Dropping the `expected_size == 0`
+    ///   guard leaves the same result by a longer path: with a non-empty `v` the fall-through
+    ///   reaches `v.size() > 0` and truncates to zero, and with an empty `v` the
+    ///   `v.empty()` arm resizes to zero -- so the guard is a fast path, not a behaviour. The
+    ///   same holds at `:12114`, where `v.size() == expected_size` truncates to its own length
+    ///   or enters a loop with `have_variants == want_variants`; and at `:12124`, where
+    ///   `vi * 2 + 1` is at most `expected_size - 1` and `v.size()` is exactly
+    ///   `expected_size`, so the bound can never be the thing that stops the write. A reviewer
+    ///   finding those three alive should not read it as a gap.
+    ///
+    ///   **The two genuinely uncovered branches need a machine limit shorter than one
+    ///   `(normal, silent)` pair, and that input has no defined oracle answer.** The sibling
     ///   `update_diff_values_to_child_config` hands such a vector to `set_only_diff`, which
-    ///   validates only its own length (`Config.hpp:593-594`) and then indexes the rhs
-    ///   unchecked at `:600`, reading past the end of a `std::vector`. Measured rather than
-    ///   argued: with that fixture present and the port's guard removed, the port panics
-    ///   (`index out of bounds: the len is 1 but the index is 1`); with the guard in place the
-    ///   comparison *diverges*, because the oracle returns whatever the out-of-bounds read
-    ///   produced. A comparison against undefined behaviour establishes nothing, so those two
-    ///   branches are left uncompared deliberately, on the same grounds as
-    ///   `get_extruder_ams_count`'s no-`#` token.
+    ///   indexes the rhs out of bounds at `Config.hpp:600` -- see that call site's own marker.
+    ///   So these two are not fixtures this unit has yet to write; they are uncomparable. The
+    ///   `expected_size == 0` body, by contrast, **was** a missing fixture, and a layout with
+    ///   both sides' `printer_extruder_variant` empty supplies it.
     ///
     /// - **`ensure_process_variant_columns` is genuinely uncovered**, and for the reason the old
     ///   note gave: its only caller is `update_values_to_printer_extruders`
