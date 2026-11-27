@@ -19473,14 +19473,13 @@ pub fn min_object_distance(cfg: &dyn slic3r_config::config::ConfigBase) -> f64 {
     // row), so there is no `from_i32` for it to call. `PrinterTechnology`'s discriminants are
     // transcribed in the vendored declaration order, so `Sla as i32` is the value the oracle's
     // `ptSLA` is.
+    // The vendored read is `option<ConfigOptionEnum<PrinterTechnology>>` (`:10325`) while
+    // `SLAPrinterConfig`'s field is a `ConfigOptionEnumGeneric` -- the two share the tag
+    // `coEnum`, which is the only reason that read works at the pin. [`tagged::enum_scalar`]
+    // reads either, so this does not depend on which instantiation a config happens to hold.
     let printer_technology =
-        slic3r_config::config::ConfigOptionResolver::option(cfg, "printer_technology").and_then(
-            |o| {
-                o.as_any()
-                    .downcast_ref::<ConfigOptionEnumGeneric>()
-                    .map(|e| e.value)
-            },
-        );
+        slic3r_config::config::ConfigOptionResolver::option(cfg, "printer_technology")
+            .and_then(tagged::enum_scalar);
     let printer_technology =
         printer_technology.unwrap_or(slic3r_config::config::PrinterTechnology::Unknown as i32);
 
@@ -19498,9 +19497,11 @@ pub fn min_object_distance(cfg: &dyn slic3r_config::config::ConfigBase) -> f64 {
             slic3r_config::config::ConfigOptionResolver::option(cfg, "extruder_clearance_radius")
                 .and_then(|o| o.as_any().downcast_ref::<ConfigOptionFloat>())
                 .map(|o| o.value);
+        // `option<ConfigOptionEnum<PrintSequence>>` is tag-checked and then `static_cast`,
+        // so it reads either `coEnum` instantiation -- see [`tagged::enum_scalar`].
         let co_opt = slic3r_config::config::ConfigOptionResolver::option(cfg, "print_sequence")
-            .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnum<PrintSequence>>())
-            .map(|o| o.value);
+            .and_then(tagged::enum_scalar)
+            .map(<PrintSequence as slic3r_config::config::ConfigOptionEnumValue>::from_i32);
 
         match (ecr_opt, co_opt) {
             (Some(ecr), Some(co)) => {
@@ -20139,6 +20140,28 @@ mod tagged {
             .map(|o| &mut o.values)
     }
 
+    /// A `coEnum` scalar's value, for the vendored `option<ConfigOptionEnum<T>>(key)` reads.
+    ///
+    /// **This closes the one finding the fidelity reviewer raised as a judgement call**, and
+    /// their mechanism was right. `ConfigOptionEnum<T>` and `ConfigOptionEnumGeneric` both
+    /// report `static_type() == coEnum`, so `option<ConfigOptionEnum<PrinterTechnology>>` reads
+    /// a stored `ConfigOptionEnumGeneric` successfully through the `static_cast` -- which is
+    /// exactly what `min_object_distance` relies on, since `SLAPrinterConfig`'s
+    /// `printer_technology` field *is* the generic one (the documented orphan-rule case).
+    ///
+    /// The port's downcasts happened to name the instantiation each key actually stores, so
+    /// every one of them read correctly and the 882-case `min_object_distance` comparison
+    /// passed -- correct by matching, not by a tag check. `ConfigOptionEnum<T>` is generic, so
+    /// no downcast can enumerate its instantiations; the value is read through
+    /// `ConfigOption::get_int` instead, which both types implement and which is what the
+    /// vendored `static_cast`-then-`->value` amounts to. Now correct by construction.
+    pub fn enum_scalar(opt: &dyn slic3r_config::config::ConfigOption) -> Option<i32> {
+        if opt.option_type() != ConfigOptionType::Enum {
+            return None;
+        }
+        opt.get_int().ok()
+    }
+
     pub fn percents(opt: &dyn slic3r_config::config::ConfigOption) -> Option<&Vec<f64>> {
         if opt.option_type() != ConfigOptionType::Percents {
             return None;
@@ -20581,12 +20604,15 @@ impl DynamicPrintConfig {
                 .base
                 .opt::<ConfigOptionBool>("independent_support_layer_height", true)
                 .is_some();
+            // Both vendored reads are `option<ConfigOptionEnum<T>>`, which is tag-checked and
+            // then `static_cast` -- see [`tagged::enum_scalar`].
             let ps_value = Resolver::option(self, "print_sequence")
-                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnum<PrintSequence>>())
-                .map(|o| o.value);
+                .and_then(tagged::enum_scalar)
+                .map(<PrintSequence as slic3r_config::config::ConfigOptionEnumValue>::from_i32);
             let is_smooth_timelapse = Resolver::option(self, "timelapse_type")
-                .and_then(|o| o.as_any().downcast_ref::<ConfigOptionEnum<TimelapseType>>())
-                .is_some_and(|o| o.value == TimelapseType::tlSmooth);
+                .and_then(tagged::enum_scalar)
+                .map(<TimelapseType as slic3r_config::config::ConfigOptionEnumValue>::from_i32)
+                .is_some_and(|v| v == TimelapseType::tlSmooth);
 
             // PORT NOTE: `ps_opt->value` at `PrintConfig.cpp:10408` is dereferenced without a
             // null check, where `ps_opt` comes from `option<...>("print_sequence")` with no
