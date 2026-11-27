@@ -75,6 +75,16 @@ impl PiecewiseFittedCurve {
     /// arithmetic gives once truncated back to the narrower type, for every segment index this
     /// port's own caller can reach; this is ported as plain signed arithmetic rather than
     /// reproducing the intermediate unsigned step.
+    ///
+    /// `middle_right_segment_index`, `start_segment_idx` and `parameter_index` are also widened
+    /// from the vendored `int` (32-bit) to `i64` below. This is a second, separate divergence
+    /// from the signedness one above: it only matters where
+    /// `floor((observation_point - start) / segment_size)` exceeds `i32::MAX`/underflows
+    /// `i32::MIN`, which is where the vendored `int` conversion from `float` is itself undefined
+    /// behaviour (`Curves.hpp:80`) while Rust's `as i64` does not wrap. No in-scope caller
+    /// (`SeamPlacer.cpp:2044`'s `fit_cubic_bspline`, read back through this function at `:2056`)
+    /// reaches that magnitude, so the width choice is unreachable in practice rather than
+    /// verified bit-exact at the boundary.
     pub fn get_fitted_value(&self, observation_point: f32) -> Vec2f {
         // `0f32` (no decimal point) so the exempt value `0` normalises into R16's exempt set
         // rather than needing a marker (`docs/PORTING.md`, "Decisions recorded on 2026-11-26",
@@ -103,6 +113,15 @@ impl PiecewiseFittedCurve {
             // (`:89`).
             let parameter_index = segment_index + self.endpoints_level_of_freedom as i64;
             let max_index = self.coefficients.len() as i64 - 1;
+            // PORT NOTE: `std::clamp(parameter_index, 0, int(coefficients.cols()) - 1)`
+            // (`Curves.hpp:89`) is undefined behaviour in the vendored source when
+            // `coefficients` is empty (`int(coefficients.cols()) - 1` is `-1`, so `std::clamp`'s
+            // precondition `min <= max` is violated) -- the release build compiles no assertion
+            // and runs on. Rust's `Ord::clamp` is documented to panic in that same state
+            // (`min > max`), so this port diverges from the vendored UB by panicking instead
+            // of continuing silently. `coefficients` is a `pub Vec<Vec2f>` field of a `pub
+            // struct`, so an empty vector is constructible by any caller; no in-scope caller
+            // constructs one today.
             let parameter_index = parameter_index.clamp(0, max_index) as usize;
 
             // `result += Kernel::kernel(normalized_segment_distance) *
