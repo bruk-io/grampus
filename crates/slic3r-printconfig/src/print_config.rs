@@ -20874,8 +20874,11 @@ pub fn set_variant_override(
 /// `static void normalize_stride2_floats(ConfigOptionFloats &opt, size_t expected_size)`
 /// (`PrintConfig.cpp:12089-12127`): resizes a stride-2 `(normal, silent)` vector to
 /// `expected_size`, replicating the first pair into any variants it gains.
-fn normalize_stride2_floats(opt: &mut ConfigOptionFloats, expected_size: usize) {
-    let v = &mut opt.values;
+fn normalize_stride2_floats(v: &mut Vec<f64>, expected_size: usize) {
+    // The vendored signature is `ConfigOptionFloats&` but the body touches only `.values`, and
+    // its callers reach it through a `static_cast` that may have reinterpreted a
+    // `ConfigOptionFloatsNullable` -- see [`tagged`]. Taking the vector is what lets either
+    // instantiation be passed, as the `static_cast` does.
     if expected_size == 0 {
         v.clear();
         return;
@@ -21404,28 +21407,36 @@ impl DynamicPrintConfig {
                         "update_non_diff_values_to_base_config: key '{opt}' is expected to be ConfigOptionFloats for stride=2."
                     )));
                 }
-                let Some(target_floats) = target_copy.as_any().downcast_ref::<ConfigOptionFloats>()
-                else {
+                // The vendored guard at `:12226` is on the **tag** and both casts at
+                // `:12229-12230` are `static_cast`, so a `ConfigOptionFloatsNullable` passes
+                // and is reinterpreted; a type-exact downcast here would silently skip the key
+                // instead -- see [`tagged`].
+                let Some(target_values) = tagged::floats(target_copy.as_ref()) else {
                     continue;
                 };
-                let mut rhs_tmp = target_floats.clone();
+                let mut rhs_tmp = ConfigOptionFloats {
+                    values: target_values.clone(),
+                };
                 // PORT NOTE: src/libslic3r/PrintConfig.cpp:12235
                 // (log_normalize_legacy_vector_size, itself a BOOST_LOG_TRIVIAL(debug); see its
                 // own note at the function this module does not port).
                 //
                 // "Normalize src in-place so backup_values indexing is safe, normalize rhs via
                 // a temporary copy."
-                normalize_stride2_floats(&mut rhs_tmp, expected_size);
+                normalize_stride2_floats(&mut rhs_tmp.values, expected_size);
                 let Ok(Some(src)) = slic3r_config::config::ConfigBase::optptr_mut(self, opt, false)
                 else {
                     continue;
                 };
-                let Some(src_floats) = src.as_any_mut().downcast_mut::<ConfigOptionFloats>() else {
+                let Some(src_values) = tagged::floats_mut(src) else {
                     continue;
                 };
-                normalize_stride2_floats(src_floats, expected_size);
+                normalize_stride2_floats(src_values, expected_size);
+                let Some(src_vec) = as_vector_mut(src) else {
+                    continue;
+                };
                 let _ = slic3r_config::config::ConfigOptionVectorBase::set_with_restore(
-                    src_floats,
+                    src_vec,
                     &rhs_tmp,
                     &variant_index,
                     stride,
@@ -21795,14 +21806,15 @@ impl slic3r_config::config::ConfigBase for DynamicPrintAndCLIConfig {
 // `get_bed_shape_with_excluded_area` (`:14365-14374`) are additionally blocked by the same
 // absent `slic3r-clipperutils` dependency as `get_shared_poly` above.
 
-// TODO(port): src/libslic3r/PrintConfig.cpp:10891 -- eight of the `DynamicPrintConfig`
-// transformation methods are still not ported: `update_values_from_single_to_multi`
-// (`:10891-11056`), `update_values_from_multi_to_multi` (`:11057-11247`),
-// `update_values_from_multi_to_multi_2` (`:11248-11393`), `resize_mixed_filament_metadata`
-// (`:11448-11551`), `update_values_to_printer_extruders` (`:11634-11837`),
-// `gather_option_values` (`:11838-11856`),
-// `update_values_to_printer_extruders_for_multiple_filaments` (`:11857-11968`) and
-// `update_filament_config_values_for_multiple_extruders` (`:11969-12088`) -- about 1,060 lines.
+// TODO(port): src/libslic3r/PrintConfig.cpp:11057 -- seven of the `DynamicPrintConfig`
+// transformation methods are still not ported. Named by their line ranges alone, so this marker
+// needs no rewording as each one lands and cannot go stale the way a prose list does: `:11057`,
+// `:11248`, `:11448`, `:11634`, `:11838`, `:11857` and `:11969`, each running to the start of
+// the next entry in that list or, for the last, to `:12088` -- about 1,060 lines in all. Their
+// names are declared across `PrintConfig.hpp:976-1002` (the five member functions, at `:976`, `:978`, `:986`, `:997` and `:1002`) and `:1033`
+// (`resize_mixed_filament_metadata`, a free function); `gather_option_values` has no
+// declaration at all, being file-scope `static` at its definition. Those are the authority on
+// the names; this unit does not repeat a list that can drift.
 //
 // **These are reachable with this crate's dependencies**, so this marker records work owed and
 // not a dependency gap. The `ConfigOptionVectorBase` cast they need is [`as_vector_mut`]; an
@@ -21811,11 +21823,8 @@ impl slic3r_config::config::ConfigBase for DynamicPrintAndCLIConfig {
 // trusted, and transcription with nothing checking it would weaken a module whose standing is
 // that every figure is asserted by a test.
 //
-// The rest of the family **is** ported, each with its own comparison: `set_variant_override`,
-// `normalize_filament_values_to_variants`, `set_filament_dev_options`,
-// `ensure_process_variant_columns`, `normalize_stride2_floats`,
-// `compute_filament_override_value`, `update_static_print_config_from_dynamic`,
-// `update_non_diff_values_to_base_config` and `update_diff_values_to_child_config`.
+// Ten of the family **are** ported, each with its own comparison; they are the ones this module
+// defines, so `git grep` over it is the authority rather than a list here that can drift.
 // `log_normalize_legacy_vector_size` (`:12129-12138`) is a log statement and nothing else; see
 // its own `// PORT NOTE:`.
 
