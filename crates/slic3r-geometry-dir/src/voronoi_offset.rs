@@ -25,14 +25,21 @@
 //! **What is genuinely ported below, with no topology dependency at all:** the three "color"
 //! enums ([`VertexCategory`], [`EdgeCategory`], [`CellCategory`], plain data, no behaviour to
 //! prove), [`edge_offset_no_intersection`]/[`edge_offset_has_intersection`] (a bare `isnan` check
-//! on a `Vec2d`), and the pure-arithmetic helpers the vendored `namespace detail` carries ahead
-//! of its first topology-dependent function at `:186` -- [`first_circle_segment_intersection_parameter`],
-//! [`Intersections`] and [`point_point_equal_distance_points`]/[`line_point_equal_distance_points`].
-//! Everything else -- `contour_point`/`vertex_point`/`*_category`/`set_*_category`
-//! (`VoronoiOffset.hpp:21-102`), `detail::vertex_equal_to_point`/`dist_to_site`/`on_site`/the
-//! `verify_*` self-checks (`VoronoiOffset.cpp:186-649`), and the six public entry points
-//! (`:650-1646`) -- needs a live diagram and is left as `// TODO(port):` below, one marker per
-//! function naming its own vendored line range, per this task's own pull request.
+//! on a `Vec2d`), the vendored `namespace detail`'s pure-arithmetic prefix
+//! ([`first_circle_segment_intersection_parameter`], [`Intersections`] and
+//! [`point_point_equal_distance_points`]/[`line_point_equal_distance_points`], `:31-210`), and
+//! two of the four free functions that follow `detail::on_site` ([`point_point_dr_dl_thresholds`]
+//! and [`point_point_skeleton_thresholds`], `:267-305` and `:372-401`) -- despite sitting between
+//! two topology-dependent sections, neither touches a `cell`/`edge`/`vertex` at all; see each
+//! function's own doc. Everything else -- `contour_point`/`vertex_point`/`*_category`/
+//! `set_*_category` (`VoronoiOffset.hpp:21-102`), `detail::vertex_equal_to_point`/`dist_to_site`/
+//! `on_site` (`VoronoiOffset.cpp:212-256`), `detail::point_segment_dr_dl_thresholds`/
+//! `point_segment_skeleton_thresholds` (`:316-370`, `:403-449`, blocked on `Geometry::foot_pt`,
+//! not topology -- see each function's own `// TODO(port):` below), the `debug::verify_*`
+//! self-checks (`:457-648`, `#ifndef NDEBUG`), and the seven public entry points (`:650-1646`) --
+//! needs a live diagram (the `point_segment_*` pair needs `foot_pt` instead) and is left as
+//! `// TODO(port):` below, one marker per function naming its own vendored line range, per this
+//! task's own pull request.
 
 use slic3r_point::point::Vec2d;
 
@@ -142,12 +149,15 @@ pub fn edge_offset_has_intersection(intersection_point: Vec2d) -> bool {
 // &, double, double)`; same dependency, defined at `VoronoiOffset.cpp:1521-1541`.
 
 // -------------------------------------------------------------------------------------------
-// namespace detail (VoronoiOffset.cpp:30-649) -- a named (not anonymous) namespace, so these
+// namespace detail (VoronoiOffset.cpp:30-451) -- a named (not anonymous) namespace, so these
 // carry external linkage at the pin; ported as private (non-`pub`) functions per the idiom map's
 // "free function in an anonymous namespace, or a `static` free function" row, since none is
 // `pub` in the vendored header either and nothing outside this translation unit calls them.
-// Only the pure-arithmetic prefix (`:31-210`) ports without a live diagram; `:212` onward needs
-// one.
+// `:31-210` (pure arithmetic) and two of the four functions at `:258-449` port below with no
+// live diagram; `:212-256` and the other two of those four (`:316-370`, `:403-449`, blocked on
+// `Geometry::foot_pt` instead) do not -- see the module doc and each function's own doc/TODO.
+// `namespace debug` (`:453-648`, `#ifndef NDEBUG`) is a separate, sibling namespace, not part of
+// `detail`; its five `verify_*` self-checks are TODO(port)'d separately below.
 // -------------------------------------------------------------------------------------------
 
 /// Intersect a circle with a ray, return the parameter of the intersection that lies on the
@@ -162,10 +172,14 @@ fn first_circle_segment_intersection_parameter(center: Vec2d, r: f64, pt: Vec2d,
     let b = 2. * vec2d_dot(d, v); // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:45
     let c = vec2d_dot(d, d) - r * r;
     let u = b * b - 4. * a * c; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:48
-    // `if (u <= 0)` (`:51`): the vendored line spells this comparison's zero as a bare
-    // integer, not `0.` -- `0f64` here (normalised text `0`, R16's exempt set) matches that
-    // spelling exactly, per `docs/PORTING.md` decision 8 of 2026-11-26.
-    if u <= 0f64 {
+
+    // `if (u <= 0)` (`:51`) spells this comparison's zero as a bare integer, not `0.` -- `0f64`
+    // below (normalised text `0`, R16's exempt set) matches that spelling, per
+    // `docs/PORTING.md` decision 8 of 2026-11-26. Bound to a `let` (rather than written as a
+    // trailing comment on the `if` itself) so `cargo fmt` cannot relocate the marker off the
+    // line it covers.
+    let u_le_zero = u <= 0f64; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:51
+    if u_le_zero {
         // Degenerate to a single closest point.
         let t = -b / (2. * a); // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:53
         t.clamp(0., 1.) // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:55
@@ -173,12 +187,17 @@ fn first_circle_segment_intersection_parameter(center: Vec2d, r: f64, pt: Vec2d,
         let u = u.sqrt();
         let t0 = (-b - u) / (2. * a); // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:59
         let t1 = (-b + u) / (2. * a); // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:60
-        // One of the intersections shall be found inside the segment.
-        if t1 < 0. { // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:63
+
+        // One of the intersections shall be found inside the segment. Each comparison is bound
+        // to a `let` for the same `cargo fmt` reason as `u_le_zero` above.
+        let t1_lt_zero = t1 < 0.; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:63
+        let t0_gt_one = t0 > 1.; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:65
+        let t0_gt_zero = t0 > 0.; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:67
+        if t1_lt_zero {
             0. // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:64
-        } else if t0 > 1. { // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:65
+        } else if t0_gt_one {
             1. // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:66
-        } else if t0 > 0. { // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:67
+        } else if t0_gt_zero {
             t0
         } else {
             t1
@@ -229,10 +248,18 @@ fn point_point_equal_distance_points(
     let mut cy = (pt1.y() - pt2.y()) as f64;
     let cl = cx * cx + cy * cy;
     let discr = 4. * d * d - cl; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:90
-    if discr < 0. { // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:91
+
+    // Bound to a `let` (rather than written as a trailing comment on the `if` itself) so
+    // `cargo fmt` cannot relocate the marker off the line it covers.
+    let discr_lt_zero = discr < 0.; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:91
+    if discr_lt_zero {
         // No intersection point found, the two circles are too far away.
-        // `Vec2d()`/`Vec2d()` (`:93`) are default-constructed, carrying no literal of their
-        // own; `Vec2d::default()` is this port's own zero value with nothing to cite.
+        // PORT NOTE: src/libslic3r/Geometry/VoronoiOffset.cpp:93 -- `Vec2d()`/`Vec2d()` are
+        // default-constructed, carrying no literal of their own. Eigen's default constructor
+        // leaves the storage indeterminate (`EIGEN_INITIALIZE_MATRICES_BY_ZERO` is defined
+        // nowhere in this build); `Vec2d::default()` substitutes a defined zero for that
+        // indeterminate value -- a divergence, not an equivalence, but unobservable here because
+        // every caller checks `count` before ever reading `pts`.
         return Intersections {
             count: 0,
             pts: [Vec2d::default(), Vec2d::default()],
@@ -246,8 +273,9 @@ fn point_point_equal_distance_points(
     // `u = 0;` (`:103`) spells this value's zero as a bare integer, not `0.` -- `0f64` below
     // (normalised text `0`, R16's exempt set) matches that spelling, per `docs/PORTING.md`
     // decision 8 of 2026-11-26.
-    let (cnt, u) = if discr == 0. { // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:101
-        (1, 0f64)
+    let discr_eq_zero = discr == 0.; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:101
+    let (cnt, u) = if discr_eq_zero {
+        (1, 0f64) // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:103
     } else {
         (2, 0.5 * cx * (cl * discr).sqrt() / cl) // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:106
     };
@@ -299,8 +327,11 @@ fn line_point_equal_distance_points(
     let mut c = vec2d_cross2(lpv, lv);
     // `if (c < 0)` (`:139`) spells this comparison's zero as a bare integer, not `0.` --
     // `0f64` below (normalised text `0`, R16's exempt set) matches that spelling, per
-    // `docs/PORTING.md` decision 8 of 2026-11-26.
-    if c < 0f64 {
+    // `docs/PORTING.md` decision 8 of 2026-11-26. Bound to a `let` (rather than written as a
+    // trailing comment on the `if` itself) so `cargo fmt` cannot relocate the marker off the
+    // line it covers.
+    let c_lt_zero = c < 0f64; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:139
+    if c_lt_zero {
         lv = Vec2d::new(-lv.x(), -lv.y());
         c = -c;
     }
@@ -311,11 +342,19 @@ fn line_point_equal_distance_points(
 
     let dscaled = d * l2.sqrt();
     let s = c * (2. * dscaled - c); // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:173
-    if s < 0. { // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:174
+
+    // Bound to a `let` (rather than written as a trailing comment on the `if` itself) so
+    // `cargo fmt` cannot relocate the marker off the line it covers.
+    let s_lt_zero = s < 0.; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:174
+    if s_lt_zero {
         // Distance of pt from line is bigger than 2 * d.
-        // `Vec2d()`/`Vec2d()` (`:176`'s implicit `Intersections { 0 }` aggregate-init) are
-        // default-constructed, carrying no literal of their own; `Vec2d::default()` is this
-        // port's own zero value with nothing to cite.
+        // PORT NOTE: src/libslic3r/Geometry/VoronoiOffset.cpp:176 -- `Vec2d()`/`Vec2d()` (the
+        // implicit `Intersections { 0 }` aggregate-init) are default-constructed, carrying no
+        // literal of their own. Eigen's default constructor leaves the storage indeterminate
+        // (`EIGEN_INITIALIZE_MATRICES_BY_ZERO` is defined nowhere in this build);
+        // `Vec2d::default()` substitutes a defined zero for that indeterminate value -- a
+        // divergence, not an equivalence, but unobservable here because every caller checks
+        // `count` before ever reading `pts`.
         return Intersections {
             count: 0,
             pts: [Vec2d::default(), Vec2d::default()],
@@ -326,7 +365,8 @@ fn line_point_equal_distance_points(
     if xy_swapped {
         std::mem::swap(&mut a, &mut b);
     }
-    let (cnt, u) = if s == 0. { // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:183
+    let s_eq_zero = s == 0.; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:183
+    let (cnt, u) = if s_eq_zero {
         // Distance of pt from line is 2 * d.
         (1, 0.) // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:186
     } else {
@@ -360,14 +400,155 @@ fn line_point_equal_distance_points(
 // TODO(port): src/libslic3r/Geometry/VoronoiOffset.cpp:238-244 -- `detail::dist_to_site(const
 // Lines &, const VD::cell_type &, const Vec2d &)`; needs `cell.source_index()`/
 // `.contains_point()`/`.source_category()`.
-// TODO(port): src/libslic3r/Geometry/VoronoiOffset.cpp:246-427 -- `detail::on_site` and its
-// static helper(s); same dependency as `dist_to_site`, plus `cell.incident_edge()`.
-// TODO(port): src/libslic3r/Geometry/VoronoiOffset.cpp:429-649 -- `detail::
+// TODO(port): src/libslic3r/Geometry/VoronoiOffset.cpp:246-256 -- `detail::on_site`; same
+// dependency as `dist_to_site`, plus `cell.incident_edge()`.
+
+// -------------------------------------------------------------------------------------------
+// Two of the four free functions that follow `on_site` (VoronoiOffset.cpp:258-449) -- despite
+// sitting between topology-dependent code on both sides, neither of these two touches a
+// `cell`/`edge`/`vertex` anywhere in its vendored body (checked: no `VD::`, `cell.`, `edge->`,
+// `vertex0`/`vertex1`, `incident_edge` or `.color(` in `:267-305` or `:372-401`). The other two,
+// `point_segment_dr_dl_thresholds`/`point_segment_skeleton_thresholds`, are genuinely blocked --
+// not by topology, but by `Geometry::foot_pt<Vec2d>`, which is itself still
+// `// TODO(port): src/libslic3r/Geometry.hpp:186-217` at `crates/slic3r-geometry/src/geometry.rs:
+// 115` -- so they stay `// TODO(port):` below rather than being ported with a stub in place of
+// `foot_pt`.
+// -------------------------------------------------------------------------------------------
+
+/// Local helper: the Euclidean norm of a plain `Vec2d`, via [`vec2d_dot`]; see that function's
+/// doc for why this unit keeps its own vector helpers rather than reaching for a shared one.
+fn vec2d_norm(v: Vec2d) -> f64 {
+    vec2d_dot(v, v).sqrt()
+}
+
+/// `v.normalized()` for a plain `Vec2d`; duplicated from `crate::voronoi_utils`'s own
+/// `vec2d_normalized` rather than shared, the same per-module-local choice [`vec2d_dot`]'s doc
+/// states. Carries Eigen's own zero-norm guard (`z > 0 ? n / sqrt(z) : n`,
+/// `Eigen/src/Core/Dot.h:92-102` under the dependency superbuild); see `crate::voronoi_utils`'s
+/// copy for the full citation.
+// PORT NOTE: src/libslic3r/Geometry/VoronoiOffset.cpp:286 -- `.normalized()` is Eigen's own
+// zero-guarded normalize, not a plain `v / v.norm()`.
+fn vec2d_normalized(v: Vec2d) -> Vec2d {
+    let squared_norm = v.x() * v.x() + v.y() * v.y();
+    if squared_norm > 0f64 {
+        let norm = squared_norm.sqrt();
+        Vec2d::new(v.x() / norm, v.y() / norm)
+    } else {
+        v
+    }
+}
+
+/// For a Voronoi segment bisecting two point sites `pt1_site`/`pt2_site`, the two points along
+/// the segment (clamped to its own endpoints `voronoi_point1`/`voronoi_point2`) where the dr/dl
+/// measure crosses `threshold_tan_alpha_half` (`VoronoiOffset.cpp:267-305`). Pure `Point`/`Vec2d`
+/// arithmetic -- see the block comment above for why this one ports with no live diagram while
+/// its sibling `point_segment_dr_dl_thresholds` does not. Has a live in-file caller at `:1609`
+/// (inside `skeleton_edges_rough`, itself still `// TODO(port):` below because it walks a live
+/// `VD` to reach this function).
+///
+/// Every vendored `assert`/debug-only branch in this body's range is absent (there is none): the
+/// body below is a line-for-line translation of `:267-305`.
+fn point_point_dr_dl_thresholds(
+    pt1_site: slic3r_point::point::Point,
+    pt2_site: slic3r_point::point::Point,
+    voronoi_point1: Vec2d,
+    voronoi_point2: Vec2d,
+    threshold_tan_alpha_half: f64,
+) -> (Vec2d, Vec2d) {
+    let dir_y = Vec2d::new(
+        (pt2_site.x() - pt1_site.x()) as f64,
+        (pt2_site.y() - pt1_site.y()) as f64,
+    );
+    let mut dir_x = vec2d_normalized(Vec2d::new(-dir_y.y(), dir_y.x()));
+    let cntr = Vec2d::new(
+        0.5 * (pt1_site.x() as f64 + pt2_site.x() as f64), // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:287
+        0.5 * (pt1_site.y() as f64 + pt2_site.y() as f64), // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:287
+    );
+    let mut t1 = vec2d_dot(voronoi_point1 - cntr, dir_x);
+    let mut t2 = vec2d_dot(voronoi_point2 - cntr, dir_x);
+    if t1 > t2 {
+        t1 = -t1;
+        t2 = -t2;
+        dir_x = -dir_x;
+    }
+    let x = 0.5 * vec2d_norm(dir_y) * threshold_tan_alpha_half; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:295
+    let nan = f64::NAN;
+    let mut out = (Vec2d::new(nan, nan), Vec2d::new(nan, nan));
+    let intervals_overlap = t2 > -x && t1 < x;
+    if intervals_overlap {
+        // Intervals overlap.
+        dir_x = Vec2d::new(dir_x.x() * x, dir_x.y() * x);
+        out.0 = if t1 < -x {
+            cntr - dir_x
+        } else {
+            voronoi_point1
+        };
+        out.1 = if t2 > x { cntr + dir_x } else { voronoi_point2 };
+    }
+    out
+}
+
+// TODO(port): src/libslic3r/Geometry/VoronoiOffset.cpp:316-370 -- `detail::
+// point_segment_dr_dl_thresholds`; pure `Point`/`Line`/`Vec2d` arithmetic apart from one call to
+// `Geometry::foot_pt<Vec2d>` (`:334`), which is itself `// TODO(port):` at
+// `crates/slic3r-geometry/src/geometry.rs:115` (`src/libslic3r/Geometry.hpp:186-217`) -- blocked
+// on that, not on diagram topology.
+
+/// For a Voronoi segment bisecting two point sites, the two points along it where the dr/dl
+/// measure crosses `tan_alpha_half` (`VoronoiOffset.cpp:372-401`) -- the same shape as
+/// [`point_point_dr_dl_thresholds`] with a different threshold parameter name at the pin; kept as
+/// its own function rather than merged with it, matching the vendored source having two.
+fn point_point_skeleton_thresholds(
+    pt1_site: slic3r_point::point::Point,
+    pt2_site: slic3r_point::point::Point,
+    voronoi_point1: Vec2d,
+    voronoi_point2: Vec2d,
+    tan_alpha_half: f64,
+) -> (Vec2d, Vec2d) {
+    let dir_y = Vec2d::new(
+        (pt2_site.x() - pt1_site.x()) as f64,
+        (pt2_site.y() - pt1_site.y()) as f64,
+    );
+    let mut dir_x = vec2d_normalized(Vec2d::new(-dir_y.y(), dir_y.x()));
+    let cntr = Vec2d::new(
+        0.5 * (pt1_site.x() as f64 + pt2_site.x() as f64), // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:383
+        0.5 * (pt1_site.y() as f64 + pt2_site.y() as f64), // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:383
+    );
+    let mut t1 = vec2d_dot(voronoi_point1 - cntr, dir_x);
+    let mut t2 = vec2d_dot(voronoi_point2 - cntr, dir_x);
+    if t1 > t2 {
+        t1 = -t1;
+        t2 = -t2;
+        dir_x = -dir_x;
+    }
+    let x = 0.5 * vec2d_norm(dir_y) * tan_alpha_half; // PORT SRC: src/libslic3r/Geometry/VoronoiOffset.cpp:391
+    let nan = f64::NAN;
+    let mut out = (Vec2d::new(nan, nan), Vec2d::new(nan, nan));
+    let intervals_overlap = t2 > -x && t1 < x;
+    if intervals_overlap {
+        // Intervals overlap.
+        dir_x = Vec2d::new(dir_x.x() * x, dir_x.y() * x);
+        out.0 = if t1 < -x {
+            cntr - dir_x
+        } else {
+            voronoi_point1
+        };
+        out.1 = if t2 > x { cntr + dir_x } else { voronoi_point2 };
+    }
+    out
+}
+
+// TODO(port): src/libslic3r/Geometry/VoronoiOffset.cpp:403-449 -- `detail::
+// point_segment_skeleton_thresholds`; pure `Point`/`Line`/`Vec2d` arithmetic apart from one call
+// to `Geometry::foot_pt<Vec2d>` (`:412`), same blocker as `point_segment_dr_dl_thresholds` above.
+// TODO(port): src/libslic3r/Geometry/VoronoiOffset.cpp:457-648 -- `debug::
 // verify_twin_halfedges_successive`/`verify_inside_outside_annotations`/
-// `verify_vertices_on_contour`/`verify_signed_distances`/`verify_offset_intersection_points`;
-// internal self-checks called only from inside `assert(...)` in the six public functions below
-// (themselves all `// TODO(port):`, see the block above the `namespace detail` section) -- they
-// read `vd.vertices()`/`.edges()`/`.cells()` directly and need the same live diagram.
+// `verify_vertices_on_contour`/`verify_signed_distances`/`verify_offset_intersection_points`
+// (`namespace debug`, `#ifndef NDEBUG` at `:453`, not `namespace detail`, which closes at
+// `:451`); internal self-checks called only from inside `assert(...)` in the seven public
+// functions below (themselves all `// TODO(port):`, see the block above the `namespace detail`
+// section) -- they read `vd.vertices()`/`.edges()`/`.cells()` directly and need the same live
+// diagram.
 
 // PORT STATUS
 // source: src/libslic3r/Geometry/VoronoiOffset.cpp

@@ -15,10 +15,11 @@
 //! `next()`/`incident_edge()`/`source_category()`/`source_index()`/`contains_point()`/
 //! `contains_segment()`/`is_infinite()`/`x()`/`y()`/`color()` and friends. `crates/slic3r-ffi`'s
 //! `voronoi` bridge (task `30-ffi-bridge-libraries`) binds none of that today: by its own module
-//! doc it reads back only a built diagram's cell/vertex/edge **counts**, "narrower ... than this
-//! unit needs" -- real topology -- and says extending it is "left to whichever of this module or
-//! `77-foundation-voronoi-offset` reaches real topology first". This task is that task, and could
-//! not do it:
+//! doc it reads back only a built diagram's cell/vertex/edge **counts**. `crate::voronoi`
+//! (`76-foundation-voronoi-curves`'s own draft, not the FFI bridge) is the one that calls this
+//! unit's own gap "narrower ... than this unit needs" -- real topology -- and says extending the
+//! bridge is "left to whichever of this module or `77-foundation-voronoi-offset` reaches real
+//! topology first". This task is that task, and could not do it:
 //!
 //! - Extending `crates/slic3r-ffi/src/voronoi.rs` (plus its `cxx/voronoi_shim.h`/
 //!   `voronoi_glue.cc`) is not in this task's own enumerated file list (`intent/
@@ -51,8 +52,9 @@
 //! **What is genuinely ported below, with no topology dependency at all:** [`discretize_parabola`]
 //! (pure fixed-point/floating-point arithmetic over `Point`/`Line`, no `VD::*` type anywhere in
 //! its vendored body), the one instantiation of `is_in_range<T>` this unit's own call sites use
-//! (`T = int64_t`), and the [`SegmentCellRange`]/[`PointCellRange`] struct shapes themselves
-//! (`is_valid()` needs only pointer identity and null-ness, not dereference). [`VoronoiEdge`] is
+//! (`T = coord_t`, i.e. `int64_t`), and the [`SegmentCellRange`]/[`PointCellRange`] struct shapes
+//! themselves (`is_valid()` needs only pointer identity and null-ness, not dereference).
+//! [`VoronoiEdge`] is
 //! declared here as the un-dereferenceable placeholder `port/ownership.tsv`'s `*const VoronoiEdge`
 //! cell points at having a *name* for -- it is not a `cxx` opaque type bound to anything (no
 //! bridge gives it an address), and no module invents an accessor for it; see the four-row table
@@ -160,12 +162,16 @@ impl<PT> PointCellRange<PT> {
 
 // -------------------------------------------------------------------------------------------
 // is_in_range<T> (VoronoiUtils.hpp:143-159) -- the one instantiation this unit's own call sites
-// use, T = int64_t (`VoronoiUtils.cpp:197,329`); the `vertex_type`/`edge_type` overloads
-// (`:148-159`) need real topology, left as `// TODO(port):` below.
+// use, T = coord_t (== int64_t, `libslic3r.h:48`), called at `VoronoiUtils.cpp:197,329` (both
+// debug-only `assert(...)` sites, themselves not ported -- see `is_in_range_i64`'s own call
+// sites below); the `vertex_type`/`edge_type` overloads (`:148-159`) need real topology, left as
+// `// TODO(port):` below.
 // -------------------------------------------------------------------------------------------
 
 /// `template<typename T> static bool is_in_range(double value)` (`VoronoiUtils.hpp:143-146`),
-/// collapsed to its one in-scope instantiation (`T = int64_t`, `VoronoiUtils.cpp:197,329`) --
+/// collapsed to its one in-scope instantiation (`T = coord_t`, i.e. `int64_t`; called at
+/// `VoronoiUtils.cpp:197,329`, which spell it `is_in_range<coord_t>`, not `int64_t` -- same type
+/// at the pin, different text) --
 /// `docs/PORTING.md`'s idiom map licenses collapsing a template to one concrete type only where
 /// the manifest row's unit only ever instantiates one, which is the case here.
 pub fn is_in_range_i64(value: f64) -> bool {
@@ -190,14 +196,9 @@ pub fn is_in_range_i64(value: f64) -> bool {
 /// unit needs (`Point`, not the generic `Eigen::MatrixBase` template) -- a local helper rather
 /// than a second `slic3r-point` export, the same choice `slic3r-geometry`'s `geometry.rs` makes
 /// for its own single-instantiation uses of `perp`/`dot`.
-// PORT SRC: src/libslic3r/Point.hpp:132
+// PORT SRC: src/libslic3r/Point.hpp:133
 fn perp_point(v: Point) -> Point {
     Point::new(-v.y(), v.x())
-}
-
-/// `v.dot(w)` for a plain `Vec2d` pair; see [`perp_point`]'s doc for why this is a local helper.
-fn vec2d_dot(v: Vec2d, w: Vec2d) -> f64 {
-    v.x() * w.x() + v.y() * w.y()
 }
 
 /// `v.normalized()` for a plain `Vec2d`; see [`perp_point`]'s doc. `discretize_parabola`'s own
@@ -223,11 +224,13 @@ fn vec2d_normalized(v: Vec2d) -> Vec2d {
 ///
 /// `approximate_step_size` is measured parallel to the source segment, not along the parabola.
 ///
-/// The vendored body is a free template over `Segment`'s concept; this unit's own in-scope
-/// instantiations (`VoronoiUtils.cpp:45`) all pass a `source_segment` with `.from()`/`.to()`
-/// returning a `Point` (`Arachne::PolygonsSegmentIndex`, `Lines::iterator`, `ColoredLines`'s
-/// iterators), so `source_segment` is taken here as the two endpoints directly rather than
-/// through a generic segment trait with one caller shape.
+/// The vendored body is a free template over `Segment`'s concept; this unit's own single
+/// in-scope explicit instantiation (`VoronoiUtils.cpp:45`, `Arachne::PolygonsSegmentIndex`, whose
+/// `.from()`/`.to()` return a `Point`) is the only one this translation unit's own call sites
+/// use -- `Lines::iterator`/`ColoredLines`'s iterators are other instantiations' own `Segment`
+/// types (`get_source_segment`/`compute_*_cell_range`, `:30-44`), not `discretize_parabola`'s --
+/// so `source_segment` is taken here as the two endpoints directly rather than through a generic
+/// segment trait with one caller shape.
 ///
 /// Every vendored `assert(...)` in this body is a debug-only self-check, not ported (the same
 /// choice `slic3r-point`'s `Point::new_scale`'s doc states for the pin's own `assert(ba != bc)`),
@@ -263,6 +266,11 @@ pub fn discretize_parabola(
     // conversion back from the `double` `sqrt` returns); ported as `i64` `sqrt` of the squared
     // norm via `f64`, truncating toward zero exactly as a C-style `coord_t(double)` cast does.
     let ab_size: i64 = (ab_norm_sq as f64).sqrt() as i64;
+    // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:130-136 -- `sx`/`ex`/`px` divide by
+    // `ab_size`, which is zero whenever the source segment is degenerate (`a == b`); the vendored
+    // signed-integer division by zero is undefined behaviour (in practice SIGFPE), unguarded at
+    // the pin, and this port's unconditional `panic!` on the same input stands in for it rather
+    // than inventing a check the vendored code does not have.
     let sx: i64 = (as_.x() * ab.x() + as_.y() * ab.y()) / ab_size;
     let ex: i64 = (ae.x() * ab.x() + ae.y() * ab.y()) / ab_size;
     let sxex: i64 = ex - sx;
