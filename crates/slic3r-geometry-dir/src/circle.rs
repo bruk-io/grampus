@@ -471,13 +471,24 @@ pub fn circle_center_taubin_newton_vec2d(input: &[Vec2d], cycles: usize) -> Vec2
         let xold = xnew;
         xnew = xold - (ynew / dy);
 
+        // `if (std::abs((xnew-xold) / xnew) < 1e-12) i = cycles;` (`:90`) -- setting the loop
+        // variable to `cycles` does not skip the rest of this iteration's body: the
+        // "reset if negative" check two lines below still runs on the converging iteration
+        // before the `for` loop's own condition ends it. An earlier draft of this function
+        // used a bare `break` at this point, which would skip that check whenever convergence
+        // and `xnew < 0` land on the same iteration -- found on review against the vendored
+        // source, not by a failing test (no fixture in this module's own proof or fuzz target
+        // happens to hit that exact combination), and fixed here before it could. The reset
+        // below always runs first; only then does this flag the loop to stop.
         // PORT SRC: src/libslic3r/Geometry/Circle.cpp:90
-        if ((xnew - xold) / xnew).abs() < 1e-12 {
-            break; // `i = cycles;` (`:90`) -- converged.
-        }
+        let converged = ((xnew - xold) / xnew).abs() < 1e-12;
 
         if xnew < 0f64 {
             xnew = 0f64;
+        }
+
+        if converged {
+            break;
         }
     }
 
