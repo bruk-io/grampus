@@ -8829,7 +8829,7 @@ impl PrintConfigDef {
                     def.category = "Machine limits".to_string();
                     def.readonly = false;
                     def.tooltip = format!("Maximum jerk of the {axis_upper} axis");
-                    // PORT NOTE: `PrintConfig.cpp:5438` really is `L("mm/s")` on the *jerk*
+                    // PORT NOTE: `PrintConfig.cpp:5437` really is `L("mm/s")` on the *jerk*
                     // option, not `mm/s` with a unit of its own; transcribed as the vendored
                     // line writes it rather than corrected, and the oracle agrees.
                     def.sidetext = "mm/s".to_string();
@@ -13489,10 +13489,26 @@ impl PrintConfigDef {
     /// whole of the translation.
     fn init_extruder_option_keys(&mut self) {
         // FIDELITY(port): both lists keep the vendored braced-initialiser order rather than
-        // being sorted here, because `extruder_option_keys()`/`extruder_retract_keys()` hand
-        // the `std::vector` out whole and callers iterate it (`GCode.cpp`'s per-extruder
-        // expansion reads it positionally). The order reaches output, so it is transcribed as
-        // written and held to it by `extruder_and_filament_key_lists_match_the_oracle`.
+        // being sorted here, because the order reaches output. **Corrected: an earlier revision
+        // of this justification said `GCode.cpp`'s per-extruder expansion reads the list
+        // positionally. `GCode.cpp` does not read either list at all** -- a `grep` over
+        // `vendor/OrcaSlicer/src/` finds no reference to `extruder_option_keys()` or
+        // `extruder_retract_keys()` in it. review-76-fidelity caught this. The conclusion holds
+        // on the readers that do exist:
+        //
+        // - `extruder_option_keys()` is handed out whole by `Preset::nozzle_options()`
+        //   (`Preset.cpp:1741`), which `Preset::printer_options()` (`:1746-1754`) then
+        //   `append`s into a static vector. **That concatenation's element order is observable**,
+        //   and it is where this list's order reaches output. Its other reader,
+        //   `PrintConfig.cpp:10641`, resizes each key independently and is order-insensitive.
+        // - `extruder_retract_keys()` is iterated by `PrintApply.cpp:295` and `:1608` and by
+        //   `Print.cpp:4784` and `:4911`. The `Print.cpp:4788-4796` loop appends to `print_diff`
+        //   and `filament_overrides` in iteration order, so that order is observable too -- it
+        //   is the `diff_keys` order this unit's own `compute_filament_override_value`
+        //   comparison holds to exact equality.
+        //
+        // Transcribed as written and held to it by
+        // `extruder_and_filament_key_lists_match_the_oracle`.
         self.m_extruder_option_keys = [
             "default_filament_profile",
             "default_nozzle_volume_type",
@@ -18587,13 +18603,13 @@ pub fn get_extruder_variant_string(
     let mut variant_string = String::new();
 
     if extruder_type > ExtruderType::ET_MAX_EXTRUDER_TYPE {
-        // PORT NOTE: src/libslic3r/PrintConfig.cpp:783 (BOOST_LOG_TRIVIAL(error); boost::log has
+        // PORT NOTE: src/libslic3r/PrintConfig.cpp:782 (BOOST_LOG_TRIVIAL(error); boost::log has
         // no counterpart here). The empty-string return below is the behaviour.
         return variant_string;
     }
     let nozzle_volume_types = get_valid_nozzle_volume_type();
     if !nozzle_volume_types.contains(&nozzle_volume_type) {
-        // PORT NOTE: src/libslic3r/PrintConfig.cpp:789 (BOOST_LOG_TRIVIAL(error)).
+        // PORT NOTE: src/libslic3r/PrintConfig.cpp:788 (BOOST_LOG_TRIVIAL(error)).
         return variant_string;
     }
     variant_string = keys_names_extruder_type()[extruder_type as usize].clone();
@@ -18824,11 +18840,11 @@ pub fn get_extruder_nozzle_stats(
             // (.at) or reading attr[1] out of bounds. Corrupt tokens are dropped and logged;
             // the rest still parse."
             if attr.len() < 2 {
-                // PORT NOTE: src/libslic3r/PrintConfig.cpp:959 (BOOST_LOG_TRIVIAL(warning)).
+                // PORT NOTE: src/libslic3r/PrintConfig.cpp:958 (BOOST_LOG_TRIVIAL(warning)).
                 continue;
             }
             let Some(value) = keys_map_nozzle_volume_type().get(attr[0]) else {
-                // PORT NOTE: src/libslic3r/PrintConfig.cpp:964 (BOOST_LOG_TRIVIAL(warning)).
+                // PORT NOTE: src/libslic3r/PrintConfig.cpp:963 (BOOST_LOG_TRIVIAL(warning)).
                 continue;
             };
             let volume_type =
@@ -19961,7 +19977,7 @@ impl DynamicPrintConfig {
                     count += extruder_nozzle_counts[i].len() as i32;
                     // FIDELITY(port): "std::map iteration order gives the canonical slot order:
                     // ascending NozzleVolumeType" -- the vendored comment at
-                    // `PrintConfig.cpp:11592`. A `BTreeMap<NozzleVolumeType, i32>` iterates the
+                    // `PrintConfig.cpp:11588`. A `BTreeMap<NozzleVolumeType, i32>` iterates the
                     // same way, since `NozzleVolumeType` derives `Ord` from its declaration
                     // order and its discriminants ascend with it. The order reaches output: it
                     // is the slot order every caller indexes by.
@@ -20658,8 +20674,16 @@ impl DynamicPrintConfig {
             // null check, where `ps_opt` comes from `option<...>("print_sequence")` with no
             // `create` -- so a config without `print_sequence` is an unchecked null dereference
             // at the pin. `None` short-circuits the `||` here instead, which is the nearest
-            // defined behaviour; `used_filaments == 1` already decides the branch for every
-            // config that reaches it in practice.
+            // defined behaviour.
+            //
+            // An earlier revision added "`used_filaments == 1` already decides the branch for
+            // every config that reaches it in practice". **That was a claim, not a
+            // measurement**, and review-76-fidelity was right to ask for it to go: nothing here
+            // measured which callers reach this line with which filament count. What is
+            // measured is narrower, and is what this note now rests on -- C++ `||`
+            // short-circuits, so the vendored dereference happens only when
+            // `used_filaments != 1`, and the 33-case comparison covers both sides of that on a
+            // config that has `print_sequence`.
             let turn_off = !is_smooth_timelapse
                 && (used_filaments == 1 || ps_value == Some(PrintSequence::ByObject));
             if turn_off {
@@ -21871,6 +21895,24 @@ impl DynamicPrintConfig {
                     for index in 0..variant_count {
                         // "variant_count is the variant column width, src_opt the value array;
                         // they disagree when the source was authored at a different width"
+                        // FIDELITY(port): the `index >= values.len()` half of the bound below is
+                        // **not** in the vendored loop, which tests only
+                        // `index >= src_opt->values.size()` (`PrintConfig.cpp:10946`, and `:10965`
+                        // for the `coFloatsOrPercents` arm). It is reachable only in a state where
+                        // the `resize(variant_count, opt)` above did not leave `values` that long,
+                        // and at the pin that state is itself undefined rather than merely
+                        // surprising: `ConfigOptionVector::resize` extends an empty vector from
+                        // `static_cast<const ConfigOptionVector<T>*>(opt_default)->values.front()`
+                        // (`Config.hpp:705`), and `front()` on an empty vector is undefined -- so
+                        // `opt->resize(n, opt)` with `opt` itself empty has no defined result, and
+                        // the vendored loop would then index past the end of `opt->values`.
+                        //
+                        // The extra bound turns that into a defined skip. It cannot change the
+                        // answer in any state the oracle defines, which is why the 144-case
+                        // comparison agrees; it is recorded here rather than left as a silent
+                        // defensive guard because review-76-fidelity asked for exactly that, and
+                        // because a reader comparing the two loops line by line would otherwise
+                        // find a condition with no counterpart and no reason.
                         if index >= src.len() || index >= values.len() {
                             break;
                         }
@@ -21896,6 +21938,9 @@ impl DynamicPrintConfig {
                         continue;
                     };
                     for index in 0..variant_count {
+                        // FIDELITY(port): the same extra `index >= values.len()` bound as the
+                        // `coFloats` arm above, for the same reason and against
+                        // `PrintConfig.cpp:10965`; see that arm's note.
                         if index >= src.len() || index >= values.len() {
                             break;
                         }
@@ -24341,6 +24386,24 @@ mod tests {
             probe(&[]),
             probe(&["filament_self_index=1"]),
             probe(&["filament_self_index=1,2"]),
+            // `filament_count == 1` with `self_index` longer than one, which is the only shape
+            // that separates the vendored `filament_count <= 0` guard
+            // (`PrintConfig.cpp:11410`) from a `<= 1`: max is 1 and `1 >= size()` is false, so
+            // the vendored body proceeds where a `<= 1` guard would return early. Added because
+            // review-76-conformance's probe found that mutation surviving -- every other
+            // fixture either returns early for both or proceeds for both.
+            probe(&["filament_self_index=1,1"]),
+            // The shape above needs a `filament_options_with_variant` key sized to exactly
+            // `filament_count` (one) before the loop at `PrintConfig.cpp:11420-11429` touches
+            // anything: its guard is `opt->size() != filament_count && opt->size() != 1`, and
+            // on a `full_print_config()` these keys are not that size, which is why the bare
+            // fixture above does not separate the two guards either.
+            probe(&["filament_self_index=1,1", "filament_flow_ratio=0.95"]),
+            probe(&[
+                "filament_self_index=1,1",
+                "filament_flow_ratio=0.95",
+                "filament_max_volumetric_speed=12",
+            ]),
             probe(&["filament_self_index=1,1,2"]),
             probe(&["filament_self_index=1,1,2", "filament_diameter=1.75"]),
             probe(&[
@@ -24506,6 +24569,57 @@ mod tests {
                 f64::from(get_real_skirt_dist(&mine)),
                 theirs,
                 "get_real_skirt_dist({entries:?})"
+            );
+            checked += 1;
+        }
+
+        // **`get_real_skirt_dist`'s `float nozzle = 0.4f` fallback (`PrintConfig.cpp:14395`),
+        // on an `"empty"` base.** review-76-conformance's probe found a mutation of that
+        // literal surviving, and it was right: the guard is `nd && !nd->values.empty()`
+        // (`:14396-14397`), a `full_print_config()` always carries `nozzle_diameter`, and
+        // setting it to the empty string does not empty the vector -- so on the `"full"` base
+        // above the literal is unreachable and every probe takes the `max_element` path.
+        //
+        // These probes make `nozzle_diameter` genuinely **absent**, which needs the `"empty"`
+        // base, which in turn needs the two keys this function dereferences without a null
+        // check supplied by hand: `opt_float("skirt_distance")` (`:14387`) and
+        // `opt_int("skirt_loops")` (`:14389`). Everything else it reads is guarded --
+        // `has_skirt`'s three reads (`:14378-14380`), `draft_shield` (`:14390`) and both line
+        // widths (`:14402-14405`) -- so with those absent the fallback decides the width too
+        // (`width <= 0` twice over, then `width = nozzle` at `:14412`), and the result is
+        // `dist + loops * 0.4`.
+        for entries in [
+            probe(&["skirt_height=1", "skirt_loops=1", "skirt_distance=2"]),
+            probe(&["skirt_height=1", "skirt_loops=3", "skirt_distance=0"]),
+            probe(&["skirt_height=2", "skirt_loops=2", "skirt_distance=1.5"]),
+            // `line_width` present, so the fallback decides `nozzle` but not `width`: this
+            // separates the two uses of the literal from each other.
+            probe(&[
+                "skirt_height=1",
+                "skirt_loops=1",
+                "skirt_distance=2",
+                "line_width=0.45",
+            ]),
+            // A percent line width, which resolves against the fallback nozzle itself
+            // (`get_abs_value(nozzle)` at `:14404`).
+            probe(&[
+                "skirt_height=1",
+                "skirt_loops=1",
+                "skirt_distance=2",
+                "initial_layer_line_width=50%",
+            ]),
+        ] {
+            let mine = config_on("empty", &entries);
+            fixtures_agree("empty", &entries, &mine);
+            let theirs = ora::oracle_real_skirt_dist("empty", &entries);
+            assert!(
+                !theirs.is_nan(),
+                "refused: get_real_skirt_dist on an empty base {entries:?}"
+            );
+            assert_eq!(
+                f64::from(get_real_skirt_dist(&mine)),
+                theirs,
+                "get_real_skirt_dist({entries:?}) with nozzle_diameter absent"
             );
             checked += 1;
         }
