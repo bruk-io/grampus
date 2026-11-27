@@ -393,12 +393,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "slic3r-edgegrid"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-expolygon",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-pngreadwrite",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-svg",
+]
+
+[[package]]
 name = "slic3r-enum-bitmask"
 version = "0.1.0"
 
 [[package]]
 name = "slic3r-exception"
 version = "0.1.0"
+
+[[package]]
+name = "slic3r-execution"
+version = "0.1.0"
+dependencies = [
+ "slic3r-libslic3r",
+]
 
 [[package]]
 name = "slic3r-expolygon"
@@ -456,6 +480,7 @@ dependencies = [
  "slic3r-arachne-utils",
  "slic3r-boundingbox",
  "slic3r-ffi",
+ "slic3r-geometry-dir",
  "slic3r-line",
  "slic3r-multipoint",
  "slic3r-point",
@@ -492,6 +517,37 @@ dependencies = [
 [[package]]
 name = "slic3r-format"
 version = "0.1.0"
+
+[[package]]
+name = "slic3r-geometry"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-libslic3r",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+]
+
+[[package]]
+name = "slic3r-geometry-dir"
+version = "0.1.0"
+dependencies = [
+ "slic3r-arachne-utils",
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-exception",
+ "slic3r-expolygon",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multimaterialsegmentation",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-svg",
+]
 
 [[package]]
 name = "slic3r-i18n"
@@ -534,6 +590,37 @@ name = "slic3r-materialtype"
 version = "0.1.0"
 
 [[package]]
+name = "slic3r-meshsplitimpl"
+version = "0.1.0"
+dependencies = [
+ "slic3r-execution",
+ "slic3r-libslic3r",
+ "slic3r-point",
+]
+
+[[package]]
+name = "slic3r-multimaterialsegmentation"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-clipperutils",
+ "slic3r-config",
+ "slic3r-edgegrid",
+ "slic3r-expolygon",
+ "slic3r-flow",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-mutablepolygon",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-printconfig",
+ "slic3r-surface",
+ "slic3r-surfacecollection",
+ "slic3r-trianglemeshslicer",
+ "slic3r-utils",
+]
+
+[[package]]
 name = "slic3r-multipoint"
 version = "0.1.0"
 dependencies = [
@@ -544,11 +631,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "slic3r-mutablepolygon"
+version = "0.1.0"
+dependencies = [
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+]
+
+[[package]]
 name = "slic3r-mutablepriorityqueue"
 version = "0.1.0"
 
 [[package]]
 name = "slic3r-platform"
+version = "0.1.0"
+
+[[package]]
+name = "slic3r-pngreadwrite"
 version = "0.1.0"
 
 [[package]]
@@ -641,6 +742,76 @@ dependencies = [
  "slic3r-libslic3r",
  "slic3r-point",
  "slic3r-polygon",
+]
+
+[[package]]
+name = "slic3r-surfacecollection"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-surface",
+ "slic3r-svg",
+]
+
+[[package]]
+name = "slic3r-svg"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-polyline",
+ "slic3r-surface",
+ "slic3r-trianglemesh",
+]
+
+[[package]]
+name = "slic3r-tesselate"
+version = "0.1.0"
+dependencies = [
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-point",
+ "slic3r-polygon",
+]
+
+[[package]]
+name = "slic3r-trianglemesh"
+version = "0.1.0"
+dependencies = [
+ "slic3r-boundingbox",
+ "slic3r-execution",
+ "slic3r-expolygon",
+ "slic3r-extrusionentity",
+ "slic3r-geometry",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-meshsplitimpl",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-trianglemeshslicer",
+ "slic3r-utils",
+]
+
+[[package]]
+name = "slic3r-trianglemeshslicer"
+version = "0.1.0"
+dependencies = [
+ "slic3r-expolygon",
+ "slic3r-libslic3r",
+ "slic3r-line",
+ "slic3r-multipoint",
+ "slic3r-point",
+ "slic3r-polygon",
+ "slic3r-tesselate",
+ "slic3r-utils",
 ]
 
 [[package]]

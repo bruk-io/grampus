@@ -4,4 +4,5 @@
 //! as docs/WORKFLOW.md states.
 
 pub mod bicubic;
+pub mod circle;
 pub mod curves;

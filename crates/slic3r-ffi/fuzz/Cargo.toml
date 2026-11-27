@@ -157,3 +157,18 @@ path = "fuzz_targets/slic3r-arachne-utils_polygons_segment_index.rs"
 test = false
 doc = false
 bench = false
+
+# `slic3r-geometry-dir`, added by task `76-foundation-voronoi-curves` for its `Geometry/Circle.cpp`/
+# `Circle.hpp` unit, whose manifest rows are both `fuzz target: required`. `docs/WORKFLOW.md`'s "A
+# `required` fuzz target" rule names this file as the one crate manifest a foundation task may
+# touch; appended here, at the end, so two branches conflict textually rather than reordering
+# silently.
+[dependencies.slic3r-geometry-dir]
+path = "../../slic3r-geometry-dir"
+
+[[bin]]
+name = "slic3r-geometry-dir_circle"
+path = "fuzz_targets/slic3r-geometry-dir_circle.rs"
+test = false
+doc = false
+bench = false
