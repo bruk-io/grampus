@@ -1,0 +1,457 @@
+//! Port of `src/libslic3r/Geometry/VoronoiUtils.cpp`/`VoronoiUtils.hpp` (task
+//! `77-foundation-voronoi-offset`, plan step 20, `port/foundation.tsv`'s `foundation-26` row).
+//! `VoronoiUtils.hpp` is `template-heavy: yes`; `VoronoiUtils.cpp` is `template-heavy: no` but
+//! hand-designed alongside it in this same task because the two are one unit.
+//!
+//! // PORT NOTE: this module is an honest Phase A draft, not a ported module: no `mod
+//! voronoi_utils;` line reaches it, it carries no `// PROOF:` marker and no fuzz target, although
+//! both its manifest rows say `fuzz target: required`.
+//!
+//! **Why, in full, because the task text itself expects this unit (and `voronoi.rs`,
+//! `76-foundation-voronoi-curves`'s own draft) to be finished here.** Every function below but
+//! [`discretize_parabola`] and the one instantiation of `is_in_range` this unit needs operates on
+//! `VoronoiDiagram::edge_type`/`vertex_type`/`cell_type` -- a live node in the graph
+//! `boost::polygon::construct_voronoi` builds, read back through `vertex0()`/`vertex1()`/
+//! `next()`/`incident_edge()`/`source_category()`/`source_index()`/`contains_point()`/
+//! `contains_segment()`/`is_infinite()`/`x()`/`y()`/`color()` and friends. `crates/slic3r-ffi`'s
+//! `voronoi` bridge (task `30-ffi-bridge-libraries`) binds none of that today: by its own module
+//! doc it reads back only a built diagram's cell/vertex/edge **counts**. `crate::voronoi`
+//! (`76-foundation-voronoi-curves`'s own draft, not the FFI bridge) is the one that calls this
+//! unit's own gap "narrower ... than this unit needs" -- real topology -- and says extending the
+//! bridge is "left to whichever of this module or `77-foundation-voronoi-offset` reaches real
+//! topology first". This task is that task and did not do it. One block stands; the two further
+//! blocks an earlier draft of this doc claimed are withdrawn here, each in its own bullet:
+//!
+//! - Extending `crates/slic3r-ffi/src/voronoi.rs` (plus its `cxx/voronoi_shim.h`/
+//!   `voronoi_glue.cc`) is not in this task's own enumerated file list (`intent/
+//!   libslic3r-rust-port/tasks/77-foundation-voronoi-offset/task.md`, "Write only your own
+//!   modules") and is not one of the three things `docs/PORTING.md`'s decisions are stated to
+//!   override a task's file list on (`docs/WORKFLOW.md`, "Decisions that govern over a task's
+//!   file list": "the proof route, the marker rules or the scope rule" -- a library's runtime
+//!   binding surface is none of those three, and that section is explicit that the override is
+//!   not "licence to write a file neither the task nor `docs/PORTING.md` puts in its path").
+//!   That file-list block carries the conclusion on its own. The four raw-pointer fields this
+//!   task's `port/ownership.tsv` rows name (`*const VoronoiEdge`, `class: ffi`, "a diagram
+//!   Boost.Polygon owns") are evidence the classification already expected a pointer that lives
+//!   on the boundary rather than a value a bridge carries by itself.
+//! - **Reading `docs/PORTING.md`'s decision 1 as a *second*, independent block is withdrawn: it
+//!   is this port's own inference, not a documented rule.** Decision 1's "never a libslic3r type"
+//!   sentence (`docs/PORTING.md:575-577`) sits inside its description of a **per-unit proof
+//!   shim** (`:562-574`, whose own worked example is
+//!   `crates/slic3r-ffi/src/proof_units/clipper_z_utils.rs`'s `ProofZPoint`, `:578-579`). It does
+//!   not scope the R17 *library* bridges, whose own module doc
+//!   (`crates/slic3r-ffi/src/voronoi.rs:22-26`) describes them as growing their bound surface per
+//!   ported unit. Every R17 bridge in the tree is in fact plain-value, so practice does not
+//!   contradict the inference -- but an inference is not a rule, and what this unit needs is a
+//!   **file-list amendment alone**, not a file-list-and-shim-contract amendment.
+//! - **The proof route is not shut, and the earlier claim here that it was is withdrawn.**
+//!   Decision 1 puts a unit's proof in `crates/<crate>/tests/` or in a `#[cfg(test)]` module
+//!   calling `slic3r_proof::proof_units::<unit>::<fn>` -- which *is* a dev-dependency use, the
+//!   only one it ever asks for -- reached through **new files only**
+//!   (`crates/slic3r-ffi/cxx/proof_units/voronoi_utils.{h,cpp}`,
+//!   `crates/slic3r-ffi/src/proof_units/voronoi_utils.rs`), and `docs/WORKFLOW.md`'s "Decisions
+//!   that govern over a task's file list" names "the proof route" as one of the three things a
+//!   decision overrides a task's own file list on. [`discretize_parabola`] is reachable that way
+//!   at the pin: `VoronoiUtils.cpp:45` carries its one explicit instantiation (`template Points
+//!   VoronoiUtils::discretize_parabola(const Point &, const Arachne::PolygonsSegmentIndex &,
+//!   const Point &, const Point &, coord_t, float);`), so the symbol has external linkage.
+//!
+//! **What this unit declines, and the measurement behind it.** A `#[cfg(test)]` proof compiles
+//! only inside a module some `mod` line reaches, and `port/port-status`'s own `derive_row_status`
+//! (`port/port-status:863-881`) returns `ported` for a row whose target module is `mod`-reached,
+//! holds no `todo!()`/`unimplemented!()` and has a present proof. Measured on a probe copy of the
+//! tree under `oracle/.cache/tmp/` (`./port/port-status --tree <copy>`; nothing below was
+//! committed): with `pub mod voronoi;`/`voronoi_offset;`/`voronoi_utils;` and no proof, all six
+//! rows derive `drafted`, `modules gated out of the build` falls 8 -> 5 and the gate's
+//! `in-scope rows remaining` stays 349; add one satisfying `// PROOF: 1` test to this file and
+//! `Geometry/VoronoiUtils.cpp` and `Geometry/VoronoiUtils.hpp` both derive **`ported`**, remaining
+//! drops 349 -> 347, and `--per-commit` then reports `missing-fuzz-target` for the
+//! `fuzz target: required` row. So taking the open proof route here would mark a 354-line and a
+//! 164-line vendored unit `ported` on the strength of one function, with 11 `// TODO(port):`
+//! markers still standing in this same file -- a manifest status cell that is false. That is the
+//! overcount `docs/PORTING.md` decisions 9 and 10 record as an amendment's call and not a
+//! porter's, so this unit declines the route on that ground, not on a claim that no route exists.
+//!
+//! Per `docs/WORKFLOW.md`'s own rule -- "never land a `mod` line over a `todo!()` ... leave the
+//! module unreached by any `mod` line instead, which is `drafted`" -- this module stays an honest
+//! Phase A draft. It is not required to compile (`docs/WORKFLOW.md`, "The two phases") and does
+//! not use `todo!()`/`unimplemented!()` for exactly that reason.
+//!
+//! **What is genuinely ported below, with no topology dependency at all:** [`discretize_parabola`]
+//! (pure fixed-point/floating-point arithmetic over `Point`/`Line`, no `VD::*` type anywhere in
+//! its vendored body), the one instantiation of `is_in_range<T>` this unit's own call sites use
+//! (`T = coord_t`, i.e. `int64_t`), and the [`SegmentCellRange`]/[`PointCellRange`] struct shapes
+//! themselves (`is_valid()` needs only pointer identity and null-ness, not dereference).
+//! [`VoronoiEdge`] is
+//! declared here as the un-dereferenceable placeholder `port/ownership.tsv`'s `*const VoronoiEdge`
+//! cell points at having a *name* for -- it is not a `cxx` opaque type bound to anything (no
+//! bridge gives it an address), and no module invents an accessor for it; see the four-row table
+//! in this task's own text.
+//!
+//! Finding named for the pull request: this unit, `VoronoiOffset.{cpp,hpp}` and
+//! `Voronoi.{cpp,hpp}` (`76-foundation-voronoi-curves`'s own draft, which this task's text
+//! otherwise finishes) all share this one blocker. Resolving it needs a **port-task file-list
+//! amendment** letting a task extend `crates/slic3r-ffi/src/voronoi.rs`'s bound surface to real
+//! topology -- that alone, not also a shim-contract amendment, per the second bullet above --
+//! together with the disposition of the drafted units themselves, which is the shape of decision
+//! 10's `fit_curve`/`circle_ransac` remedies and, like them, only an amendment may record.
+
+use slic3r_line::line::Line;
+use slic3r_point::point::{Point, Vec2d};
+
+// -------------------------------------------------------------------------------------------
+// Placeholder for `VoronoiDiagram::edge_type` (`Voronoi.hpp:41`, the `voronoi_diagram<double>::
+// edge_type` alias) -- see the module doc for why this crate cannot bind a real one.
+// -------------------------------------------------------------------------------------------
+
+/// Stands for `VoronoiDiagram::edge_type` (`Geometry/Voronoi.hpp:41`) wherever
+/// `port/ownership.tsv` names the Rust type `*const VoronoiEdge` verbatim
+/// (`Geometry/VoronoiUtils.hpp:20,21,35,36`). Not a `cxx` opaque type and not bound to anything:
+/// no bridge in `crates/slic3r-ffi` gives an edge a real address (see the module doc), so a
+/// pointer of this type is never produced and never dereferenced by this module -- it exists
+/// only so the four ownership rows have a concrete name to be verbatim about, matching
+/// `SegmentCellRange`/`PointCellRange`'s own vendored shape (`edge_begin`/`edge_end` compared for
+/// identity and null-ness only in `is_valid()`, never read through).
+#[derive(Debug)]
+pub struct VoronoiEdge {
+    _unconstructible: (),
+}
+
+// -------------------------------------------------------------------------------------------
+// SegmentCellRange / PointCellRange (VoronoiUtils.hpp:16-42)
+// -------------------------------------------------------------------------------------------
+
+/// `template<typename PT> struct SegmentCellRange` (`VoronoiUtils.hpp:16-29`): the trapezoid
+/// Voronoi cell around an input segment. `edge_begin`/`edge_end` take `port/ownership.tsv`'s
+/// `*const VoronoiEdge` cell verbatim (`VoronoiUtils.hpp:20,21`, class `ffi`).
+#[derive(Debug)]
+pub struct SegmentCellRange<PT> {
+    /// The start point of the source segment of this cell (`:18`).
+    pub source_segment_start_point: PT,
+    /// The end point of the source segment of this cell (`:19`).
+    pub source_segment_end_point: PT,
+    /// The edge of the Voronoi diagram where the loop around the cell starts (`:20`).
+    pub edge_begin: *const VoronoiEdge,
+    /// The edge of the Voronoi diagram where the loop around the cell ends (`:21`).
+    pub edge_end: *const VoronoiEdge,
+}
+
+impl<PT> SegmentCellRange<PT> {
+    /// `explicit SegmentCellRange(const PT &source_segment_start_point, const PT
+    /// &source_segment_end_point)` (`:24-26`): `edge_begin`/`edge_end` default to `nullptr`
+    /// (`:20,21`); there is no parameterless constructor (`SegmentCellRange() = delete;`, `:23`).
+    pub fn new(source_segment_start_point: PT, source_segment_end_point: PT) -> Self {
+        SegmentCellRange {
+            source_segment_start_point,
+            source_segment_end_point,
+            edge_begin: std::ptr::null(),
+            edge_end: std::ptr::null(),
+        }
+    }
+
+    /// `bool is_valid() const { return edge_begin && edge_end && edge_begin != edge_end; }`
+    /// (`:28`).
+    pub fn is_valid(&self) -> bool {
+        !self.edge_begin.is_null() && !self.edge_end.is_null() && self.edge_begin != self.edge_end
+    }
+}
+
+/// `template<typename PT> struct PointCellRange` (`VoronoiUtils.hpp:32-42`): the trapezoid
+/// Voronoi cell around an input point. `edge_begin`/`edge_end` take `port/ownership.tsv`'s
+/// `*const VoronoiEdge` cell verbatim (`VoronoiUtils.hpp:35,36`, class `ffi`).
+#[derive(Debug)]
+pub struct PointCellRange<PT> {
+    /// The source point of this cell (`:34`).
+    pub source_point: PT,
+    /// The edge of the Voronoi diagram where the loop around the cell starts (`:35`).
+    pub edge_begin: *const VoronoiEdge,
+    /// The edge of the Voronoi diagram where the loop around the cell ends (`:36`).
+    pub edge_end: *const VoronoiEdge,
+}
+
+impl<PT> PointCellRange<PT> {
+    /// `explicit PointCellRange(const PT &source_point)` (`:39`); no parameterless constructor
+    /// (`:38`).
+    pub fn new(source_point: PT) -> Self {
+        PointCellRange {
+            source_point,
+            edge_begin: std::ptr::null(),
+            edge_end: std::ptr::null(),
+        }
+    }
+
+    /// `bool is_valid() const { return edge_begin && edge_end && edge_begin != edge_end; }`
+    /// (`:41`).
+    pub fn is_valid(&self) -> bool {
+        !self.edge_begin.is_null() && !self.edge_end.is_null() && self.edge_begin != self.edge_end
+    }
+}
+
+// -------------------------------------------------------------------------------------------
+// is_in_range<T> (VoronoiUtils.hpp:143-159) -- the one instantiation this unit's own call sites
+// use, T = coord_t (== int64_t, `libslic3r.h:48`), called at `VoronoiUtils.cpp:197,329` (both
+// debug-only `assert(...)` sites, themselves not ported -- see `is_in_range_i64`'s own call
+// sites below); the `vertex_type`/`edge_type` overloads (`:148-159`) need real topology, left as
+// `// TODO(port):` below.
+// -------------------------------------------------------------------------------------------
+
+/// `template<typename T> static bool is_in_range(double value)` (`VoronoiUtils.hpp:143-146`),
+/// collapsed to its one in-scope instantiation (`T = coord_t`, i.e. `int64_t`; called at
+/// `VoronoiUtils.cpp:197,329`, which spell it `is_in_range<coord_t>`, not `int64_t` -- same type
+/// at the pin, different text) --
+/// `docs/PORTING.md`'s idiom map licenses collapsing a template to one concrete type only where
+/// the manifest row's unit only ever instantiates one, which is the case here.
+pub fn is_in_range_i64(value: f64) -> bool {
+    let lowest = i64::MIN as f64;
+    let max = i64::MAX as f64;
+    lowest <= value && value <= max
+}
+
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:148-151 -- `is_in_range<T>(const
+// VoronoiDiagram::vertex_type &vertex)`; needs a real `vertex_type` (`.x()`/`.y()` read through
+// `is_finite`), which needs the `voronoi` FFI bridge extended to real topology (see the module
+// doc).
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:153-159 -- `is_in_range<T>(const
+// VoronoiDiagram::edge_type &edge)`; needs `edge.vertex0()`/`vertex1()`, same dependency.
+
+// -------------------------------------------------------------------------------------------
+// discretize_parabola (VoronoiUtils.hpp:76-87, VoronoiUtils.cpp:116-210) -- pure arithmetic over
+// Point/Line, no VD::* type anywhere in its vendored body.
+// -------------------------------------------------------------------------------------------
+
+/// `perp(v)` (`Point.hpp:130-134`, `return { -v.y(), v.x() };`) at the one instantiation this
+/// unit needs (`Point`, not the generic `Eigen::MatrixBase` template) -- a local helper rather
+/// than a second `slic3r-point` export, the same choice `slic3r-geometry`'s `geometry.rs` makes
+/// for its own single-instantiation uses of `perp`/`dot`.
+// PORT SRC: src/libslic3r/Point.hpp:133
+fn perp_point(v: Point) -> Point {
+    Point::new(-v.y(), v.x())
+}
+
+/// `v.normalized()` for a plain `Vec2d`; see [`perp_point`]'s doc. `discretize_parabola`'s own
+/// `rot` is never the zero vector at any in-scope call site reached from a non-degenerate
+/// (`d != 0`) cell, but `Eigen::MatrixBase::normalized()`'s own zero-vector guard (`z > 0 ? n /
+/// sqrt(z) : n`, `Eigen/src/Core/Dot.h:92-102` under the dependency superbuild, a linked
+/// library's own source so `// PORT NOTE:` rather than `// PORT SRC: external:`) is carried over
+/// regardless, matching `slic3r-geometry`'s `geometry.rs`'s own `vec2d_normalized`.
+// PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:143 -- `.normalized()` is Eigen's own
+// zero-guarded normalize (see this function's own doc), not a plain `v / v.norm()`.
+fn vec2d_normalized(v: Vec2d) -> Vec2d {
+    let squared_norm = v.x() * v.x() + v.y() * v.y();
+    if squared_norm > 0f64 {
+        let norm = squared_norm.sqrt();
+        Vec2d::new(v.x() / norm, v.y() / norm)
+    } else {
+        v
+    }
+}
+
+/// Discretize a parabola based on (approximate) step size (`VoronoiUtils.hpp:76-87`,
+/// `VoronoiUtils.cpp:116-210`). Adapted from CuraEngine `VoronoiUtils::discretizeParabola`.
+///
+/// `approximate_step_size` is measured parallel to the source segment, not along the parabola.
+///
+/// The vendored body is a free template over `Segment`'s concept; this unit's own single
+/// in-scope explicit instantiation (`VoronoiUtils.cpp:45`, `Arachne::PolygonsSegmentIndex`, whose
+/// `.from()`/`.to()` return a `Point`) is the only one this translation unit's own call sites
+/// use -- `Lines::iterator`/`ColoredLines`'s iterators are other instantiations' own `Segment`
+/// types (`get_source_segment`/`compute_*_cell_range`, `:30-44`), not `discretize_parabola`'s --
+/// so `source_segment` is taken here as the two endpoints directly rather than through a generic
+/// segment trait with one caller shape.
+///
+/// Every vendored `assert(...)` in this body is a debug-only self-check, not ported (the same
+/// choice `slic3r-point`'s `Point::new_scale`'s doc states for the pin's own `assert(ba != bc)`),
+/// and the one `BOOST_LOG_TRIVIAL(warning)` (`:174`) is a log side effect with no ported
+/// counterpart (`docs/PORTING.md`'s don't-translate list has no entry for logging, but every
+/// other module's own precedent -- `slic3r-utils`'s `utils.rs`, `slic3r-geometry-dir`'s
+/// `circle.rs` -- leaves it as a `// PORT NOTE:` beside the call site, which this function does
+/// too).
+///
+/// This body carries **one deliberate divergence from the vendored line order**, added after both
+/// adversarial review passes had traced the function as line-for-line faithful: the degenerate-
+/// segment guard at the `ab_size` divisions, required by `docs/PORTING.md`'s "Decisions recorded
+/// on 2026-11-27", decision 1. It is marked `// FIDELITY(port):` at its own site, where the
+/// condition, the pin's undefined behaviour and this port's substitute are each stated. On every
+/// input where the pin is defined this function is unchanged.
+pub fn discretize_parabola(
+    source_point: Point,
+    source_segment_from: Point,
+    source_segment_to: Point,
+    start: Point,
+    end: Point,
+    approximate_step_size: i64,
+    transitioning_angle: f32,
+) -> Vec<Point> {
+    let mut discretized: Vec<Point> = Vec::new();
+
+    // x is distance of point projected on the segment ab
+    // xx is point projected on the segment ab
+    let a = source_segment_from;
+    let b = source_segment_to;
+    let ab = b - a;
+    let as_ = start - a;
+    let ae = end - a;
+    // `ab.cast<int64_t>()` (`:130`): `coord_t` is already `int64_t` (`libslic3r.h:48`), so every
+    // `.cast<int64_t>()` in this body is a no-op -- `ab`/`as_`/`ae`/`ap` stay `Point` (`i64`)
+    // throughout the integer arithmetic below, exactly as the vendored no-op cast leaves them.
+    let ab_norm_sq = ab.x() * ab.x() + ab.y() * ab.y();
+    // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:130 -- `.norm()` on an integer `Vec2i64`
+    // calls Eigen's own integer `norm()` (`sqrt` of the sum of squares, rounded by `coord_t`'s
+    // conversion back from the `double` `sqrt` returns); ported as `i64` `sqrt` of the squared
+    // norm via `f64`, truncating toward zero exactly as a C-style `coord_t(double)` cast does.
+    let ab_size: i64 = (ab_norm_sq as f64).sqrt() as i64;
+    // FIDELITY(port): src/libslic3r/Geometry/VoronoiUtils.cpp:131-136 -- `sx` (`:131`), `ex`
+    // (`:132`) and `px` (`:136`) each divide an `int64_t` by `ab_size`. On the input
+    // `source_segment.from() == source_segment.to()` -- a degenerate source segment, where
+    // `ab_size` (`:130`) is exactly `0` -- that signed-integer division by zero is undefined
+    // behaviour at the pin, unguarded there, so no oracle answer exists to match on that input.
+    // On exactly that condition, and only it, this port returns `discretized` as constructed,
+    // leaving the whole call unwritten: the bad read at `:131` precedes every `emplace_back` in
+    // the vendored body (the earliest is `:142`, in the `d == 0` branch; the next is `:176`),
+    // which is the substitute
+    // `docs/PORTING.md`'s "Decisions recorded on 2026-11-27", decision 1, point 3 prescribes where
+    // the vendored file has no bounds check of its own for this read in a sibling function. On
+    // every input where the pin is defined (`ab_size != 0`) the port's behaviour below is
+    // unchanged. The `d == 0` early return at `:141` is not the template for this: it guards a
+    // different read in this same function, not this read in a sibling.
+    if ab_size == 0 {
+        return discretized;
+    }
+    let sx: i64 = (as_.x() * ab.x() + as_.y() * ab.y()) / ab_size;
+    let ex: i64 = (ae.x() * ab.x() + ae.y() * ab.y()) / ab_size;
+    let sxex: i64 = ex - sx;
+
+    let ap = source_point - a;
+    let px: i64 = (ap.x() * ab.x() + ap.y() * ab.y()) / ab_size;
+
+    let (_dist_sq, pxx) = Line::new(a, b).distance_to_infinite_squared(source_point);
+    let ppxx = pxx - source_point;
+    // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:141 -- see `ab_size`'s own note; same
+    // integer-norm-via-`f64`-sqrt shape.
+    let d: i64 = {
+        let ppxx_norm_sq = ppxx.x() * ppxx.x() + ppxx.y() * ppxx.y();
+        (ppxx_norm_sq as f64).sqrt() as i64
+    };
+
+    let perp_ppxx = perp_point(ppxx);
+    let rot = vec2d_normalized(Vec2d::new(perp_ppxx.x() as f64, perp_ppxx.y() as f64));
+    let rot_cos_theta = rot.x();
+    let rot_sin_theta = rot.y();
+
+    if d == 0 {
+        discretized.push(start);
+        discretized.push(end);
+        return discretized;
+    }
+
+    let marking_bound = (f64::from(transitioning_angle) * 0.5).atan(); // PORT SRC: src/libslic3r/Geometry/VoronoiUtils.cpp:153
+    let mut msx: i64 = (-marking_bound * d as f64) as i64; // projected marking_start
+    let mut mex: i64 = (marking_bound * d as f64) as i64; // projected marking_end
+
+    let marking_start_end_h: i64 = msx * msx / (2 * d) + d / 2;
+    let mut marking_start =
+        Point::new(msx, marking_start_end_h).rotated_cos_sin(rot_cos_theta, rot_sin_theta) + pxx;
+    let mut marking_end =
+        Point::new(mex, marking_start_end_h).rotated_cos_sin(rot_cos_theta, rot_sin_theta) + pxx;
+    let dir: i64 = if sx > ex { -1 } else { 1 };
+    if dir < 0 {
+        std::mem::swap(&mut marking_start, &mut marking_end);
+        std::mem::swap(&mut msx, &mut mex);
+    }
+
+    let mut add_marking_start = msx * dir > (sx - px) * dir && msx * dir < (ex - px) * dir;
+    let mut add_marking_end = mex * dir > (sx - px) * dir && mex * dir < (ex - px) * dir;
+
+    let apex = Point::new(0, d / 2).rotated_cos_sin(rot_cos_theta, rot_sin_theta) + pxx;
+    let mut add_apex = (sx - px) * dir < 0 && (ex - px) * dir > 0;
+
+    // `assert(!add_marking_start || !add_marking_end || add_apex);` (`:172`) and the
+    // `BOOST_LOG_TRIVIAL(warning)` that follows it (`:174`) are not ported: the first is a
+    // debug-only self-check, the second a log side effect -- see this function's own doc.
+    // PORT NOTE: src/libslic3r/Geometry/VoronoiUtils.cpp:174 -- BOOST_LOG_TRIVIAL(warning)
+
+    // FIDELITY(port): src/libslic3r/Geometry/VoronoiUtils.cpp:176 -- on the input `ex - sx ==
+    // i64::MIN`, `std::abs` of it is undefined behaviour at the pin (no positive `int64_t`
+    // represents that magnitude). On exactly that input this port evaluates `.unsigned_abs()`,
+    // which is defined and yields `2^63` as `u64`, widened to the same `f64` the vendored
+    // `static_cast<double>` produces; on every other input the two agree bit for bit. No
+    // mechanism has been identified for the reachability of that one input: an earlier draft of
+    // this marker asserted it unreachable because `ex`/`sx` are measured parallel to a bounded
+    // input segment, and that justification is withdrawn -- no caller's line was opened to
+    // establish it (`docs/PORTING.md`'s "Decisions recorded on 2026-11-27", decision 2). The
+    // substitute above is defined either way, so the site needs no reachability claim to stand.
+    let step_count: i64 =
+        ((ex - sx).unsigned_abs() as f64 / approximate_step_size as f64).round() as i64;
+    discretized.push(start);
+    for step in 1..step_count {
+        let x: i64 = sx + sxex * step / step_count - px;
+        let y: i64 = x * x / (2 * d) + d / 2;
+
+        if add_marking_start && msx * dir < x * dir {
+            discretized.push(marking_start);
+            add_marking_start = false;
+        }
+
+        if add_apex && x * dir > 0 {
+            discretized.push(apex);
+            add_apex = false; // only add the apex just before the
+        }
+
+        if add_marking_end && mex * dir < x * dir {
+            discretized.push(marking_end);
+            add_marking_end = false;
+        }
+
+        // `assert(is_in_range<coord_t>(x) && is_in_range<coord_t>(y));` (`:197`) -- debug-only,
+        // not ported; see [`is_in_range_i64`] for the one instantiation this unit does keep.
+        let result = Point::new(x, y).rotated_cos_sin(rot_cos_theta, rot_sin_theta) + pxx;
+        discretized.push(result);
+    }
+
+    if add_apex {
+        discretized.push(apex);
+    }
+
+    if add_marking_end {
+        discretized.push(marking_end);
+    }
+
+    discretized.push(end);
+    discretized
+}
+
+// -------------------------------------------------------------------------------------------
+// Everything else: needs a live VoronoiDiagram::cell_type/edge_type/vertex_type.
+// -------------------------------------------------------------------------------------------
+
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:47-49, VoronoiUtils.cpp:318-332 --
+// `to_point(const VD::vertex_type *)`/`to_point(const VD::vertex_type &)`; needs `vertex.x()`/
+// `y()`. See the module doc for the FFI-topology dependency.
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:51, VoronoiUtils.cpp:334-337 --
+// `is_finite(const VD::vertex_type &)`; same dependency.
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:53, VoronoiUtils.cpp:339-352 --
+// `make_rotated_vertex(VD::vertex_type &, double)`; same dependency, plus needs
+// `vertex.incident_edge()`/`.color()`.
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:55-60, VoronoiUtils.cpp:53-62 --
+// `get_source_segment(const VD::cell_type &, SegmentIterator, SegmentIterator)`; needs
+// `cell.contains_segment()`/`.source_index()`.
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:62-67, VoronoiUtils.cpp:64-89 --
+// `get_source_point(const VD::cell_type &, SegmentIterator, SegmentIterator)`; needs
+// `cell.contains_point()`/`.source_category()`/`.source_index()`.
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:69-74, VoronoiUtils.cpp:91-114 --
+// `get_source_point_index(const VD::cell_type &, SegmentIterator, SegmentIterator)`; same
+// dependency as `get_source_point`.
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:108-114, VoronoiUtils.cpp:212-260 --
+// `compute_segment_cell_range(const VD::cell_type &, SegmentIterator, SegmentIterator)`; needs
+// `cell.incident_edge()`, `edge->next()`, `edge->is_infinite()`, `edge->vertex0()`/`vertex1()`
+// (through `to_point`, itself TODO above).
+// TODO(port): src/libslic3r/Geometry/VoronoiUtils.hpp:135-141, VoronoiUtils.cpp:262-316 --
+// `compute_point_cell_range(const VD::cell_type &, SegmentIterator, SegmentIterator)`; same
+// dependency as `compute_segment_cell_range`, plus `edge->is_finite()`/`is_primary()`.
+
+// PORT STATUS
+// source: src/libslic3r/Geometry/VoronoiUtils.cpp
+// source: src/libslic3r/Geometry/VoronoiUtils.hpp
+// confidence: low
+// tier: exact
+// oracle: built
