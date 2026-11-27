@@ -36,7 +36,18 @@
 
 #include "PrintConfig.hpp"
 
+#include <set>
 #include <string>
+#include <vector>
+
+// `get_shaper_type_values_for_flavor` (`PrintConfig.cpp:159-173`) is defined with external
+// linkage and declared in no header -- measured: `grep -rn get_shaper_type_values_for_flavor
+// vendor/OrcaSlicer/src/` finds only its definition, so it has no caller at the pin and nothing
+// declares it. It is declared here so this shim can call it; declaring an
+// externally-linked symbol in this file changes nothing under `vendor/OrcaSlicer/`.
+namespace Slic3r {
+std::vector<std::string> get_shaper_type_values_for_flavor(GCodeFlavor flavor);
+} // namespace Slic3r
 
 namespace slic3r_ffi {
 namespace proof_units {
@@ -341,6 +352,125 @@ rust::Vec<rust::String> oracle_custom_gcode_placeholders(rust::Str key) {
     }
     // The vector's own braced-initialiser order, not sorted here.
     return to_rust(it->second);
+}
+
+// One of the seven option-set globals, by variable name.
+rust::Vec<rust::String> oracle_option_set(rust::Str which) {
+    const std::string name(which);
+    const std::set<std::string> *set = nullptr;
+    if (name == "print_options_with_variant") {
+        set = &Slic3r::print_options_with_variant;
+    } else if (name == "filament_options_with_variant") {
+        set = &Slic3r::filament_options_with_variant;
+    } else if (name == "printer_extruder_options") {
+        set = &Slic3r::printer_extruder_options;
+    } else if (name == "printer_options_with_variant_1") {
+        set = &Slic3r::printer_options_with_variant_1;
+    } else if (name == "printer_options_with_variant_2") {
+        set = &Slic3r::printer_options_with_variant_2;
+    } else if (name == "empty_options") {
+        set = &Slic3r::empty_options;
+    } else if (name == "filament_dev_options") {
+        set = &Slic3r::filament_dev_options;
+    }
+    rust::Vec<rust::String> out;
+    if (set == nullptr) {
+        return out;
+    }
+    // A `std::set<std::string>`, so this is its own bytewise-ascending order.
+    for (const std::string &key : *set) {
+        out.push_back(rust::String(key));
+    }
+    return out;
+}
+
+rust::Vec<rust::String> oracle_shaper_type_values_for_flavor(int32_t flavor) {
+    return to_rust(Slic3r::get_shaper_type_values_for_flavor(Slic3r::GCodeFlavor(flavor)));
+}
+
+rust::String oracle_extruder_variant_string(int32_t extruder_type, int32_t nozzle_volume_type) {
+    return rust::String(Slic3r::get_extruder_variant_string(
+        Slic3r::ExtruderType(extruder_type), Slic3r::NozzleVolumeType(nozzle_volume_type)));
+}
+
+rust::String oracle_nozzle_volume_type_string(int32_t nozzle_volume_type) {
+    return rust::String(
+        Slic3r::get_nozzle_volume_type_string(Slic3r::NozzleVolumeType(nozzle_volume_type)));
+}
+
+int32_t oracle_convert_to_nvt_type(rust::Str variant_str) {
+    return static_cast<int32_t>(Slic3r::convert_to_nvt_type(std::string(variant_str)));
+}
+
+static std::vector<std::string> from_rust(const rust::Vec<rust::String> &values) {
+    std::vector<std::string> out;
+    out.reserve(values.size());
+    for (const rust::String &value : values) {
+        out.push_back(std::string(value));
+    }
+    return out;
+}
+
+static std::vector<int> from_rust_ints(const rust::Vec<int32_t> &values) {
+    std::vector<int> out;
+    out.reserve(values.size());
+    for (int32_t value : values) {
+        out.push_back(static_cast<int>(value));
+    }
+    return out;
+}
+
+int32_t oracle_find_variant_index(rust::Str variant, int32_t variant_id_1based,
+                                  const rust::Vec<rust::String> &variant_list,
+                                  const rust::Vec<int32_t> &variant_ids_1based) {
+    return static_cast<int32_t>(Slic3r::find_variant_index(
+        std::string(variant), static_cast<int>(variant_id_1based), from_rust(variant_list),
+        from_rust_ints(variant_ids_1based)));
+}
+
+rust::Vec<int32_t> oracle_map_variant_indices(const rust::Vec<rust::String> &variants,
+                                              const rust::Vec<int32_t> &ids,
+                                              const rust::Vec<rust::String> &from_variants,
+                                              const rust::Vec<int32_t> &from_ids) {
+    const std::vector<int> mapped =
+        Slic3r::map_variant_indices(from_rust(variants), from_rust_ints(ids),
+                                    from_rust(from_variants), from_rust_ints(from_ids));
+    rust::Vec<int32_t> out;
+    for (int value : mapped) {
+        out.push_back(static_cast<int32_t>(value));
+    }
+    return out;
+}
+
+int32_t oracle_config_index_base(int32_t volume_type, int32_t extruder_type,
+                                 int32_t variant_id_1based,
+                                 const rust::Vec<rust::String> &variant_list,
+                                 const rust::Vec<int32_t> &variant_ids_1based) {
+    return static_cast<int32_t>(Slic3r::get_config_index_base(
+        Slic3r::NozzleVolumeType(volume_type), Slic3r::ExtruderType(extruder_type),
+        static_cast<int>(variant_id_1based), from_rust(variant_list),
+        from_rust_ints(variant_ids_1based)));
+}
+
+rust::Vec<rust::String> oracle_extruder_ams_count_roundtrip(const rust::Vec<rust::String> &strs) {
+    return to_rust(
+        Slic3r::save_extruder_ams_count_to_string(Slic3r::get_extruder_ams_count(from_rust(strs))));
+}
+
+rust::Vec<rust::String>
+oracle_extruder_nozzle_stats_roundtrip(const rust::Vec<rust::String> &strs) {
+    return to_rust(Slic3r::save_extruder_nozzle_stats_to_string(
+        Slic3r::get_extruder_nozzle_stats(from_rust(strs))));
+}
+
+uint64_t oracle_extruder_index_of_defaults(uint32_t filament_id) {
+    return static_cast<uint64_t>(
+        Slic3r::get_extruder_index(Slic3r::GCodeConfig::defaults(), filament_id));
+}
+
+double oracle_nozzle_diameter_for_filament_of_defaults(int32_t filament_id, bool is_bbl_printer) {
+    return Slic3r::nozzle_diameter_for_filament(Slic3r::PrintConfig::defaults(),
+                                                static_cast<int>(filament_id), is_bbl_printer);
 }
 
 } // namespace print_config

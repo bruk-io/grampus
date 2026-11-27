@@ -18467,6 +18467,668 @@ pub fn custom_gcode_specific_config_def() -> &'static CustomGcodeSpecificConfigD
     DEF.with(|d| *d)
 }
 
+// --------------------------------------------------------------------------------------------
+// The extruder-variant and nozzle-inventory free functions (`PrintConfig.cpp:140-173` and
+// `:777-989`, declared at `PrintConfig.hpp:546-792`).
+//
+// `BOOST_LOG_TRIVIAL` calls are not ported: `boost::log` has no counterpart here, and a log line
+// is not behaviour this unit's proof can compare. Each site carries a `// PORT NOTE:` naming the
+// vendored line, the convention `crates/slic3r-utils/src/utils.rs` already uses for the same
+// boundary.
+// --------------------------------------------------------------------------------------------
+
+/// `get_extruder_index(const GCodeConfig&, unsigned int)` (`PrintConfig.cpp:140-146`).
+pub fn get_extruder_index(config: &GCodeConfig, filament_id: u32) -> usize {
+    if (filament_id as usize) < config.filament_map.values.len() {
+        return (config.filament_map.get_at(filament_id as usize) - 1) as usize;
+    }
+    0
+}
+
+/// `nozzle_diameter_for_filament(const PrintConfig&, int, bool)`
+/// (`PrintConfig.cpp:148-156`).
+pub fn nozzle_diameter_for_filament(
+    config: &PrintConfig,
+    filament_id: i32,
+    is_bbl_printer: bool,
+) -> f64 {
+    // `nozzle_diameter` is `PrintConfig`'s own field and `filament_map` is `GCodeConfig`'s;
+    // the vendored body reaches both unqualified through inheritance.
+    let nozzle_diameter = &config.nozzle_diameter;
+    let filament_map = &config.gcode_config.filament_map;
+    let mut extruder = filament_id;
+    if is_bbl_printer
+        && nozzle_diameter.values.len() > 1
+        && filament_id >= 1
+        && ((filament_id - 1) as usize) < filament_map.values.len()
+    {
+        extruder = filament_map.get_at((filament_id - 1) as usize);
+    }
+    nozzle_diameter.get_at((extruder - 1) as usize)
+}
+
+/// `get_shaper_type_values_for_flavor(GCodeFlavor)` (`PrintConfig.cpp:159-173`): Orca's input
+/// shaping value names, by G-code flavor.
+///
+/// FIDELITY(port): each arm's braced-initialiser order, not sorted. It reaches output -- the
+/// caller hands the list to a `coEnum` option's `enum_values`, whose index is the stored value.
+pub fn get_shaper_type_values_for_flavor(flavor: GCodeFlavor) -> Vec<String> {
+    let names: &[&str] = match flavor {
+        GCodeFlavor::gcfKlipper => &["Default", "MZV", "ZV", "ZVD", "EI", "2HUMP_EI", "3HUMP_EI"],
+        GCodeFlavor::gcfRepRapFirmware => &[
+            "Default", "MZV", "ZV", "ZVD", "ZVDD", "ZVDDD", "EI2", "EI3", "DAA",
+        ],
+        GCodeFlavor::gcfMarlinFirmware => &["ZV"],
+        GCodeFlavor::gcfMarlinLegacy => &[],
+        _ => &["Default"],
+    };
+    names.iter().map(|s| s.to_string()).collect()
+}
+
+/// `get_extruder_variant_string(ExtruderType, NozzleVolumeType)` (`PrintConfig.cpp:777-796`):
+/// the extruder type's name, a space, and the nozzle volume type's name.
+pub fn get_extruder_variant_string(
+    extruder_type: ExtruderType,
+    nozzle_volume_type: NozzleVolumeType,
+) -> String {
+    let mut variant_string = String::new();
+
+    if extruder_type > ExtruderType::ET_MAX_EXTRUDER_TYPE {
+        // PORT NOTE: src/libslic3r/PrintConfig.cpp:783 (BOOST_LOG_TRIVIAL(error); boost::log has
+        // no counterpart here). The empty-string return below is the behaviour.
+        return variant_string;
+    }
+    let nozzle_volume_types = get_valid_nozzle_volume_type();
+    if !nozzle_volume_types.contains(&nozzle_volume_type) {
+        // PORT NOTE: src/libslic3r/PrintConfig.cpp:789 (BOOST_LOG_TRIVIAL(error)).
+        return variant_string;
+    }
+    variant_string = keys_names_extruder_type()[extruder_type as usize].clone();
+    variant_string += " ";
+    variant_string += &keys_names_nozzle_volume_type()[nozzle_volume_type as usize];
+    variant_string
+}
+
+/// `find_variant_index(const std::string&, int, const std::vector<std::string>&,
+/// const std::vector<int>&)` (`PrintConfig.cpp:798-815`).
+pub fn find_variant_index(
+    variant: &str,
+    variant_id_1based: i32,
+    variant_list: &[String],
+    variant_ids_1based: &[i32],
+) -> i32 {
+    let count = if variant_list.is_empty() {
+        variant_ids_1based.len()
+    } else {
+        variant_list.len()
+    } as i32;
+    if count == 0 {
+        return 0;
+    }
+    let same_id = |index: i32| -> bool {
+        variant_id_1based < 0
+            || variant_ids_1based.is_empty()
+            || ((index as usize) < variant_ids_1based.len()
+                && variant_ids_1based[index as usize] == variant_id_1based)
+    };
+    for index in 0..variant_list.len() as i32 {
+        if variant_list[index as usize] == variant && same_id(index) {
+            return index;
+        }
+    }
+    // "Without this variant, use the id's own first variant (usually Standard), not variant
+    // index 0, which belongs to the first filament or extruder."
+    for index in 0..count {
+        if same_id(index) {
+            return index;
+        }
+    }
+    -1
+}
+
+/// `map_variant_indices(const std::vector<std::string>&, const std::vector<int>&,
+/// const std::vector<std::string>&, const std::vector<int>&)` (`PrintConfig.cpp:817-831`).
+pub fn map_variant_indices(
+    variants: &[String],
+    ids: &[i32],
+    from_variants: &[String],
+    from_ids: &[i32],
+) -> Vec<i32> {
+    let count = if variants.is_empty() {
+        ids.len()
+    } else {
+        variants.len()
+    };
+    let mut variant_index = vec![0_i32; count];
+    for index in 0..count {
+        if !ids.is_empty() && index >= ids.len() {
+            variant_index[index] = -1;
+            continue;
+        }
+        variant_index[index] = find_variant_index(
+            if index < variants.len() {
+                variants[index].as_str()
+            } else {
+                ""
+            },
+            if ids.is_empty() { -1 } else { ids[index] },
+            from_variants,
+            from_ids,
+        );
+    }
+    variant_index
+}
+
+/// `get_config_index_base(NozzleVolumeType, ExtruderType, int, const std::vector<std::string>&,
+/// const std::vector<int>&)` (`PrintConfig.cpp:833-838`).
+pub fn get_config_index_base(
+    volume_type: NozzleVolumeType,
+    extruder_type: ExtruderType,
+    variant_id_1based: i32,
+    variant_list: &[String],
+    variant_ids_1based: &[i32],
+) -> i32 {
+    debug_assert_eq!(variant_list.len(), variant_ids_1based.len());
+    let index = find_variant_index(
+        &get_extruder_variant_string(extruder_type, volume_type),
+        variant_id_1based,
+        variant_list,
+        variant_ids_1based,
+    );
+    std::cmp::max(index, 0)
+}
+
+/// `get_nozzle_volume_type_string(NozzleVolumeType)` (`PrintConfig.cpp:860-867`).
+pub fn get_nozzle_volume_type_string(nozzle_volume_type: NozzleVolumeType) -> String {
+    if nozzle_volume_type > NozzleVolumeType::NVT_MAX_NOZZLE_VOLUME_TYPE {
+        // PORT NOTE: src/libslic3r/PrintConfig.cpp:863 (BOOST_LOG_TRIVIAL(error)).
+        return String::new();
+    }
+    keys_names_nozzle_volume_type()[nozzle_volume_type as usize].clone()
+}
+
+/// `get_extruder_ams_count(const std::vector<std::string>&)` (`PrintConfig.cpp:869-889`):
+/// parses the `extruder_ams_count` option, one `"|"`-separated token list per extruder, each
+/// token `"<ams_id>#<count>"`.
+pub fn get_extruder_ams_count(strs: &[String]) -> Vec<std::collections::BTreeMap<i32, i32>> {
+    let mut extruder_ams_counts = Vec::new();
+    for str in strs {
+        let mut ams_count_info: std::collections::BTreeMap<i32, i32> =
+            std::collections::BTreeMap::new();
+        if str.is_empty() {
+            extruder_ams_counts.push(ams_count_info);
+            continue;
+        }
+        for ams_info in str.split('|') {
+            let numbers: Vec<&str> = ams_info.split('#').collect();
+            debug_assert_eq!(numbers.len(), 2);
+            // `stoi` on a non-numeric string throws at the pin, where the release build has no
+            // handler either; `parse().ok()` drops such a token instead, which is the nearest
+            // defined behaviour and never reached by a well-formed option.
+            if let (Some(Ok(k)), Some(Ok(v))) = (
+                numbers.first().map(|s| cpp_stoi(s)),
+                numbers.get(1).map(|s| cpp_stoi(s)),
+            ) {
+                // `std::map::insert` keeps the existing value for a duplicate key, unlike
+                // `BTreeMap::insert`, which replaces it (`Config.cpp`'s `add` relies on the same
+                // `std::map` property); `or_insert` reproduces it.
+                ams_count_info.entry(k).or_insert(v);
+            }
+        }
+        extruder_ams_counts.push(ams_count_info);
+    }
+    extruder_ams_counts
+}
+
+/// `save_extruder_ams_count_to_string(const std::vector<std::map<int, int>>&)`
+/// (`PrintConfig.cpp:891-906`): the inverse of [`get_extruder_ams_count`].
+///
+/// FIDELITY(port): the `std::map`'s own ascending key order, which the vendored loop writes out
+/// positionally and which therefore reaches the produced string. A `BTreeMap` iterates the same
+/// way.
+pub fn save_extruder_ams_count_to_string(
+    extruder_ams_count: &[std::collections::BTreeMap<i32, i32>],
+) -> Vec<String> {
+    extruder_ams_count
+        .iter()
+        .map(|item| {
+            item.iter()
+                .map(|(k, v)| format!("{k}#{v}"))
+                .collect::<Vec<_>>()
+                .join("|")
+        })
+        .collect()
+}
+
+/// `convert_to_nvt_type(const std::string&)` (`PrintConfig.cpp:908-938`): maps a full extruder
+/// variant string such as `"Direct Drive High Flow"` to its `NozzleVolumeType` -- the
+/// extruder-type prefix is stripped, the remainder trimmed and looked up as a volume-type name.
+/// `nvtHybrid` when the string cannot be parsed.
+///
+/// FIDELITY(port): the extruder-type names are walked in `get_enum_names()`'s own order, which
+/// is the enum's declaration order (the vector `enum_names_from_keys_map` builds, indexed by
+/// value); the first prefix that matches wins, so the order reaches the result.
+pub fn convert_to_nvt_type(variant_str: &str) -> NozzleVolumeType {
+    let ext_types = keys_names_extruder_type();
+
+    fn trim(s: &str) -> &str {
+        s.trim_matches(|c| c == ' ' || c == '\t' || c == '\r' || c == '\n')
+    }
+
+    for ext_type in ext_types {
+        // `enum_names_from_keys_map` leaves a gap empty, and `find("")` matches at 0, which
+        // would strip nothing and then look the whole string up -- the vendored `find` behaves
+        // the same way, so the empty name is not skipped here either.
+        let Some(pos) = variant_str.find(ext_type.as_str()) else {
+            continue;
+        };
+        let mut result = variant_str.to_string();
+        result.replace_range(pos..pos + ext_type.len(), "");
+        let result = trim(&result);
+        if let Some(value) = keys_map_nozzle_volume_type().get(result) {
+            // The vendored `NozzleVolumeType(iter->second)` is a bare cast. `from_i32` tests
+            // the declared variants and falls back to the default for anything else (see the
+            // `impl_config_option_enum_value!` macro's own note), which is the same answer
+            // here: every value in this key map is a declared variant.
+            return <NozzleVolumeType as slic3r_config::config::ConfigOptionEnumValue>::from_i32(
+                *value,
+            );
+        }
+    }
+
+    NozzleVolumeType::nvtHybrid
+}
+
+/// `get_extruder_nozzle_stats(const std::vector<std::string>&)` (`PrintConfig.cpp:940-973`):
+/// parses the `extruder_nozzle_stats` option, one `"|"`-separated token list per extruder, each
+/// token `"<volume_type_name>#<count>"`. An empty string means no per-type stats for that
+/// extruder.
+pub fn get_extruder_nozzle_stats(
+    strs: &[String],
+) -> Vec<std::collections::BTreeMap<NozzleVolumeType, i32>> {
+    let mut extruder_nozzle_counts = Vec::new();
+    for str in strs {
+        let mut nozzle_count_map: std::collections::BTreeMap<NozzleVolumeType, i32> =
+            std::collections::BTreeMap::new();
+        if str.is_empty() {
+            extruder_nozzle_counts.push(nozzle_count_map);
+            continue;
+        }
+        for nozzle_info in str.split('|') {
+            let attr: Vec<&str> = nozzle_info.split('#').collect();
+            // "Guard against malformed device/project data: skip tokens without a
+            // '<type>#<count>' shape or with an unknown volume-type key instead of throwing
+            // (.at) or reading attr[1] out of bounds. Corrupt tokens are dropped and logged;
+            // the rest still parse."
+            if attr.len() < 2 {
+                // PORT NOTE: src/libslic3r/PrintConfig.cpp:959 (BOOST_LOG_TRIVIAL(warning)).
+                continue;
+            }
+            let Some(value) = keys_map_nozzle_volume_type().get(attr[0]) else {
+                // PORT NOTE: src/libslic3r/PrintConfig.cpp:964 (BOOST_LOG_TRIVIAL(warning)).
+                continue;
+            };
+            let volume_type =
+                <NozzleVolumeType as slic3r_config::config::ConfigOptionEnumValue>::from_i32(
+                    *value,
+                );
+            // `std::atoi` returns 0 for a string with no leading digits and never throws.
+            let nozzle_count = cpp_atoi(attr[1]);
+            nozzle_count_map.insert(volume_type, nozzle_count);
+        }
+        extruder_nozzle_counts.push(nozzle_count_map);
+    }
+    extruder_nozzle_counts
+}
+
+/// `save_extruder_nozzle_stats_to_string(const std::vector<std::map<NozzleVolumeType, int>>&)`
+/// (`PrintConfig.cpp:975-989`): the inverse of [`get_extruder_nozzle_stats`].
+///
+/// FIDELITY(port): the `std::map<NozzleVolumeType, int>`'s own ascending key order -- ascending
+/// by the enum's underlying value, since that is what `std::less<NozzleVolumeType>` compares --
+/// which the vendored loop writes out positionally. `NozzleVolumeType` derives `Ord` from its
+/// declaration order, and its discriminants ascend with it, so a `BTreeMap` iterates the same
+/// way.
+pub fn save_extruder_nozzle_stats_to_string(
+    extruder_nozzle_stats: &[std::collections::BTreeMap<NozzleVolumeType, i32>],
+) -> Vec<String> {
+    extruder_nozzle_stats
+        .iter()
+        .map(|item| {
+            item.iter()
+                .map(|(k, v)| format!("{}#{}", get_nozzle_volume_type_string(*k), v))
+                .collect::<Vec<_>>()
+                .join("|")
+        })
+        .collect()
+}
+
+/// `std::stoi`'s accepted form: optional sign, then decimal digits, stopping at the first
+/// character that is not one. Used where the vendored code calls `stoi` on a token it has
+/// already split.
+fn cpp_stoi(s: &str) -> Result<i32, ()> {
+    let t = s.trim_start_matches([' ', '\t', '\n', '\r']);
+    let (sign, rest) = match t.as_bytes().first() {
+        Some(b'-') => (-1_i64, &t[1..]),
+        Some(b'+') => (1_i64, &t[1..]),
+        _ => (1_i64, t),
+    };
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return Err(());
+    }
+    // `stoi` throws `out_of_range` past `int`; saturating is the nearest defined behaviour and
+    // no well-formed option reaches it.
+    let value: i64 = digits.parse().unwrap_or(i64::from(i32::MAX));
+    Ok((sign * value).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32)
+}
+
+/// `std::atoi`'s accepted form: as [`cpp_stoi`], but 0 rather than an error for a string with no
+/// leading digits, and no exception for an out-of-range value.
+fn cpp_atoi(s: &str) -> i32 {
+    cpp_stoi(s).unwrap_or(0)
+}
+
+// --------------------------------------------------------------------------------------------
+// The seven option-set globals (`PrintConfig.cpp:10105-10305`, declared `extern` at
+// `PrintConfig.hpp:1009-1024`).
+//
+// Each is a `std::set<std::string>` naming the keys some per-extruder or per-variant rewriting
+// applies to. They are mutable globals at the pin -- `std::set`, not `const` -- but nothing in
+// `PrintConfig.cpp` writes to one, and each is read as a membership test, so each is ported as a
+// read-only table built once. `OnceLock` rather than the per-thread leak `print_config_def` and
+// the static caches need: a `BTreeSet<String>` holds no `dyn ConfigOption`, so it is `Send` and
+// `Sync` and can live in a `static`.
+// --------------------------------------------------------------------------------------------
+
+/// `std::set<std::string> print_options_with_variant` (`PrintConfig.cpp:10105-10153`), declared
+/// `extern` at `PrintConfig.hpp:1010`. 47 keys.
+///
+/// A `BTreeSet`, matching the vendored `std::set<std::string>`: the container's own
+/// bytewise-ascending order, not the braced-initialiser order, which is why no
+/// `// FIDELITY(port):` marker belongs here -- there is no order choice to record.
+pub fn print_options_with_variant() -> &'static std::collections::BTreeSet<String> {
+    static SET: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        [
+            "initial_layer_speed",
+            "initial_layer_infill_speed",
+            "outer_wall_speed",
+            "inner_wall_speed",
+            "small_perimeter_speed",
+            "small_perimeter_threshold",
+            "small_support_perimeter_speed",
+            "small_support_perimeter_threshold",
+            "sparse_infill_speed",
+            "internal_solid_infill_speed",
+            "top_surface_speed",
+            "enable_overhang_speed",
+            "overhang_1_4_speed",
+            "overhang_2_4_speed",
+            "overhang_3_4_speed",
+            "overhang_4_4_speed",
+            "slowdown_for_curled_perimeters",
+            "bridge_speed",
+            "internal_bridge_speed",
+            "gap_infill_speed",
+            "support_speed",
+            "support_interface_speed",
+            "travel_speed",
+            "travel_speed_z",
+            "initial_layer_travel_speed",
+            "default_acceleration",
+            "bridge_acceleration",
+            "travel_acceleration",
+            "initial_layer_travel_acceleration",
+            "initial_layer_acceleration",
+            "outer_wall_acceleration",
+            "inner_wall_acceleration",
+            "sparse_infill_acceleration",
+            "internal_solid_infill_acceleration",
+            "top_surface_acceleration",
+            "default_jerk",
+            "outer_wall_jerk",
+            "inner_wall_jerk",
+            "infill_jerk",
+            "top_surface_jerk",
+            "initial_layer_jerk",
+            "travel_jerk",
+            "initial_layer_travel_jerk",
+            "default_junction_deviation",
+            "print_extruder_id",
+            "print_extruder_variant",
+            "top_solid_infill_flow_ratio",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    })
+}
+
+/// `std::set<std::string> filament_options_with_variant` (`PrintConfig.cpp:10155-10226`), declared
+/// `extern` at `PrintConfig.hpp:1011`. 63 keys.
+///
+/// A `BTreeSet`, matching the vendored `std::set<std::string>`: the container's own
+/// bytewise-ascending order, not the braced-initialiser order, which is why no
+/// `// FIDELITY(port):` marker belongs here -- there is no order choice to record.
+pub fn filament_options_with_variant() -> &'static std::collections::BTreeSet<String> {
+    static SET: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        [
+            "filament_flow_ratio",
+            "filament_max_volumetric_speed",
+            "filament_ramming_volumetric_speed",
+            "filament_pre_cooling_temperature",
+            "filament_ramming_travel_time",
+            "filament_ramming_volumetric_speed_nc",
+            "filament_pre_cooling_temperature_nc",
+            "filament_ramming_travel_time_nc",
+            "filament_retract_length_nc",
+            "filament_preheat_temperature_delta",
+            "filament_extruder_variant",
+            "filament_retraction_length",
+            "filament_z_hop",
+            "filament_z_hop_types",
+            "filament_retract_lift_above",
+            "filament_retract_lift_below",
+            "filament_retract_lift_enforce",
+            "filament_retract_restart_extra",
+            "filament_retract_length_toolchange",
+            "filament_retract_restart_extra_toolchange",
+            "filament_retraction_speed",
+            "filament_deretraction_speed",
+            "filament_retraction_minimum_travel",
+            "filament_retract_when_changing_layer",
+            "filament_wipe",
+            "filament_wipe_distance",
+            "filament_retract_before_wipe",
+            "filament_retract_after_wipe",
+            "filament_long_retractions_when_cut",
+            "filament_retraction_distances_when_cut",
+            "long_retractions_when_ec",
+            "retraction_distances_when_ec",
+            "nozzle_temperature_initial_layer",
+            "nozzle_temperature",
+            "filament_flush_volumetric_speed",
+            "filament_flush_temp",
+            "filament_cooling_before_tower",
+            "volumetric_speed_coefficients",
+            "filament_adaptive_volumetric_speed",
+            "filament_ironing_flow",
+            "filament_ironing_spacing",
+            "filament_ironing_inset",
+            "filament_ironing_speed",
+            "enable_pressure_advance",
+            "pressure_advance",
+            "adaptive_pressure_advance",
+            "adaptive_pressure_advance_model",
+            "adaptive_pressure_advance_overhangs",
+            "adaptive_pressure_advance_bridges",
+            "fan_min_speed",
+            "fan_max_speed",
+            "additional_cooling_fan_speed",
+            "filament_minimal_purge_on_wipe_tower",
+            "filament_multitool_ramming",
+            "filament_multitool_ramming_volume",
+            "filament_multitool_ramming_flow",
+            "nozzle_temperature_range_low",
+            "nozzle_temperature_range_high",
+            "activate_air_filtration",
+            "activate_air_filtration_during_print",
+            "activate_air_filtration_on_completion",
+            "during_print_exhaust_fan_speed",
+            "complete_print_exhaust_fan_speed",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    })
+}
+
+/// `std::set<std::string> printer_extruder_options` (`PrintConfig.cpp:10229-10239`), declared
+/// `extern` at `PrintConfig.hpp:1009`. 9 keys.
+///
+/// A `BTreeSet`, matching the vendored `std::set<std::string>`: the container's own
+/// bytewise-ascending order, not the braced-initialiser order, which is why no
+/// `// FIDELITY(port):` marker belongs here -- there is no order choice to record.
+pub fn printer_extruder_options() -> &'static std::collections::BTreeSet<String> {
+    static SET: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        [
+            "extruder_type",
+            "nozzle_diameter",
+            "default_nozzle_volume_type",
+            "extruder_printable_area",
+            "extruder_bed_exclude_volumes",
+            "extruder_printable_height",
+            "min_layer_height",
+            "max_layer_height",
+            "extruder_max_nozzle_count",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    })
+}
+
+/// `std::set<std::string> printer_options_with_variant_1` (`PrintConfig.cpp:10241-10272`), declared
+/// `extern` at `PrintConfig.hpp:1012`. 28 keys.
+///
+/// A `BTreeSet`, matching the vendored `std::set<std::string>`: the container's own
+/// bytewise-ascending order, not the braced-initialiser order, which is why no
+/// `// FIDELITY(port):` marker belongs here -- there is no order choice to record.
+pub fn printer_options_with_variant_1() -> &'static std::collections::BTreeSet<String> {
+    static SET: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        [
+            "nozzle_volume",
+            "retraction_length",
+            "z_hop",
+            "travel_slope",
+            "retract_lift_above",
+            "retract_lift_below",
+            "retract_lift_enforce",
+            "z_hop_types",
+            "retraction_speed",
+            "deretraction_speed",
+            "retraction_minimum_travel",
+            "retract_when_changing_layer",
+            "wipe",
+            "wipe_distance",
+            "retract_before_wipe",
+            "retract_after_wipe",
+            "retract_length_toolchange",
+            "retract_restart_extra",
+            "retract_restart_extra_toolchange",
+            "long_retractions_when_cut",
+            "retraction_distances_when_cut",
+            "nozzle_volume",
+            "nozzle_type",
+            "printer_extruder_id",
+            "printer_extruder_variant",
+            "hotend_cooling_rate",
+            "hotend_heating_rate",
+            "nozzle_flush_dataset",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    })
+}
+
+/// `std::set<std::string> printer_options_with_variant_2` (`PrintConfig.cpp:10275-10292`), declared
+/// `extern` at `PrintConfig.hpp:1013`. 16 keys.
+///
+/// A `BTreeSet`, matching the vendored `std::set<std::string>`: the container's own
+/// bytewise-ascending order, not the braced-initialiser order, which is why no
+/// `// FIDELITY(port):` marker belongs here -- there is no order choice to record.
+pub fn printer_options_with_variant_2() -> &'static std::collections::BTreeSet<String> {
+    static SET: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        [
+            "machine_max_acceleration_x",
+            "machine_max_acceleration_y",
+            "machine_max_acceleration_z",
+            "machine_max_acceleration_e",
+            "machine_max_acceleration_extruding",
+            "machine_max_acceleration_retracting",
+            "machine_max_acceleration_travel",
+            "machine_max_speed_x",
+            "machine_max_speed_y",
+            "machine_max_speed_z",
+            "machine_max_speed_e",
+            "machine_max_jerk_x",
+            "machine_max_jerk_y",
+            "machine_max_jerk_z",
+            "machine_max_jerk_e",
+            "machine_max_junction_deviation",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    })
+}
+
+/// `std::set<std::string> empty_options` (`PrintConfig.cpp:10294`), declared
+/// `extern` at `PrintConfig.hpp:1014`: default-constructed and never filled at the pin,
+/// which callers pass where a key set is required and none applies.
+pub fn empty_options() -> &'static std::collections::BTreeSet<String> {
+    static SET: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::collections::BTreeSet::new())
+}
+
+/// `std::set<std::string> filament_dev_options` (`PrintConfig.cpp:10296-10305`), declared
+/// `extern` at `PrintConfig.hpp:1024`. 8 keys.
+///
+/// A `BTreeSet`, matching the vendored `std::set<std::string>`: the container's own
+/// bytewise-ascending order, not the braced-initialiser order, which is why no
+/// `// FIDELITY(port):` marker belongs here -- there is no order choice to record.
+pub fn filament_dev_options() -> &'static std::collections::BTreeSet<String> {
+    static SET: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        [
+            "filament_dev_ams_drying_ams_limitations",
+            "filament_dev_ams_drying_temperature",
+            "filament_dev_ams_drying_time",
+            "filament_dev_ams_drying_heat_distortion_temperature",
+            "filament_dev_chamber_drying_bed_temperature",
+            "filament_dev_chamber_drying_time",
+            "filament_dev_drying_softening_temperature",
+            "filament_dev_drying_cooling_temperature",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -19290,6 +19952,328 @@ mod tests {
                     .join("\u{1}"),
             ),
         ])
+    }
+
+    /// The seven option-set globals (`PrintConfig.cpp:10105-10305`), each held to exact
+    /// equality against the oracle's own -- content and order.
+    #[test]
+    fn the_option_set_globals_match_the_oracle() {
+        let sets: Vec<(&str, &'static std::collections::BTreeSet<String>)> = vec![
+            ("print_options_with_variant", print_options_with_variant()),
+            (
+                "filament_options_with_variant",
+                filament_options_with_variant(),
+            ),
+            ("printer_extruder_options", printer_extruder_options()),
+            (
+                "printer_options_with_variant_1",
+                printer_options_with_variant_1(),
+            ),
+            (
+                "printer_options_with_variant_2",
+                printer_options_with_variant_2(),
+            ),
+            ("empty_options", empty_options()),
+            ("filament_dev_options", filament_dev_options()),
+        ];
+        assert_eq!(
+            sets.len(),
+            7,
+            "PrintConfig.hpp:1009-1024 declares seven option-set globals"
+        );
+        let mut total = 0_usize;
+        for (which, ported) in &sets {
+            let oracle: Vec<String> = ora::oracle_option_set(which)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mine: Vec<String> = ported.iter().cloned().collect();
+            assert_eq!(mine, oracle, "{which}: the sets differ");
+            if *which == "empty_options" {
+                // Empty is also what the shim returns for a name it does not know, so this one
+                // says so explicitly rather than reading an empty list as agreement.
+                assert!(
+                    oracle.is_empty(),
+                    "empty_options is default-constructed and never filled at the pin"
+                );
+            } else {
+                assert!(!oracle.is_empty(), "{which}: the oracle's set is empty");
+            }
+            total += oracle.len();
+        }
+        println!(
+            "option-set globals: {} sets, {total} keys, exact",
+            sets.len()
+        );
+    }
+
+    /// The extruder-variant and nozzle-inventory free functions
+    /// (`PrintConfig.cpp:140-173`, `:777-989`), each held to exact equality against the oracle's
+    /// own over every input the enums admit plus the malformed strings the vendored bodies guard
+    /// against.
+    #[test]
+    fn the_variant_free_functions_match_the_oracle() {
+        // `get_shaper_type_values_for_flavor`, over every declared `GCodeFlavor`. That is the
+        // ported function's whole input domain -- a Rust `GCodeFlavor` is always a declared
+        // variant -- and it still reaches every arm, because only four of the thirteen
+        // variants are named and the other nine fall to `default:`. A value *past* the enum is
+        // deliberately not probed: `ConfigOptionEnumValue::from_i32` pins an out-of-range `i32`
+        // to the default variant rather than producing an invalid enum (the one design decision
+        // the `impl_config_option_enum_value!` macro records), while the oracle's
+        // `GCodeFlavor(13)` is a bare cast reaching `default:`. Feeding one through `from_i32`
+        // would compare `gcfMarlinLegacy`'s arm against `default:`'s and fail on that decision
+        // rather than on this function -- measured, not assumed: flavor 13 gives `[]` here and
+        // `["Default"]` there, which is exactly `from_i32`'s documented behaviour.
+        let flavors = [
+            GCodeFlavor::gcfMarlinLegacy,
+            GCodeFlavor::gcfKlipper,
+            GCodeFlavor::gcfRepRapFirmware,
+            GCodeFlavor::gcfRepetier,
+            GCodeFlavor::gcfMarlinFirmware,
+            GCodeFlavor::gcfRepRapSprinter,
+            GCodeFlavor::gcfTeacup,
+            GCodeFlavor::gcfMakerWare,
+            GCodeFlavor::gcfSailfish,
+            GCodeFlavor::gcfMach3,
+            GCodeFlavor::gcfMachinekit,
+            GCodeFlavor::gcfSmoothie,
+            GCodeFlavor::gcfNoExtrusion,
+        ];
+        let mut checked = 0_usize;
+        for flavor in flavors {
+            let theirs: Vec<String> = ora::oracle_shaper_type_values_for_flavor(flavor as i32)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mine = get_shaper_type_values_for_flavor(flavor);
+            assert_eq!(
+                mine, theirs,
+                "get_shaper_type_values_for_flavor({flavor:?})"
+            );
+            checked += 1;
+        }
+        assert_eq!(
+            flavors.len(),
+            13,
+            "PrintConfig.hpp declares 13 GCodeFlavor variants"
+        );
+
+        // `get_extruder_variant_string` and `get_nozzle_volume_type_string`, over every
+        // extruder type and nozzle volume type the enums declare plus the out-of-range values
+        // the vendored guards reject -- including the reserved gap at 4, which
+        // `get_valid_nozzle_volume_type` skips.
+        let extruder_types = [ExtruderType::etDirectDrive, ExtruderType::etBowden];
+        let volume_types = [
+            NozzleVolumeType::nvtStandard,
+            NozzleVolumeType::nvtHighFlow,
+            NozzleVolumeType::nvtHybrid,
+            NozzleVolumeType::nvtTPUHighFlow,
+            NozzleVolumeType::nvtE3DHighFlow,
+            NozzleVolumeType::nvtExtraHighFlow,
+        ];
+        for vt in volume_types {
+            assert_eq!(
+                get_nozzle_volume_type_string(vt),
+                ora::oracle_nozzle_volume_type_string(vt as i32),
+                "get_nozzle_volume_type_string({vt:?})"
+            );
+            checked += 1;
+            for et in extruder_types {
+                assert_eq!(
+                    get_extruder_variant_string(et, vt),
+                    ora::oracle_extruder_variant_string(et as i32, vt as i32),
+                    "get_extruder_variant_string({et:?}, {vt:?})"
+                );
+                checked += 1;
+            }
+        }
+
+        // `convert_to_nvt_type`, over every variant string the two enums compose plus the
+        // malformed shapes the body's `nvtHybrid` fallback exists for.
+        let mut variant_strings: Vec<String> = Vec::new();
+        for et in extruder_types {
+            for vt in volume_types {
+                variant_strings.push(get_extruder_variant_string(et, vt));
+            }
+        }
+        variant_strings.extend(
+            [
+                "",
+                " ",
+                "Direct Drive",
+                "Bowden",
+                "Standard",
+                "Direct Drive Standard ",
+                "  Direct Drive   High Flow  ",
+                "Direct DriveHigh Flow",
+                "Nonsense Variant",
+                "Direct Drive Nonsense",
+            ]
+            .iter()
+            .map(|s| s.to_string()),
+        );
+        for s in &variant_strings {
+            assert_eq!(
+                convert_to_nvt_type(s) as i32,
+                ora::oracle_convert_to_nvt_type(s),
+                "convert_to_nvt_type({s:?})"
+            );
+            checked += 1;
+        }
+
+        // `find_variant_index`, `map_variant_indices` and `get_config_index_base`, over the
+        // list shapes their three early returns and two loops distinguish: empty lists, a
+        // matching id, a non-matching id, a negative id, and an id list shorter than the
+        // variant list.
+        let lists: Vec<(Vec<String>, Vec<i32>)> = vec![
+            (vec![], vec![]),
+            (vec![], vec![1, 2]),
+            (vec!["Direct Drive Standard".to_string()], vec![1]),
+            (
+                vec![
+                    "Direct Drive Standard".to_string(),
+                    "Direct Drive High Flow".to_string(),
+                    "Bowden Standard".to_string(),
+                ],
+                vec![1, 1, 2],
+            ),
+            (
+                vec![
+                    "Direct Drive Standard".to_string(),
+                    "Bowden Standard".to_string(),
+                ],
+                vec![],
+            ),
+            (vec!["Direct Drive Standard".to_string()], vec![1, 2, 3]),
+        ];
+        let probes = [
+            "",
+            "Direct Drive Standard",
+            "Direct Drive High Flow",
+            "Bowden Standard",
+            "Nonsense",
+        ];
+        for (list, ids) in &lists {
+            for probe in probes {
+                for id in [-1_i32, 0, 1, 2, 3] {
+                    assert_eq!(
+                        find_variant_index(probe, id, list, ids),
+                        ora::oracle_find_variant_index(probe, id, list, ids),
+                        "find_variant_index({probe:?}, {id}, {list:?}, {ids:?})"
+                    );
+                    checked += 1;
+                }
+            }
+            for (from_list, from_ids) in &lists {
+                assert_eq!(
+                    map_variant_indices(list, ids, from_list, from_ids),
+                    ora::oracle_map_variant_indices(list, ids, from_list, from_ids),
+                    "map_variant_indices({list:?}, {ids:?}, {from_list:?}, {from_ids:?})"
+                );
+                checked += 1;
+            }
+            // `get_config_index_base` asserts the two lists are the same length, and the
+            // vendored `assert` is compiled out of the oracle's Release build; only the
+            // same-length shapes are probed, so neither side is asked to do something its
+            // own precondition forbids.
+            if list.len() == ids.len() {
+                for et in extruder_types {
+                    for vt in volume_types {
+                        for id in [-1_i32, 1, 2] {
+                            assert_eq!(
+                                get_config_index_base(vt, et, id, list, ids),
+                                ora::oracle_config_index_base(vt as i32, et as i32, id, list, ids),
+                                "get_config_index_base({vt:?}, {et:?}, {id}, {list:?})"
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // The two parse/save pairs, round-tripped so one comparison covers both halves: the
+        // parse's result is handed straight to the save, and the saved strings are compared.
+        let ams_inputs: Vec<Vec<String>> = vec![
+            vec![],
+            vec![String::new()],
+            vec!["1#2".to_string()],
+            vec!["1#2|3#4".to_string(), String::new(), "7#8".to_string()],
+            // Out of ascending order on input, so the save's `std::map` ordering is exercised.
+            vec!["9#1|2#5|5#3".to_string()],
+            // A duplicate key, which `std::map::insert` keeps the first of.
+            vec!["1#2|1#9".to_string()],
+            vec!["-1#-2".to_string()],
+        ];
+        for input in &ams_inputs {
+            let theirs: Vec<String> = ora::oracle_extruder_ams_count_roundtrip(input)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mine = save_extruder_ams_count_to_string(&get_extruder_ams_count(input));
+            assert_eq!(mine, theirs, "extruder_ams_count round trip of {input:?}");
+            checked += 1;
+        }
+
+        let stats_inputs: Vec<Vec<String>> = vec![
+            vec![],
+            vec![String::new()],
+            vec!["Standard#2".to_string()],
+            vec![
+                "Standard#2|High Flow#3".to_string(),
+                String::new(),
+                "Hybrid#1".to_string(),
+            ],
+            // Out of the enum's own value order, so the save's `std::map<NozzleVolumeType, int>`
+            // ordering is exercised.
+            vec!["Extra High Flow#1|Standard#4|High Flow#2".to_string()],
+            // The malformed shapes the body's two guards exist for: a token with no `#`, and an
+            // unknown volume-type name.
+            vec!["Standard".to_string()],
+            vec!["Nonsense#3|Standard#1".to_string()],
+            vec!["Standard#notanumber".to_string()],
+            vec!["Standard#2|Standard#7".to_string()],
+        ];
+        for input in &stats_inputs {
+            let theirs: Vec<String> = ora::oracle_extruder_nozzle_stats_roundtrip(input)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mine = save_extruder_nozzle_stats_to_string(&get_extruder_nozzle_stats(input));
+            assert_eq!(
+                mine, theirs,
+                "extruder_nozzle_stats round trip of {input:?}"
+            );
+            checked += 1;
+        }
+
+        // `get_extruder_index` and `nozzle_diameter_for_filament`, against the
+        // default-constructed `GCodeConfig`/`PrintConfig` the class caches hold -- the only
+        // instance of either class available without a preset, and the one the oracle's side
+        // reads too. `filament_id` is swept past the end of `filament_map`, which is what the
+        // first function's bounds check and the second's `is_bbl_printer` guard turn on.
+        let gcode_defaults = GCodeConfig::defaults();
+        let print_defaults = PrintConfig::defaults();
+        for filament_id in 0_u32..6 {
+            assert_eq!(
+                get_extruder_index(gcode_defaults, filament_id) as u64,
+                ora::oracle_extruder_index_of_defaults(filament_id),
+                "get_extruder_index(defaults, {filament_id})"
+            );
+            checked += 1;
+        }
+        for filament_id in 1_i32..6 {
+            for is_bbl in [false, true] {
+                assert_eq!(
+                    nozzle_diameter_for_filament(print_defaults, filament_id, is_bbl),
+                    ora::oracle_nozzle_diameter_for_filament_of_defaults(filament_id, is_bbl),
+                    "nozzle_diameter_for_filament(defaults, {filament_id}, {is_bbl})"
+                );
+                checked += 1;
+            }
+        }
+
+        println!("variant free functions: {checked} case(s) held to exact equality");
     }
 
     /// The 11 `StaticPrintConfig`-derived classes, each held to exact equality against the

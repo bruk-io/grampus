@@ -89,6 +89,45 @@ rust::Vec<rust::String> oracle_custom_gcode_placeholders(rust::Str key);
 rust::Vec<rust::String> oracle_static_class_keys(rust::Str which);
 rust::Vec<rust::String> oracle_static_class_defaults(rust::Str which);
 
+// One of the seven option-set globals (`PrintConfig.cpp:10105-10305`, declared `extern` at
+// `PrintConfig.hpp:1009-1024`), by variable name, in the `std::set`'s own order. Empty for an
+// unknown name -- and for `empty_options`, which really is empty at the pin, so the port's own
+// proof names that one explicitly rather than reading an empty list as agreement.
+rust::Vec<rust::String> oracle_option_set(rust::Str which);
+
+// The externally-linked free functions of `PrintConfig.cpp:140-989`, each called directly. They
+// are what make a literal proof path 3 unnecessary for this part of the unit: unlike
+// `enum_names_from_keys_map` and the two anonymous-namespace string helpers, these have external
+// linkage and a symbol to call.
+rust::Vec<rust::String> oracle_shaper_type_values_for_flavor(int32_t flavor);
+rust::String oracle_extruder_variant_string(int32_t extruder_type, int32_t nozzle_volume_type);
+rust::String oracle_nozzle_volume_type_string(int32_t nozzle_volume_type);
+int32_t oracle_convert_to_nvt_type(rust::Str variant_str);
+int32_t oracle_find_variant_index(rust::Str variant, int32_t variant_id_1based,
+                                  const rust::Vec<rust::String> &variant_list,
+                                  const rust::Vec<int32_t> &variant_ids_1based);
+rust::Vec<int32_t> oracle_map_variant_indices(const rust::Vec<rust::String> &variants,
+                                              const rust::Vec<int32_t> &ids,
+                                              const rust::Vec<rust::String> &from_variants,
+                                              const rust::Vec<int32_t> &from_ids);
+int32_t oracle_config_index_base(int32_t volume_type, int32_t extruder_type,
+                                 int32_t variant_id_1based,
+                                 const rust::Vec<rust::String> &variant_list,
+                                 const rust::Vec<int32_t> &variant_ids_1based);
+// `get_extruder_ams_count` / `get_extruder_nozzle_stats` and their two inverses, round-tripped
+// through the string form so one shim call covers a parse and a save: the parse's result is
+// handed straight back to the save, and the save's output is what crosses. A parse difference
+// shows up as a different saved string.
+rust::Vec<rust::String> oracle_extruder_ams_count_roundtrip(const rust::Vec<rust::String> &strs);
+rust::Vec<rust::String> oracle_extruder_nozzle_stats_roundtrip(const rust::Vec<rust::String> &strs);
+
+// `get_extruder_index(const GCodeConfig&, unsigned int)` (`PrintConfig.cpp:140-146`) and
+// `nozzle_diameter_for_filament(const PrintConfig&, int, bool)` (`:148-156`), each against the
+// default-constructed config the class caches hold -- the only instance of either class a shim
+// can build without a preset, and the one the port's own side reads too.
+uint64_t oracle_extruder_index_of_defaults(uint32_t filament_id);
+double oracle_nozzle_diameter_for_filament_of_defaults(int32_t filament_id, bool is_bbl_printer);
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

@@ -160,6 +160,70 @@ mod ffi {
         /// wrong option type, or one whose name does not match the registry row it should
         /// carry, serializes differently from the default `finalize` assigned it.
         fn oracle_static_class_defaults(which: &str) -> Vec<String>;
+
+        /// One of the seven option-set globals (`PrintConfig.cpp:10105-10305`), by variable
+        /// name, in the `std::set`'s own order. Empty for an unknown name -- and for
+        /// `empty_options`, which really is empty at the pin.
+        fn oracle_option_set(which: &str) -> Vec<String>;
+
+        /// `get_shaper_type_values_for_flavor(GCodeFlavor)` (`PrintConfig.cpp:159-173`).
+        fn oracle_shaper_type_values_for_flavor(flavor: i32) -> Vec<String>;
+
+        /// `get_extruder_variant_string(ExtruderType, NozzleVolumeType)`
+        /// (`PrintConfig.cpp:777-796`).
+        fn oracle_extruder_variant_string(extruder_type: i32, nozzle_volume_type: i32) -> String;
+
+        /// `get_nozzle_volume_type_string(NozzleVolumeType)` (`PrintConfig.cpp:860-867`).
+        fn oracle_nozzle_volume_type_string(nozzle_volume_type: i32) -> String;
+
+        /// `convert_to_nvt_type(const std::string&)` (`PrintConfig.cpp:908-938`), as the
+        /// returned enumerator's underlying value.
+        fn oracle_convert_to_nvt_type(variant_str: &str) -> i32;
+
+        /// `find_variant_index(...)` (`PrintConfig.cpp:798-815`).
+        fn oracle_find_variant_index(
+            variant: &str,
+            variant_id_1based: i32,
+            variant_list: &Vec<String>,
+            variant_ids_1based: &Vec<i32>,
+        ) -> i32;
+
+        /// `map_variant_indices(...)` (`PrintConfig.cpp:817-831`).
+        fn oracle_map_variant_indices(
+            variants: &Vec<String>,
+            ids: &Vec<i32>,
+            from_variants: &Vec<String>,
+            from_ids: &Vec<i32>,
+        ) -> Vec<i32>;
+
+        /// `get_config_index_base(...)` (`PrintConfig.cpp:833-838`).
+        fn oracle_config_index_base(
+            volume_type: i32,
+            extruder_type: i32,
+            variant_id_1based: i32,
+            variant_list: &Vec<String>,
+            variant_ids_1based: &Vec<i32>,
+        ) -> i32;
+
+        /// `save_extruder_ams_count_to_string(get_extruder_ams_count(strs))`
+        /// (`PrintConfig.cpp:869-906`): one call covering the parse and its inverse, so a
+        /// parse difference shows up as a different saved string.
+        fn oracle_extruder_ams_count_roundtrip(strs: &Vec<String>) -> Vec<String>;
+
+        /// `save_extruder_nozzle_stats_to_string(get_extruder_nozzle_stats(strs))`
+        /// (`PrintConfig.cpp:940-989`), the same round trip for the nozzle-stats pair.
+        fn oracle_extruder_nozzle_stats_roundtrip(strs: &Vec<String>) -> Vec<String>;
+
+        /// `get_extruder_index(GCodeConfig::defaults(), filament_id)`
+        /// (`PrintConfig.cpp:140-146`).
+        fn oracle_extruder_index_of_defaults(filament_id: u32) -> u64;
+
+        /// `nozzle_diameter_for_filament(PrintConfig::defaults(), filament_id, is_bbl_printer)`
+        /// (`PrintConfig.cpp:148-156`).
+        fn oracle_nozzle_diameter_for_filament_of_defaults(
+            filament_id: i32,
+            is_bbl_printer: bool,
+        ) -> f64;
     }
 }
 
@@ -167,6 +231,11 @@ pub use ffi::{
     oracle_custom_gcode_placeholder_keys, oracle_custom_gcode_placeholders,
     oracle_extruder_option_keys, oracle_extruder_retract_keys, oracle_filament_option_keys,
     oracle_filament_retract_keys, oracle_handle_legacy, oracle_option_info, oracle_option_keys,
-    oracle_other_def_keys, oracle_other_def_option_info, oracle_static_class_defaults,
-    oracle_static_class_keys, OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
+    oracle_config_index_base, oracle_convert_to_nvt_type, oracle_extruder_ams_count_roundtrip,
+    oracle_extruder_index_of_defaults, oracle_nozzle_diameter_for_filament_of_defaults,
+    oracle_extruder_nozzle_stats_roundtrip, oracle_extruder_variant_string,
+    oracle_find_variant_index, oracle_map_variant_indices, oracle_nozzle_volume_type_string,
+    oracle_option_set, oracle_other_def_keys, oracle_other_def_option_info,
+    oracle_shaper_type_values_for_flavor, oracle_static_class_defaults, oracle_static_class_keys,
+    OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
 };
