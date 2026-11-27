@@ -8,9 +8,13 @@
 //! `crates/slic3r-geometry-dir/src/circle.rs`'s own `// PROOF: 1`/`// PROOF: 2` tests make on
 //! fixed inputs, here driven by the fuzzer's arbitrary ones.
 //!
-//! Three arms: `circle_center` (three arbitrary points, `Circle.hpp`'s header-only row),
-//! `smallest_enclosing_circle_welzl` (an arbitrary, bounded-length point set, the same row), and
-//! `circle_center_taubin_newton` (`Circle.cpp`'s own externally-linked row).
+//! Four arms: `circle_center` (three arbitrary points, `Circle.hpp`'s header-only row),
+//! `smallest_enclosing_circle_welzl` (an arbitrary, bounded-length point set, the same row),
+//! `circle_center_taubin_newton` on the `Vec2ds` overload (`Circle.cpp`'s own externally-linked
+//! row, `f64` output), and `circle_center_taubin_newton` on the `Points` overload (the same row,
+//! `Point` -- integer-coordinate -- output; the unit's only integer-coordinate-producing
+//! function and its only scaling conversion, so this is the arm the Done-when line "asserts
+//! exact equality of integer-coordinate output" actually needs).
 //!
 //! **Every coordinate is derived from an `i32` seed**, the same technique
 //! `slic3r-boundingbox_bounding_box.rs`'s own fuzz target uses, so no generated `Point` ever
@@ -107,5 +111,18 @@ fuzz_target!(|input: ArbInput| {
         expected[1].to_bits(),
         "circle_center_taubin_newton.y must match the oracle exactly (bit pattern, NaN included) \
          for points={points:?}",
+    );
+
+    // Arm 4: `circle_center_taubin_newton(const Points::const_iterator&, ..., size_t)`
+    // (`Circle.cpp:19-26`), the `Points` overload -- scaled (integer) coordinates in, scaled
+    // (integer) coordinates out, over the same point set arm 2/3 use (always at least 3 points).
+    let flat_i64: Vec<i64> = points.iter().flat_map(|p| [p.x(), p.y()]).collect();
+    let actual = circle::circle_center_taubin_newton(&points, 20);
+    let expected = oracle::path1_circle_center_taubin_newton_point(flat_i64, 20);
+    assert_eq!(
+        (actual.x(), actual.y()),
+        (expected[0], expected[1]),
+        "circle_center_taubin_newton (Points overload) must match the oracle exactly for \
+         points={points:?}",
     );
 });

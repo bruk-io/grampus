@@ -18,6 +18,11 @@ mod ffi {
         /// `circle_taubin_newton(const Vec2ds&, size_t)` (`Circle.cpp:106-117`); returns
         /// `[center.x, center.y, radius]`.
         fn path1_circle_taubin_newton(flat: Vec<f64>, cycles: u64) -> Vec<f64>;
+        /// `circle_center_taubin_newton(Points::const_iterator, Points::const_iterator, size_t)`
+        /// (`Circle.cpp:19-26`), the unit's only integer-coordinate-producing overload. `flat`
+        /// is `[x0, y0, x1, y1, ...]`, scaled (integer) coordinates; returns
+        /// `[center.x, center.y]`, also scaled integer coordinates.
+        fn path1_circle_center_taubin_newton_point(flat: Vec<i64>, cycles: u64) -> Vec<i64>;
 
         /// `circle_center<Vec2d>(...)` (`Circle.hpp:17-36`).
         fn path2_circle_center(
@@ -40,6 +45,7 @@ mod ffi {
 }
 
 pub use ffi::{
-    path1_circle_center_taubin_newton, path1_circle_taubin_newton, path2_circle_center,
-    path2_ray_circle_intersections, path2_smallest_enclosing_circle_welzl,
+    path1_circle_center_taubin_newton, path1_circle_center_taubin_newton_point,
+    path1_circle_taubin_newton, path2_circle_center, path2_ray_circle_intersections,
+    path2_smallest_enclosing_circle_welzl,
 };

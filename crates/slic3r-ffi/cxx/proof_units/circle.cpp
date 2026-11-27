@@ -45,6 +45,20 @@ rust::Vec<double> path1_circle_taubin_newton(rust::Vec<double> flat, uint64_t cy
     return out;
 }
 
+rust::Vec<int64_t> path1_circle_center_taubin_newton_point(rust::Vec<int64_t> flat, uint64_t cycles) {
+    Slic3r::Points points;
+    points.reserve(flat.size() / 2);
+    for (size_t i = 0; i + 1 < flat.size(); i += 2) {
+        points.emplace_back(flat[i], flat[i + 1]);
+    }
+    Slic3r::Point center = Slic3r::Geometry::circle_center_taubin_newton(
+        points.cbegin(), points.cend(), static_cast<size_t>(cycles));
+    rust::Vec<int64_t> out;
+    out.push_back(center.x());
+    out.push_back(center.y());
+    return out;
+}
+
 rust::Vec<double> path2_circle_center(double ax, double ay, double bx, double by, double cx,
                                        double cy, double epsilon) {
     Slic3r::Vec2d a(ax, ay), b(bx, by), c(cx, cy);

@@ -11,6 +11,11 @@ namespace circle {
 // `flat` is `[x0, y0, x1, y1, ...]`.
 rust::Vec<double> path1_circle_center_taubin_newton(rust::Vec<double> flat, uint64_t cycles);
 rust::Vec<double> path1_circle_taubin_newton(rust::Vec<double> flat, uint64_t cycles);
+// `Point circle_center_taubin_newton(Points::const_iterator, Points::const_iterator, size_t)`
+// (`Circle.cpp:19-26`), the unit's only integer-coordinate-producing overload: `flat` is
+// `[x0, y0, x1, y1, ...]`, scaled (integer) coordinates; returns `[center.x, center.y]`, also
+// scaled integer coordinates.
+rust::Vec<int64_t> path1_circle_center_taubin_newton_point(rust::Vec<int64_t> flat, uint64_t cycles);
 
 // Path 2: `Geometry/Circle.hpp`'s own header-only templates, instantiated directly in this
 // translation unit's counterpart `.cpp`.

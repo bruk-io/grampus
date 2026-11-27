@@ -30,9 +30,10 @@
 //! - **`ray_circle_intersections` (`Circle.hpp:176-186`), the 4-argument convenience wrapper.**
 //!   Its body calls `ray_circle_intersections_r2_lv2_c2(...)` (`:185`) -- a name with no
 //!   declaration anywhere in the vendored tree (the real primitive is spelled
-//!   `ray_circle_intersections_r2_lv2_c`, no `2` before `_c`); this is a latent bug in the
-//!   vendored header. It is never instantiated anywhere in the tree -- `FillBase.cpp:928` calls
-//!   `ray_circle_intersections_r2_lv2_c` directly, never this wrapper -- so, like
+//!   `ray_circle_intersections_r2_lv2_c`, a stray trailing `2` after `_c`); this is a latent
+//!   bug in the vendored header. It is never instantiated anywhere in the tree --
+//!   `FillBase.cpp:928` calls `ray_circle_intersections_r2_lv2_c` directly, never this
+//!   wrapper -- so, like
 //!   `intersect_triangle_epsilon` in `docs/PORTING.md`'s "Decisions recorded on 2026-11-26",
 //!   decision 9, it has no caller anywhere in the vendored tree and does not compile when
 //!   instantiated. Left unported for exactly that reason.
@@ -189,9 +190,14 @@ impl CircleSq {
 
 /// `Circle<Vector>` (`Circle.hpp:67-93`). The two-argument constructor, `invalid`/`valid`,
 /// `contains`/`contains(_, epsilon)` and `inflated` are generic (both `Circled`/`Circlef`
-/// instantiate them in-scope); `from_two_points`/`from_three_points`/the `CircleSq` conversion
-/// are `Vec2d`-only inherent methods below them, because no in-scope caller ever reaches those
-/// three at `Vec2f` (see the module doc).
+/// instantiate them in-scope); `from_two_points` and the `CircleSq` conversion
+/// (`from_circle_sq`) are `Vec2d`-only inherent methods below them, because no in-scope caller
+/// ever reaches those two at `Vec2f` (see the module doc). The three-point constructor
+/// (`Circle.hpp:76`, `Circle(const Vector&, const Vector&, const Vector&, const Scalar)`) and
+/// its `operator=` from `CircleSq` (`:82`) are unported: `Circle` is only ever constructed with
+/// two arguments anywhere in the vendored tree (`BuildVolume.hpp:42,165`,
+/// `BuildVolume.cpp:412,467`), so the three/four-argument forms have no caller to preserve
+/// behaviour for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Circle<T> {
     pub center: Vec2<T>,
@@ -375,8 +381,11 @@ pub fn smallest_enclosing_circle_welzl(points: &[Point]) -> Circled {
 /// (`Circle.hpp:161-175`), at `T = f64` -- the only instantiation reached in-scope
 /// (`src/libslic3r/Fill/FillBase.cpp:928`). The non-const-reference out-parameter becomes a
 /// return value (`docs/PORTING.md` idiom map): `(count, [first, second])`, `first`/`second`
-/// meaningful only while `count > 0`, matching the vendored pair's own undefined state when the
-/// function returns `0`.
+/// meaningful only while `count > 0` -- the vendored pair is left *untouched* (whatever the
+/// caller's own storage already held) when `d2 < 0` and the function returns `0` (`:167-168`);
+/// the two zero `Vec2d`s this port returns in that case are this port's own fill, chosen
+/// because Rust has no uninitialised-out-parameter equivalent, and are not a value the oracle
+/// ever produced, so no caller may read them as meaningful.
 pub fn ray_circle_intersections_r2_lv2_c(
     r2: f64,
     a: f64,
@@ -658,7 +667,13 @@ mod tests {
     }
 
     /// `circle_center_taubin_newton`/`circle_taubin_newton` against the oracle, both externally
-    /// linked (`Circle.cpp`'s own row).
+    /// linked (`Circle.cpp`'s own row). Covers both overloads of
+    /// `circle_center_taubin_newton`: the `Vec2ds` one (real-world, mm coordinates) and the
+    /// `Points` one (`circle.rs:526-533` -- this unit's only integer-coordinate-producing
+    /// function and its only scaling conversion), compared as integers rather than through the
+    /// `Vec2ds` overload's `f64` result, since a 1-ULP difference in the fit crosses to a
+    /// different integer on truncation and the `f64` comparison above cannot establish that the
+    /// two agree.
     // PROOF: 1
     #[test]
     fn circle_cpp_functions_match_the_oracle() {
@@ -692,6 +707,24 @@ mod tests {
             expected,
         )
         .unwrap_or_else(|e| panic!("circle_taubin_newton: {e}"));
+
+        let scaled_points: Vec<Point> = points
+            .iter()
+            .map(|p| Point::new_scale(p.x(), p.y()))
+            .collect();
+        let scaled_flat: Vec<i64> = scaled_points.iter().flat_map(|p| [p.x(), p.y()]).collect();
+        let actual = circle_center_taubin_newton(&scaled_points, 20);
+        let expected = slic3r_proof::proof_units::circle::path1_circle_center_taubin_newton_point(
+            scaled_flat,
+            20,
+        );
+        compare_unit(
+            "Geometry/Circle.cpp",
+            Oracle::Built,
+            vec![actual.x(), actual.y()],
+            expected,
+        )
+        .unwrap_or_else(|e| panic!("circle_center_taubin_newton (Points overload): {e}"));
     }
 }
 
