@@ -4596,6 +4596,541 @@ fn obsolete_option_keys() -> &'static std::collections::BTreeSet<&'static str> {
 
 // <<<APPEND>>>
 
+// --------------------------------------------------------------------------------------------
+// Unit tests against the real oracle. **These are not this unit's R19 proof** and carry no
+// `// PROOF:` marker: the proof is `crates/slic3r-printconfig/tests/print_config_proof.rs`,
+// which asserts exact equality over all 881 registry keys and lands at the plan's Step 7,
+// atomically with the `mod print_config;` line, once the table is complete.
+//
+// What these are for: every assertion below is true of the table as it stands *and* stays true
+// as the table fills, so the measurements this task's pull request reports are reproducible
+// from the tree rather than only from the session that ran them. Because `lib.rs` carries no
+// `mod print_config;` line yet, this module is not compiled by `cargo test --workspace` today;
+// it was verified by temporarily adding that line and running it, and it activates on its own
+// the moment Step 7 lands. Nothing here weakens into a check that cannot fail: each one would
+// fail on a mistranscribed enum value, option type, default, CLI spelling or legacy branch.
+// --------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use slic3r_proof::proof_units::print_config as ora;
+
+    /// Every key map this module transcribes, by the name of the vendored
+    /// `s_keys_map_<NAME>` table it came from.
+    fn transcribed_key_maps() -> Vec<(&'static str, &'static TConfigEnumValues)> {
+        vec![
+            ("PrinterTechnology", keys_map_printer_technology()),
+            ("PrintHostType", keys_map_print_host_type()),
+            ("AuthorizationType", keys_map_authorization_type()),
+            ("GCodeFlavor", keys_map_gcode_flavor()),
+            ("BedTempFormula", keys_map_bed_temp_formula()),
+            ("PowerLossRecoveryMode", keys_map_power_loss_recovery_mode()),
+            ("ArcFittingMode", keys_map_arc_fitting_mode()),
+            (
+                "CenterOfSurfacePattern",
+                keys_map_center_of_surface_pattern(),
+            ),
+            ("FuzzySkinType", keys_map_fuzzy_skin_type()),
+            ("NoiseType", keys_map_noise_type()),
+            ("WipeTowerType", keys_map_wipe_tower_type()),
+            ("FuzzySkinMode", keys_map_fuzzy_skin_mode()),
+            (
+                "TopSurfaceExpansionDirection",
+                keys_map_top_surface_expansion_direction(),
+            ),
+            ("InfillPattern", keys_map_infill_pattern()),
+            ("IroningType", keys_map_ironing_type()),
+            ("WallInfillOrder", keys_map_wall_infill_order()),
+            ("WallSequence", keys_map_wall_sequence()),
+            ("WallDirection", keys_map_wall_direction()),
+            ("SurfaceFillOrder", keys_map_surface_fill_order()),
+            ("AdaptiveInfillMode", keys_map_adaptive_infill_mode()),
+            (
+                "AdaptiveInfillGradient",
+                keys_map_adaptive_infill_gradient(),
+            ),
+            ("PrintSequence", keys_map_print_sequence()),
+            ("PrintOrder", keys_map_print_order()),
+            ("SlicingMode", keys_map_slicing_mode()),
+            ("BeltRotationAxis", keys_map_belt_rotation_axis()),
+            ("RemapAxis", keys_map_remap_axis()),
+            (
+                "SupportMaterialPattern",
+                keys_map_support_material_pattern(),
+            ),
+            ("SupportMaterialStyle", keys_map_support_material_style()),
+            (
+                "SupportMaterialInterfacePattern",
+                keys_map_support_material_interface_pattern(),
+            ),
+            ("SupportType", keys_map_support_type()),
+            ("SeamPosition", keys_map_seam_position()),
+            ("SeamScarfType", keys_map_seam_scarf_type()),
+            (
+                "EnsureVerticalShellThickness",
+                keys_map_ensure_vertical_shell_thickness(),
+            ),
+            ("InternalBridgeFilter", keys_map_internal_bridge_filter()),
+            (
+                "EnableExtraBridgeLayer",
+                keys_map_enable_extra_bridge_layer(),
+            ),
+            ("GapFillTarget", keys_map_gap_fill_target()),
+            ("SLADisplayOrientation", keys_map_sla_display_orientation()),
+            (
+                "SLAPillarConnectionMode",
+                keys_map_sla_pillar_connection_mode(),
+            ),
+            ("SLAMaterialSpeed", keys_map_sla_material_speed()),
+            ("BrimType", keys_map_brim_type()),
+            ("TimelapseType", keys_map_timelapse_type()),
+            ("SkirtType", keys_map_skirt_type()),
+            ("DraftShield", keys_map_draft_shield()),
+            (
+                "ForwardCompatibilitySubstitutionRule",
+                keys_map_forward_compatibility_substitution_rule(),
+            ),
+            ("OverhangFanThreshold", keys_map_overhang_fan_threshold()),
+            ("BedType", keys_map_bed_type()),
+            ("LayerSeq", keys_map_layer_seq()),
+            ("NozzleType", keys_map_nozzle_type()),
+            ("FanDirection", keys_map_fan_direction()),
+            ("PrinterStructure", keys_map_printer_structure()),
+            ("InputShaperType", keys_map_input_shaper_type()),
+            (
+                "PerimeterGeneratorType",
+                keys_map_perimeter_generator_type(),
+            ),
+            (
+                "ToolChangeOrderingType",
+                keys_map_tool_change_ordering_type(),
+            ),
+            ("ZHopType", keys_map_z_hop_type()),
+            (
+                "RetractLiftEnforceType",
+                keys_map_retract_lift_enforce_type(),
+            ),
+            ("GCodeThumbnailsFormat", keys_map_gcode_thumbnails_format()),
+            (
+                "CounterboreHoleBridgingOption",
+                keys_map_counterbore_hole_bridging_option(),
+            ),
+            ("WipeTowerWallType", keys_map_wipe_tower_wall_type()),
+            ("ExtruderType", keys_map_extruder_type()),
+            ("NozzleVolumeType", keys_map_nozzle_volume_type()),
+            ("FilamentMapMode", keys_map_filament_map_mode()),
+            ("BedExcludeVolumeMode", keys_map_bed_exclude_volume_mode()),
+            ("ImexToolLayout", keys_map_imex_tool_layout()),
+            ("ImexVizTheme", keys_map_imex_viz_theme()),
+            ("PrimeVolumeMode", keys_map_prime_volume_mode()),
+        ]
+    }
+
+    /// `enum_names_from_keys_map` (`PrintConfig.cpp:176-187`) on a table with a gap and a value
+    /// shared by two names -- the two shapes the registry really contains
+    /// (`s_keys_map_NozzleVolumeType` has a gap at 4; `s_keys_map_WallInfillOrder` writes one
+    /// key twice).
+    #[test]
+    fn enum_names_from_keys_map_sizes_to_the_largest_value_and_leaves_gaps_empty() {
+        let names = enum_names_from_keys_map(keys_map_nozzle_volume_type());
+        assert_eq!(names.len(), 7, "sized to max value + 1");
+        assert_eq!(names[0], "Standard");
+        assert_eq!(names[4], "", "the reserved gap stays empty");
+        assert_eq!(names[6], "Extra High Flow");
+    }
+
+    /// Every enum key map this module transcribes, against the real oracle's own
+    /// `ConfigOptionDef::enum_keys_map` tables. An enum the registry does not use has no oracle
+    /// table to match and is reported, not failed -- but a transcribed table that the registry
+    /// *does* use and that differs by one name or one value fails here.
+    #[test]
+    fn transcribed_enum_key_maps_match_the_oracles() {
+        let mut oracle_tables: Vec<std::collections::BTreeMap<String, i32>> = Vec::new();
+        for key in ora::oracle_option_keys() {
+            let info = ora::oracle_option_info(&key);
+            if info.enum_keys_map.is_empty() {
+                continue;
+            }
+            let m: std::collections::BTreeMap<String, i32> = info
+                .enum_keys_map
+                .iter()
+                .map(|e| (e.name.to_string(), e.value))
+                .collect();
+            if !oracle_tables.contains(&m) {
+                oracle_tables.push(m);
+            }
+        }
+
+        let mine = transcribed_key_maps();
+        let mut unused: Vec<&str> = Vec::new();
+        for (name, map) in &mine {
+            if !oracle_tables.iter().any(|t| t == *map) {
+                unused.push(name);
+            }
+        }
+        // Measured at the pin: `wall_infill_order` is not a registry key at all
+        // (`handle_legacy` renames it to `wall_sequence`) and the substitution rule is CLI-only,
+        // so neither table is reachable through `print_config_def`. Any *other* table failing to
+        // match is a mistranscription.
+        unused.sort_unstable();
+        assert_eq!(
+            unused,
+            ["ForwardCompatibilitySubstitutionRule", "WallInfillOrder"],
+            "every key map the registry uses must match the oracle byte for byte"
+        );
+
+        // And the other direction: no oracle table is left unmatched by this module.
+        for t in &oracle_tables {
+            assert!(
+                mine.iter().any(|(_, m)| *m == t),
+                "oracle enum_keys_map {t:?} matches no transcribed table"
+            );
+        }
+    }
+
+    /// Every option key this module has transcribed, against the real oracle, on the
+    /// behaviourally load-bearing fields. This is the same comparison the Step 7 proof makes;
+    /// the difference is that the proof additionally requires the registry to be **complete**,
+    /// which it is not yet. So this asserts the two directions that are true today and stay
+    /// true as rows are added -- every transcribed key exists in the oracle, and every
+    /// transcribed key agrees with it exactly -- and reports the shortfall instead of
+    /// asserting it away.
+    #[test]
+    fn every_transcribed_option_agrees_exactly_with_the_oracle() {
+        let oracle_keys: Vec<String> = ora::oracle_option_keys()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mine = &print_config_def().def.options;
+
+        let mut disagree: Vec<String> = Vec::new();
+        for (key, d) in mine.iter() {
+            let info = ora::oracle_option_info(key);
+            assert!(
+                info.found,
+                "{key} is in the ported registry and not in the oracle's"
+            );
+            let mut why: Vec<String> = Vec::new();
+            if (d.option_type as i32) != info.option_type {
+                why.push(format!(
+                    "type mine={} oracle={}",
+                    d.option_type as i32, info.option_type
+                ));
+            }
+            if d.nullable != info.nullable {
+                why.push(format!(
+                    "nullable mine={} oracle={}",
+                    d.nullable, info.nullable
+                ));
+            }
+            if d.cli != info.cli {
+                why.push(format!("cli mine={:?} oracle={:?}", d.cli, info.cli));
+            }
+            let mine_default = d.default_value.as_ref().map(|v| v.serialize());
+            let oracle_default = if info.has_default {
+                Some(info.default_serialized.to_string())
+            } else {
+                None
+            };
+            if mine_default != oracle_default {
+                why.push(format!(
+                    "default mine={mine_default:?} oracle={oracle_default:?}"
+                ));
+            }
+            let oracle_values: Vec<String> =
+                info.enum_values.iter().map(|s| s.to_string()).collect();
+            if d.enum_values != oracle_values {
+                why.push(format!(
+                    "enum_values mine={:?} oracle={:?}",
+                    d.enum_values, oracle_values
+                ));
+            }
+            let oracle_map: Vec<(String, i32)> = info
+                .enum_keys_map
+                .iter()
+                .map(|e| (e.name.to_string(), e.value))
+                .collect();
+            let mine_map: Vec<(String, i32)> = d
+                .enum_keys_map
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            if mine_map != oracle_map {
+                why.push(format!(
+                    "enum_keys_map mine={mine_map:?} oracle={oracle_map:?}"
+                ));
+            }
+            if !why.is_empty() {
+                disagree.push(format!("{key}: {}", why.join("; ")));
+            }
+        }
+        assert!(
+            disagree.is_empty(),
+            "transcribed options disagreeing with the oracle: {disagree:#?}"
+        );
+        let missing = oracle_keys
+            .iter()
+            .filter(|k| !mine.contains_key(*k))
+            .count();
+        println!(
+            "registry agreement: {} of {} oracle keys transcribed and exact; {} not yet transcribed",
+            mine.len(),
+            oracle_keys.len(),
+            missing
+        );
+    }
+
+    /// `handle_legacy` against the oracle's own, over every registry key plus the legacy,
+    /// renamed and obsolete keys the vendored function names, against the value shapes that
+    /// reach each of its value-rewriting branches.
+    ///
+    /// The vendored body's last statement clears `opt_key` when the registry does not know it,
+    /// so while the table is incomplete the two sides legitimately differ on a key the oracle
+    /// keeps and this registry has not got yet. Rather than skip those cases (which would let a
+    /// real divergence hide behind the shortfall), this asserts the full chain for every case
+    /// where the oracle's surviving key is one this registry *does* know, which is exactly the
+    /// set where the two sides must agree, and which grows to everything as rows are added.
+    #[test]
+    fn handle_legacy_matches_the_oracle() {
+        let mut keys: Vec<String> = ora::oracle_option_keys()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        for k in [
+            "curr_bed_type",
+            "enable_wipe_tower",
+            "wipe_tower_width",
+            "wiping_volume",
+            "wipe_tower_brim_width",
+            "tool_change_gcode",
+            "bridge_fan_speed",
+            "tpms_adaptive",
+            "tpms_interior_density",
+            "tpms_adaptive_gradient",
+            "infill_extruder",
+            "sparse_infill_filament",
+            "solid_infill_extruder",
+            "solid_infill_filament",
+            "top_solid_infill_filament",
+            "bottom_solid_infill_filament",
+            "perimeter_extruder",
+            "wall_filament",
+            "wall_filament_id",
+            "inner_wall_filament",
+            "outer_wall_filament",
+            "wipe_tower_extruder",
+            "support_material_extruder",
+            "support_material_interface_extruder",
+            "support_material_angle",
+            "support_material_enforce_layers",
+            "initial_layer_print_height",
+            "initial_layer_speed",
+            "internal_solid_infill_speed",
+            "top_surface_speed",
+            "support_interface_speed",
+            "outer_wall_speed",
+            "support_object_xy_distance",
+            "inherits_cummulative",
+            "compatible_printers_condition_cummulative",
+            "compatible_prints_condition_cummulative",
+            "cooling",
+            "timelapse_no_toolhead",
+            "timelapse_type",
+            "support_type",
+            "support_base_pattern",
+            "tree_support_wall_count",
+            "different_settings_to_system",
+            "overhang_fan_threshold",
+            "wall_infill_order",
+            "nozzle_volume_type",
+            "default_nozzle_volume_type",
+            "printer_extruder_variant",
+            "print_extruder_variant",
+            "filament_extruder_variant",
+            "extruder_variant_list",
+            "extruder_type",
+            "enable_power_loss_recovery",
+            "enable_arc_fitting",
+            "ensure_vertical_shell_thickness",
+            "rotate_solid_infill_direction",
+            "sparse_infill_anchor",
+            "sparse_infill_anchor_max",
+            "chamber_temperatures",
+            "thumbnail_size",
+            "top_one_wall_type",
+            "initial_layer_flow_ratio",
+            "ironing_direction",
+            "ironing_angle",
+            "counterbole_hole_bridging",
+            "draft_shield",
+            "sparse_infill_pattern",
+            "top_surface_pattern",
+            "bottom_surface_pattern",
+            "internal_solid_infill_pattern",
+            "ironing_pattern",
+            "support_ironing_pattern",
+            "filament_map_mode",
+            "filament_type",
+            "prime_tower_rib_wall",
+            "prime_tower_extra_rib_length",
+            "prime_tower_rib_width",
+            "prime_tower_fillet_wall",
+            "extruder_clearance_max_radius",
+            "machine_switch_extruder_time",
+            "wall_direction",
+            "is_ixex",
+            "ixex_carriage_width_x",
+            "ixex_carriage_width_y",
+            "ixex_primary_col",
+            "ixex_tool_layout",
+            "ixex_",
+            "ixex",
+            "acceleration",
+            "scale",
+            "rotate",
+            "duplicate",
+            "duplicate_grid",
+            "bed_size",
+            "print_center",
+            "g0",
+            "wipe_tower_per_color_wipe",
+            "support_sharp_tails",
+            "max_volumetric_speed",
+            "max_print_speed",
+            "silent_mode",
+            "anisotropic_surfaces",
+            "belt_slice_rotation_global",
+            "preslice_remap_x",
+            "first_layer_plane_thickness",
+            "z_hop_type",
+            "nonexistent_key_xyzzy",
+            "",
+        ] {
+            keys.push(k.to_string());
+        }
+        let values = [
+            "",
+            "0",
+            "1",
+            "2",
+            "-1",
+            "true",
+            "TRUE",
+            "false",
+            "False",
+            "none",
+            "auto",
+            "normal",
+            "tree",
+            "hybrid(auto)",
+            "limited",
+            "zig-zag",
+            "5%",
+            "50%",
+            "Auto",
+            "SuperTack Plate",
+            "inner wall/outer wall/infill",
+            "outer wall/inner wall/infill",
+            "inner-outer-inner wall/infill",
+            "infill/inner wall/outer wall",
+            "something else",
+            "Normal;Big Traffic",
+            "DirectDrive",
+            "\"ASA-Aero\";\"PLA\"",
+            "\"PLA\"",
+            "-30",
+            "enable_wipe_tower;cooling;acceleration",
+            "\"enable_wipe_tower\";\"wall_infill_order\"",
+        ];
+
+        let registry = &print_config_def().def.options;
+        let mut checked = 0usize;
+        let mut shortfall = 0usize;
+        let mut mismatches: Vec<String> = Vec::new();
+        for k in &keys {
+            for v in values {
+                let o = ora::oracle_handle_legacy(k, v);
+                let mut mk = k.clone();
+                let mut mv = v.to_string();
+                PrintConfigDef::handle_legacy(&mut mk, &mut mv);
+                if !o.opt_key.is_empty() && !registry.contains_key(o.opt_key.as_str()) {
+                    // The oracle kept a key this registry has not transcribed yet: the two
+                    // sides must differ here, by the vendored body's own final `has()` check.
+                    shortfall += 1;
+                    continue;
+                }
+                checked += 1;
+                if mk != o.opt_key || mv != o.value {
+                    mismatches.push(format!(
+                        "key={k:?} value={v:?} -> mine=({mk:?},{mv:?}) oracle=({:?},{:?})",
+                        o.opt_key, o.value
+                    ));
+                }
+            }
+        }
+        println!(
+            "handle_legacy: {checked} case(s) held to exact equality, \
+             {shortfall} case(s) deferred to a key not yet transcribed"
+        );
+        assert!(
+            mismatches.is_empty(),
+            "handle_legacy divergences: {:#?}",
+            &mismatches[..mismatches.len().min(20)]
+        );
+    }
+
+    /// The `different_settings_to_system` branch's recursion and the two anonymous-namespace
+    /// helpers it is built on, against the oracle on the one input shape that exercises all
+    /// three at once.
+    #[test]
+    fn the_recursive_legacy_branch_renames_each_split_key() {
+        // The three keys that branch renames to, each present in the oracle's registry.
+        for renamed_to in [
+            "enable_prime_tower",
+            "slow_down_for_layer_cooling",
+            "wall_sequence",
+        ] {
+            assert!(
+                ora::oracle_option_info(renamed_to).found,
+                "{renamed_to} must be a registry key at the pin"
+            );
+        }
+        for (k, want) in [
+            ("enable_wipe_tower", "enable_prime_tower"),
+            ("cooling", "slow_down_for_layer_cooling"),
+            ("wall_infill_order", "wall_sequence"),
+        ] {
+            let o = ora::oracle_handle_legacy(k, "");
+            assert_eq!(o.opt_key, want, "the oracle's own rename of {k}");
+            let mut mk = k.to_string();
+            let mut mv = String::new();
+            PrintConfigDef::handle_legacy(&mut mk, &mut mv);
+            // Once `want` is transcribed this is the full equality; until then the ported
+            // chain's own rename is still checked, by asking the helpers directly.
+            if print_config_def().def.has(want) {
+                assert_eq!(mk, want, "the ported rename of {k}");
+            }
+        }
+        // `SplitStringAndRemoveDuplicateElement` and `ReplaceString` themselves.
+        let split = split_string_and_remove_duplicate_element("b;a;b;", ";");
+        assert_eq!(
+            split.iter().cloned().collect::<Vec<String>>(),
+            vec!["".to_string(), "a".to_string(), "b".to_string()],
+            "deduplicated and in the std::set's own bytewise order"
+        );
+        let mut s = "Normal Normal".to_string();
+        replace_string(&mut s, "Normal", "Standard");
+        assert_eq!(s, "Standard Standard");
+        let mut t = "aa".to_string();
+        replace_string(&mut t, "a", "aa");
+        assert_eq!(
+            t, "aaaa",
+            "advances past each replacement rather than rescanning"
+        );
+    }
+}
+
 // PORT STATUS
 // source: src/libslic3r/PrintConfig.cpp
 // source: src/libslic3r/PrintConfig.hpp

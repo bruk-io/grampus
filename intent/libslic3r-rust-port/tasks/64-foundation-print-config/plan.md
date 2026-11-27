@@ -293,8 +293,36 @@ delegates to `PrintConfigDef::handle_legacy`, so step 3 does not compile without
 - delivers: none.
 
 ### Step 7: wire the module in, only once steps 1-6 compile, hold no live `todo!()`/`unimplemented!()`, and the Step 1 test is fully green over all 881 keys
-- Add `mod print_config;` to `crates/slic3r-printconfig/src/lib.rs` at its alphabetical position.
-  Not added at all if any earlier step is short; see "Risks" below.
+- Add `mod print_config;` to `crates/slic3r-printconfig/src/lib.rs` at its alphabetical position
+  (`pub mod print_config;`, matching every sibling crate's own `lib.rs`).
+- **Corrected here: the `mod` line and the Step 1 proof test are two separate gates, not one.**
+  This step originally bundled them, and said the `mod` line is "not added at all if any earlier
+  step is short". That conflated the rule with its purpose. `docs/WORKFLOW.md`'s rule is **never
+  land a `mod` line over a live `todo!()`**, because a `mod`-reached `todo!()` derives
+  `not-started` and so hides in the burn-down. It says nothing about completeness, and
+  `derive_row_status` reads `drafted`, never `ported`, for a `mod`-reached module whose
+  `// PROOF:` marker is absent. So the two gates are:
+  - **The `mod` line** lands as soon as the module compiles with no live
+    `todo!()`/`unimplemented!()`. Landing it then is strictly better than withholding it: the
+    module and its in-module `#[cfg(test)]` oracle comparisons are compiled and run by
+    `cargo build --workspace`/`cargo test --workspace` and therefore by CI, so every figure this
+    task's pull request reports is reproducible from the tree instead of only from the session
+    that measured it. Withholding it leaves thousands of committed lines that no check in
+    `.asdlc/checks` ever compiles.
+  - **The `// PROOF: 3` test** (`crates/slic3r-printconfig/tests/print_config_proof.rs`,
+    asserting exact equality over all 881 keys) lands only when the table is complete, for the
+    reason "The proof design" above gives: a version narrowed to the rows that happen to be
+    finished is weakening the check, and committing the full one early is committing a failing
+    test. Until it lands the rows derive `drafted` and `./port/port-status` reports them in
+    `in-scope rows remaining`, which is the honest signal.
+  The in-module `#[cfg(test)]` tests are **not** that proof and carry no `// PROOF:` marker. They
+  assert only what is true of a partial table and stays true as it fills -- every transcribed key
+  exists in the oracle and agrees with it exactly; every key map the registry uses matches byte
+  for byte; `handle_legacy` agrees for every case whose surviving key the registry knows -- and
+  they were mutation-checked rather than assumed: changing one enum key name, one option default
+  and one legacy rename makes them fail, and changing one `def->max` is caught instead by
+  `port/port-status`'s `// PORT SRC:` line check, which is the complementary half (`min`, `max`,
+  `max_literal` and the GUI fields are not fields the shim exposes).
 - delivers: none.
 
 ## Risks
