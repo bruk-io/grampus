@@ -31,6 +31,9 @@
 
 use slic3r_point::point::Point;
 
+// PORT NOTE: gated out of the build until 77-foundation-voronoi-offset adds voronoi_utils.rs
+// and this crate's mod voronoi; line together (see the module doc above for the full reason).
+
 /// `VoronoiDiagram::IssueType` (`Voronoi.hpp:52-60`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueType {

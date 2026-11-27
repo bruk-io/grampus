@@ -3,7 +3,9 @@
 //! hand-designed before fan-out, as `docs/WORKFLOW.md` "Unit of work" states.
 //!
 //! **Only one instantiation of this header's machinery is reachable from in-scope code at all.**
-//! Measured with `grep -rn` over the whole of `vendor/OrcaSlicer/src/` (not just `libslic3r/`):
+//! Measured with `grep -rn` over the whole of `vendor/OrcaSlicer/` -- `src/` (not just
+//! `libslic3r/`), `tests/`, `sandboxes/` and `tools/`, the only directories that could plausibly
+//! name a libslic3r symbol:
 //! `BicubicInternal::LinearKernel<T>` and `BicubicInternal::CubicCatmulRomKernel<T>` (and the
 //! `Geometry::LinearKernel`/`Geometry::CubicCatmulRomKernel` aliases over them), `CubicKernelWrapper::interpolate`,
 //! and the two free functions `cubic_interpolate`/`bicubic_interpolate` (`:241-287`) have **zero**
@@ -72,15 +74,20 @@ pub const CUBIC_BSPLINE_KERNEL_SPAN: usize = 4;
 /// (`docs/PORTING.md`, "Float widths").
 pub fn cubic_bspline_kernel(x: f32) -> f32 {
     let x = x.abs();
-    // Every literal below is the structural value `0`, `1` or `2` from the kernel's own domain
-    // split (`:203,205,210,211`), spelled with an `f32` suffix and no decimal point so its
-    // normalised text lands in R16's exempt set rather than needing a marker for a value this
-    // exempt (`docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 8's spelling
-    // technique, applied to an exempt value).
-    if x >= 2f32 {
-        return 0f32;
+    // Every literal below is transcribed from a vendored line that spells it with a decimal
+    // point (`2.`, `0.0f`, `1.`), so each keeps that decimal spelling plus its own
+    // `// PORT SRC:` marker -- `docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 8
+    // forbids relying on the `0`/`1`/`2` exempt spelling (`2f32`, `1f32`, ...) "as a way to skip
+    // writing a marker for a value that *is* transcribed from a vendored line"; that licence is
+    // only for a value the vendored line itself spells as a bare integer (see
+    // `CircleSq::make_invalid` in `circle.rs` for that other case).
+    // PORT SRC: src/libslic3r/Geometry/Bicubic.hpp:203
+    if x >= 2. {
+        // PORT SRC: src/libslic3r/Geometry/Bicubic.hpp:204
+        return 0.0;
     }
-    if x <= 1f32 {
+    // PORT SRC: src/libslic3r/Geometry/Bicubic.hpp:205
+    if x <= 1. {
         let x2 = x * x;
         let x3 = x2 * x;
         return A10 + A11 * x + A12 * x2 + A13 * x3;
@@ -88,8 +95,10 @@ pub fn cubic_bspline_kernel(x: f32) -> f32 {
     // `assert(x > (FloatType)1. && x < (FloatType)2.);` (`:210`) -- compiled out of the oracle's
     // release build, ported as `debug_assert!`, never a live `panic!` (`docs/PORTING.md`, "Error
     // sets").
-    debug_assert!(x > 1f32 && x < 2f32);
-    let x = x - 1f32;
+    // PORT SRC: src/libslic3r/Geometry/Bicubic.hpp:210
+    debug_assert!(x > 1. && x < 2.);
+    // PORT SRC: src/libslic3r/Geometry/Bicubic.hpp:211
+    let x = x - 1.;
     let x2 = x * x;
     let x3 = x2 * x;
     A00 + A01 * x + A02 * x2 + A03 * x3

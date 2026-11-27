@@ -3,7 +3,9 @@
 //! `template-heavy: yes`; `Circle.cpp` is `template-heavy: no` but hand-designed alongside it in
 //! this same task because the two are one unit.
 //!
-//! **Scope, measured against the whole of `vendor/OrcaSlicer/src/`:**
+//! **Scope, measured against the whole of `vendor/OrcaSlicer/` -- `src/`, `tests/`,
+//! `sandboxes/` and `tools/`, the only directories that could plausibly name a libslic3r
+//! symbol:**
 //!
 //! - `circle_center<Vector>` (`:17-36`), `CircleSq<Vector>`/`Circle<Vector>` (`:40-93`) and
 //!   `smallest_enclosing_circle2_welzl`/`smallest_enclosing_circle_welzl` (`:111-154`) are ported
@@ -455,7 +457,12 @@ pub fn circle_center_taubin_newton_vec2d(input: &[Vec2d], cycles: usize) -> Vec2
     let c22 = c2 + c2;
     let c33 = c3 + c3 + c3;
 
-    let mut xnew = 0f64;
+    // `double xnew = 0.0;` (`:75`) -- decimal-spelled in the vendored line, so kept as `0.0`
+    // (not the shorter `0.`, whose normalised text is a prefix of the vendored line's `0.0`
+    // and so fails the marker's own non-digit/non-dot boundary check) rather than the
+    // exempt-suffix form (`docs/PORTING.md`, "Decisions recorded on 2026-11-26", decision 8).
+    // PORT SRC: src/libslic3r/Geometry/Circle.cpp:75
+    let mut xnew = 0.0;
     // PORT SRC: src/libslic3r/Geometry/Circle.cpp:76
     let mut ynew = 1e20f64;
 
@@ -483,8 +490,12 @@ pub fn circle_center_taubin_newton_vec2d(input: &[Vec2d], cycles: usize) -> Vec2
         // PORT SRC: src/libslic3r/Geometry/Circle.cpp:90
         let converged = ((xnew - xold) / xnew).abs() < 1e-12;
 
+        // `if (xnew < 0)` (`:92`) -- bare `0`, exempt as-is.
         if xnew < 0f64 {
-            xnew = 0f64;
+            // `xnew = 0.0;` (`:94`) -- decimal-spelled, unlike the comparison above; kept as
+            // `0.0` plus its own marker (see the `xnew` initialiser's identical note above).
+            // PORT SRC: src/libslic3r/Geometry/Circle.cpp:94
+            xnew = 0.0;
         }
 
         if converged {
@@ -497,9 +508,13 @@ pub fn circle_center_taubin_newton_vec2d(input: &[Vec2d], cycles: usize) -> Vec2
         mxz * (myy - xnew) - myz * mxy,
         myz * (mxx - xnew) - mxz * mxy,
     );
-    // `center /= (DET * 2.);` (`:102`) -- component-wise division by `DET * 2`; `2f64` (no
-    // decimal point) so the exempt value `2` normalises into R16's exempt set.
-    let two_det = det * 2f64;
+    // `center /= (DET * 2.);` (`:102`) -- component-wise division by `DET * 2.`. The vendored
+    // line spells this `2.` (a decimal), not a bare integer, so it keeps that spelling plus a
+    // marker rather than the exempt-suffix form (`docs/PORTING.md`, "Decisions recorded on
+    // 2026-11-26", decision 8; contrast `circle_center`'s `2f64 * d` above, whose own cited line,
+    // `Circle.hpp:34`, spells its `2` bare).
+    // PORT SRC: src/libslic3r/Geometry/Circle.cpp:102
+    let two_det = det * 2.;
     let center = Vec2::new(unscaled_center.x() / two_det, unscaled_center.y() / two_det);
     center + centroid
 }
@@ -524,7 +539,11 @@ pub fn circle_taubin_newton(input: &[Vec2d], cycles: usize) -> Circled {
         return Circled::make_invalid();
     }
     let center = circle_center_taubin_newton_vec2d(input, cycles);
-    let mut radius = 0f64;
+    // `std::accumulate(input.begin(), input.end(), 0., ...)` (`:113`) -- the accumulator's
+    // initial value is decimal-spelled in the vendored line, kept as `0.` plus its own marker
+    // rather than the exempt-suffix form (same reason as the `xnew` sites above).
+    // PORT SRC: src/libslic3r/Geometry/Circle.cpp:113
+    let mut radius = 0.;
     for &pt in input {
         let d = pt - center;
         radius += (d.x() * d.x() + d.y() * d.y()).sqrt();
