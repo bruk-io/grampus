@@ -28,7 +28,10 @@
 //! from that route: a `#[cfg(test)]` proof needs a `mod` line, and
 //! `port/port-status:863-881`'s `derive_row_status` then returns `ported` -- which for a
 //! 1,646-line `.cpp` with 27 `// TODO(port):` markers still standing here, including all seven
-//! public entry points, would be a false manifest status cell. That disposition is
+//! public entry points, would be a false manifest status cell. That last step is this unit's
+//! reading of `derive_row_status`'s own text, by the same rule the probe measured on
+//! [`crate::voronoi_utils`]'s two rows, not a separate measurement on these two: the probe left
+//! this module `mod`-reached and proof-less, where it derives `drafted`. That disposition is
 //! `docs/PORTING.md` decisions 9 and 10's call, not a porter's. Per `docs/WORKFLOW.md`'s own
 //! rule, this module stays an honest Phase A draft, unreached by any `mod` line, and does not use
 //! `todo!()`/`unimplemented!()`.
