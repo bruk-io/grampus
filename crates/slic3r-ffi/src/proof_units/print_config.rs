@@ -148,6 +148,18 @@ mod ffi {
         /// One custom G-code's placeholder list, in that `std::vector`'s own
         /// braced-initialiser order rather than sorted.
         fn oracle_custom_gcode_placeholders(key: &str) -> Vec<String>;
+
+        /// One `StaticPrintConfig`-derived class's `defaults().keys_ref()`
+        /// (`PrintConfig.hpp:1147`), by class name -- the list `StaticCache::finalize` filled
+        /// by walking the registry in order and keeping each key the class has a field for.
+        /// Empty for an unknown name, which the port's own proof asserts against.
+        fn oracle_static_class_keys(which: &str) -> Vec<String>;
+
+        /// The same class's defaults, each key's `optptr(key)->serialize()` in the same order.
+        /// This is what checks the cache wiring rather than only the field list: a field of the
+        /// wrong option type, or one whose name does not match the registry row it should
+        /// carry, serializes differently from the default `finalize` assigned it.
+        fn oracle_static_class_defaults(which: &str) -> Vec<String>;
     }
 }
 
@@ -155,6 +167,6 @@ pub use ffi::{
     oracle_custom_gcode_placeholder_keys, oracle_custom_gcode_placeholders,
     oracle_extruder_option_keys, oracle_extruder_retract_keys, oracle_filament_option_keys,
     oracle_filament_retract_keys, oracle_handle_legacy, oracle_option_info, oracle_option_keys,
-    oracle_other_def_keys, oracle_other_def_option_info, OracleEnumKeyValue, OracleLegacyResult,
-    OracleOptionInfo,
+    oracle_other_def_keys, oracle_other_def_option_info, oracle_static_class_defaults,
+    oracle_static_class_keys, OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
 };

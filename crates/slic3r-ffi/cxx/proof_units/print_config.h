@@ -70,6 +70,25 @@ OracleOptionInfo oracle_other_def_option_info(rust::Str which, rust::Str key);
 rust::Vec<rust::String> oracle_custom_gcode_placeholder_keys();
 rust::Vec<rust::String> oracle_custom_gcode_placeholders(rust::Str key);
 
+// The 11 `StaticPrintConfig`-derived option classes (`PrintConfig.hpp:1282-2395`), by class
+// name. Each is read off `CLASS_NAME::defaults()` -- the object
+// `print_config_static_initializer()` built before `main` from `print_config_def`
+// (`PrintConfig.cpp:12689-12695`).
+//
+// `oracle_static_class_keys` is `defaults().keys_ref()`, the list `StaticCache::finalize` filled
+// by walking the registry in order and keeping each key the class has a field for
+// (`PrintConfig.hpp:1105-1129`) -- so it is both the class's field set and the order the class
+// reports it in.
+//
+// `oracle_static_class_defaults` is each of those keys' `optptr(key)->serialize()`, in the same
+// order. That is what exercises the wiring rather than only the field list: a field declared
+// with the wrong option type, or one whose name does not match the registry row it is meant to
+// carry, serializes differently from the registry default `finalize` assigned it.
+//
+// An unknown class name yields empty lists in both, which the port's own proof asserts against.
+rust::Vec<rust::String> oracle_static_class_keys(rust::Str which);
+rust::Vec<rust::String> oracle_static_class_defaults(rust::Str which);
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

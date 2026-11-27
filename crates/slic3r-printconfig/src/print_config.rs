@@ -14370,7 +14370,37 @@ impl<'a, T: 'static> StaticCache<'a, T> {
                 if default_value.option_type() == ConfigOptionType::Enums {
                     // "Enum list defaults are built without a keys map; set() adopts the one
                     // create_default_option() adds." (`PrintConfig.hpp:1121-1124`).
-                    if let Ok(default_option) = def.create_default_option() {
+                    //
+                    // TODO(port): src/libslic3r/Config.cpp:329 -- the key map the comment above
+                    // relies on is attached by the callee, and `slic3r-config` does not attach
+                    // it. Its `ConfigOptionDef::create_default_option`
+                    // (`crates/slic3r-config/src/config.rs:6965-6970`) cites
+                    // `Config.cpp:322-342` but ports only the plain
+                    // `return this->default_value->clone()` arm (`:339`): the vendored
+                    // `coEnums` arm (`:329-337`), which clones and then assigns
+                    // `enum_keys_map` to the copy, and the `coEnum` arm (`:326-327`) are both
+                    // missing. Without that assignment the copy carries no key map,
+                    // `ConfigOptionEnumsGenericTempl::set` has none to adopt, and the field
+                    // serializes to the empty string instead of the value's name -- measured:
+                    // 17 of the 11 classes' defaults, `extruder_type`, `nozzle_type`,
+                    // `nozzle_volume_type`, `overhang_fan_threshold`, `retract_lift_enforce`
+                    // and `z_hop_types` across `GCodeConfig`, `PrintConfig` and
+                    // `FullPrintConfig`. The one assignment the vendored arm makes is
+                    // reproduced here so this unit's `finalize` leaves the fields the oracle's
+                    // leaves; adding the two arms is `slic3r-config`'s module to do, and this
+                    // task's pull request body names it as a finding against it.
+                    if let Ok(mut default_option) = def.create_default_option() {
+                        if let Some(enums) = default_option
+                            .as_any_mut()
+                            .downcast_mut::<ConfigOptionEnumsGeneric>()
+                        {
+                            enums.keys_map = def.enum_keys_map;
+                        } else if let Some(enums) = default_option
+                            .as_any_mut()
+                            .downcast_mut::<ConfigOptionEnumsGenericNullable>(
+                        ) {
+                            enums.keys_map = def.enum_keys_map;
+                        }
                         let _ = opt.set(default_option.as_ref());
                     }
                 } else {
@@ -14452,6 +14482,1474 @@ pub trait StaticPrintConfig: slic3r_config::config::StaticConfig {
         PrintConfigDef::handle_legacy(opt_key, value);
     }
 }
+
+// --------------------------------------------------------------------------------------------
+// Step 4: the 11 `StaticPrintConfig`-derived option classes (`PrintConfig.hpp:1282-2395`).
+//
+// The vendored source declares each with `PRINT_CONFIG_CLASS_DEFINE(NAME, SEQ)` or
+// `PRINT_CONFIG_CLASS_DERIVED_DEFINE[0](NAME, PARENTS[, SEQ])` -- Boost.Preprocessor macros that
+// expand one `((Type, field))` sequence into the typed members, into `for_each_option_pair`, and
+// into `initialize`, `hash`, `operator==`, `operator<` and `apply_to` built on that visitor
+// (`PrintConfig.hpp:1137-1281`, `PrintConfig.cpp:12699-12707`). They are written once as macros,
+// so they are ported once as macros, the same way `CONFIG_OPTION_ENUM_DEFINE_STATIC_MAPS` is.
+// The three vendored forms become three macros here, for the same reason there are three there.
+// --------------------------------------------------------------------------------------------
+
+/// `boost::hash_combine`'s role in `PRINT_CONFIG_CLASS_COMMON_BODY::hash()`
+/// (`PrintConfig.hpp:1186-1191`): fold each option's own hash into a running seed.
+///
+/// PORT NOTE: this is **not** `boost::hash_combine`'s algorithm, and the resulting value is not
+/// comparable with the oracle's. It cannot be: `slic3r-config` already does not reproduce
+/// `boost::hash_combine` in the leaf `ConfigOption::hash_value` implementations it ports
+/// (every one of them feeds the value through `std::collections::hash_map::DefaultHasher`,
+/// `crates/slic3r-config/src/config.rs:1604` and the rest), so the inputs to any combiner here
+/// already differ from the oracle's. That is a settled property of task `59-foundation-config`'s
+/// module, not a choice this unit makes or can undo. The same `DefaultHasher` idiom is used here
+/// so the whole config hierarchy hashes one way rather than two, and nothing in this unit's
+/// proof reads a hash: the registry proof compares `ConfigOptionDef` fields, never hashes.
+fn combine_option_hashes(hashes: &[u64]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for value in hashes {
+        value.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// `PRINT_CONFIG_CLASS_DEFINE(CLASS_NAME, PARAMETER_DEFINITION_SEQ)`
+/// (`PrintConfig.hpp:1213-1240`), with the `STATIC_PRINT_CONFIG_CACHE` and
+/// `PRINT_CONFIG_CLASS_COMMON_BODY` expansions it pulls in (`:1137-1211`) and the out-of-line
+/// `apply_to` the `.cpp` defines for it (`PrintConfig.cpp:12699-12707`).
+///
+/// One `((Type, field))` element of the vendored sequence is one `(Type, field)` pair here, in
+/// the vendored declaration order.
+///
+/// FIDELITY(port): that declaration order is transcribed rather than sorted, and it reaches
+/// output twice. `for_each_option_pair` walks it in order and stops at the first `f` returning
+/// false, which is what makes `hash()`'s fold order and `operator==`'s short-circuit position
+/// what they are; and `initialize` fills `StaticCacheBase` by walking it, though
+/// `StaticCache::finalize` then re-derives `m_keys` in *registry* order, so `keys()` does not
+/// depend on it.
+macro_rules! print_config_class_define {
+    ($name:ident, $doc:expr, [ $( ($ty:ty, $field:ident) ),* $(,)? ]) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone, Default)]
+        pub struct $name {
+            $( pub $field: $ty, )*
+        }
+
+        impl $name {
+            /// `initialize(StaticCacheBase &cache, const char *base_ptr)`
+            /// (`PrintConfig.hpp:1209-1211`): one `cache.opt_add` per option, in declaration
+            /// order. There is no `base_ptr` because there is no byte offset -- see
+            /// [`OptionAccessor`] for why the cache maps a name to a function pair instead.
+            fn initialize(cache: &mut StaticCacheBase<Self>) {
+                $(
+                    cache.opt_add(
+                        stringify!($field),
+                        OptionAccessor {
+                            get: |s: &Self| {
+                                &s.$field as &dyn slic3r_config::config::ConfigOption
+                            },
+                            get_mut: |s: &mut Self| {
+                                &mut s.$field as &mut dyn slic3r_config::config::ConfigOption
+                            },
+                        },
+                    );
+                )*
+            }
+
+            /// `s_cache_##CLASS_NAME` with `initialize_cache()` (`PrintConfig.hpp:1149-1161`),
+            /// which `print_config_static_initializer()` runs before `main`
+            /// (`PrintConfig.cpp:12689-12695`).
+            ///
+            /// One cache per thread rather than one per process, for the reason
+            /// [`print_config_def`] records in full: `slic3r-config` declares `ConfigOption`
+            /// with no `Send`/`Sync` bound, so neither this cache's `m_defaults` nor the
+            /// registry it finalizes against can live in a `static`. Every copy is built by the
+            /// same code from the same registry, so the content a caller observes is identical.
+            pub fn cache() -> &'static StaticCache<'static, Self> {
+                thread_local! {
+                    static CACHE: &'static StaticCache<'static, $name> = {
+                        let mut base = StaticCacheBase::default();
+                        $name::initialize(&mut base);
+                        let defaults: &'static mut $name = Box::leak(Box::new($name::default()));
+                        Box::leak(Box::new(StaticCache::finalize(
+                            base,
+                            defaults,
+                            &print_config_def().def,
+                        )))
+                    };
+                }
+                CACHE.with(|c| *c)
+            }
+
+            /// `static const CLASS_NAME& defaults()` (`PrintConfig.hpp:1148`).
+            pub fn defaults() -> &'static Self {
+                let cache = Self::cache();
+                debug_assert!(cache.initialized());
+                cache.defaults()
+            }
+
+            /// `CLASS_NAME()` (`PrintConfig.hpp:1167`): "Public default constructor will
+            /// initialize the key/option cache and the default object copy if needed", whose
+            /// body is `*this = s_cache_##CLASS_NAME.defaults()`.
+            pub fn new() -> Self {
+                Self::defaults().clone()
+            }
+
+            /// `hash()` (`PrintConfig.hpp:1186-1191`).
+            pub fn hash_value(&self) -> u64 {
+                combine_option_hashes(&[
+                    $( slic3r_config::config::ConfigOption::hash_value(&self.$field), )*
+                ])
+            }
+        }
+
+        impl PartialEq for $name {
+            /// `operator==` (`PrintConfig.hpp:1192-1197`): every option compared with its
+            /// counterpart in declaration order, stopping at the first inequality.
+            fn eq(&self, rhs: &Self) -> bool {
+                $(
+                    if !matches!(
+                        slic3r_config::config::ConfigOption::eq_dyn(&self.$field, &rhs.$field),
+                        Ok(true)
+                    ) {
+                        return false;
+                    }
+                )*
+                true
+            }
+        }
+
+        impl slic3r_config::config::ConfigOptionResolver for $name {
+            /// `const ConfigOption* optptr(const t_config_option_key&) const override`
+            /// (`PrintConfig.hpp:1140-1141`).
+            fn optptr(&self, opt_key: &str) -> Option<&dyn slic3r_config::config::ConfigOption> {
+                Self::cache().optptr(opt_key, self)
+            }
+        }
+
+        impl slic3r_config::config::ConfigBase for $name {
+            /// `def()` (`PrintConfig.hpp:1047`), inherited from `StaticPrintConfig`.
+            fn def(&self) -> Option<&ConfigDef<'_>> {
+                Some(<Self as StaticPrintConfig>::static_print_config_def())
+            }
+
+            /// `ConfigOption* optptr(const t_config_option_key&, bool create)`
+            /// (`PrintConfig.hpp:1143-1144`). The vendored body ignores `create`: a static
+            /// config has no option to create.
+            fn optptr_mut(
+                &mut self,
+                opt_key: &str,
+                _create: bool,
+            ) -> Result<
+                Option<&mut (dyn slic3r_config::config::ConfigOption + '_)>,
+                slic3r_config::config::ConfigError,
+            > {
+                Ok(Self::cache().optptr_mut(opt_key, self))
+            }
+
+            /// `keys()` (`PrintConfig.hpp:1146`): `s_cache_##CLASS_NAME.keys()`, which
+            /// `StaticCache::finalize` filled in registry order.
+            fn keys(&self) -> Vec<String> {
+                Self::cache().keys().clone()
+            }
+
+            /// `apply_to(ConfigBase &target)` (`PrintConfig.cpp:12700-12707`): the vendored
+            /// body `dynamic_cast`s `target` to this class, returns false if that fails, and
+            /// otherwise copies option by option -- "the same set() calls
+            /// ConfigBase::apply_only() makes, without looking every key up by name", as the
+            /// comment above it says (`:12698`).
+            ///
+            /// TODO(port): src/libslic3r/PrintConfig.cpp:12702 -- the `dynamic_cast` guard is
+            /// not reproduced, because `slic3r_config::config::ConfigBase` exposes no downcast
+            /// (it declares `def`, `optptr_mut` and `keys` and no `as_any`, unlike
+            /// `ConfigOption`, which has both `as_any` and `as_any_mut`). This body is instead
+            /// the by-name equivalent the vendored comment itself names, so a same-type target
+            /// -- every real caller -- gets the identical result; a target of a *different*
+            /// type that happens to carry these keys is accepted here and refused at the pin.
+            /// Widening that trait is `slic3r-config`'s module to change, not this one's, and
+            /// it is named in this task's pull request body as a finding against it.
+            fn apply_to(&self, target: &mut dyn slic3r_config::config::ConfigBase) -> bool {
+                $(
+                    match target.optptr_mut(stringify!($field), false) {
+                        Ok(Some(opt)) => {
+                            if opt.set(&self.$field).is_err() {
+                                return false;
+                            }
+                        }
+                        _ => return false,
+                    }
+                )*
+                true
+            }
+
+            /// `handle_legacy()` (`PrintConfig.hpp:1056-1057`), inherited from
+            /// `StaticPrintConfig`.
+            fn handle_legacy(&self, opt_key: &mut String, value: &mut String) {
+                <Self as StaticPrintConfig>::static_print_config_handle_legacy(opt_key, value);
+            }
+        }
+
+        impl slic3r_config::config::StaticConfig for $name {}
+
+        impl StaticPrintConfig for $name {
+            /// `keys_ref()` (`PrintConfig.hpp:1147`).
+            fn keys_ref(&self) -> &Vec<String> {
+                Self::cache().keys()
+            }
+        }
+    };
+}
+
+/// `PRINT_CONFIG_CLASS_DERIVED_DEFINE(CLASS_NAME, CLASSES_PARENTS_TUPLE,
+/// PARAMETER_DEFINITION_SEQ)` (`PrintConfig.hpp:1277-1281`, through
+/// `PRINT_CONFIG_CLASS_DERIVED_DEFINE1`, `:1242-1272`): a class inheriting several of the
+/// classes above and adding options of its own.
+///
+/// **How the parents are carried, and the one place this differs in shape from the vendored
+/// class.** C++ multiple inheritance makes a parent's options members of the derived object, and
+/// `PRINT_CONFIG_CLASS_DERIVED_INITCACHE` (`:1189`) registers them into the *derived* cache by
+/// calling each parent's `initialize` with the derived object's own base pointer -- so one
+/// offset map covers the parents' options and the derived one's alike. Rust has no inheritance,
+/// so each parent is a field, in the vendored base-class order; and an offset map is not what
+/// the ported cache holds (see [`OptionAccessor`]: it maps a name to a function pair, because a
+/// `&dyn ConfigOption` is a fat pointer no byte offset alone can produce). A function pair
+/// reaching a parent's field through the parent field would have to be built by composing the
+/// parent's own accessor with the projection into that field, which is a closure capturing the
+/// projection and therefore not an `fn` pointer -- so the parents' options cannot be folded into
+/// one cache without either duplicating all 11 field lists at the derived invocations (1,426
+/// further transcribed names the vendored source does not have) or giving up the `fn` pair.
+///
+/// Instead `optptr` consults this class's own cache and then each parent in declaration order,
+/// which is the lookup C++ performs through the single map, and `keys()` is
+/// `StaticConfig::keys()` -- the registry walked in order, keeping each key some field resolves.
+/// That is the same computation `StaticCache::finalize` performs to fill `m_keys`
+/// (`PrintConfig.hpp:1105-1129`), run against the composed lookup rather than against one map,
+/// so `keys()` and `keys_ref()` return the same list in the same order as the vendored class's.
+/// `optptr`, `keys`, `keys_ref` and `defaults` are what this class's surface is observed
+/// through, and each is held to the oracle's by this unit's proof.
+macro_rules! print_config_class_derived_define {
+    (
+        $name:ident, $doc:expr,
+        [ $( ($pfield:ident, $pty:ty) ),+ $(,)? ],
+        [ $( ($ty:ty, $field:ident) ),+ $(,)? ]
+    ) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone, Default)]
+        pub struct $name {
+            $( pub $pfield: $pty, )+
+            $( pub $field: $ty, )+
+        }
+
+        impl $name {
+            /// The own-options half of `initialize` (`PrintConfig.hpp:1188-1191`); the parents'
+            /// half is their own `initialize`, reached through `optptr` below.
+            fn initialize(cache: &mut StaticCacheBase<Self>) {
+                $(
+                    cache.opt_add(
+                        stringify!($field),
+                        OptionAccessor {
+                            get: |s: &Self| {
+                                &s.$field as &dyn slic3r_config::config::ConfigOption
+                            },
+                            get_mut: |s: &mut Self| {
+                                &mut s.$field as &mut dyn slic3r_config::config::ConfigOption
+                            },
+                        },
+                    );
+                )*
+            }
+
+            /// This class's own cache, over its own options only.
+            pub fn cache() -> &'static StaticCache<'static, Self> {
+                thread_local! {
+                    static CACHE: &'static StaticCache<'static, $name> = {
+                        let mut base = StaticCacheBase::default();
+                        $name::initialize(&mut base);
+                        let defaults: &'static mut $name = Box::leak(Box::new($name::default()));
+                        Box::leak(Box::new(StaticCache::finalize(
+                            base,
+                            defaults,
+                            &print_config_def().def,
+                        )))
+                    };
+                }
+                CACHE.with(|c| *c)
+            }
+
+            /// `static const CLASS_NAME& defaults()` (`PrintConfig.hpp:1148`).
+            pub fn defaults() -> &'static Self {
+                thread_local! {
+                    static DEFAULTS: &'static $name = Box::leak(Box::new($name::build_defaults()));
+                }
+                DEFAULTS.with(|d| *d)
+            }
+
+            /// `CLASS_NAME() : parents(0)... { *this = s_cache.defaults(); }`
+            /// (`PrintConfig.hpp:1245`). Each parent is default-constructed, which copies that
+            /// parent's own cache defaults, and this class's own options are copied from its own
+            /// cache's -- both filled from the same registry row, so the object is the one the
+            /// vendored constructor produces.
+            fn build_defaults() -> Self {
+                let own = Self::cache().defaults();
+                $name {
+                    $( $pfield: <$pty>::new(), )+
+                    $( $field: own.$field.clone(), )+
+                }
+            }
+
+            /// `CLASS_NAME()` (`PrintConfig.hpp:1245`).
+            pub fn new() -> Self {
+                Self::defaults().clone()
+            }
+
+            /// `hash()` (`PrintConfig.hpp:1247-1254`): each parent's own `hash()` folded in, in
+            /// base-class order, then this class's own options in declaration order.
+            ///
+            /// FIDELITY(port): that fixed fold order is the vendored one and reaches output --
+            /// a different order gives a different value.
+            pub fn hash_value(&self) -> u64 {
+                let mut hashes: Vec<u64> = Vec::new();
+                $( hashes.push(self.$pfield.hash_value()); )+
+                $( hashes.push(slic3r_config::config::ConfigOption::hash_value(&self.$field)); )+
+                combine_option_hashes(&hashes)
+            }
+        }
+
+        impl PartialEq for $name {
+            /// `operator==` (`PrintConfig.hpp:1255-1261`): each parent compared first, in
+            /// base-class order, then this class's own options.
+            fn eq(&self, rhs: &Self) -> bool {
+                $( if self.$pfield != rhs.$pfield { return false; } )+
+                $(
+                    if !matches!(
+                        slic3r_config::config::ConfigOption::eq_dyn(&self.$field, &rhs.$field),
+                        Ok(true)
+                    ) {
+                        return false;
+                    }
+                )+
+                true
+            }
+        }
+
+        impl slic3r_config::config::ConfigOptionResolver for $name {
+            /// The derived `optptr` (`PrintConfig.hpp:1140-1141`, through the one offset map):
+            /// this class's own options, then each parent in base-class order.
+            fn optptr(&self, opt_key: &str) -> Option<&dyn slic3r_config::config::ConfigOption> {
+                if let Some(opt) = Self::cache().optptr(opt_key, self) {
+                    return Some(opt);
+                }
+                $(
+                    if let Some(opt) =
+                        slic3r_config::config::ConfigOptionResolver::optptr(&self.$pfield, opt_key)
+                    {
+                        return Some(opt);
+                    }
+                )+
+                None
+            }
+        }
+
+        impl slic3r_config::config::ConfigBase for $name {
+            /// `def()` (`PrintConfig.hpp:1176`), from `STATIC_PRINT_CONFIG_CACHE_DERIVED`.
+            fn def(&self) -> Option<&ConfigDef<'_>> {
+                Some(<Self as StaticPrintConfig>::static_print_config_def())
+            }
+
+            fn optptr_mut(
+                &mut self,
+                opt_key: &str,
+                create: bool,
+            ) -> Result<
+                Option<&mut (dyn slic3r_config::config::ConfigOption + '_)>,
+                slic3r_config::config::ConfigError,
+            > {
+                if Self::cache().optptr(opt_key, self).is_some() {
+                    return Ok(Self::cache().optptr_mut(opt_key, self));
+                }
+                $(
+                    if slic3r_config::config::ConfigOptionResolver::optptr(&self.$pfield, opt_key)
+                        .is_some()
+                    {
+                        return slic3r_config::config::ConfigBase::optptr_mut(
+                            &mut self.$pfield,
+                            opt_key,
+                            create,
+                        );
+                    }
+                )+
+                Ok(None)
+            }
+
+            /// `keys()`: the registry walked in order, keeping each key a field resolves --
+            /// `StaticCache::finalize`'s own computation (`PrintConfig.hpp:1105-1129`) against
+            /// the composed lookup. See this macro's doc comment.
+            fn keys(&self) -> Vec<String> {
+                slic3r_config::config::StaticConfig::static_keys(self)
+            }
+
+            /// `bool apply_to(ConfigBase&) const override { return false; }`
+            /// (`PrintConfig.hpp:1248`): "Its parents each apply themselves to a target member
+            /// by member, so this one keeps the lookup by name." The vendored derived class
+            /// really does return false unconditionally -- it is not given a
+            /// `PRINT_CONFIG_APPLY_TO_DEFINITION` (`PrintConfig.cpp:12708-12709` lists only the
+            /// eight non-derived classes), so this is the vendored behaviour, not a gap.
+            fn apply_to(&self, _target: &mut dyn slic3r_config::config::ConfigBase) -> bool {
+                false
+            }
+
+            /// `handle_legacy()` (`PrintConfig.hpp:1178-1179`), from
+            /// `STATIC_PRINT_CONFIG_CACHE_DERIVED`.
+            fn handle_legacy(&self, opt_key: &mut String, value: &mut String) {
+                <Self as StaticPrintConfig>::static_print_config_handle_legacy(opt_key, value);
+            }
+        }
+
+        impl slic3r_config::config::StaticConfig for $name {}
+
+        impl StaticPrintConfig for $name {
+            /// `keys_ref()` (`PrintConfig.hpp:1147`). The vendored one hands out a reference
+            /// into the cache's `m_keys`; this class has no single map holding every key, so the
+            /// list is built once per thread and handed out by reference, which is the same
+            /// stable reference a caller observes.
+            fn keys_ref(&self) -> &Vec<String> {
+                thread_local! {
+                    static KEYS: &'static Vec<String> =
+                        Box::leak(Box::new(slic3r_config::config::ConfigBase::keys(
+                            &$name::new(),
+                        )));
+                }
+                KEYS.with(|k| *k)
+            }
+        }
+    };
+}
+
+/// `PRINT_CONFIG_CLASS_DERIVED_DEFINE0(CLASS_NAME, CLASSES_PARENTS_TUPLE)`
+/// (`PrintConfig.hpp:1274-1275`): the derived form that adds no options of its own, so it has no
+/// cache of its own either -- every key it answers comes from a parent. The vendored pair of
+/// macros exists for the same reason this pair does: `BOOST_PP_SEQ_FOR_EACH` over an empty
+/// sequence is not the same expansion as over a non-empty one.
+macro_rules! print_config_class_derived_define0 {
+    ($name:ident, $doc:expr, [ $( ($pfield:ident, $pty:ty) ),+ $(,)? ]) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone, Default)]
+        pub struct $name {
+            $( pub $pfield: $pty, )+
+        }
+
+        impl $name {
+            /// `static const CLASS_NAME& defaults()` (`PrintConfig.hpp:1148`).
+            pub fn defaults() -> &'static Self {
+                thread_local! {
+                    static DEFAULTS: &'static $name = Box::leak(Box::new($name {
+                        $( $pfield: <$pty>::new(), )+
+                    }));
+                }
+                DEFAULTS.with(|d| *d)
+            }
+
+            /// `CLASS_NAME() : parents(0)...` (`PrintConfig.hpp:1245`).
+            pub fn new() -> Self {
+                Self::defaults().clone()
+            }
+
+            /// `hash()` (`PrintConfig.hpp:1247-1254`), over the parents in base-class order.
+            ///
+            /// FIDELITY(port): the fixed fold order is the vendored base-class order and
+            /// reaches output.
+            pub fn hash_value(&self) -> u64 {
+                let mut hashes: Vec<u64> = Vec::new();
+                $( hashes.push(self.$pfield.hash_value()); )+
+                combine_option_hashes(&hashes)
+            }
+        }
+
+        impl PartialEq for $name {
+            /// `operator==` (`PrintConfig.hpp:1255-1261`), over the parents in base-class order.
+            fn eq(&self, rhs: &Self) -> bool {
+                $( if self.$pfield != rhs.$pfield { return false; } )+
+                true
+            }
+        }
+
+        impl slic3r_config::config::ConfigOptionResolver for $name {
+            fn optptr(&self, opt_key: &str) -> Option<&dyn slic3r_config::config::ConfigOption> {
+                $(
+                    if let Some(opt) =
+                        slic3r_config::config::ConfigOptionResolver::optptr(&self.$pfield, opt_key)
+                    {
+                        return Some(opt);
+                    }
+                )+
+                None
+            }
+        }
+
+        impl slic3r_config::config::ConfigBase for $name {
+            fn def(&self) -> Option<&ConfigDef<'_>> {
+                Some(<Self as StaticPrintConfig>::static_print_config_def())
+            }
+
+            fn optptr_mut(
+                &mut self,
+                opt_key: &str,
+                create: bool,
+            ) -> Result<
+                Option<&mut (dyn slic3r_config::config::ConfigOption + '_)>,
+                slic3r_config::config::ConfigError,
+            > {
+                $(
+                    if slic3r_config::config::ConfigOptionResolver::optptr(&self.$pfield, opt_key)
+                        .is_some()
+                    {
+                        return slic3r_config::config::ConfigBase::optptr_mut(
+                            &mut self.$pfield,
+                            opt_key,
+                            create,
+                        );
+                    }
+                )+
+                Ok(None)
+            }
+
+            fn keys(&self) -> Vec<String> {
+                slic3r_config::config::StaticConfig::static_keys(self)
+            }
+
+            /// `bool apply_to(ConfigBase&) const override { return false; }`
+            /// (`PrintConfig.hpp:1248`), the vendored derived behaviour.
+            fn apply_to(&self, _target: &mut dyn slic3r_config::config::ConfigBase) -> bool {
+                false
+            }
+
+            fn handle_legacy(&self, opt_key: &mut String, value: &mut String) {
+                <Self as StaticPrintConfig>::static_print_config_handle_legacy(opt_key, value);
+            }
+        }
+
+        impl slic3r_config::config::StaticConfig for $name {}
+
+        impl StaticPrintConfig for $name {
+            fn keys_ref(&self) -> &Vec<String> {
+                thread_local! {
+                    static KEYS: &'static Vec<String> =
+                        Box::leak(Box::new(slic3r_config::config::ConfigBase::keys(
+                            &$name::new(),
+                        )));
+                }
+                KEYS.with(|k| *k)
+            }
+        }
+    };
+}
+
+print_config_class_define!(
+    PrintObjectConfig,
+    "`PrintObjectConfig` (`PrintConfig.hpp:1282-1449`), 132 options.",
+    [
+        (ConfigOptionFloat, brim_object_gap),
+        (ConfigOptionFloat, brim_flow_ratio),
+        (ConfigOptionBool, brim_use_efc_outline),
+        (ConfigOptionEnum<BrimType>, brim_type),
+        (ConfigOptionFloat, brim_width),
+        (ConfigOptionFloat, leading_brim_length),
+        (ConfigOptionFloat, extra_brim_width),
+        (ConfigOptionFloat, brim_ears_detection_length),
+        (ConfigOptionFloat, brim_ears_max_angle),
+        (ConfigOptionBool, brim_ears_outer_only),
+        (ConfigOptionFloat, skirt_start_angle),
+        (ConfigOptionBool, bridge_no_support),
+        (ConfigOptionFloat, elefant_foot_compensation),
+        (ConfigOptionInt, elefant_foot_compensation_layers),
+        (ConfigOptionPercent, elefant_foot_layers_density),
+        (ConfigOptionFloat, max_bridge_length),
+        (ConfigOptionFloatOrPercent, line_width),
+        (ConfigOptionBool, interface_shells),
+        (ConfigOptionFloat, layer_height),
+        (ConfigOptionFloat, mmu_segmented_region_max_width),
+        (ConfigOptionFloat, mmu_segmented_region_interlocking_depth),
+        (ConfigOptionFloat, raft_contact_distance),
+        (ConfigOptionFloat, raft_expansion),
+        (ConfigOptionPercent, raft_first_layer_density),
+        (ConfigOptionFloat, raft_first_layer_expansion),
+        (ConfigOptionInt, raft_layers),
+        (ConfigOptionEnum<SeamPosition>, seam_position),
+        (ConfigOptionBool, staggered_inner_seams),
+        (ConfigOptionFloat, slice_closing_radius),
+        (ConfigOptionEnum<SlicingMode>, slicing_mode),
+        (ConfigOptionBool, enable_support),
+        (ConfigOptionEnum<SupportType>, support_type),
+        (ConfigOptionFloat, support_angle),
+        (ConfigOptionBool, support_on_build_plate_only),
+        (ConfigOptionBool, support_critical_regions_only),
+        (ConfigOptionBool, support_remove_small_overhang),
+        (ConfigOptionFloat, support_top_z_distance),
+        (ConfigOptionFloat, support_bottom_z_distance),
+        (ConfigOptionInt, enforce_support_layers),
+        (ConfigOptionInt, support_filament),
+        (ConfigOptionFloatOrPercent, support_line_width),
+        (ConfigOptionBool, support_interface_not_for_body),
+        (ConfigOptionBool, support_interface_loop_pattern),
+        (ConfigOptionInt, support_interface_filament),
+        (ConfigOptionInt, support_interface_top_layers),
+        (ConfigOptionInt, support_interface_bottom_layers),
+        (ConfigOptionFloat, support_interface_spacing),
+        (ConfigOptionFloatsNullable, support_interface_speed),
+        (ConfigOptionEnum<SupportMaterialPattern>, support_base_pattern),
+        (ConfigOptionEnum<SupportMaterialInterfacePattern>, support_interface_pattern),
+        (ConfigOptionFloat, support_base_pattern_spacing),
+        (ConfigOptionFloat, support_expansion),
+        (ConfigOptionFloatsNullable, support_speed),
+        (ConfigOptionEnum<SupportMaterialStyle>, support_style),
+        (ConfigOptionBool, set_other_flow_ratios),
+        (ConfigOptionFloat, support_flow_ratio),
+        (ConfigOptionFloat, support_interface_flow_ratio),
+        (ConfigOptionBool, thick_bridges),
+        (ConfigOptionBool, thick_internal_bridges),
+        (ConfigOptionEnum<InternalBridgeFilter>, dont_filter_internal_bridges),
+        (ConfigOptionEnum<EnableExtraBridgeLayer>, enable_extra_bridge_layer),
+        (ConfigOptionPercent, internal_bridge_density),
+        (ConfigOptionInt, support_threshold_angle),
+        (ConfigOptionFloatOrPercent, support_threshold_overlap),
+        (ConfigOptionFloat, support_object_xy_distance),
+        (ConfigOptionFloat, support_object_first_layer_gap),
+        (ConfigOptionBool, support_ironing),
+        (ConfigOptionEnum<InfillPattern>, support_ironing_pattern),
+        (ConfigOptionPercent, support_ironing_flow),
+        (ConfigOptionFloat, support_ironing_spacing),
+        (ConfigOptionFloat, xy_hole_compensation),
+        (ConfigOptionFloat, xy_contour_compensation),
+        (ConfigOptionBool, flush_into_objects),
+        (ConfigOptionBool, flush_into_infill),
+        (ConfigOptionBool, flush_into_support),
+        (ConfigOptionBool, belt_purge_tower_object),
+        (ConfigOptionFloat, tree_support_branch_distance),
+        (ConfigOptionFloat, tree_support_tip_diameter),
+        (ConfigOptionFloat, tree_support_branch_diameter),
+        (ConfigOptionFloat, tree_support_branch_angle),
+        (ConfigOptionFloat, tree_support_branch_diameter_angle),
+        (ConfigOptionFloat, tree_support_angle_slow),
+        (ConfigOptionInt, tree_support_wall_count),
+        (ConfigOptionBool, tree_support_auto_brim),
+        (ConfigOptionFloat, tree_support_brim_width),
+        (ConfigOptionBool, detect_narrow_internal_solid_infill),
+        (ConfigOptionFloat, support_bottom_interface_spacing),
+        (ConfigOptionEnum<PerimeterGeneratorType>, wall_generator),
+        (ConfigOptionPercent, wall_transition_length),
+        (ConfigOptionPercent, wall_transition_filter_deviation),
+        (ConfigOptionFloat, wall_transition_angle),
+        (ConfigOptionInt, wall_distribution_count),
+        (ConfigOptionPercent, min_feature_size),
+        (ConfigOptionPercent, initial_layer_min_bead_width),
+        (ConfigOptionPercent, min_bead_width),
+        (ConfigOptionFloat, wall_maximum_resolution),
+        (ConfigOptionFloat, wall_maximum_deviation),
+        (ConfigOptionFloat, make_overhang_printable_angle),
+        (ConfigOptionFloat, make_overhang_printable_hole_size),
+        (ConfigOptionFloat, tree_support_branch_distance_organic),
+        (ConfigOptionPercent, tree_support_top_rate),
+        (ConfigOptionFloat, tree_support_branch_diameter_organic),
+        (ConfigOptionFloat, tree_support_branch_angle_organic),
+        (ConfigOptionEnum<GapFillTarget>, gap_fill_target),
+        (ConfigOptionFloat, min_length_factor),
+        (ConfigOptionFloatsNullable, default_acceleration),
+        (ConfigOptionFloatsNullable, outer_wall_acceleration),
+        (ConfigOptionFloatsNullable, inner_wall_acceleration),
+        (ConfigOptionFloatsNullable, top_surface_acceleration),
+        (ConfigOptionFloatsNullable, initial_layer_acceleration),
+        (ConfigOptionFloatsOrPercentsNullable, bridge_acceleration),
+        (ConfigOptionFloatsNullable, travel_acceleration),
+        (ConfigOptionFloatsOrPercentsNullable, sparse_infill_acceleration),
+        (ConfigOptionFloatsOrPercentsNullable, internal_solid_infill_acceleration),
+        (ConfigOptionFloatsNullable, default_jerk),
+        (ConfigOptionFloatsNullable, outer_wall_jerk),
+        (ConfigOptionFloatsNullable, inner_wall_jerk),
+        (ConfigOptionFloatsNullable, infill_jerk),
+        (ConfigOptionFloatsNullable, top_surface_jerk),
+        (ConfigOptionFloatsNullable, initial_layer_jerk),
+        (ConfigOptionFloatsNullable, travel_jerk),
+        (ConfigOptionBool, precise_z_height),
+        (ConfigOptionFloatsNullable, default_junction_deviation),
+        (ConfigOptionBool, interlocking_beam),
+        (ConfigOptionFloat, interlocking_beam_width),
+        (ConfigOptionFloat, interlocking_orientation),
+        (ConfigOptionInt, interlocking_beam_layer_count),
+        (ConfigOptionInt, interlocking_depth),
+        (ConfigOptionInt, interlocking_boundary_avoidance),
+        (ConfigOptionBool, calib_flowrate_topinfill_special_order),
+        (ConfigOptionString, imex_parallel_mode),
+        (ConfigOptionString, imex_head_filament_map),
+    ]
+);
+
+print_config_class_define!(
+    PrintRegionConfig,
+    "`PrintRegionConfig` (`PrintConfig.hpp:1452-1650`), 177 options.",
+    [
+        (ConfigOptionInts, print_extruder_id),
+        (ConfigOptionStrings, print_extruder_variant),
+        (ConfigOptionInt, bottom_shell_layers),
+        (ConfigOptionFloat, bottom_shell_thickness),
+        (ConfigOptionInt, bottom_color_penetration_layers),
+        (ConfigOptionFloat, bridge_angle),
+        (ConfigOptionFloat, internal_bridge_angle),
+        (ConfigOptionBool, relative_bridge_angle),
+        (ConfigOptionFloat, bridge_flow),
+        (ConfigOptionFloatOrPercent, bridge_line_width),
+        (ConfigOptionFloat, internal_bridge_flow),
+        (ConfigOptionFloatsNullable, bridge_speed),
+        (ConfigOptionFloatsOrPercentsNullable, internal_bridge_speed),
+        (ConfigOptionEnum<EnsureVerticalShellThickness>, ensure_vertical_shell_thickness),
+        (ConfigOptionPercent, top_surface_density),
+        (ConfigOptionPercent, bottom_surface_density),
+        (ConfigOptionEnum<InfillPattern>, top_surface_pattern),
+        (ConfigOptionEnum<InfillPattern>, bottom_surface_pattern),
+        (ConfigOptionEnum<SurfaceFillOrder>, top_surface_fill_order),
+        (ConfigOptionEnum<SurfaceFillOrder>, bottom_surface_fill_order),
+        (ConfigOptionEnum<InfillPattern>, internal_solid_infill_pattern),
+        (ConfigOptionFloatOrPercent, outer_wall_line_width),
+        (ConfigOptionFloatsNullable, outer_wall_speed),
+        (ConfigOptionFloat, infill_direction),
+        (ConfigOptionFloat, solid_infill_direction),
+        (ConfigOptionFloat, top_layer_direction),
+        (ConfigOptionFloat, bottom_layer_direction),
+        (ConfigOptionString, solid_infill_rotate_template),
+        (ConfigOptionBool, symmetric_infill_y_axis),
+        (ConfigOptionBool, infill_complete_top),
+        (ConfigOptionFloat, infill_shift_step),
+        (ConfigOptionString, sparse_infill_rotate_template),
+        (ConfigOptionPercent, sparse_infill_density),
+        (ConfigOptionEnum<InfillPattern>, sparse_infill_pattern),
+        (ConfigOptionPercent, sparse_infill_smooth_factor),
+        (ConfigOptionFloat, lateral_lattice_angle_1),
+        (ConfigOptionFloat, lateral_lattice_angle_2),
+        (ConfigOptionFloat, infill_overhang_angle),
+        (ConfigOptionFloat, lightning_overhang_angle),
+        (ConfigOptionFloat, lightning_prune_angle),
+        (ConfigOptionFloat, lightning_straightening_angle),
+        (ConfigOptionBool, align_infill_direction_to_model),
+        (ConfigOptionEnum<CenterOfSurfacePattern>, center_of_surface_pattern),
+        (ConfigOptionBool, separated_infills),
+        (ConfigOptionString, extra_solid_infills),
+        (ConfigOptionEnum<FuzzySkinType>, fuzzy_skin),
+        (ConfigOptionFloat, fuzzy_skin_thickness),
+        (ConfigOptionFloat, fuzzy_skin_point_distance),
+        (ConfigOptionBool, fuzzy_skin_first_layer),
+        (ConfigOptionEnum<NoiseType>, fuzzy_skin_noise_type),
+        (ConfigOptionEnum<FuzzySkinMode>, fuzzy_skin_mode),
+        (ConfigOptionFloat, fuzzy_skin_scale),
+        (ConfigOptionInt, fuzzy_skin_octaves),
+        (ConfigOptionFloat, fuzzy_skin_persistence),
+        (ConfigOptionInt, fuzzy_skin_ripples_per_layer),
+        (ConfigOptionPercent, fuzzy_skin_ripple_offset),
+        (ConfigOptionInt, fuzzy_skin_layers_between_ripple_offset),
+        (ConfigOptionFloatsNullable, gap_infill_speed),
+        (ConfigOptionInt, sparse_infill_filament_id),
+        (ConfigOptionFloatOrPercent, sparse_infill_line_width),
+        (ConfigOptionPercent, infill_wall_overlap),
+        (ConfigOptionPercent, top_bottom_infill_wall_overlap),
+        (ConfigOptionFloatsNullable, sparse_infill_speed),
+        (ConfigOptionPercent, skeleton_infill_density),
+        (ConfigOptionPercent, skin_infill_density),
+        (ConfigOptionFloat, infill_lock_depth),
+        (ConfigOptionFloat, skin_infill_depth),
+        (ConfigOptionFloatOrPercent, skin_infill_line_width),
+        (ConfigOptionFloatOrPercent, skeleton_infill_line_width),
+        (ConfigOptionBool, infill_combination),
+        (ConfigOptionFloatOrPercent, infill_combination_max_layer_height),
+        (ConfigOptionInt, fill_multiline),
+        (ConfigOptionEnum<AdaptiveInfillMode>, adaptive_infill_mode),
+        (ConfigOptionPercent, adaptive_infill_interior_density),
+        (ConfigOptionEnum<AdaptiveInfillGradient>, adaptive_infill_gradient),
+        (ConfigOptionBool, gyroid_optimized),
+        (ConfigOptionEnum<IroningType>, ironing_type),
+        (ConfigOptionEnum<InfillPattern>, ironing_pattern),
+        (ConfigOptionPercent, ironing_flow),
+        (ConfigOptionFloat, ironing_spacing),
+        (ConfigOptionFloat, ironing_inset),
+        (ConfigOptionFloat, ironing_direction),
+        (ConfigOptionFloat, ironing_speed),
+        (ConfigOptionFloat, ironing_angle),
+        (ConfigOptionBool, ironing_angle_fixed),
+        (ConfigOptionPercentsNullable, filament_ironing_flow),
+        (ConfigOptionFloatsNullable, filament_ironing_spacing),
+        (ConfigOptionFloatsNullable, filament_ironing_inset),
+        (ConfigOptionFloatsNullable, filament_ironing_speed),
+        (ConfigOptionBool, detect_overhang_wall),
+        (ConfigOptionBool, unsupported_wall_last),
+        (ConfigOptionInt, outer_wall_filament_id),
+        (ConfigOptionInt, inner_wall_filament_id),
+        (ConfigOptionFloatOrPercent, inner_wall_line_width),
+        (ConfigOptionFloatsNullable, inner_wall_speed),
+        (ConfigOptionInt, wall_loops),
+        (ConfigOptionBool, alternate_extra_wall),
+        (ConfigOptionFloat, minimum_sparse_infill_area),
+        (ConfigOptionInt, internal_solid_filament_id),
+        (ConfigOptionInt, top_surface_filament_id),
+        (ConfigOptionInt, bottom_surface_filament_id),
+        (ConfigOptionFloatOrPercent, internal_solid_infill_line_width),
+        (ConfigOptionFloatsNullable, internal_solid_infill_speed),
+        (ConfigOptionBool, detect_thin_wall),
+        (ConfigOptionFloatOrPercent, top_surface_line_width),
+        (ConfigOptionInt, top_shell_layers),
+        (ConfigOptionFloat, top_shell_thickness),
+        (ConfigOptionInt, top_color_penetration_layers),
+        (ConfigOptionFloat, top_surface_expansion),
+        (ConfigOptionFloat, top_surface_expansion_margin),
+        (ConfigOptionEnum<TopSurfaceExpansionDirection>, top_surface_expansion_direction),
+        (ConfigOptionFloatsNullable, top_surface_speed),
+        (ConfigOptionBoolsNullable, enable_overhang_speed),
+        (ConfigOptionFloatsOrPercentsNullable, overhang_1_4_speed),
+        (ConfigOptionFloatsOrPercentsNullable, overhang_2_4_speed),
+        (ConfigOptionFloatsOrPercentsNullable, overhang_3_4_speed),
+        (ConfigOptionFloatsOrPercentsNullable, overhang_4_4_speed),
+        (ConfigOptionBool, only_one_wall_top),
+        (ConfigOptionFloatOrPercent, min_width_top_surface),
+        (ConfigOptionBool, only_one_wall_first_layer),
+        (ConfigOptionFloat, print_flow_ratio),
+        (ConfigOptionFloatOrPercent, seam_gap),
+        (ConfigOptionBool, role_based_wipe_speed),
+        (ConfigOptionFloatOrPercent, wipe_speed),
+        (ConfigOptionBool, wipe_on_loops),
+        (ConfigOptionBool, wipe_inward),
+        (ConfigOptionFloatOrPercent, wipe_inward_distance),
+        (ConfigOptionBool, wipe_before_external_loop),
+        (ConfigOptionEnum<WallInfillOrder>, wall_infill_order),
+        (ConfigOptionBool, precise_outer_wall),
+        (ConfigOptionPercent, bridge_density),
+        (ConfigOptionFloat, filter_out_gap_fill),
+        (ConfigOptionFloatsOrPercentsNullable, small_perimeter_speed),
+        (ConfigOptionFloatsNullable, small_perimeter_threshold),
+        (ConfigOptionFloatsOrPercentsNullable, small_support_perimeter_speed),
+        (ConfigOptionFloatsNullable, small_support_perimeter_threshold),
+        (ConfigOptionFloatsNullable, top_solid_infill_flow_ratio),
+        (ConfigOptionFloat, bottom_solid_infill_flow_ratio),
+        (ConfigOptionFloatOrPercent, infill_anchor),
+        (ConfigOptionFloatOrPercent, infill_anchor_max),
+        (ConfigOptionBool, make_overhang_printable),
+        (ConfigOptionBool, extra_perimeters_on_overhangs),
+        (ConfigOptionBoolsNullable, slowdown_for_curled_perimeters),
+        (ConfigOptionBool, hole_to_polyhole),
+        (ConfigOptionFloatOrPercent, hole_to_polyhole_threshold),
+        (ConfigOptionBool, hole_to_polyhole_twisted),
+        (ConfigOptionInt, hole_to_polyhole_max_edges),
+        (ConfigOptionBool, overhang_reverse),
+        (ConfigOptionBool, overhang_reverse_internal_only),
+        (ConfigOptionFloatOrPercent, overhang_reverse_threshold),
+        (ConfigOptionEnum<CounterboreHoleBridgingOption>, counterbore_hole_bridging),
+        (ConfigOptionEnum<WallSequence>, wall_sequence),
+        (ConfigOptionBool, is_infill_first),
+        (ConfigOptionBool, small_area_infill_flow_compensation),
+        (ConfigOptionEnum<WallDirection>, wall_direction),
+        (ConfigOptionFloat, first_layer_flow_ratio),
+        (ConfigOptionFloat, outer_wall_flow_ratio),
+        (ConfigOptionFloat, inner_wall_flow_ratio),
+        (ConfigOptionFloat, overhang_flow_ratio),
+        (ConfigOptionFloat, sparse_infill_flow_ratio),
+        (ConfigOptionFloat, internal_solid_infill_flow_ratio),
+        (ConfigOptionFloat, gap_fill_flow_ratio),
+        (ConfigOptionEnum<SeamScarfType>, seam_slope_type),
+        (ConfigOptionBool, seam_slope_conditional),
+        (ConfigOptionInt, scarf_angle_threshold),
+        (ConfigOptionFloatOrPercent, seam_slope_start_height),
+        (ConfigOptionBool, seam_slope_entire_loop),
+        (ConfigOptionFloat, seam_slope_min_length),
+        (ConfigOptionInt, seam_slope_steps),
+        (ConfigOptionBool, seam_slope_inner_walls),
+        (ConfigOptionFloatOrPercent, scarf_joint_speed),
+        (ConfigOptionFloat, scarf_joint_flow_ratio),
+        (ConfigOptionPercent, scarf_overhang_threshold),
+        (ConfigOptionBool, zaa_enabled),
+        (ConfigOptionBool, zaa_dont_alternate_fill_direction),
+        (ConfigOptionFloat, zaa_min_z),
+        (ConfigOptionFloat, zaa_minimize_perimeter_height),
+    ]
+);
+
+print_config_class_define!(
+    MachineEnvelopeConfig,
+    "`MachineEnvelopeConfig` (`PrintConfig.hpp:1652-1703`), 31 options.",
+    [
+        (ConfigOptionBool, emit_machine_limits_to_gcode),
+        (ConfigOptionFloats, machine_max_acceleration_x),
+        (ConfigOptionFloats, machine_max_acceleration_y),
+        (ConfigOptionFloats, machine_max_acceleration_z),
+        (ConfigOptionFloats, machine_max_acceleration_e),
+        (ConfigOptionFloats, machine_max_speed_x),
+        (ConfigOptionFloats, machine_max_speed_y),
+        (ConfigOptionFloats, machine_max_speed_z),
+        (ConfigOptionFloats, machine_max_speed_e),
+        (ConfigOptionFloats, machine_max_acceleration_extruding),
+        (ConfigOptionFloats, machine_max_acceleration_retracting),
+        (ConfigOptionFloats, machine_max_acceleration_travel),
+        (ConfigOptionFloats, machine_max_jerk_x),
+        (ConfigOptionFloats, machine_max_jerk_y),
+        (ConfigOptionFloats, machine_max_jerk_z),
+        (ConfigOptionFloats, machine_max_jerk_e),
+        (ConfigOptionFloats, machine_max_junction_deviation),
+        (ConfigOptionFloats, machine_min_travel_rate),
+        (ConfigOptionFloats, machine_min_extruding_rate),
+        (ConfigOptionFloat, machine_max_force_Y),
+        (ConfigOptionFloat, machine_bed_mass_Y),
+        (ConfigOptionFloat, machine_max_printed_mass),
+        (ConfigOptionBool, resonance_avoidance),
+        (ConfigOptionFloat, min_resonance_avoidance_speed),
+        (ConfigOptionFloat, max_resonance_avoidance_speed),
+        (ConfigOptionBool, input_shaping_emit),
+        (ConfigOptionEnum<InputShaperType>, input_shaping_type),
+        (ConfigOptionFloat, input_shaping_freq_x),
+        (ConfigOptionFloat, input_shaping_freq_y),
+        (ConfigOptionFloat, input_shaping_damp_x),
+        (ConfigOptionFloat, input_shaping_damp_y),
+    ]
+);
+
+print_config_class_define!(
+    GCodeConfig,
+    "`GCodeConfig` (`PrintConfig.hpp:1706-1953`), 210 options.",
+    [
+        (ConfigOptionString, before_layer_change_gcode),
+        (ConfigOptionString, printing_by_object_gcode),
+        (ConfigOptionFloats, deretraction_speed),
+        (ConfigOptionEnum<ArcFittingMode>, enable_arc_fitting),
+        (ConfigOptionString, machine_end_gcode),
+        (ConfigOptionStrings, filament_end_gcode),
+        (ConfigOptionFloatsNullable, filament_flow_ratio),
+        (ConfigOptionBools, enable_pressure_advance),
+        (ConfigOptionFloats, pressure_advance),
+        (ConfigOptionBools, adaptive_pressure_advance),
+        (ConfigOptionBools, adaptive_pressure_advance_overhangs),
+        (ConfigOptionStrings, adaptive_pressure_advance_model),
+        (ConfigOptionFloats, adaptive_pressure_advance_bridges),
+        (ConfigOptionFloat, fan_kickstart),
+        (ConfigOptionBool, fan_speedup_overhangs),
+        (ConfigOptionFloat, fan_speedup_time),
+        (ConfigOptionInt, part_cooling_fan_min_pwm),
+        (ConfigOptionFloats, filament_diameter),
+        (ConfigOptionBoolsNullable, filament_adaptive_volumetric_speed),
+        (ConfigOptionStrings, volumetric_speed_coefficients),
+        (ConfigOptionInts, filament_adhesiveness_category),
+        (ConfigOptionFloats, filament_density),
+        (ConfigOptionStrings, filament_type),
+        (ConfigOptionBools, filament_soluble),
+        (ConfigOptionStrings, filament_ids),
+        (ConfigOptionStrings, filament_colour),
+        (ConfigOptionStrings, filament_vendor),
+        (ConfigOptionBools, filament_is_support),
+        (ConfigOptionBools, filament_is_mixed),
+        (ConfigOptionStrings, filament_mixed_components),
+        (ConfigOptionStrings, filament_mixed_sublayer_ratios),
+        (ConfigOptionBools, filament_mixed_gradient),
+        (ConfigOptionStrings, filament_mixed_gradient_range),
+        (ConfigOptionStrings, filament_mixed_gradient_curve),
+        (ConfigOptionBools, filament_mixed_gradient_per_part),
+        (ConfigOptionInts, filament_printable),
+        (ConfigOptionInts, filament_extruder_compatibility),
+        (ConfigOptionFloats, filament_change_length),
+        (ConfigOptionFloats, filament_cost),
+        (ConfigOptionStrings, default_filament_colour),
+        (ConfigOptionInts, temperature_vitrification),
+        (ConfigOptionFloats, filament_max_volumetric_speed),
+        (ConfigOptionInts, required_nozzle_HRC),
+        (ConfigOptionEnum<FilamentMapMode>, filament_map_mode),
+        (ConfigOptionInts, filament_map),
+        (ConfigOptionInts, filament_volume_map),
+        (ConfigOptionInts, filament_nozzle_map),
+        (ConfigOptionInts, filament_map_2),
+        (ConfigOptionStrings, filament_extruder_variant),
+        (ConfigOptionInts, filament_self_index),
+        (ConfigOptionBool, support_object_skip_flush),
+        (ConfigOptionEnum<BedTempFormula>, bed_temperature_formula),
+        (ConfigOptionInts, physical_extruder_map),
+        (ConfigOptionIntsNullable, nozzle_flush_dataset),
+        (ConfigOptionFloatsNullable, filament_flush_volumetric_speed),
+        (ConfigOptionIntsNullable, filament_flush_temp),
+        (ConfigOptionIntsNullable, filament_flush_temp_fast),
+        (ConfigOptionBool, scan_first_layer),
+        (ConfigOptionEnum<PowerLossRecoveryMode>, enable_power_loss_recovery),
+        (ConfigOptionBool, enable_wrapping_detection),
+        (ConfigOptionInt, wrapping_detection_layers),
+        (ConfigOptionPoints, wrapping_exclude_area),
+        (ConfigOptionPoints, thumbnail_size),
+        (ConfigOptionBool, gcode_add_line_number),
+        (ConfigOptionBool, high_precision_gcode),
+        (ConfigOptionBool, bbl_bed_temperature_gcode),
+        (ConfigOptionEnum<GCodeFlavor>, gcode_flavor),
+        (ConfigOptionBool, gcode_skip_config_block),
+        (ConfigOptionFloat, time_cost),
+        (ConfigOptionString, layer_change_gcode),
+        (ConfigOptionString, time_lapse_gcode),
+        (ConfigOptionString, wrapping_detection_gcode),
+        (ConfigOptionFloat, max_volumetric_extrusion_rate_slope),
+        (ConfigOptionFloat, max_volumetric_extrusion_rate_slope_segment_length),
+        (ConfigOptionBool, extrusion_rate_smoothing_external_perimeter_only),
+        (ConfigOptionPercents, retract_before_wipe),
+        (ConfigOptionPercents, retract_after_wipe),
+        (ConfigOptionFloats, retraction_length),
+        (ConfigOptionFloats, retract_length_toolchange),
+        (ConfigOptionInt, enable_long_retraction_when_cut),
+        (ConfigOptionFloats, retraction_distances_when_cut),
+        (ConfigOptionBools, long_retractions_when_cut),
+        (ConfigOptionFloatsNullable, retraction_distances_when_ec),
+        (ConfigOptionBoolsNullable, long_retractions_when_ec),
+        (ConfigOptionFloats, z_hop),
+        (ConfigOptionEnumsGeneric, z_hop_types),
+        (ConfigOptionFloats, travel_slope),
+        (ConfigOptionFloats, retract_lift_above),
+        (ConfigOptionFloats, retract_lift_below),
+        (ConfigOptionEnumsGeneric, retract_lift_enforce),
+        (ConfigOptionFloats, retract_restart_extra),
+        (ConfigOptionFloats, retract_restart_extra_toolchange),
+        (ConfigOptionFloats, retraction_speed),
+        (ConfigOptionString, file_start_gcode),
+        (ConfigOptionString, machine_start_gcode),
+        (ConfigOptionStrings, filament_start_gcode),
+        (ConfigOptionBool, single_extruder_multi_material),
+        (ConfigOptionBool, manual_filament_change),
+        (ConfigOptionBool, is_imex),
+        (ConfigOptionBool, imex_firmware_managed_zones),
+        (ConfigOptionInt, imex_gantry_count),
+        (ConfigOptionInt, imex_tools_per_gantry),
+        (ConfigOptionFloat, imex_nozzle_clearance_x),
+        (ConfigOptionFloat, imex_nozzle_clearance_y),
+        (ConfigOptionFloat, imex_carriage_margin),
+        (ConfigOptionEnum<ImexToolLayout>, imex_tool_layout),
+        (ConfigOptionEnum<ImexVizTheme>, imex_viz_theme),
+        (ConfigOptionStrings, imex_mode_names),
+        (ConfigOptionStrings, imex_mode_active_tools),
+        (ConfigOptionStrings, imex_mode_gcodes),
+        (ConfigOptionBool, single_extruder_multi_material_priming),
+        (ConfigOptionEnum<ToolChangeOrderingType>, toolchange_ordering),
+        (ConfigOptionString, toolchange_cyclic_order),
+        (ConfigOptionBool, toolchange_cyclic_first_layer),
+        (ConfigOptionBool, wipe_tower_no_sparse_layers),
+        (ConfigOptionBool, wipe_tower_sparse_layers_combination),
+        (ConfigOptionString, change_filament_gcode),
+        (ConfigOptionString, change_extrusion_role_gcode),
+        (ConfigOptionString, process_change_extrusion_role_gcode),
+        (ConfigOptionStrings, filament_change_extrusion_role_gcode),
+        (ConfigOptionFloatsNullable, travel_speed),
+        (ConfigOptionFloatsNullable, travel_speed_z),
+        (ConfigOptionString, machine_pause_gcode),
+        (ConfigOptionString, template_custom_gcode),
+        (ConfigOptionEnumsGenericNullable, nozzle_type),
+        (ConfigOptionInt, nozzle_hrc),
+        (ConfigOptionBool, auxiliary_fan),
+        (ConfigOptionEnum<FanDirection>, fan_direction),
+        (ConfigOptionBool, support_air_filtration),
+        (ConfigOptionBool, support_cooling_filter),
+        (ConfigOptionBool, cooling_filter_enabled),
+        (ConfigOptionEnum<PrinterStructure>, printer_structure),
+        (ConfigOptionBool, support_chamber_temp_control),
+        (ConfigOptionEnumsGeneric, extruder_type),
+        (ConfigOptionEnumsGeneric, nozzle_volume_type),
+        (ConfigOptionStrings, extruder_ams_count),
+        (ConfigOptionStrings, extruder_nozzle_stats),
+        (ConfigOptionInts, printer_extruder_id),
+        (ConfigOptionInt, master_extruder_id),
+        (ConfigOptionStrings, printer_extruder_variant),
+        (ConfigOptionBool, use_firmware_retraction),
+        (ConfigOptionBool, use_relative_e_distances),
+        (ConfigOptionBool, accel_to_decel_enable),
+        (ConfigOptionPercent, accel_to_decel_factor),
+        (ConfigOptionFloatsOrPercentsNullable, initial_layer_travel_speed),
+        (ConfigOptionFloatsOrPercentsNullable, initial_layer_travel_acceleration),
+        (ConfigOptionFloatsOrPercentsNullable, initial_layer_travel_jerk),
+        (ConfigOptionBool, bbl_calib_mark_logo),
+        (ConfigOptionBool, disable_m73),
+        (ConfigOptionFloat, cooling_tube_retraction),
+        (ConfigOptionFloat, cooling_tube_length),
+        (ConfigOptionBool, high_current_on_filament_swap),
+        (ConfigOptionFloat, parking_pos_retraction),
+        (ConfigOptionFloat, extra_loading_move),
+        (ConfigOptionFloat, machine_load_filament_time),
+        (ConfigOptionFloat, machine_tool_change_time),
+        (ConfigOptionFloat, machine_unload_filament_time),
+        (ConfigOptionFloats, filament_loading_speed),
+        (ConfigOptionFloats, filament_loading_speed_start),
+        (ConfigOptionFloats, filament_unloading_speed),
+        (ConfigOptionFloats, filament_unloading_speed_start),
+        (ConfigOptionFloats, filament_toolchange_delay),
+        (ConfigOptionInts, filament_cooling_moves),
+        (ConfigOptionFloats, filament_cooling_initial_speed),
+        (ConfigOptionFloats, filament_minimal_purge_on_wipe_tower),
+        (ConfigOptionFloatsNullable, filament_cooling_before_tower),
+        (ConfigOptionFloats, filament_tower_interface_pre_extrusion_dist),
+        (ConfigOptionFloats, filament_tower_interface_pre_extrusion_length),
+        (ConfigOptionFloats, filament_tower_ironing_area),
+        (ConfigOptionFloats, filament_tower_interface_purge_volume),
+        (ConfigOptionInts, filament_tower_interface_print_temp),
+        (ConfigOptionFloats, filament_cooling_final_speed),
+        (ConfigOptionStrings, filament_ramming_parameters),
+        (ConfigOptionBools, filament_multitool_ramming),
+        (ConfigOptionFloats, filament_multitool_ramming_volume),
+        (ConfigOptionFloats, filament_multitool_ramming_flow),
+        (ConfigOptionFloats, filament_stamping_loading_speed),
+        (ConfigOptionFloats, filament_stamping_distance),
+        (ConfigOptionEnum<WipeTowerType>, wipe_tower_type),
+        (ConfigOptionBool, purge_in_prime_tower),
+        (ConfigOptionBool, enable_filament_ramming),
+        (ConfigOptionBool, tool_change_on_wipe_tower),
+        (ConfigOptionBool, wait_for_temp_on_wipe_tower),
+        (ConfigOptionBool, support_multi_bed_types),
+        (ConfigOptionBool, use_3mf),
+        (ConfigOptionStrings, small_area_infill_flow_compensation_model),
+        (ConfigOptionBool, has_scarf_joint_seam),
+        (ConfigOptionFloat, machine_hotend_change_time),
+        (ConfigOptionFloat, machine_prepare_compensation_time),
+        (ConfigOptionBool, enable_pre_heating),
+        (ConfigOptionFloatsNullable, hotend_cooling_rate),
+        (ConfigOptionFloatsNullable, hotend_heating_rate),
+        (ConfigOptionFloats, filament_change_length_nc),
+        (ConfigOptionFloatsNullable, filament_ramming_travel_time),
+        (ConfigOptionIntsNullable, filament_pre_cooling_temperature),
+        (ConfigOptionFloatsNullable, filament_ramming_volumetric_speed),
+        (ConfigOptionFloatsNullable, filament_ramming_travel_time_nc),
+        (ConfigOptionIntsNullable, filament_pre_cooling_temperature_nc),
+        (ConfigOptionFloatsNullable, filament_ramming_volumetric_speed_nc),
+        (ConfigOptionFloatsNullable, filament_retract_length_nc),
+        (ConfigOptionIntsNullable, extruder_max_nozzle_count),
+        (ConfigOptionBool, support_fast_purge_mode),
+        (ConfigOptionStrings, filament_dev_ams_drying_ams_limitations),
+        (ConfigOptionFloats, filament_dev_ams_drying_temperature),
+        (ConfigOptionFloats, filament_dev_ams_drying_time),
+        (ConfigOptionFloats, filament_dev_ams_drying_heat_distortion_temperature),
+        (ConfigOptionFloats, filament_dev_chamber_drying_bed_temperature),
+        (ConfigOptionFloats, filament_dev_chamber_drying_time),
+        (ConfigOptionFloats, filament_dev_drying_softening_temperature),
+        (ConfigOptionFloats, filament_dev_drying_cooling_temperature),
+    ]
+);
+
+print_config_class_derived_define!(
+    PrintConfig,
+    "`PrintConfig` (`PrintConfig.hpp:1956-2185`), inheriting `MachineEnvelopeConfig`, `GCodeConfig` and adding 184 options of its own.",
+    [
+        (machine_envelope_config, MachineEnvelopeConfig),
+        (gcode_config, GCodeConfig),
+    ],
+    [
+        (ConfigOptionFloat, build_plate_tilt_x),
+        (ConfigOptionFloat, build_plate_tilt_y),
+        (ConfigOptionBool, belt_printer),
+        (ConfigOptionBool, belt_printer_infinite_y),
+        (ConfigOptionEnum<BeltRotationAxis>, belt_slice_rotation),
+        (ConfigOptionFloat, belt_slice_rotation_angle),
+        (ConfigOptionBool, belt_frame_tilt_decouple),
+        (ConfigOptionFloat, belt_frame_tilt_angle),
+        (ConfigOptionEnum<RemapAxis>, gcode_remap_x),
+        (ConfigOptionEnum<RemapAxis>, gcode_remap_y),
+        (ConfigOptionEnum<RemapAxis>, gcode_remap_z),
+        (ConfigOptionFloat, belt_support_floor_offset),
+        (ConfigOptionFloat, belt_purge_tower_width),
+        (ConfigOptionBool, enable_belt_purge_tower),
+        (ConfigOptionInts, additional_cooling_fan_speed),
+        (ConfigOptionInts, close_additional_fan_first_x_layers),
+        (ConfigOptionInts, additional_fan_full_speed_layer),
+        (ConfigOptionFloats, first_x_layer_fan_speed),
+        (ConfigOptionBool, reduce_crossing_wall),
+        (ConfigOptionFloatOrPercent, max_travel_detour_distance),
+        (ConfigOptionPoints, printable_area),
+        (ConfigOptionPointsGroups, extruder_printable_area),
+        (ConfigOptionBool, support_parallel_printheads),
+        (ConfigOptionInt, parallel_printheads_count),
+        (ConfigOptionStrings, parallel_printheads_bed_exclude_areas),
+        (ConfigOptionPoints, bed_exclude_area),
+        (ConfigOptionString, bed_exclude_volumes),
+        (ConfigOptionEnum<BedExcludeVolumeMode>, bed_exclude_volume_mode),
+        (ConfigOptionStrings, extruder_bed_exclude_volumes),
+        (ConfigOptionPoints, head_wrap_detect_zone),
+        (ConfigOptionString, bed_custom_texture),
+        (ConfigOptionString, bed_custom_model),
+        (ConfigOptionEnum<BedType>, curr_bed_type),
+        (ConfigOptionInts, cool_plate_temp),
+        (ConfigOptionInts, textured_cool_plate_temp),
+        (ConfigOptionInts, supertack_plate_temp),
+        (ConfigOptionInts, eng_plate_temp),
+        (ConfigOptionInts, hot_plate_temp),
+        (ConfigOptionInts, textured_plate_temp),
+        (ConfigOptionInts, supertack_plate_temp_initial_layer),
+        (ConfigOptionInts, cool_plate_temp_initial_layer),
+        (ConfigOptionInts, textured_cool_plate_temp_initial_layer),
+        (ConfigOptionInts, eng_plate_temp_initial_layer),
+        (ConfigOptionInts, hot_plate_temp_initial_layer),
+        (ConfigOptionInts, textured_plate_temp_initial_layer),
+        (ConfigOptionBools, enable_overhang_bridge_fan),
+        (ConfigOptionInts, overhang_fan_speed),
+        (ConfigOptionEnumsGeneric, overhang_fan_threshold),
+        (ConfigOptionEnum<PrintSequence>, print_sequence),
+        (ConfigOptionEnum<PrintOrder>, print_order),
+        (ConfigOptionInts, first_layer_print_sequence),
+        (ConfigOptionInts, other_layers_print_sequence),
+        (ConfigOptionInt, other_layers_print_sequence_nums),
+        (ConfigOptionBools, slow_down_for_layer_cooling),
+        (ConfigOptionInts, close_fan_the_first_x_layers),
+        (ConfigOptionEnum<DraftShield>, draft_shield),
+        (ConfigOptionFloat, extruder_clearance_dist_to_rod),
+        (ConfigOptionFloat, extruder_clearance_height_to_rod),
+        (ConfigOptionFloat, extruder_clearance_height_to_lid),
+        (ConfigOptionFloat, extruder_clearance_radius),
+        (ConfigOptionFloat, nozzle_height),
+        (ConfigOptionStrings, extruder_colour),
+        (ConfigOptionPoints, extruder_offset),
+        (ConfigOptionBools, reduce_fan_stop_start_freq),
+        (ConfigOptionBools, dont_slow_down_outer_wall),
+        (ConfigOptionFloats, fan_cooling_layer_time),
+        (ConfigOptionBools, activate_air_filtration),
+        (ConfigOptionBools, activate_air_filtration_during_print),
+        (ConfigOptionBools, activate_air_filtration_on_completion),
+        (ConfigOptionInts, during_print_exhaust_fan_speed),
+        (ConfigOptionInts, complete_print_exhaust_fan_speed),
+        (ConfigOptionFloatOrPercent, initial_layer_line_width),
+        (ConfigOptionFloat, initial_layer_print_height),
+        (ConfigOptionFloatsNullable, initial_layer_speed),
+        (ConfigOptionFloatsNullable, initial_layer_infill_speed),
+        (ConfigOptionInts, nozzle_temperature_initial_layer),
+        (ConfigOptionInts, full_fan_speed_layer),
+        (ConfigOptionInts, initial_layer_fan_speed),
+        (ConfigOptionFloats, fan_max_speed),
+        (ConfigOptionFloats, max_layer_height),
+        (ConfigOptionFloats, fan_min_speed),
+        (ConfigOptionFloats, min_layer_height),
+        (ConfigOptionFloat, printable_height),
+        (ConfigOptionFloatsNullable, extruder_printable_height),
+        (ConfigOptionPoint, best_object_pos),
+        (ConfigOptionFloats, slow_down_min_speed),
+        (ConfigOptionFloats, nozzle_diameter),
+        (ConfigOptionBool, reduce_infill_retraction),
+        (ConfigOptionBool, ooze_prevention),
+        (ConfigOptionString, filename_format),
+        (ConfigOptionStrings, post_process),
+        (ConfigOptionStrings, slicing_pipeline_plugin),
+        (ConfigOptionString, print_plugin_config_overrides),
+        (ConfigOptionString, printer_model),
+        (ConfigOptionFloat, resolution),
+        (ConfigOptionFloats, retraction_minimum_travel),
+        (ConfigOptionBools, retract_when_changing_layer),
+        (ConfigOptionFloat, skirt_distance),
+        (ConfigOptionInt, skirt_height),
+        (ConfigOptionInt, skirt_loops),
+        (ConfigOptionEnum<SkirtType>, skirt_type),
+        (ConfigOptionFloat, skirt_speed),
+        (ConfigOptionBool, single_loop_draft_shield),
+        (ConfigOptionFloat, min_skirt_length),
+        (ConfigOptionFloats, slow_down_layer_time),
+        (ConfigOptionBool, spiral_mode),
+        (ConfigOptionBool, spiral_mode_smooth),
+        (ConfigOptionFloatOrPercent, spiral_mode_max_xy_smoothing),
+        (ConfigOptionFloat, spiral_finishing_flow_ratio),
+        (ConfigOptionFloat, spiral_starting_flow_ratio),
+        (ConfigOptionInt, standby_temperature_delta),
+        (ConfigOptionFloat, preheat_time),
+        (ConfigOptionInt, preheat_steps),
+        (ConfigOptionInts, nozzle_temperature),
+        (ConfigOptionBools, wipe),
+        (ConfigOptionInts, nozzle_temperature_range_low),
+        (ConfigOptionInts, nozzle_temperature_range_high),
+        (ConfigOptionFloats, wipe_distance),
+        (ConfigOptionBool, enable_mixed_color_sublayer),
+        (ConfigOptionBool, enable_prime_tower),
+        (ConfigOptionBool, prime_tower_enable_framework),
+        (ConfigOptionFloats, wipe_tower_x),
+        (ConfigOptionFloats, wipe_tower_y),
+        (ConfigOptionFloat, prime_tower_width),
+        (ConfigOptionFloat, wipe_tower_per_color_wipe),
+        (ConfigOptionFloat, wipe_tower_rotation_angle),
+        (ConfigOptionFloat, prime_tower_brim_width),
+        (ConfigOptionPercent, prime_tower_infill_gap),
+        (ConfigOptionBool, prime_tower_skip_points),
+        (ConfigOptionBool, prime_tower_flat_ironing),
+        (ConfigOptionBool, enable_tower_interface_features),
+        (ConfigOptionBool, enable_tower_interface_cooldown_during_tower),
+        (ConfigOptionFloat, wipe_tower_bridging),
+        (ConfigOptionPercent, wipe_tower_extra_flow),
+        (ConfigOptionFloats, flush_volumes_matrix),
+        (ConfigOptionFloats, flush_volumes_vector),
+        (ConfigOptionFloat, wipe_tower_cone_angle),
+        (ConfigOptionPercent, wipe_tower_extra_spacing),
+        (ConfigOptionFloat, wipe_tower_max_purge_speed),
+        (ConfigOptionEnum<WipeTowerWallType>, wipe_tower_wall_type),
+        (ConfigOptionFloat, wipe_tower_extra_rib_length),
+        (ConfigOptionFloat, wipe_tower_rib_width),
+        (ConfigOptionBool, wipe_tower_fillet_wall),
+        (ConfigOptionInt, wipe_tower_filament),
+        (ConfigOptionFloats, wiping_volumes_extruders),
+        (ConfigOptionInts, idle_temperature),
+        (ConfigOptionFloat, prime_volume),
+        (ConfigOptionFloats, filament_prime_volume),
+        (ConfigOptionFloats, filament_prime_volume_nc),
+        (ConfigOptionFloatsNullable, filament_preheat_temperature_delta),
+        (ConfigOptionFloats, flush_multiplier),
+        (ConfigOptionEnum<PrimeVolumeMode>, prime_volume_mode),
+        (ConfigOptionFloats, flush_multiplier_fast),
+        (ConfigOptionFloat, z_offset),
+        (ConfigOptionFloats, filament_colour_new),
+        (ConfigOptionFloatsNullable, nozzle_volume),
+        (ConfigOptionPoints, start_end_points),
+        (ConfigOptionEnum<TimelapseType>, timelapse_type),
+        (ConfigOptionBool, farthest_point_timelapse),
+        (ConfigOptionString, thumbnails),
+        (ConfigOptionBool, independent_support_layer_height),
+        (ConfigOptionBool, combine_brims),
+        (ConfigOptionPercents, filament_shrink),
+        (ConfigOptionPercents, filament_shrinkage_compensation_z),
+        (ConfigOptionBool, gcode_label_objects),
+        (ConfigOptionBool, exclude_object),
+        (ConfigOptionFloat, exclude_object_tolerance),
+        (ConfigOptionFloats, grab_length),
+        (ConfigOptionBool, gcode_comments),
+        (ConfigOptionInt, slow_down_layers),
+        (ConfigOptionInts, support_material_interface_fan_speed),
+        (ConfigOptionInts, internal_bridge_fan_speed),
+        (ConfigOptionInts, ironing_fan_speed),
+        (ConfigOptionStrings, filament_notes),
+        (ConfigOptionString, notes),
+        (ConfigOptionString, printer_notes),
+        (ConfigOptionBools, activate_chamber_temp_control),
+        (ConfigOptionInts, chamber_temperature),
+        (ConfigOptionInts, chamber_minimal_temperature),
+        (ConfigOptionFloat, preferred_orientation),
+        (ConfigOptionPoint, bed_mesh_min),
+        (ConfigOptionPoint, bed_mesh_max),
+        (ConfigOptionPoint, bed_mesh_probe_distance),
+        (ConfigOptionFloat, adaptive_bed_mesh_margin),
+    ]
+);
+
+print_config_class_derived_define0!(
+    FullPrintConfig,
+    "`FullPrintConfig` (`PrintConfig.hpp:2188-2191`), inheriting `PrintObjectConfig`, `PrintRegionConfig`, `PrintConfig` and adding none of its own.",
+    [
+        (print_object_config, PrintObjectConfig),
+        (print_region_config, PrintRegionConfig),
+        (print_config, PrintConfig),
+    ]
+);
+
+print_config_class_define!(
+    SLAPrintConfig,
+    "`SLAPrintConfig` (`PrintConfig.hpp:2196-2199`), 1 options.",
+    [(ConfigOptionString, filename_format),]
+);
+
+print_config_class_define!(
+    SLAPrintObjectConfig,
+    "`SLAPrintObjectConfig` (`PrintConfig.hpp:2201-2341`), 38 options.",
+    [
+        (ConfigOptionFloat, layer_height),
+        (ConfigOptionInt, faded_layers),
+        (ConfigOptionFloat, slice_closing_radius),
+        (ConfigOptionBool, supports_enable),
+        (ConfigOptionFloat, support_head_front_diameter),
+        (ConfigOptionFloat, support_head_penetration),
+        (ConfigOptionFloat, support_head_width),
+        (ConfigOptionFloat, support_pillar_diameter),
+        (ConfigOptionPercent, support_small_pillar_diameter_percent),
+        (ConfigOptionInt, support_max_bridges_on_pillar),
+        (ConfigOptionEnum<SLAPillarConnectionMode>, support_pillar_connection_mode),
+        (ConfigOptionBool, support_buildplate_only),
+        (ConfigOptionFloat, support_pillar_widening_factor),
+        (ConfigOptionFloat, support_base_diameter),
+        (ConfigOptionFloat, support_base_height),
+        (ConfigOptionFloat, support_base_safety_distance),
+        (ConfigOptionFloat, support_critical_angle),
+        (ConfigOptionFloat, support_max_bridge_length),
+        (ConfigOptionFloat, support_max_pillar_link_distance),
+        (ConfigOptionFloat, support_object_elevation),
+        (ConfigOptionInt, support_points_density_relative),
+        (ConfigOptionFloat, support_points_minimal_distance),
+        (ConfigOptionBool, pad_enable),
+        (ConfigOptionFloat, pad_wall_thickness),
+        (ConfigOptionFloat, pad_wall_height),
+        (ConfigOptionFloat, pad_brim_size),
+        (ConfigOptionFloat, pad_max_merge_distance),
+        (ConfigOptionFloat, pad_wall_slope),
+        (ConfigOptionBool, pad_around_object),
+        (ConfigOptionBool, pad_around_object_everywhere),
+        (ConfigOptionFloat, pad_object_gap),
+        (ConfigOptionFloat, pad_object_connector_stride),
+        (ConfigOptionFloat, pad_object_connector_width),
+        (ConfigOptionFloat, pad_object_connector_penetration),
+        (ConfigOptionBool, hollowing_enable),
+        (ConfigOptionFloat, hollowing_min_thickness),
+        (ConfigOptionFloat, hollowing_quality),
+        (ConfigOptionFloat, hollowing_closing_distance),
+    ]
+);
+
+print_config_class_define!(
+    SLAMaterialConfig,
+    "`SLAMaterialConfig` (`PrintConfig.hpp:2345-2360`), 12 options.",
+    [
+        (ConfigOptionFloat, initial_layer_height),
+        (ConfigOptionFloat, bottle_cost),
+        (ConfigOptionFloat, bottle_volume),
+        (ConfigOptionFloat, bottle_weight),
+        (ConfigOptionFloat, material_density),
+        (ConfigOptionFloat, exposure_time),
+        (ConfigOptionFloat, initial_exposure_time),
+        (ConfigOptionFloats, material_correction),
+        (ConfigOptionFloat, material_correction_x),
+        (ConfigOptionFloat, material_correction_y),
+        (ConfigOptionFloat, material_correction_z),
+        (ConfigOptionEnum<SLAMaterialSpeed>, material_print_speed),
+    ]
+);
+
+print_config_class_define!(
+    SLAPrinterConfig,
+    "`SLAPrinterConfig` (`PrintConfig.hpp:2362-2390`), 25 options.",
+    [
+        // PORT NOTE: the vendored field is `ConfigOptionEnum<PrinterTechnology>`
+        // (`PrintConfig.hpp:2365`), the one field of these 11 classes whose enum this
+        // crate cannot implement `ConfigOptionEnumValue` for: `PrinterTechnology` and the
+        // trait both live in `slic3r-config`, so the orphan rule forbids the impl the
+        // vendored macro writes in its own translation unit. `ConfigOptionEnumGeneric`
+        // over the same key map is used instead, exactly as `init_common_params`'s
+        // `printer_technology` row above does, and it serializes the same text -- which
+        // this unit's class comparison against the oracle checks rather than assumes.
+        (ConfigOptionEnumGeneric, printer_technology),
+        (ConfigOptionPoints, printable_area),
+        (ConfigOptionFloat, printable_height),
+        (ConfigOptionFloat, display_width),
+        (ConfigOptionFloat, display_height),
+        (ConfigOptionInt, display_pixels_x),
+        (ConfigOptionInt, display_pixels_y),
+        (ConfigOptionEnum<SLADisplayOrientation>, display_orientation),
+        (ConfigOptionBool, display_mirror_x),
+        (ConfigOptionBool, display_mirror_y),
+        (ConfigOptionFloats, relative_correction),
+        (ConfigOptionFloat, relative_correction_x),
+        (ConfigOptionFloat, relative_correction_y),
+        (ConfigOptionFloat, relative_correction_z),
+        (ConfigOptionFloat, absolute_correction),
+        (ConfigOptionFloat, elefant_foot_compensation),
+        (ConfigOptionFloat, elefant_foot_min_width),
+        (ConfigOptionFloat, gamma_correction),
+        (ConfigOptionFloat, fast_tilt_time),
+        (ConfigOptionFloat, slow_tilt_time),
+        (ConfigOptionFloat, area_fill),
+        (ConfigOptionFloat, min_exposure_time),
+        (ConfigOptionFloat, max_exposure_time),
+        (ConfigOptionFloat, min_initial_exposure_time),
+        (ConfigOptionFloat, max_initial_exposure_time),
+    ]
+);
+
+print_config_class_derived_define0!(
+    SLAFullPrintConfig,
+    "`SLAFullPrintConfig` (`PrintConfig.hpp:2392-2395`), inheriting `SLAPrinterConfig`, `SLAPrintConfig`, `SLAPrintObjectConfig`, `SLAMaterialConfig` and adding none of its own.",
+    [
+        (sla_printer_config, SLAPrinterConfig),
+        (sla_print_config, SLAPrintConfig),
+        (sla_print_object_config, SLAPrintObjectConfig),
+        (sla_material_config, SLAMaterialConfig),
+    ]
+);
 
 // --------------------------------------------------------------------------------------------
 // Step 6: the anonymous-namespace string helpers (`PrintConfig.cpp:55-85`) and
@@ -17792,6 +19290,142 @@ mod tests {
                     .join("\u{1}"),
             ),
         ])
+    }
+
+    /// The 11 `StaticPrintConfig`-derived classes, each held to exact equality against the
+    /// oracle's own on two things: the key list `keys_ref()` reports, in order, and every one
+    /// of those keys' serialized default value.
+    ///
+    /// The key list is the class's field set as `StaticCache::finalize` derived it, so a
+    /// missing, extra or misspelled field shows up there. The defaults are what check the
+    /// cache *wiring* rather than only the field list: each is the registry default
+    /// `finalize` assigned through this class's own `optptr`, so a field declared with the
+    /// wrong option type, or one carrying a different registry row than its name says, has a
+    /// different serialized value even when the key list matches. Together they exercise
+    /// Step 3's `StaticCacheBase`/`StaticCache`/`OptionAccessor` machinery, which nothing else
+    /// in this module's tests reaches.
+    #[test]
+    fn the_static_print_config_classes_match_the_oracle() {
+        // Each class's own `keys_ref()` and the serialized defaults behind it, as closures so
+        // the 11 concrete types can share one comparison without a trait object.
+        type Pair = (&'static str, fn() -> (Vec<String>, Vec<String>));
+        fn read<T>() -> (Vec<String>, Vec<String>)
+        where
+            T: Readable + 'static,
+        {
+            let defaults = <T as Readable>::defaults_ref();
+            let keys = defaults.keys_ref().clone();
+            let values = keys
+                .iter()
+                .map(
+                    |k| match slic3r_config::config::ConfigOptionResolver::optptr(defaults, k) {
+                        Some(opt) => opt.serialize(),
+                        None => "<no option>".to_string(),
+                    },
+                )
+                .collect();
+            (keys, values)
+        }
+        /// The `static defaults()` each of the 11 macro expansions declares, as a trait so one
+        /// generic reader covers all 11. `print_config_class_define!` and its two derived
+        /// siblings each generate `defaults()` as an inherent associated function, which no
+        /// trait bound can name.
+        trait Readable: StaticPrintConfig {
+            fn defaults_ref() -> &'static Self;
+        }
+        macro_rules! impl_readable {
+            ($( $ty:ty ),+ $(,)?) => {
+                $(
+                    impl Readable for $ty {
+                        fn defaults_ref() -> &'static Self {
+                            <$ty>::defaults()
+                        }
+                    }
+                )+
+            };
+        }
+        impl_readable!(
+            PrintObjectConfig,
+            PrintRegionConfig,
+            MachineEnvelopeConfig,
+            GCodeConfig,
+            PrintConfig,
+            FullPrintConfig,
+            SLAPrintConfig,
+            SLAPrintObjectConfig,
+            SLAMaterialConfig,
+            SLAPrinterConfig,
+            SLAFullPrintConfig,
+        );
+
+        let classes: Vec<Pair> = vec![
+            ("PrintObjectConfig", read::<PrintObjectConfig>),
+            ("PrintRegionConfig", read::<PrintRegionConfig>),
+            ("MachineEnvelopeConfig", read::<MachineEnvelopeConfig>),
+            ("GCodeConfig", read::<GCodeConfig>),
+            ("PrintConfig", read::<PrintConfig>),
+            ("FullPrintConfig", read::<FullPrintConfig>),
+            ("SLAPrintConfig", read::<SLAPrintConfig>),
+            ("SLAPrintObjectConfig", read::<SLAPrintObjectConfig>),
+            ("SLAMaterialConfig", read::<SLAMaterialConfig>),
+            ("SLAPrinterConfig", read::<SLAPrinterConfig>),
+            ("SLAFullPrintConfig", read::<SLAFullPrintConfig>),
+        ];
+        assert_eq!(
+            classes.len(),
+            11,
+            "PrintConfig.hpp:1282-2395 declares 11 StaticPrintConfig-derived classes"
+        );
+
+        let mut differences: Vec<String> = Vec::new();
+        let mut total_keys = 0_usize;
+        for (which, reader) in &classes {
+            let oracle_keys: Vec<String> = ora::oracle_static_class_keys(which)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            // An unknown name yields an empty list, and none of the 11 is empty at the pin.
+            assert!(
+                !oracle_keys.is_empty(),
+                "{which}: the oracle reports no keys at all -- an unknown class name?"
+            );
+            let (ported_keys, ported_values) = reader();
+            assert_eq!(
+                ported_keys, oracle_keys,
+                "{which}: the key lists or their order differ"
+            );
+            let oracle_values: Vec<String> = ora::oracle_static_class_defaults(which)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_eq!(
+                oracle_values.len(),
+                oracle_keys.len(),
+                "{which}: the oracle's key and default lists are different lengths"
+            );
+            for ((key, mine), theirs) in ported_keys
+                .iter()
+                .zip(ported_values.iter())
+                .zip(oracle_values.iter())
+            {
+                if mine != theirs {
+                    differences.push(format!(
+                        "{which}: {key}: ported default {mine:?} != oracle {theirs:?}"
+                    ));
+                }
+            }
+            total_keys += oracle_keys.len();
+        }
+        assert!(
+            differences.is_empty(),
+            "{} default(s) disagree with the oracle: {differences:#?}",
+            differences.len()
+        );
+        println!(
+            "StaticPrintConfig classes: {} classes, {total_keys} keys, \
+             every key list and default exact",
+            classes.len()
+        );
     }
 
     /// The other 13 `ConfigDef` subclasses, each held to exact equality against the oracle's

@@ -264,6 +264,75 @@ rust::Vec<rust::String> oracle_custom_gcode_placeholder_keys() {
     return out;
 }
 
+// One `StaticPrintConfig`-derived class's key list and its defaults' serialized values, read
+// off the `CLASS_NAME::defaults()` object. Templates rather than 22 functions, because every
+// one of the 11 classes is read the same way; `KEYS_OR_DEFAULTS` dispatches the class name once
+// for both.
+template <class T> static rust::Vec<rust::String> class_keys() {
+    return to_rust(T::defaults().keys_ref());
+}
+
+template <class T> static rust::Vec<rust::String> class_defaults() {
+    const T &defaults = T::defaults();
+    rust::Vec<rust::String> out;
+    for (const std::string &key : defaults.keys_ref()) {
+        const Slic3r::ConfigOption *opt = defaults.optptr(key);
+        // `keys_ref()` only ever holds a key `optptr` resolves, by construction in
+        // `StaticCache::finalize`, so a null here would be a broken cache rather than a missing
+        // option; it is reported as a value rather than dereferenced.
+        out.push_back(rust::String(opt == nullptr ? std::string("<no option>") : opt->serialize()));
+    }
+    return out;
+}
+
+#define SLIC3R_FFI_STATIC_CLASS_DISPATCH(FN)                                                       \
+    if (name == "PrintObjectConfig") {                                                             \
+        return FN<Slic3r::PrintObjectConfig>();                                                    \
+    }                                                                                              \
+    if (name == "PrintRegionConfig") {                                                             \
+        return FN<Slic3r::PrintRegionConfig>();                                                    \
+    }                                                                                              \
+    if (name == "MachineEnvelopeConfig") {                                                         \
+        return FN<Slic3r::MachineEnvelopeConfig>();                                                \
+    }                                                                                              \
+    if (name == "GCodeConfig") {                                                                   \
+        return FN<Slic3r::GCodeConfig>();                                                          \
+    }                                                                                              \
+    if (name == "PrintConfig") {                                                                   \
+        return FN<Slic3r::PrintConfig>();                                                          \
+    }                                                                                              \
+    if (name == "FullPrintConfig") {                                                               \
+        return FN<Slic3r::FullPrintConfig>();                                                      \
+    }                                                                                              \
+    if (name == "SLAPrintConfig") {                                                                \
+        return FN<Slic3r::SLAPrintConfig>();                                                       \
+    }                                                                                              \
+    if (name == "SLAPrintObjectConfig") {                                                          \
+        return FN<Slic3r::SLAPrintObjectConfig>();                                                 \
+    }                                                                                              \
+    if (name == "SLAMaterialConfig") {                                                             \
+        return FN<Slic3r::SLAMaterialConfig>();                                                    \
+    }                                                                                              \
+    if (name == "SLAPrinterConfig") {                                                              \
+        return FN<Slic3r::SLAPrinterConfig>();                                                     \
+    }                                                                                              \
+    if (name == "SLAFullPrintConfig") {                                                            \
+        return FN<Slic3r::SLAFullPrintConfig>();                                                   \
+    }                                                                                              \
+    return rust::Vec<rust::String>();
+
+rust::Vec<rust::String> oracle_static_class_keys(rust::Str which) {
+    const std::string name(which);
+    SLIC3R_FFI_STATIC_CLASS_DISPATCH(class_keys)
+}
+
+rust::Vec<rust::String> oracle_static_class_defaults(rust::Str which) {
+    const std::string name(which);
+    SLIC3R_FFI_STATIC_CLASS_DISPATCH(class_defaults)
+}
+
+#undef SLIC3R_FFI_STATIC_CLASS_DISPATCH
+
 rust::Vec<rust::String> oracle_custom_gcode_placeholders(rust::Str key) {
     const auto &map = Slic3r::custom_gcode_specific_placeholders();
     auto it = map.find(std::string(key));
