@@ -207,12 +207,17 @@ mod ffi {
 
         /// `save_extruder_ams_count_to_string(get_extruder_ams_count(strs))`
         /// (`PrintConfig.cpp:869-906`): one call covering the parse and its inverse, so a
-        /// parse difference shows up as a different saved string.
-        fn oracle_extruder_ams_count_roundtrip(strs: &Vec<String>) -> Vec<String>;
-
-        /// `save_extruder_nozzle_stats_to_string(get_extruder_nozzle_stats(strs))`
-        /// (`PrintConfig.cpp:940-989`), the same round trip for the nozzle-stats pair.
-        fn oracle_extruder_nozzle_stats_roundtrip(strs: &Vec<String>) -> Vec<String>;
+        /// `get_extruder_ams_count` (`PrintConfig.cpp:943-961`) and
+        /// `save_extruder_ams_count_to_string` (`:963-975`), and the same pair for nozzle
+        /// stats, each crossing on its own rather than composed into a roundtrip -- a parse
+        /// defect the save inverts was invisible when only the final string crossed.
+        ///
+        /// The intermediate crosses flat: entry 0 is the map count as decimal, then one entry
+        /// per map holding its `k=v` pairs joined by `;` in ascending key order.
+        fn oracle_get_extruder_ams_count(strs: &Vec<String>) -> Vec<String>;
+        fn oracle_save_extruder_ams_count_to_string(flat: &Vec<String>) -> Vec<String>;
+        fn oracle_get_extruder_nozzle_stats(strs: &Vec<String>) -> Vec<String>;
+        fn oracle_save_extruder_nozzle_stats_to_string(flat: &Vec<String>) -> Vec<String>;
 
         /// `get_extruder_index(GCodeConfig::defaults(), filament_id)`
         /// (`PrintConfig.cpp:140-146`).
@@ -460,20 +465,21 @@ pub use ffi::{
     oracle_bed_shape_of_sla_defaults, oracle_compute_filament_override_value, oracle_config_from,
     oracle_config_from_base, oracle_config_index_base, oracle_convert_to_nvt_type,
     oracle_custom_gcode_placeholder_keys, oracle_custom_gcode_placeholders,
-    oracle_dynamic_from_static_serialized, oracle_extruder_ams_count_roundtrip,
-    oracle_extruder_index_of_defaults, oracle_extruder_nozzle_stats_roundtrip,
+    oracle_dynamic_from_static_serialized, oracle_extruder_index_of_defaults,
     oracle_extruder_nozzle_volume_count, oracle_extruder_option_keys, oracle_extruder_retract_keys,
     oracle_extruder_supported_nozzle_volume_types, oracle_extruder_variant_string,
     oracle_filament_option_keys, oracle_filament_retract_keys, oracle_filament_type_probe,
-    oracle_find_variant_index, oracle_full_print_config_serialized, oracle_handle_legacy,
-    oracle_handle_legacy_sla, oracle_has_multi_variant_filament, oracle_has_skirt,
-    oracle_index_for_extruder, oracle_is_using_different_extruders, oracle_is_xl_printer_dynamic,
+    oracle_find_variant_index, oracle_full_print_config_serialized, oracle_get_extruder_ams_count,
+    oracle_get_extruder_nozzle_stats, oracle_handle_legacy, oracle_handle_legacy_sla,
+    oracle_has_multi_variant_filament, oracle_has_skirt, oracle_index_for_extruder,
+    oracle_is_using_different_extruders, oracle_is_xl_printer_dynamic,
     oracle_is_xl_printer_of_print_defaults, oracle_map_variant_indices, oracle_min_object_distance,
     oracle_new_from_defaults_keys_serialized, oracle_normalize_fdm, oracle_normalize_fdm_1,
     oracle_normalize_filament_values_to_variants, oracle_nozzle_diameter_for_filament_of_defaults,
     oracle_nozzle_volume_type_string, oracle_option_info, oracle_option_keys, oracle_option_set,
     oracle_other_def_keys, oracle_other_def_option_info, oracle_parameter_size_of_full,
     oracle_print_and_cli_def_keys, oracle_print_and_cli_handle_legacy, oracle_real_skirt_dist,
+    oracle_save_extruder_ams_count_to_string, oracle_save_extruder_nozzle_stats_to_string,
     oracle_set_filament_dev_options, oracle_set_num_extruders, oracle_set_num_filaments,
     oracle_set_variant_override, oracle_shaper_type_values_for_flavor,
     oracle_static_class_defaults, oracle_static_class_keys, oracle_support_different_extruders,

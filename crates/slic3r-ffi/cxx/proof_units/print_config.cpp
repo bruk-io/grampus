@@ -455,15 +455,91 @@ int32_t oracle_config_index_base(int32_t volume_type, int32_t extruder_type,
         from_rust_ints(variant_ids_1based)));
 }
 
-rust::Vec<rust::String> oracle_extruder_ams_count_roundtrip(const rust::Vec<rust::String> &strs) {
-    return to_rust(
-        Slic3r::save_extruder_ams_count_to_string(Slic3r::get_extruder_ams_count(from_rust(strs))));
+// The flat encoding described in the header: entry 0 is the map count, then one entry per map.
+template <typename K>
+static rust::Vec<rust::String> encode_maps(const std::vector<std::map<K, int>> &maps) {
+    rust::Vec<rust::String> out;
+    out.push_back(rust::String(std::to_string(maps.size())));
+    for (const std::map<K, int> &m : maps) {
+        std::string entry;
+        for (const std::pair<const K, int> &kv : m) {
+            if (!entry.empty())
+                entry += ";";
+            entry += std::to_string(static_cast<int>(kv.first));
+            entry += "=";
+            entry += std::to_string(kv.second);
+        }
+        out.push_back(rust::String(entry));
+    }
+    return out;
 }
 
-rust::Vec<rust::String>
-oracle_extruder_nozzle_stats_roundtrip(const rust::Vec<rust::String> &strs) {
+template <typename K>
+static std::vector<std::map<K, int>> decode_maps(const rust::Vec<rust::String> &flat) {
+    std::vector<std::map<K, int>> maps;
+    if (flat.size() == 0)
+        return maps;
+    // Entry 0 is the count; the remaining entries are the maps, so a truncated list yields
+    // fewer maps rather than reading past the end.
+    for (size_t i = 1; i < flat.size(); ++i) {
+        std::map<K, int> m;
+        const std::string entry(flat[i]);
+        size_t pos = 0;
+        while (pos < entry.size()) {
+            const size_t semi = entry.find(';', pos);
+            const std::string pair =
+                entry.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
+            const size_t eq = pair.find('=');
+            if (eq != std::string::npos) {
+                m[static_cast<K>(std::stoi(pair.substr(0, eq)))] = std::stoi(pair.substr(eq + 1));
+            }
+            if (semi == std::string::npos)
+                break;
+            pos = semi + 1;
+        }
+        maps.push_back(std::move(m));
+    }
+    return maps;
+}
+
+rust::Vec<rust::String> oracle_get_extruder_ams_count(const rust::Vec<rust::String> &strs) {
+    // `get_extruder_ams_count` (`PrintConfig.cpp:884`) calls `stoi` unguarded under an
+    // `assert(numbers.size() == 2)` that the oracle's Release build compiles out, so a
+    // non-numeric token throws `std::invalid_argument` -- and an exception escaping a cxx
+    // bridge aborts the test binary. Reported as a refusal instead. Its nozzle-stats twin
+    // (`:957-964`) was explicitly hardened against exactly these shapes; this one was not.
+    try {
+        return encode_maps<int>(Slic3r::get_extruder_ams_count(from_rust(strs)));
+    } catch (const std::exception &) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<threw>"));
+        return out;
+    }
+}
+
+rust::Vec<rust::String> oracle_save_extruder_ams_count_to_string(
+    const rust::Vec<rust::String> &flat) {
+    return to_rust(Slic3r::save_extruder_ams_count_to_string(decode_maps<int>(flat)));
+}
+
+rust::Vec<rust::String> oracle_get_extruder_nozzle_stats(const rust::Vec<rust::String> &strs) {
+    // Guarded the same way as its sibling above, although this body's own guards
+    // (`PrintConfig.cpp:957-964`) mean nothing here is expected to throw -- the shim is not the
+    // place to assume that.
+    try {
+        return encode_maps<Slic3r::NozzleVolumeType>(
+            Slic3r::get_extruder_nozzle_stats(from_rust(strs)));
+    } catch (const std::exception &) {
+        rust::Vec<rust::String> out;
+        out.push_back(rust::String("<threw>"));
+        return out;
+    }
+}
+
+rust::Vec<rust::String> oracle_save_extruder_nozzle_stats_to_string(
+    const rust::Vec<rust::String> &flat) {
     return to_rust(Slic3r::save_extruder_nozzle_stats_to_string(
-        Slic3r::get_extruder_nozzle_stats(from_rust(strs))));
+        decode_maps<Slic3r::NozzleVolumeType>(flat)));
 }
 
 uint64_t oracle_extruder_index_of_defaults(uint32_t filament_id) {

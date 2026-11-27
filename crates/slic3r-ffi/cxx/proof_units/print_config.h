@@ -118,8 +118,26 @@ int32_t oracle_config_index_base(int32_t volume_type, int32_t extruder_type,
 // through the string form so one shim call covers a parse and a save: the parse's result is
 // handed straight back to the save, and the save's output is what crosses. A parse difference
 // shows up as a different saved string.
-rust::Vec<rust::String> oracle_extruder_ams_count_roundtrip(const rust::Vec<rust::String> &strs);
-rust::Vec<rust::String> oracle_extruder_nozzle_stats_roundtrip(const rust::Vec<rust::String> &strs);
+// `get_extruder_ams_count` (`PrintConfig.cpp:943-961`) and
+// `save_extruder_ams_count_to_string` (`:963-975`), and the same pair for nozzle stats
+// (`:901-922`, `:924-941`), each crossing the bridge on its own.
+//
+// **These replace two roundtrip functions that composed each parse with its own inverse and
+// sent only the final string.** A parse defect that the save happens to invert was invisible on
+// both sides of that comparison: the port and the oracle could disagree about the intermediate
+// and still agree about the string. All four halves are externally linked, so there is no
+// reason to compose them.
+//
+// The intermediate `std::vector<std::map<K, int>>` crosses as a flat list: entry 0 is the
+// number of maps as decimal, then one entry per map holding its `k=v` pairs joined by `;` in
+// `std::map`'s own ascending-key order (an empty string for an empty map). An enum key crosses
+// as its underlying int.
+rust::Vec<rust::String> oracle_get_extruder_ams_count(const rust::Vec<rust::String> &strs);
+rust::Vec<rust::String> oracle_save_extruder_ams_count_to_string(
+    const rust::Vec<rust::String> &flat);
+rust::Vec<rust::String> oracle_get_extruder_nozzle_stats(const rust::Vec<rust::String> &strs);
+rust::Vec<rust::String> oracle_save_extruder_nozzle_stats_to_string(
+    const rust::Vec<rust::String> &flat);
 
 // `get_extruder_index(const GCodeConfig&, unsigned int)` (`PrintConfig.cpp:140-146`) and
 // `nozzle_diameter_for_filament(const PrintConfig&, int, bool)` (`:148-156`), each against the

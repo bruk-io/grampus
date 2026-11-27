@@ -18674,10 +18674,20 @@ pub fn get_extruder_ams_count(strs: &[String]) -> Vec<std::collections::BTreeMap
         }
         for ams_info in str.split('|') {
             let numbers: Vec<&str> = ams_info.split('#').collect();
-            debug_assert_eq!(numbers.len(), 2);
-            // `stoi` on a non-numeric string throws at the pin, where the release build has no
-            // handler either; `parse().ok()` drops such a token instead, which is the nearest
-            // defined behaviour and never reached by a well-formed option.
+            // PORT NOTE: `assert(numbers.size() == 2)` (`PrintConfig.cpp:883`) is
+            // `<cassert>`'s and compiled out of the oracle's Release build, so it is not ported
+            // as a live check of any kind (`docs/PORTING.md`'s don't-translate list). An earlier
+            // pass had a `debug_assert_eq!` here and it fired on the input `"1"` -- which is
+            // the point: **the vendored assert is false for that input and the line below it
+            // then reads `numbers[1]` past the end of a `std::vector`.** With the assert
+            // compiled out that is undefined behaviour, not a refusal.
+            //
+            // The two guards below are therefore not a translation of the assert but a defined
+            // answer where the vendored code has none: a token with fewer than two parts, or a
+            // part `stoi` cannot parse (which **throws** at `:884`, with no handler in the
+            // release build), is dropped. That is what the hardened nozzle-stats twin does for
+            // exactly these shapes at `:957-964`, so it is the nearest defined behaviour in the
+            // vendored file itself rather than this port's invention.
             if let (Some(Ok(k)), Some(Ok(v))) = (
                 numbers.first().map(|s| cpp_stoi(s)),
                 numbers.get(1).map(|s| cpp_stoi(s)),
@@ -25723,26 +25733,113 @@ mod tests {
             }
         }
 
-        // The two parse/save pairs, round-tripped so one comparison covers both halves: the
-        // parse's result is handed straight to the save, and the saved strings are compared.
+        // The two parse/save pairs, **each half compared on its own**. An earlier version of
+        // this test composed each parse with its own inverse and compared only the saved
+        // string, which cannot see a parse defect that the save happens to invert: the port and
+        // the oracle could disagree about the intermediate map and still agree about the
+        // string. All four halves are externally linked, so the parse's result crosses the
+        // bridge and is compared directly, and the save is compared from a known parsed value.
+        //
+        // The intermediate crosses flat, in the shim's encoding: entry 0 is the map count as
+        // decimal, then one entry per map holding its `k=v` pairs joined by `;` in ascending
+        // key order. `std::map` and `BTreeMap` both iterate ascending, so the order is the
+        // same on both sides and is itself part of what is compared.
+        // The key crosses as its underlying int, which for the enum key is `to_i32` -- the
+        // same `static_cast<int>` the shim's `encode_maps` performs.
+        fn encode_maps<K: Copy, F: Fn(K) -> i32>(
+            maps: &[std::collections::BTreeMap<K, i32>],
+            key_as_int: F,
+        ) -> Vec<String> {
+            let mut out = vec![maps.len().to_string()];
+            for m in maps {
+                out.push(
+                    m.iter()
+                        .map(|(k, v)| format!("{}={v}", key_as_int(*k)))
+                        .collect::<Vec<_>>()
+                        .join(";"),
+                );
+            }
+            out
+        }
+        let ams_key = |k: i32| k;
+        let stats_key = |k: NozzleVolumeType| {
+            <NozzleVolumeType as slic3r_config::config::ConfigOptionEnumValue>::to_i32(k)
+        };
+
         let ams_inputs: Vec<Vec<String>> = vec![
             vec![],
             vec![String::new()],
             vec!["1#2".to_string()],
             vec!["1#2|3#4".to_string(), String::new(), "7#8".to_string()],
-            // Out of ascending order on input, so the save's `std::map` ordering is exercised.
+            // Out of ascending order on input, so the map's own ordering is exercised.
             vec!["9#1|2#5|5#3".to_string()],
             // A duplicate key, which `std::map::insert` keeps the first of.
             vec!["1#2|1#9".to_string()],
             vec!["-1#-2".to_string()],
+            // A non-numeric count. `get_extruder_ams_count` calls `stoi` unguarded
+            // (`PrintConfig.cpp:884`) under an `assert(numbers.size() == 2)` the oracle's
+            // Release build compiles out, so this **throws** `std::invalid_argument`; the shim
+            // reports a refusal rather than letting it abort the test binary, and the loop
+            // below asserts the port refuses the same input so the skip cannot hide a
+            // difference.
+            vec!["1#notanumber".to_string()],
         ];
+
+        // **A token with no `#` is deliberately not probed**, and that is a finding rather than
+        // a gap in the test. `boost::algorithm::split` on `"1"` yields one element, and
+        // `:884`'s `stoi(numbers[1])` then reads a `std::vector` past its end with the
+        // `assert` compiled out -- undefined behaviour, not a defined refusal. A comparison
+        // against undefined behaviour establishes nothing about the port, so the shape is
+        // recorded here and left uncompared. Its nozzle-stats twin guards exactly this case at
+        // `:957-960` and drops the token; the asymmetry between the two bodies is the vendored
+        // code's, not this port's.
+        let malformed = ["1".to_string()];
+        assert_eq!(
+            get_extruder_ams_count(&malformed),
+            vec![std::collections::BTreeMap::new()],
+            "the port drops a token with no '#' rather than reading out of bounds; the oracle \
+             is undefined here, so this asserts the port's own defined answer only"
+        );
+        let mut ams_refusals = 0_usize;
         for input in &ams_inputs {
-            let theirs: Vec<String> = ora::oracle_extruder_ams_count_roundtrip(input)
+            // The parse, compared as the map it produces rather than through its inverse.
+            let theirs: Vec<String> = ora::oracle_get_extruder_ams_count(input)
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
-            let mine = save_extruder_ams_count_to_string(&get_extruder_ams_count(input));
-            assert_eq!(mine, theirs, "extruder_ams_count round trip of {input:?}");
+            if theirs == vec!["<threw>".to_string()] {
+                // The oracle threw. Assert the port's own answer is defined rather than
+                // silently moving on: it drops the unparseable token, which is the nearest
+                // defined behaviour and what the hardened twin does.
+                assert_eq!(
+                    get_extruder_ams_count(input),
+                    vec![std::collections::BTreeMap::new()],
+                    "the oracle threw on {input:?}; the port should drop the token"
+                );
+                ams_refusals += 1;
+                continue;
+            }
+            let parsed = get_extruder_ams_count(input);
+            assert_eq!(
+                encode_maps(&parsed, ams_key),
+                theirs,
+                "get_extruder_ams_count({input:?}) -- the parsed maps themselves"
+            );
+            checked += 1;
+
+            // The save, compared from the parsed value this port produced. Handing the oracle
+            // the *port's* intermediate is what makes this a check of the save alone: if the
+            // two parses had disagreed the assertion above would already have failed.
+            let flat = encode_maps(&parsed, ams_key);
+            let theirs_saved: Vec<String> = ora::oracle_save_extruder_ams_count_to_string(&flat)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_eq!(
+                save_extruder_ams_count_to_string(&parsed),
+                theirs_saved,
+                "save_extruder_ams_count_to_string(parse({input:?})) -- the save alone"
+            );
             checked += 1;
         }
 
@@ -25755,8 +25852,7 @@ mod tests {
                 String::new(),
                 "Hybrid#1".to_string(),
             ],
-            // Out of the enum's own value order, so the save's `std::map<NozzleVolumeType, int>`
-            // ordering is exercised.
+            // Out of the enum's own value order, so the map's ordering is exercised.
             vec!["Extra High Flow#1|Standard#4|High Flow#2".to_string()],
             // The malformed shapes the body's two guards exist for: a token with no `#`, and an
             // unknown volume-type name.
@@ -25766,17 +25862,48 @@ mod tests {
             vec!["Standard#2|Standard#7".to_string()],
         ];
         for input in &stats_inputs {
-            let theirs: Vec<String> = ora::oracle_extruder_nozzle_stats_roundtrip(input)
+            let theirs: Vec<String> = ora::oracle_get_extruder_nozzle_stats(input)
                 .iter()
                 .map(|s| s.to_string())
                 .collect();
-            let mine = save_extruder_nozzle_stats_to_string(&get_extruder_nozzle_stats(input));
+            let parsed = get_extruder_nozzle_stats(input);
             assert_eq!(
-                mine, theirs,
-                "extruder_nozzle_stats round trip of {input:?}"
+                encode_maps(&parsed, stats_key),
+                theirs,
+                "get_extruder_nozzle_stats({input:?}) -- the parsed maps themselves"
+            );
+            checked += 1;
+
+            let flat = encode_maps(&parsed, stats_key);
+            let theirs_saved: Vec<String> = ora::oracle_save_extruder_nozzle_stats_to_string(&flat)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_eq!(
+                save_extruder_nozzle_stats_to_string(&parsed),
+                theirs_saved,
+                "save_extruder_nozzle_stats_to_string(parse({input:?})) -- the save alone"
             );
             checked += 1;
         }
+
+        assert_eq!(
+            ams_refusals, 1,
+            "exactly one ams input should make the oracle throw; a change in that count means \
+             the unguarded stoi at PrintConfig.cpp:884 now fires on a different set"
+        );
+
+        // The split is only worth having if the parse comparison can actually fail, which
+        // means the intermediate must be non-trivial for at least one input. Asserted, so the
+        // whole set degenerating to empty maps would not pass silently.
+        assert_eq!(
+            encode_maps(
+                &get_extruder_ams_count(&["1#2|3#4".to_string(), String::new(), "7#8".to_string()]),
+                ams_key
+            ),
+            vec!["3", "1=2;3=4", "", "7=8"],
+            "the flat encoding should carry the maps themselves, not a digest of them"
+        );
 
         // `get_extruder_index` and `nozzle_diameter_for_filament`, against the
         // default-constructed `GCodeConfig`/`PrintConfig` the class caches hold -- the only
