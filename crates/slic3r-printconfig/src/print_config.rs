@@ -21229,6 +21229,39 @@ pub fn is_xl_printer(cfg: &PrintConfig) -> bool {
     is_xl_printer_notes(&cfg.printer_notes.value)
 }
 
+/// The escape test the `set_only_diff` call site applies to its index list, as one function so
+/// the port-only test exercises **the code that runs** rather than a copy of it.
+///
+/// An earlier revision inlined this as a closure and the test re-declared its own copy "as the
+/// module computes it". That tests a copy: the closure could have changed and the test would
+/// still have passed. The lead caught it; `port/check-mocks`'s rule is about mocking the code
+/// under test and this was the same mistake in a milder form.
+///
+/// Returns `variant_index` with every entry whose read would escape replaced by `-1`, so
+/// `Config.hpp:597`'s own `diff_index[i] != -1` test leaves it unwritten. The full reasoning --
+/// the exact bound, why `map` and not `filter`, and why per entry -- is at the call site in
+/// [`DynamicPrintConfig::update_diff_values_to_child_config`].
+///
+/// `d` is safe exactly when `(d + 1) * stride <= target_len`, i.e. `d < target_len / stride`;
+/// the integer division is the exact boundary because `d + 1` is an integer. The escape test is
+/// spelled to mirror `:597` (`d != -1 && ...`) rather than as `d >= 0`: the two coincide here,
+/// since everything that is not a safe non-negative index maps to `-1` either way, but the
+/// faithful spelling can be checked against `:597` directly.
+fn sanitise_diff_index(variant_index: &[i32], stride: i32, target_len: usize) -> Vec<i32> {
+    let max_ok = target_len / stride as usize;
+    variant_index
+        .iter()
+        .map(|&d| {
+            let escapes = d != -1 && (d < 0 || (d as usize) >= max_ok);
+            if escapes {
+                -1
+            } else {
+                d
+            }
+        })
+        .collect()
+}
+
 /// `void set_variant_override(ConfigOptionVectorBase &target, const ConfigOptionVectorBase
 /// &source, const std::vector<int> &variant_index, int stride)`
 /// (`PrintConfig.cpp:11394-11402`).
@@ -21812,20 +21845,8 @@ impl DynamicPrintConfig {
                 // list, which `map_variant_indices` never writes -- are covered by
                 // `print_config_unguarded_vendored_dereference_compensations_hold`, with no
                 // oracle comparison because the pin is undefined on them.
-                let max_ok = target_vec.len_values() / stride as usize;
-                // The escape test is written to mirror `:597`'s own `diff_index[i] != -1`
-                // rather than as `d >= 0`, so a hypothetical `d < -1` is treated as escaping
-                // (which it is -- the pin would compute `d * stride` in `int` and index a
-                // `size_t` with it) instead of being quietly lumped in with the skip case. In
-                // the sanitiser the two spellings happen to coincide, because everything that
-                // is not a safe non-negative index maps to `-1` either way; the difference
-                // mattered in the whole-key predicate this replaced, and the faithful spelling
-                // is kept so the next reader can check it against `:597` directly.
-                let escapes = |d: i32| d != -1 && (d < 0 || (d as usize) >= max_ok);
-                let sanitised: Vec<i32> = variant_index
-                    .iter()
-                    .map(|&d| if escapes(d) { -1 } else { d })
-                    .collect();
+                let sanitised =
+                    sanitise_diff_index(&variant_index, stride, target_vec.len_values());
                 let _ = src_vec.set_only_diff(
                     target_vec,
                     &sanitised,
@@ -25648,21 +25669,13 @@ mod tests {
     /// the sanitiser's own arithmetic directly.
     #[test]
     fn print_config_unguarded_vendored_dereference_compensations_hold() {
-        // The sanitiser from `update_diff_values_to_child_config`, as the module computes it:
-        // entry `d` survives iff `d >= 0 && d < target_len / stride`.
-        fn sanitise(variant_index: &[i32], stride: usize, target_len: usize) -> Vec<i32> {
-            let max_ok = target_len / stride;
-            variant_index
-                .iter()
-                .map(|&d| {
-                    if d >= 0 && (d as usize) < max_ok {
-                        d
-                    } else {
-                        -1
-                    }
-                })
-                .collect()
-        }
+        // **The sanitiser is called, not re-declared.** An earlier revision of this test
+        // defined its own copy "as the module computes it" and asserted on that, which tests a
+        // copy: the module's own version could have changed and this would still have passed.
+        // The lead caught it. `sanitise_diff_index` is the function the call site in
+        // `update_diff_values_to_child_config` uses, so breaking it breaks this test -- checked
+        // by breaking it.
+        let sanitise = sanitise_diff_index;
 
         // `[5]`, stride 2, target length 2: the shape the earlier length-based guard passed,
         // after which `Config.hpp:600` read indices 10 and 11.
