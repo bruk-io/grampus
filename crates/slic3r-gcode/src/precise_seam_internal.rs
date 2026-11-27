@@ -4,8 +4,8 @@
 //! the precise-seam binding intermediates -- a header-only unit (`template-heavy: yes`,
 //! `port/manifest.tsv`) with no same-stem `.cpp`, 42 lines.
 //!
-//! **This module is deliberately incomplete, and stays `drafted`.** The header's third
-//! include, `GCode/PreciseSeam.hpp`, is *not* a foundation row (`template-heavy: no`, its own
+//! **This module is deliberately incomplete, and stays `drafted`.** The header's own
+//! `#include "PreciseSeam.hpp"` (`:3`) is *not* a foundation row (`template-heavy: no`, its own
 //! manifest row targeting `crates/slic3r-gcode/src/precise_seam.rs`, written by the Phase A/B
 //! fan-out, not this task and not `83-foundation-support-params`). The header's three
 //! functions -- `append_projected_fragment`, `bind_fragment`, `append_fragment` -- are
