@@ -129,6 +129,31 @@ path = "../../slic3r-polyline"
 [[bin]]
 name = "slic3r-polyline_polyline"
 path = "fuzz_targets/slic3r-polyline_polyline.rs"
+
+# `slic3r-arachne-utils`, added by task `73-foundation-arachne-indices` for its three `ported`
+# modules with `fuzz target: required` -- `half_edge_node` (`Arachne/utils/HalfEdgeNode.hpp`),
+# `polygons_point_index` (`Arachne/utils/PolygonsPointIndex.hpp`) and `polygons_segment_index`
+# (`Arachne/utils/PolygonsSegmentIndex.hpp`). The `[dependencies.slic3r-arachne-utils]` block
+# task `72-foundation-arachne-grids` already added above covers this crate too, so only the
+# three `[[bin]]` blocks are appended here, at the end, so two branches conflict textually
+# rather than reordering silently.
+[[bin]]
+name = "slic3r-arachne-utils_half_edge_node"
+path = "fuzz_targets/slic3r-arachne-utils_half_edge_node.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "slic3r-arachne-utils_polygons_point_index"
+path = "fuzz_targets/slic3r-arachne-utils_polygons_point_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "slic3r-arachne-utils_polygons_segment_index"
+path = "fuzz_targets/slic3r-arachne-utils_polygons_segment_index.rs"
 test = false
 doc = false
 bench = false
