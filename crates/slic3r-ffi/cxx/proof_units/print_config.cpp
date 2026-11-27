@@ -68,15 +68,49 @@ OracleOptionInfo oracle_option_info(rust::Str key) {
     info.found = true;
     info.option_type = static_cast<int32_t>(def->type);
     info.nullable = def->nullable;
-    info.cli = rust::String(def->cli);
 
     if (def->default_value) {
         info.has_default = true;
         info.default_serialized = rust::String(def->default_value->serialize());
     }
 
+    // The GUI-presentation half of `ConfigOptionDef`. These compare bytewise because `L()` is
+    // the identity extraction marker inside libslic3r (`I18N.hpp:31`), not a catalog lookup --
+    // see the bridge module's doc comment.
+    info.gui_type = static_cast<int32_t>(def->gui_type);
+    info.gui_flags = rust::String(def->gui_flags);
+    info.plugin_type = rust::String(def->plugin_type);
+    info.label = rust::String(def->label);
+    info.full_label = rust::String(def->full_label);
+    info.printer_technology = static_cast<int32_t>(def->printer_technology);
+    info.category = rust::String(def->category);
+    info.tooltip = rust::String(def->tooltip);
+    info.sidetext = rust::String(def->sidetext);
+    info.cli = rust::String(def->cli);
+    info.cli_params = rust::String(def->cli_params);
+    info.ratio_over = rust::String(def->ratio_over);
+    info.multiline = def->multiline;
+    info.full_width = def->full_width;
+    info.is_code = def->is_code;
+    info.readonly = def->readonly;
+    info.height = static_cast<int32_t>(def->height);
+    info.width = static_cast<int32_t>(def->width);
+    info.min = def->min;
+    info.max = def->max;
+    info.max_literal = def->max_literal;
+    info.mode = static_cast<int32_t>(def->mode);
+
+    for (const auto &alias : def->aliases) {
+        info.aliases.push_back(rust::String(alias));
+    }
+    for (const auto &shortcut : def->shortcut) {
+        info.shortcut.push_back(rust::String(shortcut));
+    }
     for (const auto &value : def->enum_values) {
         info.enum_values.push_back(rust::String(value));
+    }
+    for (const auto &label : def->enum_labels) {
+        info.enum_labels.push_back(rust::String(label));
     }
     // `def->enum_keys_map` is `const t_config_enum_values*` (`std::map<std::string, int>`),
     // never null for an in-scope enum option at the pin (every `coEnum`/`coEnums` row in

@@ -15,10 +15,13 @@ namespace print_config {
 // ConfigOptionDef>`, in that map's own (alphabetical) iteration order.
 rust::Vec<rust::String> oracle_option_keys();
 
-// One key's behaviourally load-bearing metadata (type, nullability, CLI spelling, default
-// value's serialized form, enum value list and enum name/value map) straight off
-// `Slic3r::print_config_def.get(key)`. `found = false` when the oracle's registry has no such
-// key at all.
+// One key's whole `ConfigOptionDef` (`Config.hpp:2315-2637`) field for field -- type,
+// nullability, default value's serialized form, every GUI-presentation string, the numeric
+// `min`/`max`/`max_literal`, the three enum-valued fields as `i32` casts, and the alias,
+// shortcut, enum-value, enum-label and enum-key-map lists -- straight off
+// `Slic3r::print_config_def.get(key)`. Less `opt_key` (the lookup key) and
+// `serialization_key_ordinal` (not a property of the transcription; see the bridge module's doc
+// comment). `found = false` when the oracle's registry has no such key at all.
 OracleOptionInfo oracle_option_info(rust::Str key);
 
 // `Slic3r::PrintConfigDef::handle_legacy(opt_key, value)` (`PrintConfig.hpp:848`), a public

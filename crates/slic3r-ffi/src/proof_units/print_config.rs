@@ -7,10 +7,35 @@
 //! `#include`-whole to avoid a duplicate-symbol link failure).
 //!
 //! `oracle_option_keys`/`oracle_option_info` turn the registry's whole key set into one
-//! mechanically comparable table: the behaviourally load-bearing fields (type, default value,
-//! enum name/value map, CLI spelling) rather than the GUI-presentation ones (label, tooltip,
-//! category, ...), which this task's own plan scopes to the two-pass adversarial review instead
-//! (`intent/libslic3r-rust-port/tasks/64-foundation-print-config/plan.md`, "The proof design").
+//! mechanically comparable table carrying **every** field of `ConfigOptionDef`
+//! (`Config.hpp:2315-2637`) that the registry's `init_*` bodies can set: the behaviourally
+//! load-bearing ones (type, nullability, default value, enum name/value map, CLI spelling) and
+//! the GUI-presentation ones (label, tooltip, category, sidetext, mode, `gui_type`, the numeric
+//! `min`/`max`/`max_literal`, the alias and shortcut lists, ...) alike.
+//!
+//! **Why the presentation fields are in the proof and not left to review.** This task's own
+//! plan scoped them to the two-pass adversarial review, on the reading that `L()` wraps them
+//! and a translated string could not be compared. That reading is wrong at the pin:
+//! `vendor/OrcaSlicer/src/libslic3r/I18N.hpp:31` defines `L` inside libslic3r as
+//! `const char* L(const char* s) { return s; }` -- the identity extraction marker, not a
+//! lookup -- so `def->label` holds the English literal the vendored line spells, and it
+//! compares bytewise. Only `_u8L` (`I18N.hpp:33`) goes through `I18N::translate`, and no
+//! `ConfigOptionDef` field in `PrintConfig.cpp`'s registry bodies is assigned from it. Leaving
+//! these fields out would leave the label, tooltip, category, sidetext, mode and `gui_type` of
+//! all 881 rows checked by nothing at all, which is where a mechanical transcription of 881
+//! near-identical rows would hide its errors.
+//!
+//! The three enum-valued fields (`gui_type`, `printer_technology`, `mode`) cross as `i32` casts
+//! of the C++ enumerator, which is sound because `slic3r-config` transcribes all three
+//! enumerator lists in the vendored declaration order
+//! (`ConfigOptionDef::GUIType`, `Config.hpp:2318-2339`; `PrinterTechnology`, `:228-238`;
+//! `ConfigOptionMode`, `:221-226`), so the two sides' discriminants agree by construction and
+//! the comparison would fail loudly if one ever did not.
+//!
+//! `serialization_key_ordinal` is deliberately **not** exposed: `slic3r-config` draws it from a
+//! process-wide atomic counter rather than from the registry's own construction order, so it
+//! depends on how many registries the process has built and is not a property of the
+//! transcription. It is named as a finding in this task's pull request body instead.
 
 #[cxx::bridge(namespace = "slic3r_ffi::proof_units::print_config")]
 mod ffi {
@@ -21,17 +46,43 @@ mod ffi {
         value: i32,
     }
 
-    /// The behaviourally load-bearing slice of one oracle `ConfigOptionDef`: everything this
-    /// task's proof holds to exact equality. `found = false` means the key is not in the
-    /// oracle's `print_config_def.options` at all (an unknown key, or one the port invented).
+    /// One oracle `ConfigOptionDef` (`Config.hpp:2315-2637`), field for field, less
+    /// `opt_key` (which is the lookup key) and `serialization_key_ordinal` (see this module's
+    /// own doc comment). Everything here is held to exact equality by this task's proof.
+    /// `found = false` means the key is not in the oracle's `print_config_def.options` at all
+    /// (an unknown key, or one the port invented).
     struct OracleOptionInfo {
         found: bool,
         option_type: i32,
         nullable: bool,
-        cli: String,
         has_default: bool,
         default_serialized: String,
+        gui_type: i32,
+        gui_flags: String,
+        plugin_type: String,
+        label: String,
+        full_label: String,
+        printer_technology: i32,
+        category: String,
+        tooltip: String,
+        sidetext: String,
+        cli: String,
+        cli_params: String,
+        ratio_over: String,
+        multiline: bool,
+        full_width: bool,
+        is_code: bool,
+        readonly: bool,
+        height: i32,
+        width: i32,
+        min: f32,
+        max: f32,
+        max_literal: f64,
+        mode: i32,
+        aliases: Vec<String>,
+        shortcut: Vec<String>,
         enum_values: Vec<String>,
+        enum_labels: Vec<String>,
         enum_keys_map: Vec<OracleEnumKeyValue>,
     }
 
@@ -55,7 +106,7 @@ mod ffi {
         /// lists positionally as well as by key).
         fn oracle_option_keys() -> Vec<String>;
 
-        /// One key's behaviourally load-bearing metadata, straight off
+        /// One key's whole `ConfigOptionDef`, straight off
         /// `Slic3r::print_config_def.get(key)`.
         fn oracle_option_info(key: &str) -> OracleOptionInfo;
 

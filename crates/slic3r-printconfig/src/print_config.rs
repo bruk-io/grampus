@@ -4983,9 +4983,55 @@ mod tests {
                     d.nullable, info.nullable
                 ));
             }
-            if d.cli != info.cli {
-                why.push(format!("cli mine={:?} oracle={:?}", d.cli, info.cli));
+            // Every remaining scalar field of `ConfigOptionDef`, compared the same way. The
+            // three enum-valued ones cross the bridge as `i32` casts of the C++ enumerator and
+            // are cast the same way here; `slic3r-config` transcribes all three enumerator
+            // lists in the vendored declaration order, so the discriminants agree by
+            // construction and a future divergence in either would fail here loudly.
+            macro_rules! same {
+                ($name:literal, $mine:expr, $oracle:expr) => {
+                    if $mine != $oracle {
+                        why.push(format!(
+                            concat!($name, " mine={:?} oracle={:?}"),
+                            $mine, $oracle
+                        ));
+                    }
+                };
             }
+            same!("gui_type", d.gui_type as i32, info.gui_type);
+            same!("gui_flags", d.gui_flags, info.gui_flags);
+            same!("plugin_type", d.plugin_type, info.plugin_type);
+            same!("label", d.label, info.label);
+            same!("full_label", d.full_label, info.full_label);
+            same!(
+                "printer_technology",
+                d.printer_technology as i32,
+                info.printer_technology
+            );
+            same!("category", d.category, info.category);
+            same!("tooltip", d.tooltip, info.tooltip);
+            same!("sidetext", d.sidetext, info.sidetext);
+            same!("cli", d.cli, info.cli);
+            same!("cli_params", d.cli_params, info.cli_params);
+            same!("ratio_over", d.ratio_over, info.ratio_over);
+            same!("multiline", d.multiline, info.multiline);
+            same!("full_width", d.full_width, info.full_width);
+            same!("is_code", d.is_code, info.is_code);
+            same!("readonly", d.readonly, info.readonly);
+            same!("height", d.height, info.height);
+            same!("width", d.width, info.width);
+            same!("min", d.min, info.min);
+            same!("max", d.max, info.max);
+            same!("max_literal", d.max_literal, info.max_literal);
+            same!("mode", d.mode as i32, info.mode);
+            let oracle_aliases: Vec<String> = info.aliases.iter().map(|s| s.to_string()).collect();
+            same!("aliases", d.aliases, oracle_aliases);
+            let oracle_shortcut: Vec<String> =
+                info.shortcut.iter().map(|s| s.to_string()).collect();
+            same!("shortcut", d.shortcut, oracle_shortcut);
+            let oracle_enum_labels: Vec<String> =
+                info.enum_labels.iter().map(|s| s.to_string()).collect();
+            same!("enum_labels", d.enum_labels, oracle_enum_labels);
             let mine_default = d.default_value.as_ref().map(|v| v.serialize());
             let oracle_default = if info.has_default {
                 Some(info.default_serialized.to_string())
