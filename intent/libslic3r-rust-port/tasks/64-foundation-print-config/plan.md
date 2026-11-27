@@ -154,18 +154,32 @@ own memory layout, not a map of `Box<dyn ConfigOption>`. `port/ownership.tsv`'s 
 unit (`PrintConfig.hpp:1132`, `StaticCache::m_defaults`, `T *`, class `borrowed`, verbatim type
 `&'a mut T`) names exactly this mechanism's cached defaults pointer.
 
-The simplest translation that keeps this meaning (`docs/WORKFLOW.md`'s "rejection rule" --
-not the nicest one) is the same technique in Rust: each concrete class is `#[repr(C)]` with its
-option fields in the same declared order as the vendored `PARAMETER_DEFINITION_SEQ`, and
-`StaticCache<T>` records each field's byte offset with `std::mem::offset_of!` (computed at compile
-time, not re-derived from a live pointer subtraction the way the C++ constructor does it, because
-Rust has no "take the address of a field on a not-yet-constructed object" step to mirror -- a
-deliberate, named divergence, not an invented shortcut: the vendored code computes the same compile-
-time-constant number at run time once, this port computes it at compile time, and both read the same
-field through the same offset from then on). `optptr` becomes one `unsafe fn` doing the pointer
-arithmetic the vendored function does, each occurrence carrying its own `// SAFETY:` naming the
-invariant (`owner` is a valid `&(mut) T`, the offset came from `offset_of!` on that same `T`, the
-field at that offset really has the layout the caller's turbofish claims).
+**Corrected here against the built code: the byte-offset translation does not work, and the
+offsets are not kept at all.** An earlier version of this section said each concrete class would be
+`#[repr(C)]` with `StaticCache<T>` recording each field's byte offset through
+`std::mem::offset_of!`, and `optptr` would be one `unsafe fn` doing the vendored pointer
+arithmetic behind a `// SAFETY:` comment. That is not implementable. The vendored `optptr` is
+`reinterpret_cast<ConfigOption*>((char*)owner + offset)` (`PrintConfig.hpp:1090`), which works only
+because every option field is a C++ class with `ConfigOption` as a base, so a byte address already
+*is* a valid `ConfigOption*`. Rust's `&dyn ConfigOption` is a **fat** pointer: it carries a vtable
+chosen by the field's concrete type, and no byte offset alone can produce one. The concrete type has
+to be known where the borrow is formed, which is exactly what a per-field function pair is.
+
+So the translation actually built is: `StaticCacheBase<T>` maps each option key to an
+`OptionAccessor<T>`, a pair of `fn(&T) -> &dyn ConfigOption` / `fn(&mut T) -> &mut dyn ConfigOption`
+generated beside the field declaration, and `optptr` is the map lookup plus a call. Keeping the
+offset beside it would buy one `unsafe` block and a `// SAFETY:` invariant that is wrong for all 11
+classes at once if it is wrong at all -- this plan's own named second risk, below -- in exchange for
+a number nothing observable reads: the offsets never reach `keys()`, `optptr`'s result, `hash()`,
+`operator==` or `apply_to()`, and this unit's proof compares the registry, never a
+`StaticPrintConfig` instance. `port/ownership.tsv` has no row for `m_map_name_to_offset` either (it
+is a `std::map<std::string, ptrdiff_t>`, not a raw-pointer field), so nothing in the committed
+inputs asks for the offset form. **This unit therefore adds no `unsafe` block and no `// SAFETY:`
+marker of its own, and the plan's second risk below is retired rather than mitigated.**
+`m_defaults` still carries `port/ownership.tsv`'s cell verbatim (`&'a mut T`, no `Option<_>`); the
+vendored null-pointer "not yet initialized" state becomes the enclosing `OnceLock`/`thread_local`'s,
+so the cache is constructible only through `finalize` and the reference can never be null, while
+`initialized()` still reads `! m_keys.is_empty()`.
 
 **The 11 classes' field lists** are transcribed from the `PRINT_CONFIG_CLASS_DEFINE`/
 `_DERIVED_DEFINE` call sites (`:1282-2392`) as plain Rust struct definitions in declaration order
@@ -193,6 +207,15 @@ no dependency on `crates/slic3r-i18n` and every `L("...")` becomes `"...".to_str
 
 Each step names the slice a reviewer can accept or reject on its own, even though the task's
 "Done when" gate (`mod print_config;`, `ported` status) is all-or-nothing across every step.
+
+**The numbered order below is the order the steps are described in, not the order they can be
+built in -- corrected here against the build.** Steps 3 and 4 cannot come before step 5:
+`StaticPrintConfig::def()` (`PrintConfig.hpp:1047`) returns `&print_config_def`, and
+`StaticCache::finalize` (`:1105-1129`) reads `defs->options` and each option's `default_value`, so
+neither compiles -- let alone can be checked -- before the registry exists. The built order is
+therefore 2, 5 (the registry and `init_common_params`), 3, 6, then 4 and the rest of 5. Step 6
+moved up with step 3 for the same reason in reverse: `StaticPrintConfig`'s `handle_legacy` override
+delegates to `PrintConfigDef::handle_legacy`, so step 3 does not compile without step 6.
 
 ### Step 1: the proof shim, and the whole-key-set comparison test's assertions settled (not yet running)
 - `cxx/proof_units/print_config.{h,cpp}`, `src/proof_units/print_config.rs` are written and
@@ -238,6 +261,19 @@ Each step names the slice a reviewer can accept or reject on its own, even thoug
   `PRINT_CONFIG_CLASS_DEFINE`/`_DERIVED_DEFINE`/`_DERIVED_DEFINE0` call site, plus the one generic
   `hash`/`eq`/`lt`/`initialize` visitor Step 3's `StaticCache` drives (see "The class hierarchy and
   the one raw-pointer row" above).
+- **Blocked on a missing capability in `slic3r-config`, measured not assumed.** The visitor's
+  `hash()` and `operator==` are reachable: `ConfigOption` declares `hash_value()` and `eq_dyn()`
+  (`crates/slic3r-config/src/config.rs:1218,1227`). Its `operator<`
+  (`PRINT_CONFIG_CLASS_COMMON_BODY`, `PrintConfig.hpp:1201-1206`) is **not**: the vendored body
+  compares two concrete option fields with `a < b`, and `slic3r-config` gives the `ConfigOption`
+  trait no ordering method and its concrete option types no `PartialOrd` -- `grep -c PartialOrd`
+  over that module returns 1, the single `impl PartialOrd for FloatOrPercent`. Reimplementing an
+  ordering per option type here would be inventing a Rust type's semantics for a sibling's module,
+  which `task.md`'s "Write only your own modules" and `docs/PORTING.md`'s banned-substitution rule
+  both forbid. So when this step lands, `operator<` carries a
+  `// TODO(port): src/libslic3r/PrintConfig.hpp:1201` naming that gap, and the gap itself is a
+  finding against `slic3r-config` for the pull request -- not a tolerance or a stand-in invented on
+  this branch.
 - delivers: none.
 
 ### Step 5: the option table, by the vendored `init_*` grouping, each its own reviewable slice
@@ -274,9 +310,24 @@ unit `drafted`, and the pull request states whatever fraction was measured again
 throwaway run at push time -- never a committed test asserting agreement on fewer than all 881
 keys, which would weaken the check task.md's R19 requires.
 
-**A second, smaller risk:** the `StaticCache` translation (Step 3) is this unit's only `unsafe` design
-of its own; a wrong `// SAFETY:` invariant there is wrong for all 11 classes at once, which is why it
-is ported once, generically, rather than copied per class.
+**A second, smaller risk -- retired, not mitigated.** This risk read: "the `StaticCache` translation
+(Step 3) is this unit's only `unsafe` design of its own; a wrong `// SAFETY:` invariant there is
+wrong for all 11 classes at once." Step 3 as built has no `unsafe` block and no `// SAFETY:` marker
+at all (see "The class hierarchy and the one raw-pointer row" above for why the byte-offset design
+that would have needed one is not implementable in Rust), so there is no invariant to get wrong.
+`./port/port-status --per-commit` confirms it: this unit contributes zero to the `SAFETY` marker
+count.
+
+**A third risk this plan did not name, found by building against the real `slic3r-config`.** Three
+of this unit's translations are blocked, each by something `59-foundation-config`'s module decided
+rather than by anything in this unit, and each is a finding for the pull request rather than a
+workaround on this branch: `ConfigOption` carries no `Send`/`Sync` bound, so `print_config_def`
+cannot live in a `static` and is leaked once per thread instead; the orphan rule forbids this crate
+implementing `ConfigOptionEnumValue` for `PrinterTechnology`,
+`ForwardCompatibilitySubstitutionRule` (both `slic3r-config`) or `NozzleType`
+(`slic3r-commondefs`), so `printer_technology`'s default is a `ConfigOptionEnumGeneric` over the
+same key map -- which serializes to the same `"FFF"`, verified against the oracle, not argued; and
+the missing ordering named under Step 4 above.
 
 ## Proof
 
