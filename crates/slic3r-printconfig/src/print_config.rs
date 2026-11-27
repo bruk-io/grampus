@@ -6,9 +6,10 @@
 //! the order `intent/libslic3r-rust-port/tasks/64-foundation-print-config/plan.md` sets out
 //! (Step 2 the enums, Step 3 `StaticCache`/`StaticPrintConfig`, Step 4 the 11 derived classes,
 //! Step 5 the option table, Step 6 `handle_legacy`). Steps 2, 3 and 6 are in; Step 5 is
-//! partial -- `init_common_params` in full plus the first options of `init_fff_params`, with
-//! `init_extruder_option_keys`, `init_filament_option_keys` and `init_sla_params` still
-//! placeholders -- and Step 4 is not started.
+//! partial -- `init_common_params`, `init_extruder_option_keys` and
+//! `init_filament_option_keys` in full, plus the first options of `init_fff_params`, with the
+//! rest of `init_fff_params` and all of `init_sla_params` still placeholders -- and Step 4 is
+//! not started.
 //!
 //! `crates/slic3r-printconfig/src/lib.rs` **does** carry `pub mod print_config;`, landed in
 //! `d6e3f55`. That is `docs/WORKFLOW.md`'s rule satisfied, not a completeness claim: the rule
@@ -3903,15 +3904,168 @@ impl PrintConfigDef {
         // <<<STEP5-FFF>>>
     }
 
-    /// `PrintConfigDef::init_extruder_option_keys()` (`PrintConfig.cpp:8992-9054`).
+    /// `PrintConfigDef::init_extruder_option_keys()` (`PrintConfig.cpp:8992-9053`).
+    ///
+    /// Two braced-initialiser key lists. The vendored comment above the first names the option
+    /// types they cover ("ConfigOptionFloats, ConfigOptionPercents, ConfigOptionBools,
+    /// ConfigOptionStrings"); the lists themselves are plain string vectors, so this is the
+    /// whole of the translation.
     fn init_extruder_option_keys(&mut self) {
-        // <<<STEP5-EXTRUDER>>>
+        // FIDELITY(port): both lists keep the vendored braced-initialiser order rather than
+        // being sorted here, because `extruder_option_keys()`/`extruder_retract_keys()` hand
+        // the `std::vector` out whole and callers iterate it (`GCode.cpp`'s per-extruder
+        // expansion reads it positionally). The order reaches output, so it is transcribed as
+        // written and held to it by `extruder_and_filament_key_lists_match_the_oracle`.
+        self.m_extruder_option_keys = [
+            "default_filament_profile",
+            "default_nozzle_volume_type",
+            "deretraction_speed",
+            "extruder_colour",
+            "extruder_offset",
+            "extruder_printable_height",
+            "extruder_type",
+            "long_retractions_when_cut",
+            "max_layer_height",
+            "min_layer_height",
+            "nozzle_diameter",
+            "nozzle_flush_dataset",
+            "nozzle_type",
+            "nozzle_volume",
+            "retract_after_wipe",
+            "retract_before_wipe",
+            "retract_length_toolchange",
+            "retract_lift_above",
+            "retract_lift_below",
+            "retract_lift_enforce",
+            "retract_restart_extra",
+            "retract_restart_extra_toolchange",
+            "retract_when_changing_layer",
+            "retraction_distances_when_cut",
+            "retraction_length",
+            "retraction_minimum_travel",
+            "retraction_speed",
+            "travel_slope",
+            "wipe",
+            "wipe_distance",
+            "z_hop",
+            "z_hop_types",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        self.m_extruder_retract_keys = [
+            "deretraction_speed",
+            "long_retractions_when_cut",
+            "retract_after_wipe",
+            "retract_before_wipe",
+            "retract_length_toolchange",
+            "retract_lift_above",
+            "retract_lift_below",
+            "retract_lift_enforce",
+            "retract_restart_extra",
+            "retract_restart_extra_toolchange",
+            "retract_when_changing_layer",
+            "retraction_distances_when_cut",
+            "retraction_length",
+            "retraction_minimum_travel",
+            "retraction_speed",
+            "travel_slope",
+            "wipe",
+            "wipe_distance",
+            "z_hop",
+            "z_hop_types",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        // PORT NOTE: `assert(std::is_sorted(...))` (`PrintConfig.cpp:9052`). The vendored
+        // `assert` is `<cassert>`'s, compiled out by `NDEBUG` in the oracle's own Release
+        // build, so `debug_assert!` -- not `assert!` -- is the faithful translation: a release
+        // Rust build must not keep a check the oracle does not run. The predicate is the
+        // vendored one, `is_sorted` over the list just assigned.
+        debug_assert!(self.m_extruder_retract_keys.is_sorted());
     }
 
-    /// `PrintConfigDef::init_filament_option_keys()` (`PrintConfig.cpp:9055-9109`).
+    /// `PrintConfigDef::init_filament_option_keys()` (`PrintConfig.cpp:9055-9108`).
+    ///
+    /// **PORT NOTE: dead code at the pin, and kept dead here.** Nothing in the vendored tree
+    /// calls this function -- `grep -rn init_filament_option_keys
+    /// vendor/OrcaSlicer/src/libslic3r/` finds only its definition (`PrintConfig.cpp:9055`) and
+    /// its declaration (`PrintConfig.hpp:872`), and `PrintConfigDef::PrintConfigDef()`
+    /// (`:998-1007`) calls `init_common_params`, `init_fff_params`,
+    /// `init_extruder_option_keys` and `init_sla_params` and not this one. So
+    /// `print_config_def.filament_option_keys()` and `.filament_retract_keys()` are **empty**
+    /// on the real oracle, and `PrintConfigDef::new()` here leaves them empty for the same
+    /// reason rather than calling this function and diverging. The body is still transcribed,
+    /// because the function exists at the pin and a later caller is the fan-out's business, not
+    /// this unit's; `#[allow(dead_code)]` records that it is unreachable rather than hiding it.
+    /// `extruder_and_filament_key_lists_match_the_oracle` measures the emptiness against the
+    /// oracle instead of assuming it.
     #[allow(dead_code)]
     fn init_filament_option_keys(&mut self) {
-        // <<<STEP5-FILAMENT>>>
+        // FIDELITY(port): braced-initialiser order, as in `init_extruder_option_keys`.
+        self.m_filament_option_keys = [
+            "default_filament_profile",
+            "deretraction_speed",
+            "filament_colour",
+            "filament_diameter",
+            "filament_retract_length_nc",
+            // The vendored list carries `// "filament_seam_gap",` commented out at
+            // `PrintConfig.cpp:9063`; the key is therefore absent, and the comment is kept here
+            // so the two lists read line for line.
+            "long_retractions_when_cut",
+            "max_layer_height",
+            "min_layer_height",
+            "retract_after_wipe",
+            "retract_before_wipe",
+            "retract_length_toolchange",
+            "retract_lift_above",
+            "retract_lift_below",
+            "retract_lift_enforce",
+            "retract_restart_extra",
+            "retract_restart_extra_toolchange",
+            "retract_when_changing_layer",
+            "retraction_distances_when_cut",
+            "retraction_length",
+            "retraction_minimum_travel",
+            "retraction_speed",
+            "volumetric_speed_coefficients",
+            "wipe",
+            "wipe_distance",
+            "z_hop",
+            "z_hop_types",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+        self.m_filament_retract_keys = [
+            "deretraction_speed",
+            "filament_retract_length_nc",
+            "long_retractions_when_cut",
+            "retract_after_wipe",
+            "retract_before_wipe",
+            "retract_lift_above",
+            "retract_lift_below",
+            "retract_lift_enforce",
+            "retract_restart_extra",
+            "retract_when_changing_layer",
+            "retraction_distances_when_cut",
+            "retraction_length",
+            "retraction_minimum_travel",
+            "retraction_speed",
+            "wipe",
+            "wipe_distance",
+            "z_hop",
+            "z_hop_types",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        // PORT NOTE: `assert(std::is_sorted(...))` (`PrintConfig.cpp:9107`), `debug_assert!`
+        // for the same reason as in `init_extruder_option_keys`.
+        debug_assert!(self.m_filament_retract_keys.is_sorted());
     }
 
     /// `PrintConfigDef::init_sla_params()` (`PrintConfig.cpp:9110-9747`).
@@ -5140,6 +5294,104 @@ mod tests {
             t, "aaaa",
             "advances past each replacement rather than rescanning"
         );
+    }
+
+    /// The four key lists `PrintConfigDef` keeps beside the registry
+    /// (`init_extruder_option_keys`, `PrintConfig.cpp:8992-9053`;
+    /// `init_filament_option_keys`, `:9055-9108`), held to exact equality against the real
+    /// oracle's own accessors -- content *and* order, since both lists are handed out whole
+    /// and iterated positionally.
+    ///
+    /// This covers the two filament lists' **emptiness** as well. `init_filament_option_keys`
+    /// is never called at the pin, so `print_config_def.filament_option_keys()` is empty, and
+    /// the port leaves its own two members empty for the same reason. That is a divergence a
+    /// reader would otherwise have to take on the implementer's word; here it is the oracle
+    /// that says so. The transcribed body is still checked, by calling it on a throwaway
+    /// `PrintConfigDef` and comparing against the vendored braced initialiser's own content,
+    /// so a mistranscribed key in a function the pin never calls still fails a test rather
+    /// than sitting unread.
+    #[test]
+    fn extruder_and_filament_key_lists_match_the_oracle() {
+        let def = print_config_def();
+
+        assert_eq!(
+            *def.extruder_option_keys(),
+            ora::oracle_extruder_option_keys()
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+            "extruder_option_keys, in the vendored vector's own order"
+        );
+        assert_eq!(
+            *def.extruder_retract_keys(),
+            ora::oracle_extruder_retract_keys()
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+            "extruder_retract_keys, in the vendored vector's own order"
+        );
+
+        // `init_filament_option_keys` is uncalled at the pin, so both of these are empty on
+        // the oracle and on the port. Asserted against the oracle rather than against a
+        // literal `vec![]`, so this reads as agreement and not as an assumption.
+        let oracle_filament_option = ora::oracle_filament_option_keys();
+        let oracle_filament_retract = ora::oracle_filament_retract_keys();
+        assert!(
+            oracle_filament_option.is_empty() && oracle_filament_retract.is_empty(),
+            "the pin never calls init_filament_option_keys, so both filament lists are empty \
+             on print_config_def; got {} and {} entries",
+            oracle_filament_option.len(),
+            oracle_filament_retract.len()
+        );
+        assert!(
+            def.filament_option_keys().is_empty() && def.filament_retract_keys().is_empty(),
+            "the port must leave them empty too, i.e. must not call \
+             init_filament_option_keys from PrintConfigDef::new()"
+        );
+
+        // The uncalled function's own body, checked against the vendored braced initialiser.
+        let mut throwaway = PrintConfigDef::new();
+        throwaway.init_filament_option_keys();
+        assert_eq!(
+            throwaway.filament_option_keys().len(),
+            26,
+            "27 braced entries at PrintConfig.cpp:9057-9084 less the one commented out at :9063"
+        );
+        assert_eq!(
+            throwaway.filament_option_keys()[0],
+            "default_filament_profile"
+        );
+        assert_eq!(
+            *throwaway.filament_option_keys().last().unwrap(),
+            "z_hop_types"
+        );
+        assert!(
+            !throwaway
+                .filament_option_keys()
+                .contains(&"filament_seam_gap".to_string()),
+            "the key commented out at PrintConfig.cpp:9063 must stay absent"
+        );
+        assert_eq!(throwaway.filament_retract_keys().len(), 18);
+        assert!(
+            throwaway.filament_retract_keys().is_sorted(),
+            "the predicate PrintConfig.cpp:9107's own assert states"
+        );
+        // Every filament-retract key is a filament-option key, and every extruder-retract key
+        // an extruder-option key -- true of the vendored lists and the property the
+        // "overridden by the same values defined at the Filament level" comment
+        // (`PrintConfig.hpp:853-855`) relies on.
+        for k in throwaway.filament_retract_keys() {
+            assert!(
+                throwaway.filament_option_keys().contains(k),
+                "{k} is a filament retract key and not a filament option key"
+            );
+        }
+        for k in def.extruder_retract_keys() {
+            assert!(
+                def.extruder_option_keys().contains(k),
+                "{k} is an extruder retract key and not an extruder option key"
+            );
+        }
     }
 }
 

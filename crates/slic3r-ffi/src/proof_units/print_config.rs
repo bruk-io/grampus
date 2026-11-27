@@ -63,10 +63,26 @@ mod ffi {
         /// handed back. Used by this unit's proof to hold the ported `handle_legacy` to exact
         /// equality over every key the registry knows plus the obsolete and renamed ones.
         fn oracle_handle_legacy(opt_key: &str, value: &str) -> OracleLegacyResult;
+
+        /// `print_config_def.extruder_option_keys()` (`PrintConfig.hpp:852`), in the
+        /// `std::vector`'s own braced-initialiser order rather than sorted.
+        fn oracle_extruder_option_keys() -> Vec<String>;
+
+        /// `print_config_def.extruder_retract_keys()` (`PrintConfig.hpp:856`).
+        fn oracle_extruder_retract_keys() -> Vec<String>;
+
+        /// `print_config_def.filament_option_keys()` (`PrintConfig.hpp:859`). Empty at the
+        /// pin: `init_filament_option_keys` is never called -- see the C++ shim's header.
+        fn oracle_filament_option_keys() -> Vec<String>;
+
+        /// `print_config_def.filament_retract_keys()` (`PrintConfig.hpp:860`). Empty at the
+        /// pin, for the same reason.
+        fn oracle_filament_retract_keys() -> Vec<String>;
     }
 }
 
 pub use ffi::{
-    oracle_handle_legacy, oracle_option_info, oracle_option_keys, OracleEnumKeyValue,
-    OracleLegacyResult, OracleOptionInfo,
+    oracle_extruder_option_keys, oracle_extruder_retract_keys, oracle_filament_option_keys,
+    oracle_filament_retract_keys, oracle_handle_legacy, oracle_option_info, oracle_option_keys,
+    OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
 };

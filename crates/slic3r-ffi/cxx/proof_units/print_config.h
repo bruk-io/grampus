@@ -26,6 +26,25 @@ OracleOptionInfo oracle_option_info(rust::Str key);
 // shim copies them in and hands both back.
 OracleLegacyResult oracle_handle_legacy(rust::Str opt_key, rust::Str value);
 
+// The four key lists `PrintConfigDef` keeps beside the registry, read through its own public
+// const accessors on the global `Slic3r::print_config_def`
+// (`PrintConfig.hpp:852,856,859,860`) and handed back in the `std::vector`'s own order, which
+// is the braced-initialiser order of `init_extruder_option_keys`/`init_filament_option_keys`
+// (`PrintConfig.cpp:8992,9055`) -- not sorted here, so the port's own lists are held to that
+// order as well as to that content.
+//
+// `oracle_filament_option_keys`/`oracle_filament_retract_keys` are expected to come back
+// **empty**: `init_filament_option_keys` is never called at the pin (`grep -rn
+// init_filament_option_keys vendor/OrcaSlicer/src/libslic3r/` finds only its definition at
+// `PrintConfig.cpp:9055` and its declaration at `PrintConfig.hpp:872`), so the two members it
+// would fill stay default-constructed on `print_config_def`. They are exposed anyway, so that
+// the port being empty there is a measured agreement with the oracle rather than an
+// assumption.
+rust::Vec<rust::String> oracle_extruder_option_keys();
+rust::Vec<rust::String> oracle_extruder_retract_keys();
+rust::Vec<rust::String> oracle_filament_option_keys();
+rust::Vec<rust::String> oracle_filament_retract_keys();
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

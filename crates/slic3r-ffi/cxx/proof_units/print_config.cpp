@@ -104,6 +104,33 @@ OracleLegacyResult oracle_handle_legacy(rust::Str opt_key, rust::Str value) {
     return out;
 }
 
+// The four key lists, each straight off its own public const accessor and in the
+// `std::vector`'s own order. See this unit's header for why the two filament lists come back
+// empty at the pin.
+static rust::Vec<rust::String> to_rust(const std::vector<std::string> &keys) {
+    rust::Vec<rust::String> out;
+    for (const auto &key : keys) {
+        out.push_back(rust::String(key));
+    }
+    return out;
+}
+
+rust::Vec<rust::String> oracle_extruder_option_keys() {
+    return to_rust(Slic3r::print_config_def.extruder_option_keys());
+}
+
+rust::Vec<rust::String> oracle_extruder_retract_keys() {
+    return to_rust(Slic3r::print_config_def.extruder_retract_keys());
+}
+
+rust::Vec<rust::String> oracle_filament_option_keys() {
+    return to_rust(Slic3r::print_config_def.filament_option_keys());
+}
+
+rust::Vec<rust::String> oracle_filament_retract_keys() {
+    return to_rust(Slic3r::print_config_def.filament_retract_keys());
+}
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi
