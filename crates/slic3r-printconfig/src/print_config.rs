@@ -2905,7 +2905,7 @@ pub fn filament_extruder_override_keys() -> &'static Vec<String> {
             "filament_retraction_minimum_travel",
             "filament_retract_length_toolchange",
             "filament_retract_restart_extra_toolchange",
-            // BBS: floats
+            // The BBS-added floats.
             "filament_wipe_distance",
             // bools
             "filament_retract_when_changing_layer",
@@ -4495,8 +4495,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:2065
+            let value = 150_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 150_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -4805,8 +4806,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:2337
+            let value = 100_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 100_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -4825,8 +4827,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:2348
+            let value = 50_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 50_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -5295,8 +5298,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:2723
+            let value = 50_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 50_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -5332,8 +5336,9 @@ impl PrintConfigDef {
             def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:2745
+            let value = 50_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 50_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -5470,9 +5475,10 @@ impl PrintConfigDef {
             def.sidetext = "mm".to_string();
             def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
             // PORT SRC: src/libslic3r/PrintConfig.cpp:2866
-            def.set_default_value(Box::new(ConfigOptionPoint::new(Vec2d::new(
-                -99999_f64, -99999_f64,
-            ))));
+            let x = -99999_f64;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:2866
+            let y = -99999_f64;
+            def.set_default_value(Box::new(ConfigOptionPoint::new(Vec2d::new(x, y))));
         }
         {
             let def = self.def.add("bed_mesh_max", ConfigOptionType::Point);
@@ -5481,9 +5487,10 @@ impl PrintConfigDef {
             def.sidetext = "mm".to_string();
             def.mode = slic3r_config::config::ConfigOptionMode::Advanced;
             // PORT SRC: src/libslic3r/PrintConfig.cpp:2878
-            def.set_default_value(Box::new(ConfigOptionPoint::new(Vec2d::new(
-                99999_f64, 99999_f64,
-            ))));
+            let x = 99999_f64;
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:2878
+            let y = 99999_f64;
+            def.set_default_value(Box::new(ConfigOptionPoint::new(Vec2d::new(x, y))));
         }
         {
             let def = self
@@ -6860,8 +6867,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:3917
+            let value = 100_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 100_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -6881,8 +6889,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:3928
+            let value = 100_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 100_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -7065,8 +7074,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:4047
+            let value = 100_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 100_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -7147,8 +7157,9 @@ impl PrintConfigDef {
             def.nullable = true;
             let mut v = ConfigOptionFloatsOrPercentsNullable { values: Vec::new() };
             // PORT SRC: src/libslic3r/PrintConfig.cpp:4104
+            let value = 100_f64;
             v.values.push(slic3r_config::config::FloatOrPercent {
-                value: 100_f64,
+                value,
                 percent: true,
             });
             def.set_default_value(Box::new(v));
@@ -13147,8 +13158,9 @@ impl PrintConfigDef {
             def.enum_values = src.enum_values;
             def.min = src.min;
             def.max = src.max;
-            // BBS: the specific filament retract settings are shown, because the machine
-            // retract settings are hidden behind `comDevelop`.
+            // The BBS note at `PrintConfig.cpp:8802`: the specific filament retract
+            // settings are shown, because the machine retract settings are hidden behind
+            // `comDevelop`.
             def.mode = if simple_mode {
                 slic3r_config::config::ConfigOptionMode::Simple
             } else {
@@ -14926,6 +14938,2037 @@ fn obsolete_option_keys() -> &'static std::collections::BTreeSet<&'static str> {
 // default, CLI spelling or legacy branch.
 // --------------------------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------------------------
+// The other `ConfigDef` subclasses of this unit (`PrintConfig.cpp:12713-13777`,
+// `PrintConfig.hpp:2417-2501`).
+//
+// None of these enters `print_config_def`: they are separate option tables -- the three command
+// line ones, the nine `GUI::EditGCodeDialog` placeholder ones, and the custom-G-code one -- and
+// they are in this unit because they are in `PrintConfig.cpp`. Each is one `ConfigDef` with a
+// constructor that fills it, so each is ported as a struct holding its `ConfigDef` base and a
+// `new()` that runs the vendored constructor body, exactly as `PrintConfigDef` above is.
+//
+// Only four have an `extern const` global at the pin (`cli_actions_config_def`,
+// `cli_transform_config_def`, `cli_misc_config_def`, `custom_gcode_specific_config_def`); the
+// other nine are constructed on demand by the GUI and have no global, which is why this unit's
+// proof shim default-constructs those nine rather than reading a symbol.
+// --------------------------------------------------------------------------------------------
+
+/// `class CLIActionsConfigDef : public ConfigDef` (`PrintConfig.hpp:2417-2421`): the command line options representing actions.
+pub struct CLIActionsConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl CLIActionsConfigDef {
+    /// `CLIActionsConfigDef::CLIActionsConfigDef()` (`PrintConfig.cpp:12713-12896`).
+    pub fn new() -> Self {
+        let mut this = CLIActionsConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("export_3mf", ConfigOptionType::String);
+            def.label = "Export 3MF".to_string();
+            def.tooltip = "This exports the project as a 3MF file.".to_string();
+            def.cli_params = "filename.3mf".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new("output.3mf".to_string())));
+        }
+        {
+            let def = self.def.add("export_slicedata", ConfigOptionType::String);
+            def.label = "Export slicing data".to_string();
+            def.tooltip = "Export slicing data to a folder".to_string();
+            def.cli_params = "slicing_data_directory".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new("cached_data".to_string())));
+        }
+        {
+            let def = self.def.add("load_slicedata", ConfigOptionType::Strings);
+            def.label = "Load slicing data".to_string();
+            def.tooltip = "Load cached slicing data from directory.".to_string();
+            def.cli_params = "slicing_data_directory".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new("cached_data".to_string())));
+        }
+        {
+            let def = self.def.add("export_stl", ConfigOptionType::Bool);
+            def.label = "Export STL".to_string();
+            def.tooltip = "Export the objects as single STL.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("export_stls", ConfigOptionType::String);
+            def.label = "Export multiple STLs".to_string();
+            def.tooltip = "Export the objects as multiple STLs to directory.".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new("stl_path".to_string())));
+        }
+        {
+            let def = self.def.add("slice", ConfigOptionType::Int);
+            def.label = "Slice".to_string();
+            def.tooltip = "Slice the plates: 0-all plates, i-plate i, others-invalid".to_string();
+            def.cli = "slice".to_string();
+            def.cli_params = "option".to_string();
+            def.set_default_value(Box::new(ConfigOptionInt::new(0)));
+        }
+        {
+            let def = self.def.add("help", ConfigOptionType::Bool);
+            def.label = "Help".to_string();
+            def.tooltip = "This shows command help.".to_string();
+            def.cli = "help|h".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("uptodate", ConfigOptionType::Bool);
+            def.label = "UpToDate".to_string();
+            def.tooltip = "Update the config values of 3MF to latest.".to_string();
+            def.cli = "uptodate".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("load_defaultfila", ConfigOptionType::Bool);
+            def.label = "Load default filaments".to_string();
+            def.tooltip = "Load first filament as default for those not loaded.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("min_save", ConfigOptionType::Bool);
+            def.label = "Minimum save".to_string();
+            def.tooltip = "Export 3MF with minimum size.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("mtcpp", ConfigOptionType::Int);
+            def.label = "mtcpp".to_string();
+            def.tooltip = "max triangle count per plate for slicing".to_string();
+            def.cli = "mtcpp".to_string();
+            def.cli_params = "count".to_string();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:12816
+            def.set_default_value(Box::new(ConfigOptionInt::new(1000000)));
+        }
+        {
+            let def = self.def.add("mstpp", ConfigOptionType::Int);
+            def.label = "mstpp".to_string();
+            def.tooltip = "max slicing time per plate in seconds".to_string();
+            def.cli = "mstpp".to_string();
+            def.cli_params = "time".to_string();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:12823
+            def.set_default_value(Box::new(ConfigOptionInt::new(300)));
+        }
+        {
+            let def = self.def.add("no_check", ConfigOptionType::Bool);
+            def.label = "No check".to_string();
+            def.tooltip =
+                "Do not run any validity checks, such as G-code path conflicts check.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("strict", ConfigOptionType::Bool);
+            def.label = "Strict mode".to_string();
+            def.tooltip = "Exit non-zero when slicing raises a non-critical warning that is otherwise only logged, such as a model that needs support while support is disabled. Use this in CI or scripted pipelines that should never ship a subtly broken slice. Each such warning is also listed with a stable class in the `warnings` array of result.json, which is written on Linux only. Cannot be combined with --no-check, which skips the support check.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("normative_check", ConfigOptionType::Bool);
+            def.label = "Normative check".to_string();
+            def.tooltip = "Check the normative items.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(true)));
+        }
+        {
+            let def = self.def.add("info", ConfigOptionType::Bool);
+            def.label = "Output Model Info".to_string();
+            def.tooltip = "This outputs the model\u{2019}s information.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("inspect_mesh", ConfigOptionType::Bool);
+            def.label = "Inspect mesh (JSON to stdout)".to_string();
+            def.tooltip = "Print a JSON summary of each loaded object to stdout, then exit: its bounding boxes and the convex hull faces it can be laid on, with their normals, areas and centers. These are the faces the --ground-* options choose from. Machine-readable alternative to --info.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("inspect_paint", ConfigOptionType::Bool);
+            def.label = "Inspect paint (JSON to stdout)".to_string();
+            def.tooltip = "Print a structured JSON summary of every painted layer (supports, seam, MMU color, fuzzy-skin) already stored on the loaded model \u{2014} per-state facet count, surface area, and mesh-local bounding box \u{2014} then exit. Machine-readable alternative to opening the paint gizmos in the GUI.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("export_settings", ConfigOptionType::String);
+            def.label = "Export Settings".to_string();
+            def.tooltip =
+                "This exports settings to a file. Use - to write them to stdout.".to_string();
+            def.cli_params = "settings.json".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new("output.json".to_string())));
+        }
+        {
+            let def = self.def.add("pipe", ConfigOptionType::String);
+            def.label = "Send progress to pipe".to_string();
+            def.tooltip = "Send progress to pipe.".to_string();
+            def.cli_params = "pipename".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+            // <<<UNHANDLED 12895>>>
+        }
+    }
+}
+
+impl Default for CLIActionsConfigDef {
+    fn default() -> Self {
+        CLIActionsConfigDef::new()
+    }
+}
+
+/// `extern const CLIActionsConfigDef cli_actions_config_def` (`PrintConfig.hpp:2505`, defined
+/// at `PrintConfig.cpp:13261`).
+///
+/// One table per thread rather than one per process, for the reason
+/// [`print_config_def`] records in full: `slic3r-config` declares `ConfigOption` with no
+/// `Send`/`Sync` bound, so a `ConfigDef` holding `Box<dyn ConfigOption>` defaults cannot be
+/// placed in a `static`. The content a caller observes is identical -- every copy is built by
+/// the same code from the same source.
+pub fn cli_actions_config_def() -> &'static CLIActionsConfigDef {
+    thread_local! {
+        static DEF: &'static CLIActionsConfigDef = Box::leak(Box::new(CLIActionsConfigDef::new()));
+    }
+    DEF.with(|d| *d)
+}
+
+/// `class CLITransformConfigDef : public ConfigDef` (`PrintConfig.hpp:2423-2427`): the command line options representing transforms.
+pub struct CLITransformConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl CLITransformConfigDef {
+    /// `CLITransformConfigDef::CLITransformConfigDef()` (`PrintConfig.cpp:12898-13046`).
+    pub fn new() -> Self {
+        let mut this = CLITransformConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("arrange", ConfigOptionType::Int);
+            def.label = "Arrange Options".to_string();
+            def.tooltip = "Arrange options: 0-disable, 1-enable, others-auto".to_string();
+            def.cli_params = "option".to_string();
+            def.set_default_value(Box::new(ConfigOptionInt::new(0)));
+        }
+        {
+            let def = self.def.add("repetitions", ConfigOptionType::Int);
+            def.label = "Repetition count".to_string();
+            def.tooltip = "Repetition count of the whole model.".to_string();
+            def.cli_params = "count".to_string();
+            def.set_default_value(Box::new(ConfigOptionInt::new(1)));
+        }
+        {
+            let def = self.def.add("ensure_on_bed", ConfigOptionType::Bool);
+            def.label = "Ensure on bed".to_string();
+            def.tooltip =
+                "Lift the object above the bed when it is partially below. Disabled by default."
+                    .to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("assemble", ConfigOptionType::Bool);
+            def.label = "Assemble".to_string();
+            def.tooltip = "Arrange the supplied models in a plate and merge them in a single model in order to perform actions once.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("convert_unit", ConfigOptionType::Bool);
+            def.label = "Convert Unit".to_string();
+            def.tooltip = "Convert the units of model.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("orient", ConfigOptionType::Int);
+            def.label = "Orient Options".to_string();
+            def.tooltip = "Orient options: 0-disable, 1-enable, others-auto".to_string();
+            def.set_default_value(Box::new(ConfigOptionInt::new(0)));
+        }
+        {
+            let def = self.def.add("repair", ConfigOptionType::Bool);
+            def.label = "Repair".to_string();
+            def.tooltip = "Repair the meshes of the models as Fix Model does: close holes and cracks, orient them outward and remove self-intersections.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("rotate", ConfigOptionType::Float);
+            def.label = "Rotate".to_string();
+            def.tooltip = "Rotation angle around the Z axis in degrees.".to_string();
+            def.sidetext = "°".to_string();
+            def.set_default_value(Box::new(ConfigOptionFloat::new(0_f64)));
+        }
+        {
+            let def = self.def.add("rotate_x", ConfigOptionType::Float);
+            def.label = "Rotate around X".to_string();
+            def.tooltip = "Rotation angle around the X axis in degrees.".to_string();
+            def.sidetext = "°".to_string();
+            def.set_default_value(Box::new(ConfigOptionFloat::new(0_f64)));
+        }
+        {
+            let def = self.def.add("rotate_y", ConfigOptionType::Float);
+            def.label = "Rotate around Y".to_string();
+            def.tooltip = "Rotation angle around the Y axis in degrees.".to_string();
+            def.sidetext = "°".to_string();
+            def.set_default_value(Box::new(ConfigOptionFloat::new(0_f64)));
+        }
+        {
+            let def = self.def.add("ground_largest_face", ConfigOptionType::Bool);
+            def.label = "Ground largest face".to_string();
+            def.tooltip = "Lay each object on the largest face of its convex hull and drop it onto the bed. Of equally large faces, the one already facing down is kept. Objects without a face large enough to rest on are left as they are. Transforms run in command-line order, so rotations given before this option are respected. --orient 1 runs after all transforms and replaces the orientation.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("ground_face_normal", ConfigOptionType::String);
+            def.label = "Ground face by normal".to_string();
+            def.tooltip = "Lay each object on the convex hull face whose outward normal is closest to the direction NX,NY,NZ and drop it onto the bed. The direction is in object coordinates, which include the rotations given before this option and match the plate axes unless the input file rotates the object. For example, 1,0,0 stands the object on its +X side. --orient 1 runs after all transforms and replaces the orientation.".to_string();
+            def.cli_params = "NX,NY,NZ".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new("".to_string())));
+        }
+        {
+            let def = self.def.add("ground_face_point", ConfigOptionType::String);
+            def.label = "Ground face at point".to_string();
+            def.tooltip = "Lay each object on the convex hull face that contains the point X,Y,Z and drop it onto the bed. The point is in object coordinates, which include the rotations given before this option; --inspect-mesh reports face centers in them. Objects without such a face are left as they are, and the run fails if no object has one. --orient 1 runs after all transforms and replaces the orientation.".to_string();
+            def.cli_params = "X,Y,Z".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new("".to_string())));
+        }
+        {
+            let def = self.def.add("scale", ConfigOptionType::Float);
+            def.label = "Scale".to_string();
+            def.tooltip = "Scale the model by a float factor.".to_string();
+            def.cli_params = "factor".to_string();
+            // PORT SRC: src/libslic3r/PrintConfig.cpp:13036
+            def.set_default_value(Box::new(ConfigOptionFloat::new(1.)));
+            // <<<UNHANDLED 13046>>>
+        }
+    }
+}
+
+impl Default for CLITransformConfigDef {
+    fn default() -> Self {
+        CLITransformConfigDef::new()
+    }
+}
+
+/// `extern const CLITransformConfigDef cli_transform_config_def` (`PrintConfig.hpp:2508`, defined
+/// at `PrintConfig.cpp:13262`).
+///
+/// One table per thread rather than one per process, for the reason
+/// [`print_config_def`] records in full: `slic3r-config` declares `ConfigOption` with no
+/// `Send`/`Sync` bound, so a `ConfigDef` holding `Box<dyn ConfigOption>` defaults cannot be
+/// placed in a `static`. The content a caller observes is identical -- every copy is built by
+/// the same code from the same source.
+pub fn cli_transform_config_def() -> &'static CLITransformConfigDef {
+    thread_local! {
+        static DEF: &'static CLITransformConfigDef = Box::leak(Box::new(CLITransformConfigDef::new()));
+    }
+    DEF.with(|d| *d)
+}
+
+/// `class CLIMiscConfigDef : public ConfigDef` (`PrintConfig.hpp:2429-2433`): every command line option that is not an action or a transform.
+pub struct CLIMiscConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl CLIMiscConfigDef {
+    /// `CLIMiscConfigDef::CLIMiscConfigDef()` (`PrintConfig.cpp:13048-13259`).
+    pub fn new() -> Self {
+        let mut this = CLIMiscConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("load_settings", ConfigOptionType::Strings);
+            def.label = "Load General Settings".to_string();
+            def.tooltip = "Load process/machine settings from the specified file.".to_string();
+            def.cli_params = "\"setting1.json;setting2.json\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("load_filaments", ConfigOptionType::Strings);
+            def.label = "Load Filament Settings".to_string();
+            def.tooltip = "Load filament settings from the specified file list.".to_string();
+            def.cli_params = "\"filament1.json;filament2.json;...\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("skip_objects", ConfigOptionType::Ints);
+            def.label = "Skip Objects".to_string();
+            def.tooltip = "Skip some objects in this print.".to_string();
+            def.cli_params = "\"3,5,10,77\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionInts::new()));
+        }
+        {
+            let def = self.def.add("clone_objects", ConfigOptionType::Ints);
+            def.label = "Clone Objects".to_string();
+            def.tooltip = "Clone objects in the load list.".to_string();
+            def.cli_params = "\"1,3,1,10\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionInts::new()));
+        }
+        {
+            let def = self.def.add("uptodate_settings", ConfigOptionType::Strings);
+            def.label = "Load uptodate process/machine settings when using uptodate".to_string();
+            def.tooltip = "load up-to-date process/machine settings from the specified file when using up-to-date".to_string();
+            def.cli_params = "\"setting1.json;setting2.json\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self
+                .def
+                .add("uptodate_filaments", ConfigOptionType::Strings);
+            def.label = "Load uptodate filament settings when using uptodate".to_string();
+            def.tooltip =
+                "Load uptodate filament settings from the specified file when using uptodate."
+                    .to_string();
+            def.cli_params = "\"filament1.json;filament2.json;...\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("downward_check", ConfigOptionType::Bool);
+            def.label = "Downward machines check".to_string();
+            def.tooltip = "If enabled, check whether current machine downward compatible with the machines in the list.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("downward_settings", ConfigOptionType::Strings);
+            def.label = "Downward machines settings".to_string();
+            def.tooltip = "The machine settings list needs to do downward checking.".to_string();
+            def.cli_params = "\"machine1.json;machine2.json;...\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("load_assemble_list", ConfigOptionType::String);
+            def.label = "Load assemble list".to_string();
+            def.tooltip = "Load assemble object list from config file.".to_string();
+            def.cli_params = "assemble_list.json".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("datadir", ConfigOptionType::String);
+            def.label = "Data directory".to_string();
+            def.tooltip = "Load and store settings at the given directory. This is useful for maintaining different profiles or including configurations from a network storage.".to_string();
+        }
+        {
+            let def = self.def.add("outputdir", ConfigOptionType::String);
+            def.label = "Output directory".to_string();
+            def.tooltip = "This is the output directory for exported files.".to_string();
+            def.cli_params = "dir".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("export_statistics", ConfigOptionType::Bool);
+            def.label = "Export statistics".to_string();
+            def.tooltip = "Write the statistics of each sliced plate as JSON, as plate_N.statistics.json next to its G-code in the output directory and inside the 3MF of --export-3mf: print time, filament and feature totals, and the same per layer and per object.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("debug", ConfigOptionType::Int);
+            def.label = "Debug level".to_string();
+            def.tooltip =
+                "Sets debug logging level. 0:fatal, 1:error, 2:warning, 3:info, 4:debug, 5:trace\n"
+                    .to_string();
+            def.min = 0_f32;
+            def.cli_params = "level".to_string();
+            def.set_default_value(Box::new(ConfigOptionInt::new(1)));
+        }
+        {
+            let def = self.def.add("logfile", ConfigOptionType::String);
+            def.label = "Log file".to_string();
+            def.tooltip = "Redirects debug logging to file.\n".to_string();
+            def.cli_params = "file".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("enable_timelapse", ConfigOptionType::Bool);
+            def.label = "Enable timelapse for print".to_string();
+            def.tooltip =
+                "If enabled, this slicing will be considered using timelapse.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("load_custom_gcodes", ConfigOptionType::String);
+            def.label = "Load custom G-code".to_string();
+            def.tooltip = "Load custom G-code from json.".to_string();
+            def.cli_params = "custom_gcode_toolchange.json".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("load_filament_ids", ConfigOptionType::Ints);
+            def.label = "Load filament IDs".to_string();
+            def.tooltip = "Load filament IDs for each object.".to_string();
+            def.cli_params = "\"1,2,3,1\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionInts::new()));
+        }
+        {
+            let def = self
+                .def
+                .add("allow_multicolor_oneplate", ConfigOptionType::Bool);
+            def.label = "Allow multiple colors on one plate".to_string();
+            def.tooltip =
+                "If enabled, Arrange will allow multiple colors on one plate.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(true)));
+        }
+        {
+            let def = self.def.add("allow_rotations", ConfigOptionType::Bool);
+            def.label = "Allow rotation when arranging".to_string();
+            def.tooltip =
+                "If enabled, Arrange will allow rotation when placing objects.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("align_to_y_axis", ConfigOptionType::Bool);
+            def.label = "Align to Y axis when arranging".to_string();
+            def.tooltip = "If enabled, Arrange will turn each object so its long side runs along the Y axis before placing it. When not given, it is on for i3 printers and off for the others, as in the GUI.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self
+                .def
+                .add("avoid_extrusion_cali_region", ConfigOptionType::Bool);
+            def.label = "Avoid extrusion calibrate region when arranging".to_string();
+            def.tooltip =
+                "If enabled, Arrange will avoid extrusion calibrate region when placing objects."
+                    .to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("skip_modified_gcodes", ConfigOptionType::Bool);
+            def.label = "Skip modified G-code in 3MF".to_string();
+            def.tooltip =
+                "Skip the modified G-code in 3MF from printer or filament presets.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("makerlab_name", ConfigOptionType::String);
+            def.label = "MakerLab name".to_string();
+            def.tooltip = "MakerLab name to generate this 3MF.".to_string();
+            def.cli_params = "name".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("makerlab_version", ConfigOptionType::String);
+            def.label = "MakerLab version".to_string();
+            def.tooltip = "MakerLab version to generate this 3MF.".to_string();
+            def.cli_params = "version".to_string();
+            def.set_default_value(Box::new(ConfigOptionString::new(String::new())));
+        }
+        {
+            let def = self.def.add("metadata_name", ConfigOptionType::Strings);
+            def.label = "Metadata name list".to_string();
+            def.tooltip = "Metadata name list added into 3MF.".to_string();
+            def.cli_params = "\"name1;name2;...\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("metadata_value", ConfigOptionType::Strings);
+            def.label = "Metadata value list".to_string();
+            def.tooltip = "Metadata value list added into 3MF.".to_string();
+            def.cli_params = "\"value1;value2;...\"".to_string();
+            def.set_default_value(Box::new(ConfigOptionStrings::new()));
+        }
+        {
+            let def = self.def.add("allow_newer_file", ConfigOptionType::Bool);
+            def.label = "Allow 3MF with newer version to be sliced".to_string();
+            def.tooltip = "Allow 3MF with newer version to be sliced.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+        }
+        {
+            let def = self.def.add("allow_mix_temp", ConfigOptionType::Bool);
+            def.label =
+                "Allow filaments with high/low temperature to be printed together".to_string();
+            def.tooltip =
+                "Allow filaments with high/low temperature to be printed together.".to_string();
+            def.set_default_value(Box::new(ConfigOptionBool::new(false)));
+            // <<<UNHANDLED 13259>>>
+        }
+    }
+}
+
+impl Default for CLIMiscConfigDef {
+    fn default() -> Self {
+        CLIMiscConfigDef::new()
+    }
+}
+
+/// `extern const CLIMiscConfigDef cli_misc_config_def` (`PrintConfig.hpp:2511`, defined
+/// at `PrintConfig.cpp:13263`).
+///
+/// One table per thread rather than one per process, for the reason
+/// [`print_config_def`] records in full: `slic3r-config` declares `ConfigOption` with no
+/// `Send`/`Sync` bound, so a `ConfigDef` holding `Box<dyn ConfigOption>` defaults cannot be
+/// placed in a `static`. The content a caller observes is identical -- every copy is built by
+/// the same code from the same source.
+pub fn cli_misc_config_def() -> &'static CLIMiscConfigDef {
+    thread_local! {
+        static DEF: &'static CLIMiscConfigDef = Box::leak(Box::new(CLIMiscConfigDef::new()));
+    }
+    DEF.with(|d| *d)
+}
+
+/// `class ReadOnlySlicingStatesConfigDef : public ConfigDef` (`PrintConfig.hpp:2441-2445`): the read-only slicing-state placeholders `GUI::EditGCodeDialog` offers.
+pub struct ReadOnlySlicingStatesConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl ReadOnlySlicingStatesConfigDef {
+    /// `ReadOnlySlicingStatesConfigDef::ReadOnlySlicingStatesConfigDef()` (`PrintConfig.cpp:13282-13289`).
+    pub fn new() -> Self {
+        let mut this = ReadOnlySlicingStatesConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("zhop", ConfigOptionType::Float);
+            def.label = "Current Z-hop".to_string();
+            def.tooltip =
+                "Contains Z-hop present at the beginning of the custom G-code block.".to_string();
+            // <<<UNHANDLED 13289>>>
+        }
+    }
+}
+
+impl Default for ReadOnlySlicingStatesConfigDef {
+    fn default() -> Self {
+        ReadOnlySlicingStatesConfigDef::new()
+    }
+}
+
+/// `class ReadWriteSlicingStatesConfigDef : public ConfigDef` (`PrintConfig.hpp:2447-2451`): the read-write slicing-state placeholders `GUI::EditGCodeDialog` offers.
+pub struct ReadWriteSlicingStatesConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl ReadWriteSlicingStatesConfigDef {
+    /// `ReadWriteSlicingStatesConfigDef::ReadWriteSlicingStatesConfigDef()` (`PrintConfig.cpp:13291-13312`).
+    pub fn new() -> Self {
+        let mut this = ReadWriteSlicingStatesConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("position", ConfigOptionType::Floats);
+            def.label = "Position".to_string();
+            def.tooltip = "Position of the extruder at the beginning of the custom G-code block. If the custom G-code travels somewhere else, it should write to this variable so OrcaSlicer knows where it travels from when it gets control back.".to_string();
+        }
+        {
+            let def = self.def.add("e_retracted", ConfigOptionType::Floats);
+            def.label = "Retraction".to_string();
+            def.tooltip = "Retraction state at the beginning of the custom G-code block. If the custom G-code moves the extruder axis, it should write to this variable so OrcaSlicer de-retracts correctly when it gets control back.".to_string();
+        }
+        {
+            let def = self.def.add("e_restart_extra", ConfigOptionType::Floats);
+            def.label = "Extra de-retraction".to_string();
+            def.tooltip =
+                "Currently planned extra extruder priming after de-retraction.".to_string();
+        }
+        {
+            let def = self.def.add("e_position", ConfigOptionType::Floats);
+            def.label = "Absolute E position".to_string();
+            def.tooltip = "Current position of the extruder axis. Only used with absolute extruder addressing.".to_string();
+            // <<<UNHANDLED 13312>>>
+        }
+    }
+}
+
+impl Default for ReadWriteSlicingStatesConfigDef {
+    fn default() -> Self {
+        ReadWriteSlicingStatesConfigDef::new()
+    }
+}
+
+/// `class OtherSlicingStatesConfigDef : public ConfigDef` (`PrintConfig.hpp:2453-2457`): the remaining slicing-state placeholders `GUI::EditGCodeDialog` offers.
+pub struct OtherSlicingStatesConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl OtherSlicingStatesConfigDef {
+    /// `OtherSlicingStatesConfigDef::OtherSlicingStatesConfigDef()` (`PrintConfig.cpp:13314-13361`).
+    pub fn new() -> Self {
+        let mut this = OtherSlicingStatesConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("current_extruder", ConfigOptionType::Int);
+            def.label = "Current extruder".to_string();
+            def.tooltip = "Zero-based index of currently used extruder.".to_string();
+        }
+        {
+            let def = self.def.add("current_object_idx", ConfigOptionType::Int);
+            def.label = "Current object index".to_string();
+            def.tooltip =
+                "Specific for sequential printing. Zero-based index of currently printed object."
+                    .to_string();
+        }
+        {
+            let def = self.def.add("has_wipe_tower", ConfigOptionType::Bool);
+            def.label = "Has wipe tower".to_string();
+            def.tooltip = "Whether or not wipe tower is being generated in the print.".to_string();
+        }
+        {
+            let def = self.def.add("initial_extruder", ConfigOptionType::Int);
+            def.label = "Initial extruder".to_string();
+            def.tooltip =
+                "Zero-based index of the first extruder used in the print. Same as initial_tool."
+                    .to_string();
+        }
+        {
+            let def = self.def.add("initial_tool", ConfigOptionType::Int);
+            def.label = "Initial tool".to_string();
+            def.tooltip = "Zero-based index of the first extruder used in the print. Same as initial_extruder.".to_string();
+        }
+        {
+            let def = self.def.add("is_extruder_used", ConfigOptionType::Bools);
+            def.label = "Is extruder used?".to_string();
+            def.tooltip =
+                "Vector of booleans stating whether a given extruder is used in the print."
+                    .to_string();
+        }
+        {
+            let def = self.def.add("num_extruders", ConfigOptionType::Int);
+            def.label = "Number of extruders".to_string();
+            def.tooltip = "Total number of extruders, regardless of whether they are used in the current print.".to_string();
+        }
+        {
+            let def = self.def.add(
+                "has_single_extruder_multi_material_priming",
+                ConfigOptionType::Bool,
+            );
+            def.label = "Has single extruder MM priming".to_string();
+            def.tooltip =
+                "Are the extra multi-material priming regions used in this print?".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("initial_no_support_extruder", ConfigOptionType::Int);
+            def.label = "Initial no support extruder".to_string();
+            def.tooltip = "Zero-based index of the first extruder used for printing without support. Same as initial_no_support_tool.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("in_head_wrap_detect_zone", ConfigOptionType::Bool);
+            def.label = "In head wrap detect zone".to_string();
+            def.tooltip =
+                "Indicates if the first layer overlaps with the head wrap zone.".to_string();
+        }
+        {
+            let def = self.def.add("curr_bed_type", ConfigOptionType::String);
+            def.label = "Current bed type".to_string();
+            def.tooltip = "Name of the currently selected bed plate type (e.g. 'Textured PEI Plate', 'Smooth High Temp Plate').".to_string();
+        }
+        {
+            let def = self.def.add("imex_mode", ConfigOptionType::String);
+            def.label = "IDEX/IQEX active mode".to_string();
+            def.tooltip = "Name of the active IDEX/IQEX parallel print mode for this plate (e.g. 'primary', 'mirror', 'copy'). Empty string if IDEX/IQEX is not enabled.".to_string();
+        }
+        {
+            let def = self.def.add("imex_mode_index", ConfigOptionType::Int);
+            def.label = "IDEX/IQEX active mode index".to_string();
+            def.tooltip = "Zero-based index of the active IDEX/IQEX parallel print mode within imex_mode_names.".to_string();
+        }
+        {
+            let def = self.def.add("imex_mode_gcode", ConfigOptionType::String);
+            def.label = "IDEX/IQEX active mode G-code".to_string();
+            def.tooltip = "The raw mode G-code template for the active IDEX/IQEX parallel print mode, after placeholder evaluation. Globals defined here flow into machine_start_gcode.".to_string();
+            // <<<UNHANDLED 13361>>>
+        }
+    }
+}
+
+impl Default for OtherSlicingStatesConfigDef {
+    fn default() -> Self {
+        OtherSlicingStatesConfigDef::new()
+    }
+}
+
+/// `class PrintStatisticsConfigDef : public ConfigDef` (`PrintConfig.hpp:2459-2463`): the print-statistics placeholders `GUI::EditGCodeDialog` offers.
+pub struct PrintStatisticsConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl PrintStatisticsConfigDef {
+    /// `PrintStatisticsConfigDef::PrintStatisticsConfigDef()` (`PrintConfig.cpp:13363-13454`).
+    pub fn new() -> Self {
+        let mut this = PrintStatisticsConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("extruded_volume", ConfigOptionType::Floats);
+            def.label = "Volume per extruder".to_string();
+            def.tooltip =
+                "Total filament volume extruded per extruder during the entire print.".to_string();
+        }
+        {
+            let def = self.def.add("total_toolchanges", ConfigOptionType::Int);
+            def.label = "Total tool changes".to_string();
+            def.tooltip = "Number of tool changes during the print.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("extruded_volume_total", ConfigOptionType::Float);
+            def.label = "Total volume".to_string();
+            def.tooltip = "Total volume of filament used during the entire print.".to_string();
+        }
+        {
+            let def = self.def.add("extruded_weight", ConfigOptionType::Floats);
+            def.label = "Weight per extruder".to_string();
+            def.tooltip = "Weight per extruder extruded during the entire print. Calculated from filament_density value in Filament Settings.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("extruded_weight_total", ConfigOptionType::Float);
+            def.label = "Total weight".to_string();
+            def.tooltip = "Total weight of the print. Calculated from filament_density value in Filament Settings.".to_string();
+        }
+        {
+            let def = self.def.add("total_layer_count", ConfigOptionType::Int);
+            def.label = "Total layer count".to_string();
+            def.tooltip = "Number of layers in the entire print.".to_string();
+        }
+        {
+            let def = self.def.add("normal_print_time", ConfigOptionType::String);
+            def.label = "Print time (normal mode)".to_string();
+            def.tooltip = "Estimated print time when printed in normal mode (i.e. not in silent mode). Same as print_time.".to_string();
+        }
+        {
+            let def = self.def.add("print_time", ConfigOptionType::String);
+            def.label = "Print time (normal mode)".to_string();
+            def.tooltip = "Estimated print time when printed in normal mode (i.e. not in silent mode). Same as normal_print_time.".to_string();
+        }
+        {
+            let def = self.def.add("silent_print_time", ConfigOptionType::String);
+            def.label = "Print time (silent mode)".to_string();
+            def.tooltip = "Estimated print time when printed in silent mode.".to_string();
+        }
+        {
+            let def = self.def.add("total_cost", ConfigOptionType::Float);
+            def.label = "Total cost".to_string();
+            def.tooltip = "Total cost of all material used in the print. Calculated from filament_cost value in Filament Settings.".to_string();
+        }
+        {
+            let def = self.def.add("total_weight", ConfigOptionType::Float);
+            def.label = "Total weight".to_string();
+            def.tooltip = "Total weight of the print. Calculated from filament_density value in Filament Settings.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("total_wipe_tower_cost", ConfigOptionType::Float);
+            def.label = "Total wipe tower cost".to_string();
+            def.tooltip = "Total cost of the material wasted on the wipe tower. Calculated from filament_cost value in Filament Settings.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("total_wipe_tower_filament", ConfigOptionType::Float);
+            def.label = "Total wipe tower filament".to_string();
+            def.tooltip = "Total length of filament used on the wipe tower, in mm.".to_string();
+        }
+        {
+            let def = self.def.add("used_filament", ConfigOptionType::Float);
+            def.label = "Used filament".to_string();
+            def.tooltip = "Total length of filament used in the print.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("print_time_total_sec", ConfigOptionType::String);
+            def.label = "Print time (total seconds)".to_string();
+            def.tooltip = "Total estimated print time in seconds. Replaced with actual value during post-processing.".to_string();
+        }
+        {
+            let def = self.def.add("print_time_day", ConfigOptionType::String);
+            def.label = "Print time (days component)".to_string();
+            def.tooltip = "Estimated print time day component (normal mode). Replaced with actual value during post-processing.".to_string();
+        }
+        {
+            let def = self.def.add("print_time_hour", ConfigOptionType::String);
+            def.label = "Print time (hours component)".to_string();
+            def.tooltip = "Estimated print time hour component (normal mode). Replaced with actual value during post-processing.".to_string();
+        }
+        {
+            let def = self.def.add("print_time_minute", ConfigOptionType::String);
+            def.label = "Print time (minutes component)".to_string();
+            def.tooltip = "Estimated print time minute component (normal mode). Replaced with actual value during post-processing.".to_string();
+        }
+        {
+            let def = self.def.add("print_time_sec", ConfigOptionType::String);
+            def.label = "Print time (seconds component)".to_string();
+            def.tooltip = "Estimated print time second component (normal mode). Replaced with actual value during post-processing.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("used_filament_length", ConfigOptionType::String);
+            def.label = "Filament length (meters)".to_string();
+            def.tooltip = "Total filament length used in meters. Replaced with actual value during post-processing.".to_string();
+            // <<<UNHANDLED 13454>>>
+        }
+    }
+}
+
+impl Default for PrintStatisticsConfigDef {
+    fn default() -> Self {
+        PrintStatisticsConfigDef::new()
+    }
+}
+
+/// `class ObjectsInfoConfigDef : public ConfigDef` (`PrintConfig.hpp:2465-2469`): the object-information placeholders `GUI::EditGCodeDialog` offers.
+pub struct ObjectsInfoConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl ObjectsInfoConfigDef {
+    /// `ObjectsInfoConfigDef::ObjectsInfoConfigDef()` (`PrintConfig.cpp:13456-13480`).
+    pub fn new() -> Self {
+        let mut this = ObjectsInfoConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("num_objects", ConfigOptionType::Int);
+            def.label = "Number of objects".to_string();
+            def.tooltip = "Total number of objects in the print.".to_string();
+        }
+        {
+            let def = self.def.add("num_instances", ConfigOptionType::Int);
+            def.label = "Number of instances".to_string();
+            def.tooltip = "Total number of object instances in the print, summed over all objects."
+                .to_string();
+        }
+        {
+            let def = self.def.add("scale", ConfigOptionType::Strings);
+            def.label = "Scale per object".to_string();
+            def.tooltip = "Contains a string with the information about what scaling was applied to the individual objects. Indexing of the objects is zero-based (first object has index 0).\nExample: 'x:100% y:50% z:100%'.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("input_filename_base", ConfigOptionType::String);
+            def.label = "Input filename without extension".to_string();
+            def.tooltip = "Source filename of the first object, without extension.".to_string();
+        }
+        {
+            let def = self.def.add("input_filename", ConfigOptionType::String);
+            def.label = "Full input filename".to_string();
+            def.tooltip = "Source filename of the first object.".to_string();
+        }
+        {
+            let def = self.def.add("plate_name", ConfigOptionType::String);
+            def.label = "Plate name".to_string();
+            def.tooltip = "Name of the plate sliced.".to_string();
+            // <<<UNHANDLED 13480>>>
+        }
+    }
+}
+
+impl Default for ObjectsInfoConfigDef {
+    fn default() -> Self {
+        ObjectsInfoConfigDef::new()
+    }
+}
+
+/// `class DimensionsConfigDef : public ConfigDef` (`PrintConfig.hpp:2471-2475`): the dimension placeholders `GUI::EditGCodeDialog` offers.
+pub struct DimensionsConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl DimensionsConfigDef {
+    /// `DimensionsConfigDef::DimensionsConfigDef()` (`PrintConfig.cpp:13482-13520`).
+    pub fn new() -> Self {
+        let mut this = DimensionsConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self
+                .def
+                .add("first_layer_print_convex_hull", ConfigOptionType::Points);
+            def.label = "First layer convex hull".to_string();
+            def.tooltip = "Vector of points of the first layer convex hull. Each element has the following format:'[x, y]' (x and y are floating-point numbers in mm).".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_print_min", ConfigOptionType::Floats);
+            def.label = "Bottom-left corner of the first layer bounding box".to_string();
+            def.tooltip =
+                "The vector has two elements: X and Y coordinate of the point. Values in mm."
+                    .to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_print_max", ConfigOptionType::Floats);
+            def.label = "Top-right corner of the first layer bounding box".to_string();
+            def.tooltip =
+                "The vector has two elements: X and Y coordinate of the point. Values in mm."
+                    .to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_print_size", ConfigOptionType::Floats);
+            def.label = "Size of the first layer bounding box".to_string();
+            def.tooltip =
+                "The vector has two elements: X and Y dimension of the bounding box. Values in mm."
+                    .to_string();
+        }
+        {
+            let def = self.def.add("print_bed_min", ConfigOptionType::Floats);
+            def.label = "Bottom-left corner of print bed bounding box".to_string();
+            def.tooltip =
+                "The vector has two elements: X and Y coordinate of the point. Values in mm."
+                    .to_string();
+        }
+        {
+            let def = self.def.add("print_bed_max", ConfigOptionType::Floats);
+            def.label = "Top-right corner of print bed bounding box".to_string();
+            def.tooltip =
+                "The vector has two elements: X and Y coordinate of the point. Values in mm."
+                    .to_string();
+        }
+        {
+            let def = self.def.add("print_bed_size", ConfigOptionType::Floats);
+            def.label = "Size of the print bed bounding box".to_string();
+            def.tooltip =
+                "The vector has two elements: X and Y dimension of the bounding box. Values in mm."
+                    .to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_center_no_wipe_tower", ConfigOptionType::Floats);
+            def.label = "First layer center without wipe tower".to_string();
+            def.tooltip =
+                "The vector has two elements: X and Y coordinate of the point. Values in mm."
+                    .to_string();
+        }
+        {
+            let def = self.def.add("first_layer_height", ConfigOptionType::Float);
+            def.label = "First layer height".to_string();
+            def.tooltip = "Height of the first layer.".to_string();
+            // <<<UNHANDLED 13520>>>
+        }
+    }
+}
+
+impl Default for DimensionsConfigDef {
+    fn default() -> Self {
+        DimensionsConfigDef::new()
+    }
+}
+
+/// `class TemperaturesConfigDef : public ConfigDef` (`PrintConfig.hpp:2477-2481`): the temperature placeholders `GUI::EditGCodeDialog` offers.
+pub struct TemperaturesConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl TemperaturesConfigDef {
+    /// `TemperaturesConfigDef::TemperaturesConfigDef()` (`PrintConfig.cpp:13522-13536`).
+    pub fn new() -> Self {
+        let mut this = TemperaturesConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("bed_temperature", ConfigOptionType::Ints);
+            def.label = "Bed temperature".to_string();
+            def.tooltip = "Vector of bed temperatures for each extruder/filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("bed_temperature_initial_layer", ConfigOptionType::Ints);
+            def.label = "First layer bed temperature".to_string();
+            def.tooltip = "Vector of first layer bed temperatures for each extruder/filament. Provides the same value as first_layer_bed_temperature.".to_string();
+        }
+        {
+            let def = self.def.add(
+                "bed_temperature_initial_layer_single",
+                ConfigOptionType::Int,
+            );
+            def.label = "First layer bed temperature (initial extruder)".to_string();
+            def.tooltip = "First layer bed temperature for the initial extruder. Same as bed_temperature_initial_layer[initial_extruder]".to_string();
+        }
+        {
+            let def = self.def.add("chamber_temperature", ConfigOptionType::Ints);
+            def.label = "Chamber temperature".to_string();
+            def.tooltip = "Vector of chamber temperatures for each extruder/filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("chamber_minimal_temperature", ConfigOptionType::Ints);
+            def.label = "Chamber minimal temperature".to_string();
+            def.tooltip =
+                "Vector of minimal chamber temperatures for each extruder/filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("overall_chamber_temperature", ConfigOptionType::Int);
+            def.label = "Overall chamber temperature".to_string();
+            def.tooltip = "Overall chamber temperature. This value is the maximum chamber temperature of any extruder/filament used.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_bed_temperature", ConfigOptionType::Ints);
+            def.label = "First layer bed temperature".to_string();
+            def.tooltip = "Vector of first layer bed temperatures for each extruder/filament. Provides the same value as bed_temperature_initial_layer.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_temperature", ConfigOptionType::Ints);
+            def.label = "First layer temperature".to_string();
+            def.tooltip =
+                "Vector of first layer temperatures for each extruder/filament.".to_string();
+        }
+    }
+}
+
+impl Default for TemperaturesConfigDef {
+    fn default() -> Self {
+        TemperaturesConfigDef::new()
+    }
+}
+
+/// `class TimestampsConfigDef : public ConfigDef` (`PrintConfig.hpp:2483-2487`): the timestamp placeholders `GUI::EditGCodeDialog` offers.
+pub struct TimestampsConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl TimestampsConfigDef {
+    /// `TimestampsConfigDef::TimestampsConfigDef()` (`PrintConfig.cpp:13537-13562`).
+    pub fn new() -> Self {
+        let mut this = TimestampsConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("timestamp", ConfigOptionType::String);
+            def.label = "Timestamp".to_string();
+            def.tooltip = "String containing current time in yyyyMMdd-hhmmss format.".to_string();
+        }
+        {
+            let def = self.def.add("year", ConfigOptionType::Int);
+            def.label = "Year".to_string();
+        }
+        {
+            let def = self.def.add("month", ConfigOptionType::Int);
+            def.label = "Month".to_string();
+        }
+        {
+            let def = self.def.add("day", ConfigOptionType::Int);
+            def.label = "Day".to_string();
+        }
+        {
+            let def = self.def.add("hour", ConfigOptionType::Int);
+            def.label = "Hour".to_string();
+        }
+        {
+            let def = self.def.add("minute", ConfigOptionType::Int);
+            def.label = "Minute".to_string();
+        }
+        {
+            let def = self.def.add("second", ConfigOptionType::Int);
+            def.label = "Second".to_string();
+            // <<<UNHANDLED 13562>>>
+        }
+    }
+}
+
+impl Default for TimestampsConfigDef {
+    fn default() -> Self {
+        TimestampsConfigDef::new()
+    }
+}
+
+/// `class OtherPresetsConfigDef : public ConfigDef` (`PrintConfig.hpp:2489-2493`): the other-preset placeholders `GUI::EditGCodeDialog` offers.
+pub struct OtherPresetsConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl OtherPresetsConfigDef {
+    /// `OtherPresetsConfigDef::OtherPresetsConfigDef()` (`PrintConfig.cpp:13564-13584`).
+    pub fn new() -> Self {
+        let mut this = OtherPresetsConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("print_preset", ConfigOptionType::String);
+            def.label = "Print preset name".to_string();
+            def.tooltip = "Name of the print preset used for slicing.".to_string();
+        }
+        {
+            let def = self.def.add("filament_preset", ConfigOptionType::String);
+            def.label = "Filament preset name".to_string();
+            def.tooltip = "Names of the filament presets used for slicing. The variable is a vector containing one name for each extruder.".to_string();
+        }
+        {
+            let def = self.def.add("printer_preset", ConfigOptionType::String);
+            def.label = "Printer preset name".to_string();
+            def.tooltip = "Name of the printer preset used for slicing.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("physical_printer_preset", ConfigOptionType::String);
+            def.label = "Physical printer name".to_string();
+            def.tooltip = "Name of the physical printer used for slicing.".to_string();
+            // <<<UNHANDLED 13584>>>
+        }
+    }
+}
+
+impl Default for OtherPresetsConfigDef {
+    fn default() -> Self {
+        OtherPresetsConfigDef::new()
+    }
+}
+
+/// `t_custom_gcode_key` (`PrintConfig.hpp:2435`): `std::string`.
+pub type TCustomGcodeKey = String;
+
+/// `s_CustomGcodeSpecificPlaceholders` (`PrintConfig.cpp:13587-13641`), the placeholders each
+/// custom G-code accepts, if any.
+///
+/// FIDELITY(port): a `BTreeMap`, matching the vendored
+/// `std::map<t_custom_gcode_key, t_config_option_keys>`'s own bytewise-ascending key order,
+/// which reaches output -- `custom_gcode_specific_placeholders()` hands the map out whole and
+/// `GUI::EditGCodeDialog` walks it in order to build its placeholder list. Each value keeps the
+/// vendored braced-initialiser order of its own key vector, which is not sorted and which the
+/// same walk reads positionally.
+fn s_custom_gcode_specific_placeholders(
+) -> &'static std::collections::BTreeMap<TCustomGcodeKey, Vec<String>> {
+    static MAP: std::sync::OnceLock<std::collections::BTreeMap<TCustomGcodeKey, Vec<String>>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(|| {
+        [
+            ("file_start_gcode", &[] as &[&str]),
+            ("machine_start_gcode", &[] as &[&str]),
+            (
+                "machine_end_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "max_layer_z",
+                    "filament_extruder_id",
+                    "current_filament_id",
+                    "current_extruder_id",
+                    "current_nozzle_id",
+                    "nozzle_diameter_at_nozzle_id",
+                    "nozzle_volume_types",
+                ] as &[&str],
+            ),
+            (
+                "before_layer_change_gcode",
+                &["layer_num", "layer_z", "max_layer_z"] as &[&str],
+            ),
+            (
+                "layer_change_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "max_layer_z",
+                    "most_used_physical_extruder_id",
+                    "current_filament_id",
+                    "current_nozzle_id",
+                    "curr_y_acceleration_limit",
+                    "curr_accumulated_mass",
+                    "previous_layer_mass",
+                    "curr_layer_mass",
+                ] as &[&str],
+            ),
+            (
+                "time_lapse_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "max_layer_z",
+                    "most_used_physical_extruder_id",
+                    "curr_physical_extruder_id",
+                    "timelapse_pos_x",
+                    "timelapse_pos_y",
+                    "has_timelapse_safe_pos",
+                    "timelapse_inline_photo",
+                    "farthest_point_timelapse_enabled",
+                    "clear_to_x0",
+                ] as &[&str],
+            ),
+            (
+                "wrapping_detection_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "max_layer_z",
+                    "most_used_physical_extruder_id",
+                    "curr_physical_extruder_id",
+                ] as &[&str],
+            ),
+            (
+                "change_filament_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "max_layer_z",
+                    "next_extruder",
+                    "previous_extruder",
+                    "current_hotend",
+                    "next_hotend",
+                    "current_nozzle_id",
+                    "next_nozzle_id",
+                    "current_filament_id",
+                    "next_filament_id",
+                    "old_extruder_variant",
+                    "new_extruder_variant",
+                    "nozzle_diameter_at_nozzle_id",
+                    "nozzle_volume_types",
+                    "filament_retract_length_nc",
+                    "new_extruder_retracted_length",
+                    "outer_wall_volumetric_speed",
+                    "fan_speed",
+                    "first_flush_volume",
+                    "flush_length_1",
+                    "flush_length_2",
+                    "flush_length_3",
+                    "flush_length_4",
+                    "flush_length",
+                    "flush_volumetric_speeds",
+                    "flush_temperatures",
+                    "filament_cooling_before_tower",
+                    "wipe_avoid_perimeter",
+                    "wipe_avoid_pos_x",
+                    "is_prime_tower_interface",
+                    "filament_tower_interface_purge_volume",
+                    "filament_tower_interface_print_temp",
+                    "wipe_tower_wait_pos_x",
+                    "wipe_tower_wait_pos_y",
+                    "wipe_tower_wait_pos_valid",
+                    "wipe_tower_center_pos_x",
+                    "wipe_tower_center_pos_y",
+                    "wipe_tower_center_pos_valid",
+                    "temperature",
+                    "nozzle_temperature",
+                    "first_layer_temperature",
+                    "nozzle_temperature_initial_layer",
+                    "new_filament_e_feedrate",
+                    "new_filament_temp",
+                    "new_retract_length",
+                    "new_retract_length_toolchange",
+                    "old_filament_e_feedrate",
+                    "old_filament_temp",
+                    "old_retract_length",
+                    "old_retract_length_toolchange",
+                    "relative_e_axis",
+                    "second_flush_volume",
+                    "toolchange_count",
+                    "toolchange_z",
+                    "travel_point_1_x",
+                    "travel_point_1_y",
+                    "travel_point_2_x",
+                    "travel_point_2_y",
+                    "travel_point_3_x",
+                    "travel_point_3_y",
+                    "x_after_toolchange",
+                    "y_after_toolchange",
+                    "z_after_toolchange",
+                ] as &[&str],
+            ),
+            (
+                "change_extrusion_role_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "extrusion_role",
+                    "last_extrusion_role",
+                ] as &[&str],
+            ),
+            (
+                "filament_change_extrusion_role_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "extrusion_role",
+                    "last_extrusion_role",
+                ] as &[&str],
+            ),
+            (
+                "process_change_extrusion_role_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "extrusion_role",
+                    "last_extrusion_role",
+                ] as &[&str],
+            ),
+            ("printing_by_object_gcode", &[] as &[&str]),
+            ("machine_pause_gcode", &[] as &[&str]),
+            ("template_custom_gcode", &[] as &[&str]),
+            (
+                "filament_start_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "max_layer_z",
+                    "filament_extruder_id",
+                    "current_filament_id",
+                    "current_extruder_id",
+                    "current_nozzle_id",
+                    "nozzle_diameter_at_nozzle_id",
+                    "nozzle_volume_types",
+                    "retraction_distance_when_cut",
+                    "long_retraction_when_cut",
+                    "temperature",
+                    "nozzle_temperature",
+                    "first_layer_temperature",
+                    "nozzle_temperature_initial_layer",
+                ] as &[&str],
+            ),
+            (
+                "filament_end_gcode",
+                &[
+                    "layer_num",
+                    "layer_z",
+                    "max_layer_z",
+                    "filament_extruder_id",
+                    "current_filament_id",
+                    "current_extruder_id",
+                    "current_nozzle_id",
+                    "nozzle_diameter_at_nozzle_id",
+                    "nozzle_volume_types",
+                    "retraction_distance_when_cut",
+                    "long_retraction_when_cut",
+                    "temperature",
+                    "nozzle_temperature",
+                    "first_layer_temperature",
+                    "nozzle_temperature_initial_layer",
+                ] as &[&str],
+            ),
+        ]
+        .iter()
+        .map(|(key, keys)| {
+            (
+                key.to_string(),
+                keys.iter().map(|k| k.to_string()).collect::<Vec<String>>(),
+            )
+        })
+        .collect()
+    })
+}
+
+/// `custom_gcode_specific_placeholders()` (`PrintConfig.cpp:13643-13646`), declared at
+/// `PrintConfig.hpp:2437`.
+pub fn custom_gcode_specific_placeholders(
+) -> &'static std::collections::BTreeMap<TCustomGcodeKey, Vec<String>> {
+    s_custom_gcode_specific_placeholders()
+}
+
+/// `class CustomGcodeSpecificConfigDef : public ConfigDef` (`PrintConfig.hpp:2496-2501`): every custom-G-code-specific placeholder.
+pub struct CustomGcodeSpecificConfigDef {
+    /// The `ConfigDef` base. Rust has no inheritance, so the base is a field and every
+    /// `this->add(...)` of the vendored constructor becomes `self.def.add(...)`.
+    pub def: ConfigDef<'static>,
+}
+
+impl CustomGcodeSpecificConfigDef {
+    /// `CustomGcodeSpecificConfigDef::CustomGcodeSpecificConfigDef()` (`PrintConfig.cpp:13647-13777`).
+    pub fn new() -> Self {
+        let mut this = CustomGcodeSpecificConfigDef {
+            def: ConfigDef::new(),
+        };
+        this.init();
+        this
+    }
+
+    fn init(&mut self) {
+        {
+            let def = self.def.add("layer_num", ConfigOptionType::Int);
+            def.label = "Layer number".to_string();
+            def.tooltip = "Index of the current layer. The index is zero-based (first layer has index 0). Before the first layer starts, it is -1. In extrusion role change G-code, the index is one-based (first layer has index 1).".to_string();
+        }
+        {
+            let def = self.def.add("layer_z", ConfigOptionType::Float);
+            def.label = "Layer Z".to_string();
+            def.tooltip = "Height of the current layer above the print bed, measured to the top of the layer.".to_string();
+        }
+        {
+            let def = self.def.add("max_layer_z", ConfigOptionType::Float);
+            def.label = "Maximal layer Z".to_string();
+            def.tooltip = "Height of the last layer above the print bed.".to_string();
+        }
+        {
+            let def = self.def.add("filament_extruder_id", ConfigOptionType::Int);
+            def.label = "Filament extruder ID".to_string();
+            def.tooltip = "In filament start G-code, the index of the filament that is being loaded. In filament end G-code, the index of the filament that is being unloaded. The index is zero-based (first filament has index 0). At a tool change, filament end G-code gets the extruder index instead, unless the Type 1 wipe tower does the tool change. Machine end G-code gets the value from the last filament end G-code at the end of the print.".to_string();
+        }
+        {
+            let def = self.def.add("current_filament_id", ConfigOptionType::Int);
+            def.label = "Current filament ID".to_string();
+            def.tooltip = "Index of the currently active filament. The index is zero-based (first filament has index 0).".to_string();
+        }
+        {
+            let def = self.def.add("current_extruder_id", ConfigOptionType::Int);
+            def.label = "Current extruder ID".to_string();
+            def.tooltip = "Index of the currently active physical extruder. The index is zero-based (first extruder has index 0).".to_string();
+        }
+        {
+            let def = self.def.add("current_nozzle_id", ConfigOptionType::Int);
+            def.label = "Current nozzle ID".to_string();
+            def.tooltip = "Index of the currently active nozzle. The index is zero-based (first nozzle has index 0).".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("nozzle_diameter_at_nozzle_id", ConfigOptionType::Floats);
+            def.label = "Nozzle diameters".to_string();
+            def.tooltip = "Nozzle diameters indexed by nozzle ID.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("nozzle_volume_types", ConfigOptionType::Strings);
+            def.label = "Nozzle volume types".to_string();
+            def.tooltip =
+                "Nozzle volume types indexed by nozzle ID, such as \"Standard\" or \"High Flow\"."
+                    .to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("retraction_distance_when_cut", ConfigOptionType::Float);
+            def.label = "Retraction distance when cut".to_string();
+            def.tooltip = "Retraction distance used when cutting filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("long_retraction_when_cut", ConfigOptionType::Bool);
+            def.label = "Long retraction when cut".to_string();
+            def.tooltip = "Whether long retraction is used when cutting filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("most_used_physical_extruder_id", ConfigOptionType::Int);
+            def.label = "Most-used physical extruder ID".to_string();
+            def.tooltip = "Index of the physical extruder used most often on the current layer. The index is zero-based (first extruder has index 0).".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("curr_y_acceleration_limit", ConfigOptionType::Float);
+            def.label = "Current Y acceleration limit".to_string();
+            def.tooltip =
+                "Current Y-axis acceleration limit after the bed-mass adjustment.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("curr_accumulated_mass", ConfigOptionType::Float);
+            def.label = "Current accumulated mass".to_string();
+            def.tooltip = "Accumulated printed mass at the current layer.".to_string();
+        }
+        {
+            let def = self.def.add("previous_layer_mass", ConfigOptionType::Float);
+            def.label = "Previous layer mass".to_string();
+            def.tooltip = "Printed mass of the previous layer.".to_string();
+        }
+        {
+            let def = self.def.add("curr_layer_mass", ConfigOptionType::Float);
+            def.label = "Previous layer mass".to_string();
+            def.tooltip = "Same as previous_layer_mass. Bambu Studio uses this name.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("curr_physical_extruder_id", ConfigOptionType::Int);
+            def.label = "Current physical extruder ID".to_string();
+            def.tooltip = "Index of the physical extruder active for the current layer. The index is zero-based (first extruder has index 0).".to_string();
+        }
+        {
+            let def = self.def.add("timelapse_pos_x", ConfigOptionType::Int);
+            def.label = "Timelapse position X".to_string();
+            def.tooltip = "Selected X position for timelapse capture.".to_string();
+        }
+        {
+            let def = self.def.add("timelapse_pos_y", ConfigOptionType::Int);
+            def.label = "Timelapse position Y".to_string();
+            def.tooltip = "Selected Y position for timelapse capture.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("has_timelapse_safe_pos", ConfigOptionType::Bool);
+            def.label = "Has timelapse safe position".to_string();
+            def.tooltip = "Whether a safe timelapse position was found.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("timelapse_inline_photo", ConfigOptionType::Bool);
+            def.label = "Timelapse inline photo".to_string();
+            def.tooltip = "Whether the photo is taken where the nozzle already is, without moving to a safe timelapse position first.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("farthest_point_timelapse_enabled", ConfigOptionType::Bool);
+            def.label = "Farthest-point timelapse enabled".to_string();
+            def.tooltip = "Whether farthest-point timelapse positioning is active.".to_string();
+        }
+        {
+            let def = self.def.add("clear_to_x0", ConfigOptionType::Bool);
+            def.label = "Clear path to X0".to_string();
+            def.tooltip = "Whether the nozzle can move to X0 at the current height without hitting another printed object.".to_string();
+        }
+        {
+            let def = self.def.add("previous_extruder", ConfigOptionType::Int);
+            def.label = "Previous extruder".to_string();
+            def.tooltip = "Index of the filament that is being unloaded. The index is zero-based (first filament has index 0). At the start of the print, when no filament is loaded yet, it is -1.".to_string();
+        }
+        {
+            let def = self.def.add("next_extruder", ConfigOptionType::Int);
+            def.label = "Next extruder".to_string();
+            def.tooltip = "Index of the filament that is being loaded. The index is zero-based (first filament has index 0).".to_string();
+        }
+        {
+            let def = self.def.add("current_hotend", ConfigOptionType::Int);
+            def.label = "Current hotend".to_string();
+            def.tooltip = "Hotend of the outgoing filament, given as its zero-based extruder index. On Bambu printers it is -1, or the nozzle ID when a filament moves between nozzles across layers.".to_string();
+        }
+        {
+            let def = self.def.add("next_hotend", ConfigOptionType::Int);
+            def.label = "Next hotend".to_string();
+            def.tooltip = "Hotend of the incoming filament, given as its zero-based extruder index. On Bambu printers it is -1, or the nozzle ID when a filament moves between nozzles across layers.".to_string();
+        }
+        {
+            let def = self.def.add("next_nozzle_id", ConfigOptionType::Int);
+            def.label = "Next nozzle ID".to_string();
+            def.tooltip = "Index of the nozzle associated with the incoming filament. The index is zero-based (first nozzle has index 0).".to_string();
+        }
+        {
+            let def = self.def.add("next_filament_id", ConfigOptionType::Int);
+            def.label = "Next filament ID".to_string();
+            def.tooltip = "Index of the incoming filament. The index is zero-based (first filament has index 0).".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("old_extruder_variant", ConfigOptionType::String);
+            def.label = "Old extruder variant".to_string();
+            def.tooltip = "Extruder type and nozzle volume type of the outgoing extruder, such as \"Direct Drive High Flow\".".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("new_extruder_variant", ConfigOptionType::String);
+            def.label = "New extruder variant".to_string();
+            def.tooltip = "Extruder type and nozzle volume type of the incoming extruder, such as \"Direct Drive High Flow\".".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("filament_retract_length_nc", ConfigOptionType::Float);
+            def.label = "Filament nozzle-change retract length".to_string();
+            def.tooltip = "Nozzle-change retraction length of the outgoing filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("new_extruder_retracted_length", ConfigOptionType::Float);
+            def.label = "New extruder retracted length".to_string();
+            def.tooltip =
+                "Retraction length still applied to the incoming extruder from when it was parked."
+                    .to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("outer_wall_volumetric_speed", ConfigOptionType::Float);
+            def.label = "Outer wall volumetric speed".to_string();
+            def.tooltip = "Volumetric speed used for the outer wall.".to_string();
+        }
+        {
+            let def = self.def.add("relative_e_axis", ConfigOptionType::Bool);
+            def.label = "Relative e-axis".to_string();
+            def.tooltip = "Indicates if relative positioning is being used.".to_string();
+        }
+        {
+            let def = self.def.add("toolchange_count", ConfigOptionType::Int);
+            def.label = "Toolchange count".to_string();
+            def.tooltip = "The number of toolchanges throughout the print.".to_string();
+        }
+        {
+            let def = self.def.add("toolchange_z", ConfigOptionType::Float);
+            def.label = "Toolchange Z".to_string();
+            def.tooltip = "The Z position during the toolchange.".to_string();
+        }
+        {
+            let def = self.def.add("fan_speed", ConfigOptionType::None);
+            def.label = "".to_string();
+            def.tooltip = "".to_string();
+        }
+        {
+            let def = self.def.add("old_retract_length", ConfigOptionType::Float);
+            def.label = "Old retract length".to_string();
+            def.tooltip = "The retraction length of the previous filament.".to_string();
+        }
+        {
+            let def = self.def.add("new_retract_length", ConfigOptionType::Float);
+            def.label = "New retract length".to_string();
+            def.tooltip = "The retraction length of the new filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("old_retract_length_toolchange", ConfigOptionType::Float);
+            def.label = "Old retract length toolchange".to_string();
+            def.tooltip = "The toolchange retraction length of the previous filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("new_retract_length_toolchange", ConfigOptionType::Float);
+            def.label = "New retract length toolchange".to_string();
+            def.tooltip = "The toolchange retraction length of the new filament.".to_string();
+        }
+        {
+            let def = self.def.add("old_filament_temp", ConfigOptionType::Int);
+            def.label = "Old filament temp".to_string();
+            def.tooltip = "The old filament temp.".to_string();
+        }
+        {
+            let def = self.def.add("new_filament_temp", ConfigOptionType::Int);
+            def.label = "New filament temp".to_string();
+            def.tooltip = "The new filament temp.".to_string();
+        }
+        {
+            let def = self.def.add("x_after_toolchange", ConfigOptionType::Float);
+            def.label = "X after toolchange".to_string();
+            def.tooltip = "The X pos after toolchange.".to_string();
+        }
+        {
+            let def = self.def.add("y_after_toolchange", ConfigOptionType::Float);
+            def.label = "Y after toolchange".to_string();
+            def.tooltip = "The Y pos after toolchange.".to_string();
+        }
+        {
+            let def = self.def.add("z_after_toolchange", ConfigOptionType::Float);
+            def.label = "Z after toolchange".to_string();
+            def.tooltip = "The Z pos after toolchange.".to_string();
+        }
+        {
+            let def = self.def.add("first_flush_volume", ConfigOptionType::Float);
+            def.label = "First flush volume".to_string();
+            def.tooltip = "First half of the planned purge length, in mm of filament.".to_string();
+        }
+        {
+            let def = self.def.add("second_flush_volume", ConfigOptionType::Float);
+            def.label = "Second flush volume".to_string();
+            def.tooltip = "Second half of the planned purge length, in mm of filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("old_filament_e_feedrate", ConfigOptionType::Int);
+            def.label = "Old filament e feedrate".to_string();
+            def.tooltip = "The old filament extruder feedrate.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("new_filament_e_feedrate", ConfigOptionType::Int);
+            def.label = "New filament e feedrate".to_string();
+            def.tooltip = "The new filament extruder feedrate.".to_string();
+        }
+        {
+            let def = self.def.add("travel_point_1_x", ConfigOptionType::Float);
+            def.label = "Travel point 1 X".to_string();
+            def.tooltip = "The travel point 1 X.".to_string();
+        }
+        {
+            let def = self.def.add("travel_point_1_y", ConfigOptionType::Float);
+            def.label = "Travel point 1 Y".to_string();
+            def.tooltip = "The travel point 1 Y.".to_string();
+        }
+        {
+            let def = self.def.add("travel_point_2_x", ConfigOptionType::Float);
+            def.label = "Travel point 2 X".to_string();
+            def.tooltip = "The travel point 2 X.".to_string();
+        }
+        {
+            let def = self.def.add("travel_point_2_y", ConfigOptionType::Float);
+            def.label = "Travel point 2 Y".to_string();
+            def.tooltip = "The travel point 2 Y.".to_string();
+        }
+        {
+            let def = self.def.add("travel_point_3_x", ConfigOptionType::Float);
+            def.label = "Travel point 3 X".to_string();
+            def.tooltip = "The travel point 3 X.".to_string();
+        }
+        {
+            let def = self.def.add("travel_point_3_y", ConfigOptionType::Float);
+            def.label = "Travel point 3 Y".to_string();
+            def.tooltip = "The travel point 3 Y.".to_string();
+        }
+        {
+            let def = self.def.add("flush_length_1", ConfigOptionType::Float);
+            def.label = "Flush Length 1".to_string();
+            def.tooltip = "The first flush length.".to_string();
+        }
+        {
+            let def = self.def.add("flush_length_2", ConfigOptionType::Float);
+            def.label = "Flush Length 2".to_string();
+            def.tooltip = "The second flush length.".to_string();
+        }
+        {
+            let def = self.def.add("flush_length_3", ConfigOptionType::Float);
+            def.label = "Flush Length 3".to_string();
+            def.tooltip = "The third flush length.".to_string();
+        }
+        {
+            let def = self.def.add("flush_length_4", ConfigOptionType::Float);
+            def.label = "Flush Length 4".to_string();
+            def.tooltip = "The fourth flush length.".to_string();
+        }
+        {
+            let def = self.def.add("flush_length", ConfigOptionType::Float);
+            def.label = "Flush length".to_string();
+            def.tooltip = "Total flush length.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("flush_volumetric_speeds", ConfigOptionType::Floats);
+            def.label = "Flush volumetric speeds".to_string();
+            def.tooltip = "Flush volumetric speeds for each filament.".to_string();
+        }
+        {
+            let def = self.def.add("flush_temperatures", ConfigOptionType::Ints);
+            def.label = "Flush temperatures".to_string();
+            def.tooltip = "Flush temperatures for each filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("filament_cooling_before_tower", ConfigOptionType::Floats);
+            def.label = "Filament cooling before tower".to_string();
+            def.tooltip = "Temperature drop before entering the wipe tower.".to_string();
+        }
+        {
+            let def = self.def.add("wipe_avoid_perimeter", ConfigOptionType::Bool);
+            def.label = "Avoid wipe perimeter".to_string();
+            def.tooltip = "Whether travel should avoid the wipe perimeter.".to_string();
+        }
+        {
+            let def = self.def.add("wipe_avoid_pos_x", ConfigOptionType::Float);
+            def.label = "Wipe tower avoidance X".to_string();
+            def.tooltip = "X position just beside the wipe tower that the nozzle moves to so it stays clear of the tower.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("is_prime_tower_interface", ConfigOptionType::Bool);
+            def.label = "Prime tower interface".to_string();
+            def.tooltip = "Whether the current purge is for the prime tower interface layer (where different materials meet).".to_string();
+        }
+        {
+            let def = self.def.add(
+                "filament_tower_interface_purge_volume",
+                ConfigOptionType::Float,
+            );
+            def.label = "Interface layer purge length".to_string();
+            def.tooltip =
+                "Purge length for prime tower interface layer (where different materials meet)."
+                    .to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("filament_tower_interface_print_temp", ConfigOptionType::Int);
+            def.label = "Interface layer print temperature".to_string();
+            def.tooltip = "Print temperature for prime tower interface layer (where different materials meet).".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("wipe_tower_wait_pos_x", ConfigOptionType::Float);
+            def.label = "Wipe tower wait position X".to_string();
+            def.tooltip = "X coordinate of the nozzle's wipe-tower wait position, 2 mm outside the tower edge.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("wipe_tower_wait_pos_y", ConfigOptionType::Float);
+            def.label = "Wipe tower wait position Y".to_string();
+            def.tooltip = "Y coordinate of the nozzle's wipe-tower wait position.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("wipe_tower_wait_pos_valid", ConfigOptionType::Bool);
+            def.label = "Wipe tower wait position valid".to_string();
+            def.tooltip = "Whether the wait position is set, which is the case when the print has a wipe tower.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("wipe_tower_center_pos_x", ConfigOptionType::Float);
+            def.label = "Wipe tower wait position X".to_string();
+            def.tooltip = "Same as wipe_tower_wait_pos_x. Bambu Studio uses this name.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("wipe_tower_center_pos_y", ConfigOptionType::Float);
+            def.label = "Wipe tower wait position Y".to_string();
+            def.tooltip = "Same as wipe_tower_wait_pos_y. Bambu Studio uses this name.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("wipe_tower_center_pos_valid", ConfigOptionType::Bool);
+            def.label = "Wipe tower wait position valid".to_string();
+            def.tooltip =
+                "Same as wipe_tower_wait_pos_valid. Bambu Studio uses this name.".to_string();
+        }
+        {
+            let def = self.def.add("temperature", ConfigOptionType::Ints);
+            def.label = "Temperature".to_string();
+            def.tooltip = "Nozzle temperatures indexed by filament.".to_string();
+        }
+        {
+            let def = self.def.add("nozzle_temperature", ConfigOptionType::Ints);
+            def.label = "Nozzle temperature".to_string();
+            def.tooltip = "Nozzle temperatures indexed by filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("first_layer_temperature", ConfigOptionType::Ints);
+            def.label = "First layer temperature".to_string();
+            def.tooltip = "First-layer nozzle temperatures indexed by filament.".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("nozzle_temperature_initial_layer", ConfigOptionType::Ints);
+            def.label = "First layer nozzle temperature".to_string();
+            def.tooltip = "First-layer nozzle temperatures indexed by filament.".to_string();
+        }
+        {
+            let def = self.def.add("extrusion_role", ConfigOptionType::String);
+            def.label = "Extrusion role".to_string();
+            def.tooltip = "The new extrusion role/type that is going to be used\nPossible values:\n[\"Perimeter\", \"ExternalPerimeter\", \"OverhangPerimeter\", \"InternalInfill\", \"SolidInfill\", \"TopSolidInfill\", \"BottomSurface\", \"BridgeInfill\", \"GapFill\", \"Ironing\", \"Skirt\", \"Brim\", \"SupportMaterial\", \"SupportMaterialInterface\", \"SupportTransition\", \"WipeTower\", \"Mixed\"]".to_string();
+        }
+        {
+            let def = self
+                .def
+                .add("last_extrusion_role", ConfigOptionType::String);
+            def.label = "Last extrusion role".to_string();
+            def.tooltip = "The previously used extrusion role/type\nPossible values:\n[\"Perimeter\", \"ExternalPerimeter\", \"OverhangPerimeter\", \"InternalInfill\", \"SolidInfill\", \"TopSolidInfill\", \"BottomSurface\", \"BridgeInfill\", \"GapFill\", \"Ironing\", \"Skirt\", \"Brim\", \"SupportMaterial\", \"SupportMaterialInterface\", \"SupportTransition\", \"WipeTower\", \"Mixed\"]".to_string();
+            // <<<UNHANDLED 13777>>>
+        }
+    }
+}
+
+impl Default for CustomGcodeSpecificConfigDef {
+    fn default() -> Self {
+        CustomGcodeSpecificConfigDef::new()
+    }
+}
+
+/// `extern const CustomGcodeSpecificConfigDef custom_gcode_specific_config_def` (`PrintConfig.hpp:2502`, defined
+/// at `PrintConfig.cpp:13779`).
+///
+/// One table per thread rather than one per process, for the reason
+/// [`print_config_def`] records in full: `slic3r-config` declares `ConfigOption` with no
+/// `Send`/`Sync` bound, so a `ConfigDef` holding `Box<dyn ConfigOption>` defaults cannot be
+/// placed in a `static`. The content a caller observes is identical -- every copy is built by
+/// the same code from the same source.
+pub fn custom_gcode_specific_config_def() -> &'static CustomGcodeSpecificConfigDef {
+    thread_local! {
+        static DEF: &'static CustomGcodeSpecificConfigDef = Box::leak(Box::new(CustomGcodeSpecificConfigDef::new()));
+    }
+    DEF.with(|d| *d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -15749,6 +17792,127 @@ mod tests {
                     .join("\u{1}"),
             ),
         ])
+    }
+
+    /// The other 13 `ConfigDef` subclasses, each held to exact equality against the oracle's
+    /// own -- key set, key order and every field of every row, through the same `oracle_row`
+    /// rendering the registry proof uses.
+    ///
+    /// None of the 13 enters `print_config_def`, so the registry proof covers none of them;
+    /// this is their own comparison. Nine of them have no `extern const` global at the pin and
+    /// are default-constructed inside the shim, which runs the same externally-linked
+    /// constructor the GUI runs.
+    #[test]
+    fn the_other_config_def_subclasses_match_the_oracle() {
+        let tables: Vec<(&str, &ConfigDef<'static>)> = vec![
+            ("CLIActionsConfigDef", &cli_actions_config_def().def),
+            ("CLITransformConfigDef", &cli_transform_config_def().def),
+            ("CLIMiscConfigDef", &cli_misc_config_def().def),
+            (
+                "CustomGcodeSpecificConfigDef",
+                &custom_gcode_specific_config_def().def,
+            ),
+        ];
+        // The nine with no global are built here, as the shim builds its own copies.
+        let read_only = ReadOnlySlicingStatesConfigDef::new();
+        let read_write = ReadWriteSlicingStatesConfigDef::new();
+        let other_states = OtherSlicingStatesConfigDef::new();
+        let statistics = PrintStatisticsConfigDef::new();
+        let objects = ObjectsInfoConfigDef::new();
+        let dimensions = DimensionsConfigDef::new();
+        let temperatures = TemperaturesConfigDef::new();
+        let timestamps = TimestampsConfigDef::new();
+        let presets = OtherPresetsConfigDef::new();
+        let mut tables = tables;
+        tables.extend([
+            ("ReadOnlySlicingStatesConfigDef", &read_only.def),
+            ("ReadWriteSlicingStatesConfigDef", &read_write.def),
+            ("OtherSlicingStatesConfigDef", &other_states.def),
+            ("PrintStatisticsConfigDef", &statistics.def),
+            ("ObjectsInfoConfigDef", &objects.def),
+            ("DimensionsConfigDef", &dimensions.def),
+            ("TemperaturesConfigDef", &temperatures.def),
+            ("TimestampsConfigDef", &timestamps.def),
+            ("OtherPresetsConfigDef", &presets.def),
+        ]);
+        assert_eq!(
+            tables.len(),
+            13,
+            "PrintConfig.hpp:2417-2501 declares 13 other ConfigDef subclasses"
+        );
+
+        let mut differences: Vec<String> = Vec::new();
+        let mut total_rows = 0_usize;
+        for (which, ported) in &tables {
+            let oracle_keys: Vec<String> = ora::oracle_other_def_keys(which)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            // A `which` the shim does not know yields an empty list, so an empty one here is a
+            // typo in the name rather than a table with no options: none of the 13 is empty at
+            // the pin.
+            assert!(
+                !oracle_keys.is_empty(),
+                "{which}: the oracle reports no options at all -- an unknown class name?"
+            );
+            let ported_keys: Vec<String> = ported.options.keys().cloned().collect();
+            assert_eq!(
+                ported_keys, oracle_keys,
+                "{which}: the key sets or their order differ"
+            );
+            for key in &oracle_keys {
+                let info = ora::oracle_other_def_option_info(which, key);
+                assert!(info.found, "{which}: {key} vanished between calls");
+                for (m, t) in ported_row(&ported.options[key])
+                    .iter()
+                    .zip(oracle_row(&info).iter())
+                {
+                    if m != t {
+                        differences.push(format!("{which}: {key}: ported {m:?} != oracle {t:?}"));
+                    }
+                }
+                total_rows += 1;
+            }
+        }
+        assert!(
+            differences.is_empty(),
+            "{} field(s) disagree with the oracle: {differences:#?}",
+            differences.len()
+        );
+        println!(
+            "other ConfigDef subclasses: {} tables, {total_rows} rows, every field exact",
+            tables.len()
+        );
+    }
+
+    /// `custom_gcode_specific_placeholders()` (`PrintConfig.cpp:13643-13646`), held to exact
+    /// equality against the oracle's -- the map's key set and order, and each G-code's own
+    /// placeholder list in that vector's own order.
+    #[test]
+    fn custom_gcode_specific_placeholders_match_the_oracle() {
+        let oracle_keys: Vec<String> = ora::oracle_custom_gcode_placeholder_keys()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let ported = custom_gcode_specific_placeholders();
+        let ported_keys: Vec<String> = ported.keys().cloned().collect();
+        assert_eq!(
+            ported_keys, oracle_keys,
+            "the placeholder map's key sets or their order differ"
+        );
+        let mut total = 0_usize;
+        for key in &oracle_keys {
+            let theirs: Vec<String> = ora::oracle_custom_gcode_placeholders(key)
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            assert_eq!(&ported[key], &theirs, "{key}: placeholder lists differ");
+            total += theirs.len();
+        }
+        println!(
+            "custom G-code placeholders: {} G-codes, {total} placeholder keys, exact",
+            oracle_keys.len()
+        );
     }
 
     /// **This unit's R19 proof.** `PrintConfig.cpp` and `PrintConfig.hpp` are the two manifest

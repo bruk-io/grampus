@@ -129,11 +129,32 @@ mod ffi {
         /// `print_config_def.filament_retract_keys()` (`PrintConfig.hpp:860`). Empty at the
         /// pin, for the same reason.
         fn oracle_filament_retract_keys() -> Vec<String>;
+
+        /// The key set of one of the other 13 `ConfigDef` subclasses
+        /// (`PrintConfig.hpp:2417-2501`), by class name -- "CLIActionsConfigDef",
+        /// "TemperaturesConfigDef", and so on. None of the 13 enters `print_config_def`, so
+        /// none is covered by `oracle_option_keys`. Empty for an unknown name, which the
+        /// port's own proof asserts against so a typo fails loudly rather than vacuously.
+        fn oracle_other_def_keys(which: &str) -> Vec<String>;
+
+        /// One key's whole `ConfigOptionDef` from one of those 13 tables, read through the
+        /// same field list `oracle_option_info` uses.
+        fn oracle_other_def_option_info(which: &str, key: &str) -> OracleOptionInfo;
+
+        /// The keys of `custom_gcode_specific_placeholders()`
+        /// (`PrintConfig.cpp:13643-13646`), in that `std::map`'s own order.
+        fn oracle_custom_gcode_placeholder_keys() -> Vec<String>;
+
+        /// One custom G-code's placeholder list, in that `std::vector`'s own
+        /// braced-initialiser order rather than sorted.
+        fn oracle_custom_gcode_placeholders(key: &str) -> Vec<String>;
     }
 }
 
 pub use ffi::{
+    oracle_custom_gcode_placeholder_keys, oracle_custom_gcode_placeholders,
     oracle_extruder_option_keys, oracle_extruder_retract_keys, oracle_filament_option_keys,
     oracle_filament_retract_keys, oracle_handle_legacy, oracle_option_info, oracle_option_keys,
-    OracleEnumKeyValue, OracleLegacyResult, OracleOptionInfo,
+    oracle_other_def_keys, oracle_other_def_option_info, OracleEnumKeyValue, OracleLegacyResult,
+    OracleOptionInfo,
 };

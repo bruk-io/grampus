@@ -48,6 +48,28 @@ rust::Vec<rust::String> oracle_extruder_retract_keys();
 rust::Vec<rust::String> oracle_filament_option_keys();
 rust::Vec<rust::String> oracle_filament_retract_keys();
 
+// The other 13 `ConfigDef` subclasses of `PrintConfig.cpp` (`PrintConfig.hpp:2417-2501`), none
+// of which enters `print_config_def`. `which` names one by its class name
+// ("CLIActionsConfigDef", "TemperaturesConfigDef", ...); an unknown name yields an empty key
+// list and a `found = false` info, which the port's own proof asserts against so a typo in
+// `which` fails loudly rather than passing vacuously.
+//
+// Parameterised over `which` rather than written out as 26 functions, because every one of the
+// 13 is read exactly the same way. Four of them have an `extern const` global at the pin and
+// are read off it; the other nine are constructed on demand by the GUI and have no global, so
+// this shim default-constructs them -- their constructors are externally linked, which is the
+// whole of what reading them needs.
+rust::Vec<rust::String> oracle_other_def_keys(rust::Str which);
+OracleOptionInfo oracle_other_def_option_info(rust::Str which, rust::Str key);
+
+// `custom_gcode_specific_placeholders()` (`PrintConfig.cpp:13643-13646`), the
+// `std::map<t_custom_gcode_key, t_config_option_keys>` of placeholders each custom G-code
+// accepts. The key list comes back in the map's own (bytewise-ascending) order; each G-code's
+// own placeholder vector comes back in that vector's own braced-initialiser order, not sorted,
+// so the port's list is held to that order as well as to its content.
+rust::Vec<rust::String> oracle_custom_gcode_placeholder_keys();
+rust::Vec<rust::String> oracle_custom_gcode_placeholders(rust::Str key);
+
 } // namespace print_config
 } // namespace proof_units
 } // namespace slic3r_ffi

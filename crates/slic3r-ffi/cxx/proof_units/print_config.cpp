@@ -42,6 +42,15 @@ namespace slic3r_ffi {
 namespace proof_units {
 namespace print_config {
 
+// One `std::vector<std::string>` as a `rust::Vec<rust::String>`, order preserved.
+static rust::Vec<rust::String> to_rust(const std::vector<std::string> &keys) {
+    rust::Vec<rust::String> out;
+    for (const auto &key : keys) {
+        out.push_back(rust::String(key));
+    }
+    return out;
+}
+
 rust::Vec<rust::String> oracle_option_keys() {
     rust::Vec<rust::String> out;
     // `ConfigDef::options` is a `std::map<t_config_option_key, ConfigOptionDef>`
@@ -53,14 +62,16 @@ rust::Vec<rust::String> oracle_option_keys() {
     return out;
 }
 
-OracleOptionInfo oracle_option_info(rust::Str key) {
+// One `ConfigOptionDef` as an `OracleOptionInfo`, field for field. Factored out of
+// `oracle_option_info` so the other 13 `ConfigDef` subclasses are read through exactly the same
+// field list the registry is, rather than through a second copy of it that could drift.
+static OracleOptionInfo fill_option_info(const Slic3r::ConfigOptionDef *def) {
     OracleOptionInfo info{};
     info.found = false;
     info.option_type = 0;
     info.nullable = false;
     info.has_default = false;
 
-    const Slic3r::ConfigOptionDef *def = Slic3r::print_config_def.get(std::string(key));
     if (def == nullptr) {
         return info;
     }
@@ -128,6 +139,10 @@ OracleOptionInfo oracle_option_info(rust::Str key) {
     return info;
 }
 
+OracleOptionInfo oracle_option_info(rust::Str key) {
+    return fill_option_info(Slic3r::print_config_def.get(std::string(key)));
+}
+
 OracleLegacyResult oracle_handle_legacy(rust::Str opt_key, rust::Str value) {
     std::string k(opt_key);
     std::string v(value);
@@ -138,16 +153,9 @@ OracleLegacyResult oracle_handle_legacy(rust::Str opt_key, rust::Str value) {
     return out;
 }
 
-// The four key lists, each straight off its own public const accessor and in the
+// The four key lists are each read straight off their own public const accessor, in the
 // `std::vector`'s own order. See this unit's header for why the two filament lists come back
 // empty at the pin.
-static rust::Vec<rust::String> to_rust(const std::vector<std::string> &keys) {
-    rust::Vec<rust::String> out;
-    for (const auto &key : keys) {
-        out.push_back(rust::String(key));
-    }
-    return out;
-}
 
 rust::Vec<rust::String> oracle_extruder_option_keys() {
     return to_rust(Slic3r::print_config_def.extruder_option_keys());
@@ -163,6 +171,107 @@ rust::Vec<rust::String> oracle_filament_option_keys() {
 
 rust::Vec<rust::String> oracle_filament_retract_keys() {
     return to_rust(Slic3r::print_config_def.filament_retract_keys());
+}
+
+// One `ConfigDef` of the other 13 subclasses, by class name. The four with an `extern const`
+// global are read off it; the nine without one are default-constructed here, which runs the
+// same externally-linked constructor the GUI runs.
+//
+// The nine are returned by value into a `static` of this function, so the pointer stays valid
+// after the call: each is built once, on first use, and never mutated afterwards -- the same
+// lifetime the four globals have.
+static const Slic3r::ConfigDef *other_def(rust::Str which) {
+    const std::string name(which);
+    if (name == "CLIActionsConfigDef") {
+        return &Slic3r::cli_actions_config_def;
+    }
+    if (name == "CLITransformConfigDef") {
+        return &Slic3r::cli_transform_config_def;
+    }
+    if (name == "CLIMiscConfigDef") {
+        return &Slic3r::cli_misc_config_def;
+    }
+    if (name == "CustomGcodeSpecificConfigDef") {
+        return &Slic3r::custom_gcode_specific_config_def;
+    }
+    if (name == "ReadOnlySlicingStatesConfigDef") {
+        static const Slic3r::ReadOnlySlicingStatesConfigDef def;
+        return &def;
+    }
+    if (name == "ReadWriteSlicingStatesConfigDef") {
+        static const Slic3r::ReadWriteSlicingStatesConfigDef def;
+        return &def;
+    }
+    if (name == "OtherSlicingStatesConfigDef") {
+        static const Slic3r::OtherSlicingStatesConfigDef def;
+        return &def;
+    }
+    if (name == "PrintStatisticsConfigDef") {
+        static const Slic3r::PrintStatisticsConfigDef def;
+        return &def;
+    }
+    if (name == "ObjectsInfoConfigDef") {
+        static const Slic3r::ObjectsInfoConfigDef def;
+        return &def;
+    }
+    if (name == "DimensionsConfigDef") {
+        static const Slic3r::DimensionsConfigDef def;
+        return &def;
+    }
+    if (name == "TemperaturesConfigDef") {
+        static const Slic3r::TemperaturesConfigDef def;
+        return &def;
+    }
+    if (name == "TimestampsConfigDef") {
+        static const Slic3r::TimestampsConfigDef def;
+        return &def;
+    }
+    if (name == "OtherPresetsConfigDef") {
+        static const Slic3r::OtherPresetsConfigDef def;
+        return &def;
+    }
+    return nullptr;
+}
+
+rust::Vec<rust::String> oracle_other_def_keys(rust::Str which) {
+    rust::Vec<rust::String> out;
+    const Slic3r::ConfigDef *def = other_def(which);
+    if (def == nullptr) {
+        return out;
+    }
+    // `ConfigDef::options` is a `std::map`, so this is its own alphabetical-by-key order.
+    for (const auto &kvp : def->options) {
+        out.push_back(rust::String(kvp.first));
+    }
+    return out;
+}
+
+OracleOptionInfo oracle_other_def_option_info(rust::Str which, rust::Str key) {
+    const Slic3r::ConfigDef *table = other_def(which);
+    if (table == nullptr) {
+        OracleOptionInfo info{};
+        info.found = false;
+        return info;
+    }
+    return fill_option_info(table->get(std::string(key)));
+}
+
+rust::Vec<rust::String> oracle_custom_gcode_placeholder_keys() {
+    rust::Vec<rust::String> out;
+    for (const auto &kvp : Slic3r::custom_gcode_specific_placeholders()) {
+        out.push_back(rust::String(kvp.first));
+    }
+    return out;
+}
+
+rust::Vec<rust::String> oracle_custom_gcode_placeholders(rust::Str key) {
+    const auto &map = Slic3r::custom_gcode_specific_placeholders();
+    auto it = map.find(std::string(key));
+    if (it == map.end()) {
+        return rust::Vec<rust::String>();
+    }
+    // The vector's own braced-initialiser order, not sorted here.
+    return to_rust(it->second);
 }
 
 } // namespace print_config
