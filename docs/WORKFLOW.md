@@ -132,6 +132,11 @@ use insertion-ordered maps wherever iteration order reaches output, so the port 
 where the oracle is not. Each such site carries the marker that puts it in
 `port/reports/divergences.md`.
 
+The marker has one further use, added by `docs/PORTING.md`'s "Decisions recorded on 2026-11-27",
+decision 1: a site where the vendored code has undefined behaviour on some input and the port
+substitutes a defined result. Decision 2 of the same section says what any marker's stated reason
+must rest on, and what a reviewer who proposes one must supply.
+
 ## Decisions that govern over a task's file list
 
 A port task's body enumerates exactly which files `git diff main` may touch, and a task file on
