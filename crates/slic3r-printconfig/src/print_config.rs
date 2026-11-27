@@ -21228,6 +21228,29 @@ pub fn set_variant_override(
     if source.len_values() == 1 && !source.is_nil_at(0) {
         indices.fill(0);
     }
+    // FIDELITY(port): `set_to_index`'s first statement is
+    // `T v = other->values.front();` (`Config.hpp:617`) with no emptiness test, so an **empty**
+    // source is undefined at the pin -- `front()` on an empty `std::vector`. Established rather
+    // than assumed: `slic3r-config`'s transcription of that line is `other_values[0].clone()`,
+    // which **panics**. The reads further down are careful (`:625-627` bounds-tests every slot,
+    // and `is_nil` is empty-checked at `:902`); it is only this one unchecked `front()`, in the
+    // same function, that escapes.
+    //
+    // Reachable: the `indices.fill(0)` above runs only when the source holds exactly one value,
+    // so a source of length 0 falls through to the call. This function's live caller in this
+    // unit is `update_static_print_config_from_dynamic` (vendored `PrintConfig.cpp:12406`),
+    // which applies no emptiness check of its own, and neither does
+    // `set_variant_override` itself (`:11394-11402`).
+    //
+    // So the call is skipped on an empty source. There is no oracle answer to match -- the pin
+    // is undefined on that input, which is also why no comparison probes it -- and a panic
+    // reachable from ordinary preset data is the one outcome that is certainly wrong. A
+    // port-only test asserts the skip, labelled as not an oracle comparison. Like the
+    // `set_only_diff` sanitiser, the exact fix belongs in `slic3r-config`, and this is a local
+    // compensation on the follow-up's list.
+    if source.len_values() == 0 {
+        return;
+    }
     let _ = target.set_to_index(source, &indices, stride);
 }
 
@@ -21636,61 +21659,95 @@ impl DynamicPrintConfig {
             // "An override's nil means 'disabled' and is the child's value; every other nil
             // column inherits."
             if let Some(target_vec) = as_vector(target_copy.as_ref()) {
-                // FIDELITY(port): the vendored `set_only_diff` validates only its **own**
-                // length -- `if (this->values.size() != (diff_index.size()*stride)) throw`
-                // (`Config.hpp:593-594`), which is the guard above -- and then indexes the rhs
-                // unchecked. For each `i` with `diff_index[i] != -1` it reads
-                // `other->is_nil(diff_index[i] * stride)` and
-                // `other->values[diff_index[i] * stride + j]` for `j` in `0..stride`
-                // (`:599-600`). `diff_index[i] * stride` is `int` arithmetic used as a `size_t`
-                // index, so a negative entry other than `-1` converts to an enormous index.
+                // FIDELITY(port): `set_only_diff` (`Config.hpp:587-607`) validates only
+                // **its own** length -- `if (this->values.size() != (diff_index.size()*stride))
+                // throw` (`:593-594`), which is the guard above -- and then reads the **rhs**
+                // unchecked. For each `i` with `diff_index[i] != -1` (`:597`) it reads
+                // `other->values[diff_index[i] * stride + j]` for `j` in `0..stride` (`:600`).
+                // `diff_index[i] * stride` is `int` arithmetic used as a `size_t` index, so a
+                // negative entry other than `-1` becomes an enormous one. `:599`'s nil probe
+                // needs no treatment: `is_nil(idx)` is both empty- and bounds-checked
+                // (`:902`).
                 //
-                // **The exact out-of-bounds condition is therefore: some `i` where
-                // `diff_index[i] != -1` and either `diff_index[i] < 0`, or
-                // `diff_index[i] * stride + stride > other.size()`** -- the `+ stride` because
-                // `j` reaches `stride - 1`. That is what the test below is, index by index.
+                // So entry `d >= 0` is safe exactly when `(d + 1) * stride <= target_len`, i.e.
+                // when `d < target_len / stride`. The integer division is the **exact**
+                // boundary and not a conservative one: `d + 1` is an integer, so
+                // `d + 1 <= len / stride` over the rationals is `d + 1 <= floor(len / stride)`.
+                // Checked on a non-multiple as well -- `len = 5, stride = 2` gives `max_ok = 2`,
+                // and `d = 1` reads indices 2 and 3 while `d = 2` would read 4 and 5.
                 //
-                // An earlier revision of this guard skipped when
-                // `other.len() < diff_index.len() * stride`, which is a **different
-                // predicate** and wrong in both directions: it skipped inputs on which every
-                // used index is in range -- defined at the pin, so the port would have
-                // diverged on defined input -- and it let through inputs where a used index
-                // exceeds the length, which still panicked. Caught by the lead reading the
-                // condition rather than by any test, because no fixture distinguishes them.
+                // **The escaping entries are mapped to `-1`, not filtered out, and that is
+                // load-bearing.** `:593` throws when
+                // `this->values.size() != diff_index.size() * stride`, so dropping entries
+                // would shorten the list and turn a silent bad read into a hard error on input
+                // the pin accepts. `map` keeps the length and `:597`'s own test does the
+                // skipping. The copy is **per key**: `target_len` and `stride` differ from key
+                // to key, so the shared `variant_index` must not be touched.
                 //
-                // **What this does not have is a fixture that separates the two predicates.**
-                // Instrumenting this site over the whole test shows every `variant_index`
-                // containing a `-1` is `[-1]` -- all entries unused -- so no committed case has
-                // both a used index and a `-1`, which is the shape on which the old and new
-                // tests disagree. A layout with one variant on this side and two on the other
-                // was added to try to produce it and did not. So the correctness of this guard
-                // rests on the predicate matching `Config.hpp:596-601` index for index, which
-                // is checkable by reading it, and **not** on a passing comparison. What the
-                // 660 cases do establish is that it changed nothing that was already compared.
+                // **Why per entry rather than per key.** `:596-603` has no early exit: the loop
+                // runs `i` ascending and each iteration reads independently, so a mixed input
+                // is not all-or-nothing. Skipping the whole key would leave unwritten the
+                // entries whose reads are in range. What the port does, stated as the port's
+                // behaviour rather than as a property of the pin -- after a first out-of-range
+                // read the program is formally undefined, so the pin has no guaranteed result
+                // to match: **identical to the pin on every input where all reads are in range;
+                // on any other input, the entries whose reads are in range are copied and the
+                // rest left untouched.**
                 //
-                // On an input that does read out of bounds, the vendored loop has already
-                // written `this->values[i * stride + j]` for every earlier in-range `i`, so the
-                // pin's observable result is a **partial** write followed by undefined
-                // behaviour -- not a clean failure. Skipping the whole key is therefore not the
-                // vendored answer either; nothing is, which is the point. The port skips because
-                // `slic3r-config`'s faithful transcription of `:600` indexes a `Vec` and
-                // **panics**, and a panic reachable from ordinary preset data is the one outcome
-                // that is certainly wrong. Measured: a `machine_max_speed_x` of one value
-                // reaches this line and the port aborted with `index out of bounds: the len is
-                // 1 but the index is 1`; with the key skipped the comparison diverges instead,
-                // because the oracle returns whatever its out-of-bounds read produced. That is
-                // also why two of `normalize_stride2_floats`'s branches stay uncompared; see
-                // `print_config_variant_override_matches_the_oracle`.
-                let stride_u = stride as usize;
-                let reads_out_of_range = variant_index.iter().any(|&d| {
-                    d != -1 && (d < 0 || d as usize * stride_u + stride_u > target_vec.len_values())
-                });
-                if reads_out_of_range {
-                    continue;
-                }
+                // **The pin contains the missing check itself, twenty lines away.** The sibling
+                // `set_to_index` (`Config.hpp:612-633`) skips a negative index at `:621-622`
+                // and bounds-tests each slot at `:625-627`
+                // (`if (src_idx < other->values.size() && ...)`). That is the strongest
+                // available evidence that `set_only_diff`'s omission is an oversight in the
+                // vendored code rather than a contract.
+                //
+                // **It also means this guard is one slot coarser than the pin's own idiom**,
+                // and they differ on exactly one shape: a `target_len` of `d * stride + 1` with
+                // `stride == 2`, where slot `d * 2` exists and `d * 2 + 1` does not. `:626`
+                // would copy the first slot; this sanitiser writes neither, because a per-slot
+                // test has to live inside `set_only_diff`'s own `j` loop -- which is
+                // `slic3r-config`'s, and this task may not write that crate. The per-slot form
+                // is the right eventual home and is on the follow-up's list of compensations to
+                // drop.
+                //
+                // **This covers the indexed read at `:600` only.** The same family has a second
+                // unguarded site -- `set_to_index`'s own `other->values.front()` at `:617` --
+                // handled at [`set_variant_override`]; one guard does not make the family safe.
+                //
+                // An earlier revision skipped the whole key when
+                // `target_len < diff_index.len() * stride`, which is a bound on `this`
+                // (`:593`), not on the rhs, and wrong in both directions: `[5]` with
+                // `stride = 2` and `target_len = 2` passed it and still read indices 10 and 11,
+                // while `[0, 0, 0]` and `[-1, -1, 0]` were skipped although every read is in
+                // range. The lead found that by reading the condition, and both reviewers then
+                // derived this predicate independently.
+                //
+                // **One of those shapes is reachable through the public entry point and is now
+                // compared.** `variant_index` here is sized from the *receiver's* variant count
+                // and filled with indices into the *other* side's list -- the opposite
+                // direction from the obvious guess -- so a receiver with three identical
+                // variants against a single-variant other side gives exactly
+                // `[0, 0, 0]` with a two-value target. `base and child merges` carries that
+                // layout, and restoring the old predicate alongside this one makes it fail,
+                // which is what makes the correction measured rather than argued. The shapes
+                // that cannot arise from two real configs -- an index past the other side's
+                // list, which `map_variant_indices` never writes -- are covered by
+                // `print_config_unguarded_vendored_dereference_compensations_hold`, with no
+                // oracle comparison because the pin is undefined on them.
+                let max_ok = target_vec.len_values() / stride as usize;
+                let sanitised: Vec<i32> = variant_index
+                    .iter()
+                    .map(|&d| {
+                        if d >= 0 && (d as usize) < max_ok {
+                            d
+                        } else {
+                            -1
+                        }
+                    })
+                    .collect();
                 let _ = src_vec.set_only_diff(
                     target_vec,
-                    &variant_index,
+                    &sanitised,
                     stride,
                     is_filament_extruder_override_key(&opt),
                 );
@@ -24890,6 +24947,26 @@ mod tests {
                     "printer_extruder_id=1",
                 ]),
             ),
+            // **The `[0, 0, 0]` shape**, which is what separates the old length-based guard in
+            // `update_diff_values_to_child_config` from the per-entry one: three entries all
+            // indexing the other side's single variant, so every read is in range while
+            // `variant_index.len() * stride` is three times what is needed.
+            //
+            // The direction matters and is the opposite of the obvious guess: in that function
+            // `variant_index` is sized from the **receiver's** variant count, and
+            // `map_variant_indices` fills it with indices into the *other* side's list. So the
+            // receiver needs the three variants, not the other side.
+            (
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\";\"Direct Drive Standard\";\"Direct Drive Standard\"",
+                    "printer_extruder_id=1,1,1",
+                    "machine_max_speed_x=500,200,400,150,300,120",
+                ]),
+                probe(&[
+                    "printer_extruder_variant=\"Direct Drive Standard\"",
+                    "printer_extruder_id=1",
+                ]),
+            ),
             // An attempt at `target_variant_count == 0`, for `normalize_stride2_floats`'s
             // `expected_size == 0` branch.
             (
@@ -25450,6 +25527,113 @@ mod tests {
 
         assert!(checked > 0, "every case was skipped");
         println!("single to multi: {checked} case(s) held to exact equality");
+    }
+
+    /// The two local compensations for unguarded vendored dereferences in
+    /// `slic3r-config`'s `set_only_diff` and `set_to_index`, on the input shapes the public
+    /// entry points cannot produce.
+    ///
+    /// **This test makes no oracle comparison, and that is deliberate rather than a shortcut.**
+    /// Every shape below is undefined at the pin -- an out-of-range `std::vector` read at
+    /// `Config.hpp:600`, or `front()` on an empty one at `:617` -- so there is no oracle answer
+    /// to compare against. What it asserts is the two things that can be asserted: that the
+    /// port does not panic, and that it writes exactly the entries whose reads are in range.
+    ///
+    /// The shapes are here because `print_config_base_and_child_merges_match_the_oracle`
+    /// cannot reach them. That test *can* reach `[0, 0, 0]` with a short target -- the layout
+    /// with three identical variants on the receiver does it, and that case is compared against
+    /// the oracle there, because every read is in range and the pin is therefore defined. What
+    /// it cannot produce is an index beyond the other side's list: `map_variant_indices`
+    /// (`PrintConfig.cpp:817-831`) only ever writes positions it found in that list, or `-1`,
+    /// so a `[5]` or `[0, 7]` cannot arise from two real configs. Those are reached by calling
+    /// the sanitiser's own arithmetic directly.
+    #[test]
+    fn print_config_unguarded_vendored_dereference_compensations_hold() {
+        // The sanitiser from `update_diff_values_to_child_config`, as the module computes it:
+        // entry `d` survives iff `d >= 0 && d < target_len / stride`.
+        fn sanitise(variant_index: &[i32], stride: usize, target_len: usize) -> Vec<i32> {
+            let max_ok = target_len / stride;
+            variant_index
+                .iter()
+                .map(|&d| {
+                    if d >= 0 && (d as usize) < max_ok {
+                        d
+                    } else {
+                        -1
+                    }
+                })
+                .collect()
+        }
+
+        // `[5]`, stride 2, target length 2: the shape the earlier length-based guard passed,
+        // after which `Config.hpp:600` read indices 10 and 11.
+        assert_eq!(
+            sanitise(&[5], 2, 2),
+            vec![-1],
+            "an index far beyond the target must be neutralised, not passed through"
+        );
+        // `[0, 7]`, stride 2, target length 2: one entry in range beside one out. This is the
+        // case that separates the per-entry form from a whole-key skip -- entry 0 is copied.
+        assert_eq!(
+            sanitise(&[0, 7], 2, 2),
+            vec![0, -1],
+            "the in-range entry must survive; a whole-key skip would lose it"
+        );
+        // `[0, 0, 0]`, stride 2, target length 2: every read in range, so nothing is
+        // neutralised, where a length-based guard would have skipped the key entirely.
+        assert_eq!(
+            sanitise(&[0, 0, 0], 2, 2),
+            vec![0, 0, 0],
+            "repeated in-range indices must all survive"
+        );
+        // `[-1, -1, 0]`: the `-1`s drive no read at all (`Config.hpp:597`) yet still inflate
+        // `.len()`, which is the clearest demonstration that the length was the wrong quantity.
+        assert_eq!(sanitise(&[-1, -1, 0], 2, 2), vec![-1, -1, 0]);
+        // A negative entry other than `-1` is neutralised too: the pin would compute
+        // `d * stride` in `int` and index a `size_t` with it.
+        assert_eq!(sanitise(&[-2], 2, 8), vec![-1]);
+        // The boundary on a target length that is not a multiple of the stride: `max_ok` is 2,
+        // so `d = 1` reads indices 2 and 3 and survives, and `d = 2` would read 4 and 5.
+        assert_eq!(sanitise(&[1, 2], 2, 5), vec![1, -1]);
+        // Stride 1 degenerates to a plain bound.
+        assert_eq!(sanitise(&[0, 1, 2], 1, 2), vec![0, 1, -1]);
+        // An empty target neutralises everything, since any read escapes.
+        assert_eq!(sanitise(&[0, 1], 2, 0), vec![-1, -1]);
+
+        // `set_variant_override` with an **empty** source. `set_to_index`'s first statement is
+        // `other->values.front()` (`Config.hpp:617`), which `slic3r-config` transcribes as
+        // `other_values[0].clone()` -- a panic. The guard skips the call, so the target keeps
+        // its own values; reaching this line at all is the assertion.
+        let mut target = ConfigOptionFloats {
+            values: vec![1.0, 2.0],
+        };
+        let source = ConfigOptionFloats { values: Vec::new() };
+        set_variant_override(&mut target, &source, &[0, 0], 1);
+        assert_eq!(
+            target.values,
+            vec![1.0, 2.0],
+            "an empty source must leave the target untouched rather than panicking"
+        );
+
+        // And the same call with a non-empty source still does its work, so the guard has not
+        // disabled the function.
+        let mut target = ConfigOptionFloats {
+            values: vec![1.0, 2.0],
+        };
+        let source = ConfigOptionFloats {
+            values: vec![9.0, 8.0],
+        };
+        set_variant_override(&mut target, &source, &[1, 0], 1);
+        assert_eq!(
+            target.values,
+            vec![8.0, 9.0],
+            "a non-empty source must still be applied through set_to_index"
+        );
+
+        println!(
+            "unguarded-dereference compensations: 8 sanitiser shapes and 2 empty-source cases, \
+             port-only (no oracle comparison; every shape is undefined at the pin)"
+        );
     }
 
     /// `set_variant_override` (`PrintConfig.cpp:11394-11402`) and
