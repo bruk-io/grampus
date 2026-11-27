@@ -14413,6 +14413,22 @@ impl<'a, T: 'static> StaticCache<'a, T> {
                     // reproduced here so this unit's `finalize` leaves the fields the oracle's
                     // leaves; adding the two arms is `slic3r-config`'s module to do, and this
                     // task's pull request body names it as a finding against it.
+                    // FIDELITY(port): the vendored `finalize` calls `opt->set(...)`
+                    // unconditionally (`PrintConfig.hpp:1118-1127`) and lets a
+                    // `ConfigurationError` propagate out of a pre-`main` static initializer,
+                    // which terminates the process. Both `if let Ok(..)` here and the `let _ =`
+                    // on the `set` below swallow the error and leave the class default unset
+                    // instead.
+                    //
+                    // **Deliberate, and recorded because review-76-fidelity asked for it
+                    // (their finding 11), not because it is reachable.** It is not reachable:
+                    // the oracle agrees on all 1,847 class keys and their defaults, so no key
+                    // here fails today. The divergence is in what would happen if one did, and
+                    // the quieter behaviour is chosen on purpose -- this runs inside a
+                    // `LazyLock` initialisation in a library, where a panic poisons the lock
+                    // for every later access, so terminating is a worse failure mode for a Rust
+                    // caller than a missing default that the R19 proof would catch on the next
+                    // run.
                     if let Ok(mut default_option) = def.create_default_option() {
                         if let Some(enums) = default_option
                             .as_any_mut()
@@ -22849,9 +22865,90 @@ mod tests {
             "z_hop_type",
             "nonexistent_key_xyzzy",
             "",
+            // The `ixex_` family (`PrintConfig.cpp:9997-10003`). These are the **input** keys:
+            // the branch rewrites `ixex_X` to `imex_X` first and only then compares against
+            // `imex_carriage_width_x`/`_y`, so probing the `imex_` form alone never reaches the
+            // comparison. Both forms are probed -- the `ixex_` ones to exercise the branch, the
+            // `imex_` ones because the check below extracts the literals as written.
+            "is_ixex",
+            "ixex_carriage_width_x",
+            "ixex_carriage_width_y",
+            "imex_carriage_width_x",
+            "imex_carriage_width_y",
+            "ixex_something_else",
+            "ixex_",
         ] {
             keys.push(k.to_string());
         }
+
+        // **The probe list above is a second transcription of the same vendored chain, so it
+        // is checked against the chain rather than trusted.** review-76-fidelity raised this as
+        // finding 10: a branch dropped from *both* the chain and this list, whose source key is
+        // not also a registry key, would be invisible -- the oracle and the port would both
+        // return `""` and the comparison would pass. Nothing was mistranscribed when they
+        // checked it; the gap was structural.
+        //
+        // Closed by deriving the expected set from the pinned vendored source at test time.
+        // `./port/port-status` already treats that file as the authority for every
+        // `// PORT SRC:` citation, so reading it here is the same authority, not a new one.
+        // Every `opt_key == "..."` literal in `handle_legacy`'s body (`PrintConfig.cpp:9748`
+        // to the start of `handle_legacy_composite` at `:10046`) must be probed.
+        //
+        // **This is a lower bound on what the probe list owes, not the whole of it**, and the
+        // distinction is load-bearing. Where a comparison is against an already-rewritten key
+        // the literal alone does not reach it: `:9999`'s `imex_carriage_width_x` is compared
+        // only after `:9998` has turned an `ixex_`-prefixed input into an `imex_` one, so the
+        // input that exercises that branch is `ixex_carriage_width_x` and no extraction of the
+        // source text can derive that. The check caught both of those keys as unprobed on its
+        // first run, which is the gap it exists for; the inputs that reach them were added
+        // above by reading the branch.
+        {
+            let vendored = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../vendor/OrcaSlicer/src/libslic3r/PrintConfig.cpp");
+            let text = std::fs::read_to_string(&vendored).unwrap_or_else(|e| {
+                panic!(
+                    "the pinned vendored source must be readable to check the probe list \
+                     against the chain it transcribes ({}): {e}",
+                    vendored.display()
+                )
+            });
+            let lines: Vec<&str> = text.lines().collect();
+            // 1-based `:9748` through `:10045`, the line before `handle_legacy_composite`.
+            let body = lines
+                .get(9747..10045)
+                .expect("PrintConfig.cpp is shorter than handle_legacy's cited range");
+            let mut from_source: Vec<String> = Vec::new();
+            for line in body {
+                let mut rest = *line;
+                while let Some(at) = rest.find("opt_key == \"") {
+                    rest = &rest[at + "opt_key == \"".len()..];
+                    let Some(end) = rest.find('"') else { break };
+                    from_source.push(rest[..end].to_string());
+                    rest = &rest[end + 1..];
+                }
+            }
+            from_source.sort();
+            from_source.dedup();
+            assert!(
+                !from_source.is_empty(),
+                "extracted no keys from handle_legacy's body -- the citation or the \
+                 extraction is wrong, which is worse than the gap this check closes"
+            );
+            let probed: std::collections::BTreeSet<&String> = keys.iter().collect();
+            let missing: Vec<&String> =
+                from_source.iter().filter(|k| !probed.contains(k)).collect();
+            assert!(
+                missing.is_empty(),
+                "handle_legacy compares these keys but nothing probes them, so a change to \
+                 their branches would not be caught: {missing:?}"
+            );
+            println!(
+                "handle_legacy probe coverage: {} key(s) compared by the vendored chain, \
+                 every one of them probed",
+                from_source.len()
+            );
+        }
+
         let values = [
             "",
             "0",
