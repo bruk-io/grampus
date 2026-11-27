@@ -6,3 +6,7 @@
 pub mod bicubic;
 pub mod circle;
 pub mod curves;
+// Not yet reached by a `mod` line: `voronoi.rs` is an honest Phase A draft
+// (task `76-foundation-voronoi-curves`), gated out of the build until
+// `77-foundation-voronoi-offset` adds `voronoi_utils.rs` and this crate's `mod voronoi;` line
+// together (see `voronoi.rs`'s own module doc).
