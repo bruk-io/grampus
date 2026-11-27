@@ -4004,7 +4004,12 @@ impl PrintConfigDef {
     /// oracle instead of assuming it.
     #[allow(dead_code)]
     fn init_filament_option_keys(&mut self) {
-        // FIDELITY(port): braced-initialiser order, as in `init_extruder_option_keys`.
+        // FIDELITY(port): the vendored braced-initialiser order, transcribed as written. Unlike
+        // `init_extruder_option_keys`'s pair, this order reaches **no** output at the pin: this
+        // function is never called (see the doc comment above), so `m_filament_option_keys` is
+        // never built on `print_config_def` and nothing iterates it. The order is kept because
+        // it is what the vendored source says and a later caller would depend on it, not
+        // because an order choice here is observable today.
         self.m_filament_option_keys = [
             "default_filament_profile",
             "deretraction_speed",
